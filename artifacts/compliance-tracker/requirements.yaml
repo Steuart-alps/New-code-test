@@ -1,0 +1,18 @@
+packages:
+  "framer-motion": "For page transitions and smooth UI animations"
+  "recharts": "For the dashboard statistics and compliance breakdown charts"
+  "react-hook-form": "For robust form state management"
+  "@hookform/resolvers": "For Zod validation integration with react-hook-form"
+  "zod": "For form validation schemas"
+  "date-fns": "For human-readable date formatting and manipulation"
+  "clsx": "For dynamic class name merging"
+  "tailwind-merge": "For resolving Tailwind class conflicts"
+
+images:
+  - path: "artifacts/compliance-tracker/public/images/auth-bg.png"
+    description: "Abstract geometric mesh in deep indigo and slate, clean enterprise professional style, soft gradients, highly polished"
+    aspect_ratio: "16:9"
+
+notes:
+  - Using generated Orval hooks from @workspace/api-client-react
+  - Wrapped mutations in custom hooks to ensure standard query invalidation

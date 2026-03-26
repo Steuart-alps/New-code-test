@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Compliance Tracker"
+version = "1.0.0"
+id = "artifacts/compliance-tracker"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21186
+
+[services.development]
+run = "pnpm --filter @workspace/compliance-tracker run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/compliance-tracker", "run", "build" ]
+publicDir = "artifacts/compliance-tracker/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21186"
+BASE_PATH = "/"
