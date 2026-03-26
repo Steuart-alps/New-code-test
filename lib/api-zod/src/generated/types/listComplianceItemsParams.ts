@@ -3,13 +3,16 @@
  * Do not edit manually.
  * Api
  * Compliance Tracker API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import type { ListComplianceItemsPriority } from "./listComplianceItemsPriority";
 import type { ListComplianceItemsStatus } from "./listComplianceItemsStatus";
+import type { ListComplianceItemsType } from "./listComplianceItemsType";
 
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   categoryId?: number;
   priority?: ListComplianceItemsPriority;
+  type?: ListComplianceItemsType;
+  contractorId?: number;
 };

@@ -1,18 +1,18 @@
 packages:
   "framer-motion": "For page transitions and smooth UI animations"
-  "recharts": "For the dashboard statistics and compliance breakdown charts"
-  "react-hook-form": "For robust form state management"
-  "@hookform/resolvers": "For Zod validation integration with react-hook-form"
-  "zod": "For form validation schemas"
+  "recharts": "For dashboard analytics and status distribution charts"
   "date-fns": "For human-readable date formatting and manipulation"
-  "clsx": "For dynamic class name merging"
-  "tailwind-merge": "For resolving Tailwind class conflicts"
+  "@hookform/resolvers": "Zod validation resolver for React Hook Form"
+  "react-hook-form": "For robust form state management"
+  "zod": "For form validation schemas"
+  "lucide-react": "For beautiful consistent icons"
 
 images:
-  - path: "artifacts/compliance-tracker/public/images/auth-bg.png"
-    description: "Abstract geometric mesh in deep indigo and slate, clean enterprise professional style, soft gradients, highly polished"
+  - path: "artifacts/compliance-tracker/public/images/dashboard-bg.png"
+    description: "Abstract subtle geometric background in deep indigo and slate, clean enterprise aesthetic"
     aspect_ratio: "16:9"
 
 notes:
-  - Using generated Orval hooks from @workspace/api-client-react
-  - Wrapped mutations in custom hooks to ensure standard query invalidation
+  - Uses @workspace/api-client-react for TanStack Query hooks generated from OpenAPI
+  - Object storage upload flow: Request presigned URL -> PUT file directly -> Save object path
+  - Forms coerce numeric IDs and handle date conversions

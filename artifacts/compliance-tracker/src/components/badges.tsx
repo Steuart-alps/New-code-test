@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Clock, AlertCircle, AlertTriangle, ArrowRightCircle } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, ArrowRightCircle } from "lucide-react";
 
 type Status = "pending" | "in_progress" | "completed" | "overdue";
 type Priority = "low" | "medium" | "high" | "critical";
@@ -57,4 +57,18 @@ export function PriorityBadge({ priority, className }: { priority: Priority | st
       {label}
     </div>
   );
+}
+
+export function ExpiryBadge({ expiryDate }: { expiryDate: string | null | undefined }) {
+  if (!expiryDate) return <Badge variant="secondary">No Expiry</Badge>;
+  
+  const daysUntil = Math.ceil((new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
+  
+  if (daysUntil < 0) {
+    return <Badge variant="destructive">Expired</Badge>;
+  }
+  if (daysUntil <= 30) {
+    return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200 shadow-none">Expiring Soon ({daysUntil}d)</Badge>;
+  }
+  return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200 shadow-none">Valid</Badge>;
 }

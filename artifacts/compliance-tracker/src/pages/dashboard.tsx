@@ -1,158 +1,165 @@
-import { useGetDashboardStats, useListComplianceItems } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
-import { Card, CardContent } from "@/components/ui/card";
-import { FolderKanban, Activity, AlertCircle, Flame, Clock, CheckCircle2 } from "lucide-react";
-import { motion } from "framer-motion";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
-import { StatusBadge, PriorityBadge } from "@/components/badges";
+import { useGetDashboardStats } from "@workspace/api-client-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { 
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Cell as PieCell
+} from "recharts";
+import { FileWarning, Clock, ShieldAlert, Building, Briefcase, ListTodo, Activity } from "lucide-react";
 
 export default function Dashboard() {
-  const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
-  const { data: items, isLoading: itemsLoading } = useListComplianceItems({ priority: "critical" }); // Fetch critical items for quick view
+  const { data: stats, isLoading } = useGetDashboardStats();
 
-  if (statsLoading) {
+  if (isLoading || !stats) {
     return (
-      <AppLayout title="Dashboard">
-        <div className="flex h-64 items-center justify-center">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+      <AppLayout title="Overview">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
       </AppLayout>
     );
   }
 
-  const statCards = [
-    { title: "Total Items", value: stats?.total || 0, icon: FolderKanban, color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-900/30" },
-    { title: "Completion Rate", value: `${Math.round(stats?.completionRate || 0)}%`, icon: Activity, color: "text-emerald-600", bg: "bg-emerald-100 dark:bg-emerald-900/30" },
-    { title: "Overdue", value: stats?.overdue || 0, icon: AlertCircle, color: "text-rose-600", bg: "bg-rose-100 dark:bg-rose-900/30", alert: (stats?.overdue || 0) > 0 },
-    { title: "Critical Priority", value: stats?.criticalItems || 0, icon: Flame, color: "text-orange-600", bg: "bg-orange-100 dark:bg-orange-900/30" },
-    { title: "Due Soon (7d)", value: stats?.dueSoon || 0, icon: Clock, color: "text-amber-600", bg: "bg-amber-100 dark:bg-amber-900/30" },
+  const statusData = [
+    { name: "Pending", value: stats.pending, color: "#94a3b8" },
+    { name: "In Progress", value: stats.inProgress, color: "#3b82f6" },
+    { name: "Completed", value: stats.completed, color: "#10b981" },
+    { name: "Overdue", value: stats.overdue, color: "#ef4444" },
   ];
-
-  const pieData = [
-    { name: 'Pending', value: stats?.pending || 0, color: '#64748b' },
-    { name: 'In Progress', value: stats?.inProgress || 0, color: '#3b82f6' },
-    { name: 'Completed', value: stats?.completed || 0, color: '#10b981' },
-    { name: 'Overdue', value: stats?.overdue || 0, color: '#f43f5e' },
-  ].filter(d => d.value > 0);
 
   return (
     <AppLayout title="Overview">
-      <div className="space-y-8">
-        
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {statCards.map((stat, i) => (
-            <motion.div
-              key={stat.title}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-            >
-              <Card className={`relative overflow-hidden border-0 shadow-md ${stat.alert ? 'ring-2 ring-rose-500 ring-offset-2' : ''}`}>
-                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none transform translate-x-2 -translate-y-2">
-                  <stat.icon className="w-16 h-16" />
-                </div>
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl ${stat.bg}`}>
-                      <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">{stat.title}</p>
-                      <h3 className="text-2xl font-display font-bold text-foreground mt-1">{stat.value}</h3>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Chart Section */}
-          <Card className="lg:col-span-2 shadow-md border-0">
-            <div className="p-6 border-b border-border flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-display font-bold">Status Distribution</h3>
-                <p className="text-sm text-muted-foreground">Current state of all compliance items</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <Card className="shadow-lg shadow-black/5 border-border/50 bg-gradient-to-br from-card to-card/50">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Completion Rate</p>
+                <p className="text-3xl font-display font-bold">{stats.completionRate}%</p>
+              </div>
+              <div className="p-3 bg-primary/10 rounded-xl">
+                <Activity className="w-5 h-5 text-primary" />
               </div>
             </div>
-            <CardContent className="p-6">
-              <div className="h-[300px] w-full flex items-center justify-center">
-                {pieData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={80}
-                        outerRadius={110}
-                        paddingAngle={5}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-muted-foreground flex flex-col items-center">
-                    <CheckCircle2 className="w-12 h-12 mb-2 opacity-20" />
-                    <p>No data to display</p>
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-wrap justify-center gap-6 mt-4">
-                {pieData.map(d => (
-                  <div key={d.name} className="flex items-center gap-2 text-sm font-medium">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                    <span>{d.name} <span className="text-muted-foreground ml-1">({d.value})</span></span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Critical Items Quick View */}
-          <Card className="shadow-md border-0 flex flex-col">
-            <div className="p-6 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Flame className="w-5 h-5 text-orange-600" />
-                <h3 className="text-lg font-display font-bold">Critical Action Items</h3>
-              </div>
-              <p className="text-sm text-muted-foreground mt-1">Requires immediate attention</p>
+            <div className="mt-4 h-2 bg-secondary rounded-full overflow-hidden">
+              <div className="h-full bg-primary" style={{ width: `${stats.completionRate}%` }} />
             </div>
-            <CardContent className="p-0 flex-1 overflow-auto max-h-[350px]">
-              {itemsLoading ? (
-                <div className="p-6 flex justify-center"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div></div>
-              ) : items && items.length > 0 ? (
-                <div className="divide-y divide-border">
-                  {items.map(item => (
-                    <div key={item.id} className="p-4 hover:bg-muted/30 transition-colors">
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-semibold text-sm truncate pr-4">{item.title}</h4>
-                        <StatusBadge status={item.status} className="shrink-0" />
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        {item.dueDate && <span>Due: {new Date(item.dueDate).toLocaleDateString()}</span>}
-                        {item.categoryName && <span className="px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground">{item.categoryName}</span>}
-                      </div>
-                    </div>
-                  ))}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Action Needed</p>
+                <p className="text-3xl font-display font-bold text-destructive">{stats.overdue + stats.criticalItems}</p>
+              </div>
+              <div className="p-3 bg-destructive/10 rounded-xl">
+                <ShieldAlert className="w-5 h-5 text-destructive" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">
+              {stats.overdue} overdue, {stats.criticalItems} critical
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Due Soon (7d)</p>
+                <p className="text-3xl font-display font-bold text-amber-500">{stats.dueSoon}</p>
+              </div>
+              <div className="p-3 bg-amber-500/10 rounded-xl">
+                <Clock className="w-5 h-5 text-amber-500" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">Approaching deadlines</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Expiring Certs</p>
+                <p className="text-3xl font-display font-bold text-orange-500">{stats.certificatesExpiringSoon}</p>
+              </div>
+              <div className="p-3 bg-orange-500/10 rounded-xl">
+                <FileWarning className="w-5 h-5 text-orange-500" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">Contractor certificates</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 shadow-lg shadow-black/5 border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg font-display">Compliance Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px] mt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={statusData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                  <Tooltip 
+                    cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} 
+                  />
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={60}>
+                    {statusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <Card className="shadow-lg shadow-black/5 border-border/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-display">Volume Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
+                  <div className="bg-primary/20 p-2.5 rounded-lg mr-4">
+                    <ListTodo className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold">Internal Checks</h4>
+                    <p className="text-xs text-muted-foreground">Managed by staff</p>
+                  </div>
+                  <span className="text-xl font-display font-bold">{stats.internalTotal}</span>
                 </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center p-8 text-center text-muted-foreground">
-                  <CheckCircle2 className="w-12 h-12 mb-3 text-emerald-500 opacity-50" />
-                  <p className="font-medium text-foreground">All clear!</p>
-                  <p className="text-sm mt-1">No critical items pending.</p>
+
+                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
+                  <div className="bg-emerald-500/20 p-2.5 rounded-lg mr-4">
+                    <Briefcase className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold">External Checks</h4>
+                    <p className="text-xs text-muted-foreground">Contractor requirements</p>
+                  </div>
+                  <span className="text-xl font-display font-bold">{stats.externalTotal}</span>
                 </div>
-              )}
+
+                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
+                  <div className="bg-indigo-500/20 p-2.5 rounded-lg mr-4">
+                    <Building className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold">Contractors</h4>
+                    <p className="text-xs text-muted-foreground">Active in system</p>
+                  </div>
+                  <span className="text-xl font-display font-bold">{stats.contractorsCount}</span>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -3,12 +3,11 @@
  * Do not edit manually.
  * Api
  * Compliance Tracker API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import * as zod from "zod";
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -42,6 +41,157 @@ export const DeleteCategoryParams = zod.object({
 });
 
 /**
+ * @summary List all contractors
+ */
+export const ListContractorsResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  company: zod.string().nullish(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListContractorsResponse = zod.array(ListContractorsResponseItem);
+
+/**
+ * @summary Create a contractor
+ */
+export const CreateContractorBody = zod.object({
+  name: zod.string(),
+  company: zod.string().nullish(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Get a contractor
+ */
+export const GetContractorParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetContractorResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  company: zod.string().nullish(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Update a contractor
+ */
+export const UpdateContractorParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateContractorBody = zod.object({
+  name: zod.string(),
+  company: zod.string().nullish(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+export const UpdateContractorResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  company: zod.string().nullish(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Delete a contractor
+ */
+export const DeleteContractorParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary List certificates for a contractor
+ */
+export const ListCertificatesParams = zod.object({
+  contractorId: zod.coerce.number(),
+});
+
+export const ListCertificatesResponseItem = zod.object({
+  id: zod.number(),
+  contractorId: zod.number(),
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+export const ListCertificatesResponse = zod.array(ListCertificatesResponseItem);
+
+/**
+ * @summary Add a certificate to a contractor
+ */
+export const CreateCertificateParams = zod.object({
+  contractorId: zod.coerce.number(),
+});
+
+export const CreateCertificateBody = zod.object({
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Update a certificate
+ */
+export const UpdateCertificateParams = zod.object({
+  contractorId: zod.coerce.number(),
+  id: zod.coerce.number(),
+});
+
+export const UpdateCertificateBody = zod.object({
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+export const UpdateCertificateResponse = zod.object({
+  id: zod.number(),
+  contractorId: zod.number(),
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Delete a certificate
+ */
+export const DeleteCertificateParams = zod.object({
+  contractorId: zod.coerce.number(),
+  id: zod.coerce.number(),
+});
+
+/**
  * @summary List all compliance items
  */
 export const ListComplianceItemsQueryParams = zod.object({
@@ -50,19 +200,27 @@ export const ListComplianceItemsQueryParams = zod.object({
     .optional(),
   categoryId: zod.coerce.number().optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
+  type: zod.enum(["internal", "external"]).optional(),
+  contractorId: zod.coerce.number().optional(),
 });
 
 export const ListComplianceItemsResponseItem = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
+  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
+  contractorId: zod.number().nullish(),
+  contractorName: zod.string().nullish(),
+  contractorEmail: zod.string().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
+  notificationSentAt: zod.date().nullish(),
   completedAt: zod.date().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.date(),
@@ -75,12 +233,16 @@ export const ListComplianceItemsResponse = zod.array(
 /**
  * @summary Create a compliance item
  */
+export const createComplianceItemBodyTypeDefault = `internal`;
 export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
 
 export const CreateComplianceItemBody = zod.object({
   title: zod.string(),
   description: zod.string().nullish(),
+  type: zod
+    .enum(["internal", "external"])
+    .default(createComplianceItemBodyTypeDefault),
   status: zod
     .enum(["pending", "in_progress", "completed", "overdue"])
     .default(createComplianceItemBodyStatusDefault),
@@ -88,8 +250,10 @@ export const CreateComplianceItemBody = zod.object({
     .enum(["low", "medium", "high", "critical"])
     .default(createComplianceItemBodyPriorityDefault),
   categoryId: zod.number().nullish(),
+  contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
   notes: zod.string().nullish(),
 });
 
@@ -104,13 +268,19 @@ export const GetComplianceItemResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
+  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
+  contractorId: zod.number().nullish(),
+  contractorName: zod.string().nullish(),
+  contractorEmail: zod.string().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
+  notificationSentAt: zod.date().nullish(),
   completedAt: zod.date().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.date(),
@@ -127,13 +297,16 @@ export const UpdateComplianceItemParams = zod.object({
 export const UpdateComplianceItemBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().nullish(),
+  type: zod.enum(["internal", "external"]).optional(),
   status: zod
     .enum(["pending", "in_progress", "completed", "overdue"])
     .optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
   categoryId: zod.number().nullish(),
+  contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
   notes: zod.string().nullish(),
 });
 
@@ -141,13 +314,19 @@ export const UpdateComplianceItemResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
+  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
+  contractorId: zod.number().nullish(),
+  contractorName: zod.string().nullish(),
+  contractorEmail: zod.string().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
+  notificationSentAt: zod.date().nullish(),
   completedAt: zod.date().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.date(),
@@ -176,13 +355,19 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
+  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
+  contractorId: zod.number().nullish(),
+  contractorName: zod.string().nullish(),
+  contractorEmail: zod.string().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
+  leadTimeDays: zod.number().nullish(),
+  notificationSentAt: zod.date().nullish(),
   completedAt: zod.date().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.date(),
@@ -201,4 +386,91 @@ export const GetDashboardStatsResponse = zod.object({
   criticalItems: zod.number(),
   dueSoon: zod.number(),
   completionRate: zod.number(),
+  externalTotal: zod.number(),
+  internalTotal: zod.number(),
+  contractorsCount: zod.number(),
+  certificatesExpiringSoon: zod.number(),
+});
+
+/**
+ * @summary Get all app settings
+ */
+export const GetSettingsResponse = zod.object({
+  smtpHost: zod.string().nullish(),
+  smtpPort: zod.string().nullish(),
+  smtpUser: zod.string().nullish(),
+  smtpPass: zod.string().nullish(),
+  smtpFrom: zod.string().nullish(),
+  smtpFromName: zod.string().nullish(),
+  defaultLeadTimeDays: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+});
+
+/**
+ * @summary Update app settings
+ */
+export const UpdateSettingsBody = zod.object({
+  smtpHost: zod.string().nullish(),
+  smtpPort: zod.string().nullish(),
+  smtpUser: zod.string().nullish(),
+  smtpPass: zod.string().nullish(),
+  smtpFrom: zod.string().nullish(),
+  smtpFromName: zod.string().nullish(),
+  defaultLeadTimeDays: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+});
+
+export const UpdateSettingsResponse = zod.object({
+  smtpHost: zod.string().nullish(),
+  smtpPort: zod.string().nullish(),
+  smtpUser: zod.string().nullish(),
+  smtpPass: zod.string().nullish(),
+  smtpFrom: zod.string().nullish(),
+  smtpFromName: zod.string().nullish(),
+  defaultLeadTimeDays: zod.string().nullish(),
+  companyName: zod.string().nullish(),
+});
+
+/**
+ * @summary Send email reminders to contractors with upcoming due dates
+ */
+export const SendRemindersResponse = zod.object({
+  sent: zod.number(),
+  skipped: zod.number(),
+  errors: zod.number(),
+  details: zod.array(
+    zod.object({
+      itemId: zod.number(),
+      title: zod.string(),
+      contractorEmail: zod.string(),
+      status: zod.enum(["sent", "skipped", "error"]),
+      reason: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Send a test email to verify SMTP settings
+ */
+export const TestEmailBody = zod.object({
+  to: zod.string(),
+});
+
+export const TestEmailResponse = zod.object({
+  success: zod.boolean(),
+  message: zod.string(),
+});
+
+/**
+ * @summary Request a presigned upload URL for a file
+ */
+export const RequestUploadUrlBody = zod.object({
+  name: zod.string(),
+  size: zod.number(),
+  contentType: zod.string(),
+});
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod.string(),
+  objectPath: zod.string(),
 });

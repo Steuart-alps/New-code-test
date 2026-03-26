@@ -3,18 +3,22 @@
  * Do not edit manually.
  * Api
  * Compliance Tracker API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import type { CreateComplianceItemRequestPriority } from "./createComplianceItemRequestPriority";
 import type { CreateComplianceItemRequestStatus } from "./createComplianceItemRequestStatus";
+import type { CreateComplianceItemRequestType } from "./createComplianceItemRequestType";
 
 export interface CreateComplianceItemRequest {
   title: string;
   description?: string | null;
+  type?: CreateComplianceItemRequestType;
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   categoryId?: number | null;
+  contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: Date | null;
+  leadTimeDays?: number | null;
   notes?: string | null;
 }

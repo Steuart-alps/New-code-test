@@ -4,8 +4,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import Dashboard from "@/pages/dashboard";
-import ItemsPage from "@/pages/items";
+import ContractorsPage from "@/pages/contractors";
+import ContractorDetailPage from "@/pages/contractor-detail";
+import ExternalChecksPage from "@/pages/external-checks";
+import InternalChecksPage from "@/pages/internal-checks";
 import CategoriesPage from "@/pages/categories";
+import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -13,6 +17,7 @@ const queryClient = new QueryClient({
     queries: {
       retry: false,
       refetchOnWindowFocus: false,
+      staleTime: 1000 * 60 * 5, // 5 mins
     },
   },
 });
@@ -21,8 +26,12 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
-      <Route path="/items" component={ItemsPage} />
+      <Route path="/contractors" component={ContractorsPage} />
+      <Route path="/contractors/:id" component={ContractorDetailPage} />
+      <Route path="/external" component={ExternalChecksPage} />
+      <Route path="/internal" component={InternalChecksPage} />
       <Route path="/categories" component={CategoriesPage} />
+      <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
     </Switch>
   );

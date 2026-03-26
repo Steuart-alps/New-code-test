@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Compliance Tracker API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export interface DashboardStats {
@@ -15,4 +15,8 @@ export interface DashboardStats {
   criticalItems: number;
   dueSoon: number;
   completionRate: number;
+  externalTotal: number;
+  internalTotal: number;
+  contractorsCount: number;
+  certificatesExpiringSoon: number;
 }

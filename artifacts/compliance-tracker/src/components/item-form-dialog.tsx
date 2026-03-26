@@ -1,178 +1,268 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { format } from "date-fns";
-import { useAppMutations } from "@/hooks/use-app-data";
-import { useListCategories, ComplianceItem } from "@workspace/api-client-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+import * as z from "zod";
+import { 
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter 
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/hooks/use-toast";
+import { 
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
+} from "@/components/ui/select";
+import { useAppMutations } from "@/hooks/use-app-data";
+import { ComplianceItem, ComplianceItemType, useListCategories, useListContractors } from "@workspace/api-client-react";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
+  type: z.enum(["internal", "external"]),
   status: z.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: z.enum(["low", "medium", "high", "critical"]),
   categoryId: z.coerce.number().optional().nullable(),
+  contractorId: z.coerce.number().optional().nullable(),
   assignedTo: z.string().optional(),
   dueDate: z.string().optional().nullable(),
+  leadTimeDays: z.coerce.number().optional().nullable(),
   notes: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
-interface ItemFormDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+export function ItemFormDialog({
+  isOpen,
+  onClose,
+  item = null,
+  defaultType = "internal"
+}: {
+  isOpen: boolean;
+  onClose: () => void;
   item?: ComplianceItem | null;
-}
-
-export function ItemFormDialog({ open, onOpenChange, item }: ItemFormDialogProps) {
-  const isEditing = !!item;
+  defaultType?: ComplianceItemType;
+}) {
   const { createItem, updateItem } = useAppMutations();
-  const { data: categories } = useListCategories();
-  const { toast } = useToast();
-
-  const { register, handleSubmit, formState: { errors, isSubmitting }, reset, setValue, watch } = useForm<FormValues>({
+  const { data: categories = [] } = useListCategories();
+  const { data: contractors = [] } = useListContractors();
+  
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      title: "",
+      description: "",
+      type: defaultType,
       status: "pending",
       priority: "medium",
+      categoryId: undefined,
+      contractorId: undefined,
+      assignedTo: "",
+      dueDate: "",
+      leadTimeDays: 7,
+      notes: "",
     }
   });
 
   useEffect(() => {
-    if (item && open) {
-      reset({
+    if (item) {
+      form.reset({
         title: item.title,
         description: item.description || "",
+        type: item.type,
         status: item.status,
         priority: item.priority,
-        categoryId: item.categoryId,
+        categoryId: item.categoryId || undefined,
+        contractorId: item.contractorId || undefined,
         assignedTo: item.assignedTo || "",
-        dueDate: item.dueDate ? format(new Date(item.dueDate), "yyyy-MM-dd") : "",
+        dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
+        leadTimeDays: item.leadTimeDays || undefined,
         notes: item.notes || "",
       });
-    } else if (!open) {
-      reset({ status: "pending", priority: "medium", categoryId: null, title: "", description: "", assignedTo: "", dueDate: "", notes: "" });
+    } else {
+      form.reset({
+        title: "",
+        description: "",
+        type: defaultType,
+        status: "pending",
+        priority: "medium",
+        categoryId: undefined,
+        contractorId: undefined,
+        assignedTo: "",
+        dueDate: "",
+        leadTimeDays: defaultType === "external" ? 7 : undefined,
+        notes: "",
+      });
     }
-  }, [item, open, reset]);
+  }, [item, isOpen, defaultType, form]);
+
+  const typeWatch = form.watch("type");
 
   const onSubmit = async (data: FormValues) => {
     try {
       const payload = {
         ...data,
         categoryId: data.categoryId || null,
+        contractorId: data.type === 'external' ? (data.contractorId || null) : null,
+        leadTimeDays: data.type === 'external' ? (data.leadTimeDays || null) : null,
+        assignedTo: data.type === 'internal' ? data.assignedTo : null,
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
       };
 
-      if (isEditing) {
+      if (item) {
         await updateItem.mutateAsync({ id: item.id, data: payload });
-        toast({ title: "Item updated successfully" });
       } else {
         await createItem.mutateAsync({ data: payload });
-        toast({ title: "Item created successfully" });
       }
-      onOpenChange(false);
-    } catch (err: any) {
-      toast({ title: "An error occurred", description: err.message, variant: "destructive" });
+      onClose();
+    } catch (e) {
+      // handled by mutation
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] overflow-hidden">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[600px] bg-card text-card-foreground">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-display">{isEditing ? "Edit Compliance Item" : "New Compliance Item"}</DialogTitle>
+          <DialogTitle className="text-xl font-display">
+            {item ? "Edit Compliance Item" : "Create Compliance Item"}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="title">Title <span className="text-destructive">*</span></Label>
-              <Input id="title" placeholder="e.g. Annual Security Audit" {...register("title")} className="bg-muted/50 focus:bg-background" />
-              {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
+
+        <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="title">Title *</Label>
+              <Input id="title" {...form.register("title")} className="bg-background" />
+              {form.formState.errors.title && (
+                <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
+              )}
             </div>
 
-            <div className="space-y-2 md:col-span-2">
+            <div className="col-span-2 space-y-1.5">
               <Label htmlFor="description">Description</Label>
-              <Textarea id="description" placeholder="Details about this requirement..." {...register("description")} className="resize-none bg-muted/50 focus:bg-background h-20" />
+              <Textarea id="description" {...form.register("description")} className="resize-none h-20 bg-background" />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <select 
-                id="status" 
-                {...register("status")} 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-muted/50 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select 
+                disabled={!!item} // Don't allow changing type after creation
+                value={form.watch("type")} 
+                onValueChange={(val: any) => form.setValue("type", val)}
               >
-                <option value="pending">Pending</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
-                <option value="overdue">Overdue</option>
-              </select>
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="internal">Internal Check</SelectItem>
+                  <SelectItem value="external">External Contractor</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <select 
-                id="priority" 
-                {...register("priority")} 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-muted/50 px-3 py-2 text-sm ring-offset-background focus:outline-none focus:bg-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            <div className="space-y-1.5">
+              <Label>Category</Label>
+              <Select 
+                value={form.watch("categoryId")?.toString() || "none"} 
+                onValueChange={(val) => form.setValue("categoryId", val === "none" ? undefined : parseInt(val))}
               >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Select Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="categoryId">Category</Label>
-              <select 
-                id="categoryId" 
-                {...register("categoryId")} 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-muted/50 px-3 py-2 text-sm ring-offset-background focus:outline-none focus:bg-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <Select 
+                value={form.watch("status")} 
+                onValueChange={(val: any) => form.setValue("status", val)}
               >
-                <option value="">No Category</option>
-                {categories?.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
+              <Label>Priority</Label>
+              <Select 
+                value={form.watch("priority")} 
+                onValueChange={(val: any) => form.setValue("priority", val)}
+              >
+                <SelectTrigger className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {typeWatch === "external" ? (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Contractor</Label>
+                  <Select 
+                    value={form.watch("contractorId")?.toString() || "none"} 
+                    onValueChange={(val) => form.setValue("contractorId", val === "none" ? undefined : parseInt(val))}
+                  >
+                    <SelectTrigger className="bg-background">
+                      <SelectValue placeholder="Select Contractor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {contractors.map((c) => (
+                        <SelectItem key={c.id} value={c.id.toString()}>{c.name} ({c.company})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Reminder Lead Time (Days)</Label>
+                  <Input type="number" {...form.register("leadTimeDays")} className="bg-background" placeholder="7" />
+                </div>
+              </>
+            ) : (
+              <div className="space-y-1.5 col-span-2">
+                <Label htmlFor="assignedTo">Assigned To (Internal)</Label>
+                <Input id="assignedTo" {...form.register("assignedTo")} className="bg-background" />
+              </div>
+            )}
+
+            <div className="col-span-2 space-y-1.5">
               <Label htmlFor="dueDate">Due Date</Label>
-              <Input id="dueDate" type="date" {...register("dueDate")} className="bg-muted/50 focus:bg-background" />
-            </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="assignedTo">Assigned To</Label>
-              <Input id="assignedTo" placeholder="John Doe" {...register("assignedTo")} className="bg-muted/50 focus:bg-background" />
+              <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background w-full" />
             </div>
             
-            <div className="space-y-2 md:col-span-2">
+            <div className="col-span-2 space-y-1.5">
               <Label htmlFor="notes">Internal Notes</Label>
-              <Textarea id="notes" placeholder="Private notes..." {...register("notes")} className="resize-none bg-muted/50 focus:bg-background h-20" />
+              <Textarea id="notes" {...form.register("notes")} className="resize-none h-16 bg-background" />
             </div>
           </div>
-
-          <DialogFooter className="pt-4 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting} className="min-w-[120px] shadow-lg shadow-primary/20">
-              {isSubmitting ? "Saving..." : (isEditing ? "Save Changes" : "Create Item")}
-            </Button>
-          </DialogFooter>
         </form>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} type="button">Cancel</Button>
+          <Button type="submit" form="item-form" disabled={createItem.isPending || updateItem.isPending} className="shadow-lg shadow-primary/20">
+            {createItem.isPending || updateItem.isPending ? "Saving..." : "Save Item"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

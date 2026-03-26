@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Api
-  version: 0.1.0
+  version: 0.2.0
   description: Compliance Tracker API
 servers:
   - url: /api
@@ -13,13 +13,22 @@ tags:
     description: Compliance item operations
   - name: categories
     description: Category operations
+  - name: contractors
+    description: Contractor operations
+  - name: certificates
+    description: Certificate operations
+  - name: settings
+    description: App settings
+  - name: notifications
+    description: Notification operations
+  - name: storage
+    description: File storage operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -75,6 +84,197 @@ paths:
         "204":
           description: Deleted
 
+  /contractors:
+    get:
+      operationId: listContractors
+      tags: [contractors]
+      summary: List all contractors
+      responses:
+        "200":
+          description: List of contractors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contractor"
+    post:
+      operationId: createContractor
+      tags: [contractors]
+      summary: Create a contractor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContractorRequest"
+      responses:
+        "201":
+          description: Created contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+
+  /contractors/{id}:
+    get:
+      operationId: getContractor
+      tags: [contractors]
+      summary: Get a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateContractor
+      tags: [contractors]
+      summary: Update a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContractorRequest"
+      responses:
+        "200":
+          description: Updated contractor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contractor"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteContractor
+      tags: [contractors]
+      summary: Delete a contractor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /contractors/{contractorId}/certificates:
+    get:
+      operationId: listCertificates
+      tags: [certificates]
+      summary: List certificates for a contractor
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of certificates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Certificate"
+    post:
+      operationId: createCertificate
+      tags: [certificates]
+      summary: Add a certificate to a contractor
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "201":
+          description: Created certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+
+  /contractors/{contractorId}/certificates/{id}:
+    put:
+      operationId: updateCertificate
+      tags: [certificates]
+      summary: Update a certificate
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "200":
+          description: Updated certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+    delete:
+      operationId: deleteCertificate
+      tags: [certificates]
+      summary: Delete a certificate
+      parameters:
+        - name: contractorId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   /compliance-items:
     get:
       operationId: listComplianceItems
@@ -95,6 +295,15 @@ paths:
           schema:
             type: string
             enum: [low, medium, high, critical]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [internal, external]
+        - name: contractorId
+          in: query
+          schema:
+            type: integer
       responses:
         "200":
           description: List of compliance items
@@ -233,6 +442,87 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardStats"
 
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get all app settings
+      responses:
+        "200":
+          description: Settings object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppSettings"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+
+  /notifications/send-reminders:
+    post:
+      operationId: sendReminders
+      tags: [notifications]
+      summary: Send email reminders to contractors with upcoming due dates
+      responses:
+        "200":
+          description: Reminder send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendRemindersResponse"
+
+  /notifications/test-email:
+    post:
+      operationId: testEmail
+      tags: [notifications]
+      summary: Send a test email to verify SMTP settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestEmailRequest"
+      responses:
+        "200":
+          description: Test email result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestEmailResponse"
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned upload URL for a file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestUploadUrlBody"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestUploadUrlResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -280,6 +570,117 @@ components:
         - name
         - color
 
+    Contractor:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - createdAt
+        - updatedAt
+
+    CreateContractorRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        company:
+          type: string
+          nullable: true
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+        - email
+
+    Certificate:
+      type: object
+      properties:
+        id:
+          type: integer
+        contractorId:
+          type: integer
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - contractorId
+        - name
+        - createdAt
+
+    CreateCertificateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        fileUrl:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date-time
+          nullable: true
+        expiryDate:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+
     ComplianceItem:
       type: object
       properties:
@@ -290,6 +691,9 @@ components:
         description:
           type: string
           nullable: true
+        type:
+          type: string
+          enum: [internal, external]
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -305,10 +709,26 @@ components:
         categoryColor:
           type: string
           nullable: true
+        contractorId:
+          type: integer
+          nullable: true
+        contractorName:
+          type: string
+          nullable: true
+        contractorEmail:
+          type: string
+          nullable: true
         assignedTo:
           type: string
           nullable: true
         dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
+          nullable: true
+        notificationSentAt:
           type: string
           format: date-time
           nullable: true
@@ -328,6 +748,7 @@ components:
       required:
         - id
         - title
+        - type
         - status
         - priority
         - createdAt
@@ -341,6 +762,10 @@ components:
         description:
           type: string
           nullable: true
+        type:
+          type: string
+          enum: [internal, external]
+          default: internal
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -352,12 +777,18 @@ components:
         categoryId:
           type: integer
           nullable: true
+        contractorId:
+          type: integer
+          nullable: true
         assignedTo:
           type: string
           nullable: true
         dueDate:
           type: string
           format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
           nullable: true
         notes:
           type: string
@@ -373,6 +804,9 @@ components:
         description:
           type: string
           nullable: true
+        type:
+          type: string
+          enum: [internal, external]
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -382,12 +816,18 @@ components:
         categoryId:
           type: integer
           nullable: true
+        contractorId:
+          type: integer
+          nullable: true
         assignedTo:
           type: string
           nullable: true
         dueDate:
           type: string
           format: date-time
+          nullable: true
+        leadTimeDays:
+          type: integer
           nullable: true
         notes:
           type: string
@@ -421,6 +861,14 @@ components:
           type: integer
         completionRate:
           type: number
+        externalTotal:
+          type: integer
+        internalTotal:
+          type: integer
+        contractorsCount:
+          type: integer
+        certificatesExpiringSoon:
+          type: integer
       required:
         - total
         - pending
@@ -430,3 +878,116 @@ components:
         - criticalItems
         - dueSoon
         - completionRate
+        - externalTotal
+        - internalTotal
+        - contractorsCount
+        - certificatesExpiringSoon
+
+    AppSettings:
+      type: object
+      properties:
+        smtpHost:
+          type: string
+          nullable: true
+        smtpPort:
+          type: string
+          nullable: true
+        smtpUser:
+          type: string
+          nullable: true
+        smtpPass:
+          type: string
+          nullable: true
+        smtpFrom:
+          type: string
+          nullable: true
+        smtpFromName:
+          type: string
+          nullable: true
+        defaultLeadTimeDays:
+          type: string
+          nullable: true
+        companyName:
+          type: string
+          nullable: true
+
+    SendRemindersResponse:
+      type: object
+      properties:
+        sent:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: integer
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              itemId:
+                type: integer
+              title:
+                type: string
+              contractorEmail:
+                type: string
+              status:
+                type: string
+                enum: [sent, skipped, error]
+              reason:
+                type: string
+                nullable: true
+            required:
+              - itemId
+              - title
+              - contractorEmail
+              - status
+      required:
+        - sent
+        - skipped
+        - errors
+        - details
+
+    TestEmailRequest:
+      type: object
+      properties:
+        to:
+          type: string
+      required:
+        - to
+
+    TestEmailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - name
+        - size
+        - contentType
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+      required:
+        - uploadURL
+        - objectPath

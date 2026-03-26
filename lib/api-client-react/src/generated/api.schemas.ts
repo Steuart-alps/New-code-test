@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Compliance Tracker API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 export interface HealthStatus {
   status: string;
@@ -24,6 +24,54 @@ export interface CreateCategoryRequest {
   name: string;
   color: string;
 }
+
+export interface Contractor {
+  id: number;
+  name: string;
+  company?: string | null;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateContractorRequest {
+  name: string;
+  company?: string | null;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+}
+
+export interface Certificate {
+  id: number;
+  contractorId: number;
+  name: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface CreateCertificateRequest {
+  name: string;
+  fileUrl?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  notes?: string | null;
+}
+
+export type ComplianceItemType =
+  (typeof ComplianceItemType)[keyof typeof ComplianceItemType];
+
+export const ComplianceItemType = {
+  internal: "internal",
+  external: "external",
+} as const;
 
 export type ComplianceItemStatus =
   (typeof ComplianceItemStatus)[keyof typeof ComplianceItemStatus];
@@ -49,18 +97,32 @@ export interface ComplianceItem {
   id: number;
   title: string;
   description?: string | null;
+  type: ComplianceItemType;
   status: ComplianceItemStatus;
   priority: ComplianceItemPriority;
   categoryId?: number | null;
   categoryName?: string | null;
   categoryColor?: string | null;
+  contractorId?: number | null;
+  contractorName?: string | null;
+  contractorEmail?: string | null;
   assignedTo?: string | null;
   dueDate?: string | null;
+  leadTimeDays?: number | null;
+  notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type CreateComplianceItemRequestType =
+  (typeof CreateComplianceItemRequestType)[keyof typeof CreateComplianceItemRequestType];
+
+export const CreateComplianceItemRequestType = {
+  internal: "internal",
+  external: "external",
+} as const;
 
 export type CreateComplianceItemRequestStatus =
   (typeof CreateComplianceItemRequestStatus)[keyof typeof CreateComplianceItemRequestStatus];
@@ -85,13 +147,24 @@ export const CreateComplianceItemRequestPriority = {
 export interface CreateComplianceItemRequest {
   title: string;
   description?: string | null;
+  type?: CreateComplianceItemRequestType;
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   categoryId?: number | null;
+  contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
+  leadTimeDays?: number | null;
   notes?: string | null;
 }
+
+export type UpdateComplianceItemRequestType =
+  (typeof UpdateComplianceItemRequestType)[keyof typeof UpdateComplianceItemRequestType];
+
+export const UpdateComplianceItemRequestType = {
+  internal: "internal",
+  external: "external",
+} as const;
 
 export type UpdateComplianceItemRequestStatus =
   (typeof UpdateComplianceItemRequestStatus)[keyof typeof UpdateComplianceItemRequestStatus];
@@ -116,11 +189,14 @@ export const UpdateComplianceItemRequestPriority = {
 export interface UpdateComplianceItemRequest {
   title?: string;
   description?: string | null;
+  type?: UpdateComplianceItemRequestType;
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
   categoryId?: number | null;
+  contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
+  leadTimeDays?: number | null;
   notes?: string | null;
 }
 
@@ -147,12 +223,73 @@ export interface DashboardStats {
   criticalItems: number;
   dueSoon: number;
   completionRate: number;
+  externalTotal: number;
+  internalTotal: number;
+  contractorsCount: number;
+  certificatesExpiringSoon: number;
+}
+
+export interface AppSettings {
+  smtpHost?: string | null;
+  smtpPort?: string | null;
+  smtpUser?: string | null;
+  smtpPass?: string | null;
+  smtpFrom?: string | null;
+  smtpFromName?: string | null;
+  defaultLeadTimeDays?: string | null;
+  companyName?: string | null;
+}
+
+export type SendRemindersResponseDetailsItemStatus =
+  (typeof SendRemindersResponseDetailsItemStatus)[keyof typeof SendRemindersResponseDetailsItemStatus];
+
+export const SendRemindersResponseDetailsItemStatus = {
+  sent: "sent",
+  skipped: "skipped",
+  error: "error",
+} as const;
+
+export type SendRemindersResponseDetailsItem = {
+  itemId: number;
+  title: string;
+  contractorEmail: string;
+  status: SendRemindersResponseDetailsItemStatus;
+  reason?: string | null;
+};
+
+export interface SendRemindersResponse {
+  sent: number;
+  skipped: number;
+  errors: number;
+  details: SendRemindersResponseDetailsItem[];
+}
+
+export interface TestEmailRequest {
+  to: string;
+}
+
+export interface TestEmailResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface RequestUploadUrlBody {
+  name: string;
+  size: number;
+  contentType: string;
+}
+
+export interface RequestUploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
 }
 
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   categoryId?: number;
   priority?: ListComplianceItemsPriority;
+  type?: ListComplianceItemsType;
+  contractorId?: number;
 };
 
 export type ListComplianceItemsStatus =
@@ -173,4 +310,12 @@ export const ListComplianceItemsPriority = {
   medium: "medium",
   high: "high",
   critical: "critical",
+} as const;
+
+export type ListComplianceItemsType =
+  (typeof ListComplianceItemsType)[keyof typeof ListComplianceItemsType];
+
+export const ListComplianceItemsType = {
+  internal: "internal",
+  external: "external",
 } as const;
