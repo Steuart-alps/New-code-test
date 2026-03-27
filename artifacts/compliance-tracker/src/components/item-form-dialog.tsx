@@ -128,7 +128,7 @@ export function ItemFormDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="overflow-y-auto flex-1 min-h-0 px-6">
+        <div className="overflow-y-auto flex-1 min-h-0 px-6 overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
           <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2 space-y-1.5">
