@@ -27,7 +27,6 @@ async function seed() {
 
   console.log("✅ Consultant account created:");
   console.log(`   Email:    ${CONSULTANT_EMAIL}`);
-  console.log(`   Password: ${CONSULTANT_PASSWORD}`);
   console.log("\n⚠️  Change the password after first login!");
 }
 
