@@ -11,6 +11,7 @@ import certificatesRouter from "./certificates";
 import settingsRouter from "./settings";
 import notificationsRouter from "./notifications";
 import storageRouter from "./storage";
+import foodSafetyRouter from "./food-safety";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use("/storage", storageRouter);
+router.use("/food-safety", foodSafetyRouter);
 
 export default router;

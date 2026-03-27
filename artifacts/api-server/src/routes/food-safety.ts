@@ -1,0 +1,199 @@
+import { Router } from "express";
+import { z } from "zod";
+import { db } from "@workspace/db";
+import { foodSafetyRecordsTable, appSettingsTable } from "@workspace/db/schema";
+import { eq, and } from "drizzle-orm";
+import { requireAuth, getClientId } from "../middleware/requireAuth";
+
+const router = Router();
+
+const CONFIG_KEYS = [
+  "food_num_fridges",
+  "food_num_freezers",
+  "food_cooking_limit",
+  "food_cooling_limit",
+  "food_reheating_limit",
+  "food_hot_holding_limit",
+] as const;
+
+const DEFAULT_CONFIG = {
+  food_num_fridges: "2",
+  food_num_freezers: "2",
+  food_cooking_limit: "Above 75°C (10 seconds)",
+  food_cooling_limit: "8°C within 90 minutes",
+  food_reheating_limit: "Above 82°C",
+  food_hot_holding_limit: "Above 63°C",
+};
+
+// GET /api/food-safety/config
+router.get("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const rows = await db
+    .select()
+    .from(appSettingsTable)
+    .where(
+      and(
+        eq(appSettingsTable.clientId, clientId),
+        // We fetch all and filter in JS to keep it simple
+      )
+    );
+
+  const config: Record<string, string> = { ...DEFAULT_CONFIG };
+  for (const row of rows) {
+    if (CONFIG_KEYS.includes(row.key as (typeof CONFIG_KEYS)[number]) && row.value != null) {
+      config[row.key] = row.value;
+    }
+  }
+
+  res.json(config);
+});
+
+// PUT /api/food-safety/config
+router.put("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const updates = req.body as Record<string, string>;
+
+  for (const key of CONFIG_KEYS) {
+    if (key in updates) {
+      const existing = await db
+        .select()
+        .from(appSettingsTable)
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(appSettingsTable)
+          .set({ value: updates[key], updatedAt: new Date() })
+          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+      } else {
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+      }
+    }
+  }
+
+  res.json({ ok: true });
+});
+
+// GET /api/food-safety?date=YYYY-MM-DD
+router.get("/", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const { date } = req.query as { date?: string };
+  if (!date) {
+    // Return list of record dates (for history)
+    const records = await db
+      .select({ id: foodSafetyRecordsTable.id, recordDate: foodSafetyRecordsTable.recordDate, submittedAt: foodSafetyRecordsTable.submittedAt })
+      .from(foodSafetyRecordsTable)
+      .where(eq(foodSafetyRecordsTable.clientId, clientId))
+      .orderBy(foodSafetyRecordsTable.recordDate);
+    return res.json(records);
+  }
+
+  const [record] = await db
+    .select()
+    .from(foodSafetyRecordsTable)
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date)))
+    .limit(1);
+
+  if (!record) return res.json(null);
+  res.json(record);
+});
+
+// POST /api/food-safety
+router.post("/", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const schema = z.object({
+    recordDate: z.string(),
+    deliveries: z.any().optional(),
+    coldFood: z.any().optional(),
+    hotTemperature: z.any().optional(),
+    hotHolding: z.any().optional(),
+    cookingLimit: z.string().optional(),
+    coolingLimit: z.string().optional(),
+    reheatingLimit: z.string().optional(),
+    hotHoldingLimit: z.string().optional(),
+    correctives: z.string().optional(),
+    managerSignature: z.string().optional(),
+    submittedAt: z.string().optional(),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const data = parsed.data;
+
+  // Check if record already exists for this date
+  const [existing] = await db
+    .select({ id: foodSafetyRecordsTable.id })
+    .from(foodSafetyRecordsTable)
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate)))
+    .limit(1);
+
+  if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+
+  const [inserted] = await db
+    .insert(foodSafetyRecordsTable)
+    .values({
+      clientId,
+      recordDate: data.recordDate,
+      deliveries: data.deliveries ?? [],
+      coldFood: data.coldFood ?? [],
+      hotTemperature: data.hotTemperature ?? [],
+      hotHolding: data.hotHolding ?? [],
+      cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
+      coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
+      reheatingLimit: data.reheatingLimit ?? "Above 82°C",
+      hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
+      correctives: data.correctives,
+      managerSignature: data.managerSignature,
+      submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
+      createdBy: (req.session as any).userId ?? null,
+    })
+    .returning();
+
+  res.status(201).json(inserted);
+});
+
+// PUT /api/food-safety/:id
+router.put("/:id", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const [existing] = await db
+    .select({ id: foodSafetyRecordsTable.id })
+    .from(foodSafetyRecordsTable)
+    .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+    .limit(1);
+
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const updates: any = { updatedAt: new Date() };
+  const allowed = ["deliveries", "coldFood", "hotTemperature", "hotHolding", "cookingLimit", "coolingLimit", "reheatingLimit", "hotHoldingLimit", "correctives", "managerSignature"];
+  for (const key of allowed) {
+    if (key in req.body) updates[key] = req.body[key];
+  }
+  if (req.body.submittedAt !== undefined) {
+    updates.submittedAt = req.body.submittedAt ? new Date(req.body.submittedAt) : null;
+  }
+
+  const [updated] = await db
+    .update(foodSafetyRecordsTable)
+    .set(updates)
+    .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+    .returning();
+
+  res.json(updated);
+});
+
+export default router;
