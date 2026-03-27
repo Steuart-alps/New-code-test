@@ -17,6 +17,7 @@ import {
   Flame,
   UtensilsCrossed,
   Wrench,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -61,6 +62,7 @@ function useNavGroups() {
   }
   if (isConsultant) {
     systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });
+    systemItems.push({ href: "/billing", label: "Billing & Plans", icon: CreditCard });
   }
   if (canAdmin) {
     systemItems.push({ href: "/settings", label: "Settings", icon: Settings });

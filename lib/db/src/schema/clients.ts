@@ -9,6 +9,11 @@ export const clientsTable = pgTable("clients", {
   logoUrl: text("logo_url"),
   primaryColor: text("primary_color").notNull().default("#6366f1"),
   active: boolean("active").notNull().default(true),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  stripePriceId: text("stripe_price_id"),
+  subscriptionStatus: text("subscription_status").default("trial"),
+  trialEndsAt: timestamp("trial_ends_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

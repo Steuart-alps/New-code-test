@@ -12,6 +12,7 @@ import settingsRouter from "./settings";
 import notificationsRouter from "./notifications";
 import storageRouter from "./storage";
 import foodSafetyRouter from "./food-safety";
+import billingRouter from "./billing";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use("/storage", storageRouter);
 router.use("/food-safety", foodSafetyRouter);
+router.use("/billing", billingRouter);
 
 export default router;

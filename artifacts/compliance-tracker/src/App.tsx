@@ -18,6 +18,7 @@ import NotFound from "@/pages/not-found";
 import FireModulePage from "@/pages/module-fire";
 import FoodModulePage from "@/pages/module-food";
 import MaintenanceModulePage from "@/pages/module-maintenance";
+import BillingPage from "@/pages/billing";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +62,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
+      {isConsultant && <Route path="/billing" component={BillingPage} />}
       <Route component={NotFound} />
     </Switch>
   );
