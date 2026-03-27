@@ -121,146 +121,140 @@ export function ItemFormDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="sm:max-w-[600px] bg-card text-card-foreground p-0 gap-0 max-h-[90svh] overflow-y-auto"
-        style={{ WebkitOverflowScrolling: "touch" }}
-      >
-        <DialogHeader className="sticky top-0 z-10 bg-card px-6 pt-6 pb-4 border-b border-border">
-          <DialogTitle className="text-xl font-display">
-            {item ? "Edit Compliance Item" : "Create Compliance Item"}
+      <DialogContent className="sm:max-w-[580px] bg-card text-card-foreground p-0 gap-0">
+        <DialogHeader className="px-6 pt-5 pb-4 border-b border-border">
+          <DialogTitle className="text-lg font-display">
+            {item ? "Edit Compliance Item" : "Add Compliance Item"}
           </DialogTitle>
         </DialogHeader>
 
-        <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 px-6 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="title">Title *</Label>
-                <Input id="title" {...form.register("title")} className="bg-background" />
-                {form.formState.errors.title && (
-                  <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
-                )}
-              </div>
+        <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="px-6 pt-4 pb-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
 
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="description">Description</Label>
-                <Textarea id="description" {...form.register("description")} className="resize-none h-20 bg-background" />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Type</Label>
-                <Select
-                  disabled={!!item}
-                  value={form.watch("type")}
-                  onValueChange={(val: any) => form.setValue("type", val)}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="internal">Internal Check</SelectItem>
-                    <SelectItem value="external">External Contractor</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Category</Label>
-                <Select
-                  value={form.watch("categoryId")?.toString() || "none"}
-                  onValueChange={(val) => form.setValue("categoryId", val === "none" ? undefined : parseInt(val))}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue placeholder="Select Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Status</Label>
-                <Select
-                  value={form.watch("status")}
-                  onValueChange={(val: any) => form.setValue("status", val)}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="overdue">Overdue</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Priority</Label>
-                <Select
-                  value={form.watch("priority")}
-                  onValueChange={(val: any) => form.setValue("priority", val)}
-                >
-                  <SelectTrigger className="bg-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {typeWatch === "external" ? (
-                <>
-                  <div className="space-y-1.5">
-                    <Label>Contractor</Label>
-                    <Select
-                      value={form.watch("contractorId")?.toString() || "none"}
-                      onValueChange={(val) => form.setValue("contractorId", val === "none" ? undefined : parseInt(val))}
-                    >
-                      <SelectTrigger className="bg-background">
-                        <SelectValue placeholder="Select Contractor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {contractors.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>{c.name}{c.company ? ` (${c.company})` : ""}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Reminder Lead Time (Days)</Label>
-                    <Input type="number" {...form.register("leadTimeDays")} className="bg-background" placeholder="7" />
-                  </div>
-                </>
-              ) : (
-                <div className="space-y-1.5 col-span-2">
-                  <Label htmlFor="assignedTo">Assigned To</Label>
-                  <Input id="assignedTo" {...form.register("assignedTo")} className="bg-background" />
-                </div>
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="title" className="text-xs font-medium">Title *</Label>
+              <Input id="title" {...form.register("title")} className="bg-background h-9" />
+              {form.formState.errors.title && (
+                <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
               )}
-
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="dueDate">Due Date</Label>
-                <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background w-full" />
-              </div>
-
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea id="notes" {...form.register("notes")} className="resize-none h-16 bg-background" />
-              </div>
             </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Type</Label>
+              <Select
+                disabled={!!item}
+                value={form.watch("type")}
+                onValueChange={(val: any) => form.setValue("type", val)}
+              >
+                <SelectTrigger className="bg-background h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="internal">Internal</SelectItem>
+                  <SelectItem value="external">External</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Category</Label>
+              <Select
+                value={form.watch("categoryId")?.toString() || "none"}
+                onValueChange={(val) => form.setValue("categoryId", val === "none" ? undefined : parseInt(val))}
+              >
+                <SelectTrigger className="bg-background h-9">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Status</Label>
+              <Select
+                value={form.watch("status")}
+                onValueChange={(val: any) => form.setValue("status", val)}
+              >
+                <SelectTrigger className="bg-background h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium">Priority</Label>
+              <Select
+                value={form.watch("priority")}
+                onValueChange={(val: any) => form.setValue("priority", val)}
+              >
+                <SelectTrigger className="bg-background h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {typeWatch === "external" ? (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Contractor</Label>
+                  <Select
+                    value={form.watch("contractorId")?.toString() || "none"}
+                    onValueChange={(val) => form.setValue("contractorId", val === "none" ? undefined : parseInt(val))}
+                  >
+                    <SelectTrigger className="bg-background h-9">
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Unassigned</SelectItem>
+                      {contractors.map((c) => (
+                        <SelectItem key={c.id} value={c.id.toString()}>{c.name}{c.company ? ` — ${c.company}` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
+                  <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
+                </div>
+              </>
+            ) : (
+              <div className="col-span-2 space-y-1">
+                <Label htmlFor="assignedTo" className="text-xs font-medium">Assigned To</Label>
+                <Input id="assignedTo" {...form.register("assignedTo")} className="bg-background h-9" />
+              </div>
+            )}
+
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="dueDate" className="text-xs font-medium">Due Date</Label>
+              <Input type="datetime-local" id="dueDate" {...form.register("dueDate")} className="bg-background h-9 w-full" />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="notes" className="text-xs font-medium">Notes</Label>
+              <Textarea id="notes" {...form.register("notes")} className="resize-none h-14 bg-background" />
+            </div>
+
+          </div>
         </form>
 
-        <DialogFooter className="sticky bottom-0 z-10 px-6 py-4 border-t border-border bg-white">
+        <DialogFooter className="px-6 py-4 border-t border-border bg-white mt-2">
           <Button variant="outline" onClick={onClose} type="button">Cancel</Button>
           <Button type="submit" form="item-form" disabled={createItem.isPending || updateItem.isPending} className="bg-indigo-600 text-white hover:bg-indigo-700 border-indigo-600">
             {createItem.isPending || updateItem.isPending ? "Saving..." : "Save Item"}
