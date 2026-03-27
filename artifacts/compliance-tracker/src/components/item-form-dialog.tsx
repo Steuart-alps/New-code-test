@@ -121,15 +121,17 @@ export function ItemFormDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[600px] bg-card text-card-foreground flex flex-col max-h-[90vh] overflow-hidden p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border flex-shrink-0">
+      <DialogContent
+        className="sm:max-w-[600px] bg-card text-card-foreground p-0 gap-0 max-h-[90svh] overflow-y-auto"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
+        <DialogHeader className="sticky top-0 z-10 bg-card px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle className="text-xl font-display">
             {item ? "Edit Compliance Item" : "Create Compliance Item"}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="overflow-y-auto flex-1 min-h-0 px-6 overscroll-contain" style={{ WebkitOverflowScrolling: "touch" }}>
-          <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
+        <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 px-6 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="title">Title *</Label>
@@ -256,10 +258,9 @@ export function ItemFormDialog({
                 <Textarea id="notes" {...form.register("notes")} className="resize-none h-16 bg-background" />
               </div>
             </div>
-          </form>
-        </div>
+        </form>
 
-        <DialogFooter className="px-6 py-4 border-t border-border flex-shrink-0 bg-white">
+        <DialogFooter className="sticky bottom-0 z-10 px-6 py-4 border-t border-border bg-white">
           <Button variant="outline" onClick={onClose} type="button">Cancel</Button>
           <Button type="submit" form="item-form" disabled={createItem.isPending || updateItem.isPending} className="bg-indigo-600 text-white hover:bg-indigo-700 border-indigo-600">
             {createItem.isPending || updateItem.isPending ? "Saving..." : "Save Item"}
