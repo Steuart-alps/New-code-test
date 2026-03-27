@@ -259,9 +259,9 @@ export function ItemFormDialog({
           </form>
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-border flex-shrink-0 bg-card">
+        <DialogFooter className="px-6 py-4 border-t border-border flex-shrink-0 bg-white">
           <Button variant="outline" onClick={onClose} type="button">Cancel</Button>
-          <Button type="submit" form="item-form" disabled={createItem.isPending || updateItem.isPending} className="shadow-lg shadow-primary/20">
+          <Button type="submit" form="item-form" disabled={createItem.isPending || updateItem.isPending} className="bg-indigo-600 text-white hover:bg-indigo-700 border-indigo-600">
             {createItem.isPending || updateItem.isPending ? "Saving..." : "Save Item"}
           </Button>
         </DialogFooter>
