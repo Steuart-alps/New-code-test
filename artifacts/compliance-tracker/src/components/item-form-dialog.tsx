@@ -121,14 +121,14 @@ export function ItemFormDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[600px] bg-card text-card-foreground flex flex-col max-h-[90vh] p-0 gap-0">
+      <DialogContent className="sm:max-w-[600px] bg-card text-card-foreground flex flex-col max-h-[90vh] overflow-hidden p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border flex-shrink-0">
           <DialogTitle className="text-xl font-display">
             {item ? "Edit Compliance Item" : "Create Compliance Item"}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="overflow-y-auto flex-1 px-6">
+        <div className="overflow-y-auto flex-1 min-h-0 px-6">
           <form id="item-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2 space-y-1.5">
