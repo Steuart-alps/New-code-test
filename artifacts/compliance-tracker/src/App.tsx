@@ -15,6 +15,9 @@ import UsersPage from "@/pages/users";
 import ClientsPage from "@/pages/clients";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
+import FireModulePage from "@/pages/module-fire";
+import FoodModulePage from "@/pages/module-food";
+import MaintenanceModulePage from "@/pages/module-maintenance";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +54,9 @@ function ProtectedRoutes() {
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />
       <Route path="/internal" component={InternalChecksPage} />
+      <Route path="/internal/fire" component={FireModulePage} />
+      <Route path="/internal/food" component={FoodModulePage} />
+      <Route path="/internal/maintenance" component={MaintenanceModulePage} />
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}

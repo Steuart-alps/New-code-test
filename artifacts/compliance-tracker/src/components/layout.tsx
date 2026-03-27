@@ -14,6 +14,9 @@ import {
   LogOut,
   ChevronDown,
   ArrowLeftRight,
+  Flame,
+  UtensilsCrossed,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -44,6 +47,9 @@ function useNavGroups() {
       title: "Internal Compliance",
       items: [
         { href: "/internal", label: "Internal Checks", icon: ListTodo },
+        { href: "/internal/fire", label: "Fire Safety", icon: Flame },
+        { href: "/internal/food", label: "Food Safety", icon: UtensilsCrossed },
+        { href: "/internal/maintenance", label: "Maintenance", icon: Wrench },
       ]
     },
   ];
