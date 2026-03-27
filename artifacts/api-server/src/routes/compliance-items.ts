@@ -12,6 +12,7 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -29,15 +30,27 @@ function buildItemResponse(
   };
 }
 
-router.get("/compliance-items", async (req, res) => {
+router.get("/compliance-items", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
   const query = ListComplianceItemsQueryParams.parse(req.query);
 
-  const conditions = [];
+  const conditions = [eq(complianceItemsTable.clientId, clientId)];
   if (query.status) conditions.push(eq(complianceItemsTable.status, query.status));
   if (query.priority) conditions.push(eq(complianceItemsTable.priority, query.priority));
   if (query.categoryId) conditions.push(eq(complianceItemsTable.categoryId, query.categoryId));
   if (query.type) conditions.push(eq(complianceItemsTable.type, query.type));
   if (query.contractorId) conditions.push(eq(complianceItemsTable.contractorId, query.contractorId));
+
+  // Scope staff to their department
+  if (user.role === "client_staff" && user.departmentId) {
+    conditions.push(eq(complianceItemsTable.departmentId, user.departmentId));
+  }
 
   const items = await db
     .select({
@@ -48,17 +61,24 @@ router.get("/compliance-items", async (req, res) => {
     .from(complianceItemsTable)
     .leftJoin(categoriesTable, eq(complianceItemsTable.categoryId, categoriesTable.id))
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...conditions))
     .orderBy(complianceItemsTable.createdAt);
 
   res.json(items.map(({ item, category, contractor }) => buildItemResponse(item, category, contractor)));
 });
 
-router.post("/compliance-items", async (req, res) => {
+router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
+  const user = req.currentUser!;
   const body = CreateComplianceItemBody.parse(req.body);
+  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
   const [item] = await db
     .insert(complianceItemsTable)
-    .values({ ...body, updatedAt: new Date() })
+    .values({ ...body, clientId, updatedAt: new Date() })
     .returning();
 
   const [catResult] = item.categoryId
@@ -71,8 +91,10 @@ router.post("/compliance-items", async (req, res) => {
   res.status(201).json(buildItemResponse(item, catResult ?? null, conResult ?? null));
 });
 
-router.get("/compliance-items/:id", async (req, res) => {
+router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   const { id } = GetComplianceItemParams.parse({ id: Number(req.params.id) });
+  const user = req.currentUser!;
+
   const rows = await db
     .select({ item: complianceItemsTable, category: categoriesTable, contractor: contractorsTable })
     .from(complianceItemsTable)
@@ -84,13 +106,26 @@ router.get("/compliance-items/:id", async (req, res) => {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }
+
   const { item, category, contractor } = rows[0];
+  if (user.role !== "consultant" && item.clientId !== user.clientId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
   res.json(buildItemResponse(item, category, contractor));
 });
 
-router.put("/compliance-items/:id", async (req, res) => {
+router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
   const body = UpdateComplianceItemBody.parse(req.body);
+  const user = req.currentUser!;
+
+  const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+    res.status(404).json({ error: "Compliance item not found" });
+    return;
+  }
 
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
   if (body.status === "completed") updateData.completedAt = new Date();
@@ -102,11 +137,6 @@ router.put("/compliance-items/:id", async (req, res) => {
     .where(eq(complianceItemsTable.id, id))
     .returning();
 
-  if (!updated) {
-    res.status(404).json({ error: "Compliance item not found" });
-    return;
-  }
-
   const [catResult] = updated.categoryId
     ? await db.select().from(categoriesTable).where(eq(categoriesTable.id, updated.categoryId))
     : [];
@@ -117,15 +147,35 @@ router.put("/compliance-items/:id", async (req, res) => {
   res.json(buildItemResponse(updated, catResult ?? null, conResult ?? null));
 });
 
-router.delete("/compliance-items/:id", async (req, res) => {
+router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = DeleteComplianceItemParams.parse({ id: Number(req.params.id) });
+  const user = req.currentUser!;
+
+  const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+    res.status(404).json({ error: "Compliance item not found" });
+    return;
+  }
+
   await db.delete(complianceItemsTable).where(eq(complianceItemsTable.id, id));
   res.status(204).send();
 });
 
-router.patch("/compliance-items/:id/status", async (req, res) => {
+router.patch("/compliance-items/:id/status", requireAuth, async (req, res) => {
   const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const { status } = UpdateComplianceItemStatusBody.parse(req.body);
+  const user = req.currentUser!;
+
+  if (user.role === "client_viewer") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+    res.status(404).json({ error: "Compliance item not found" });
+    return;
+  }
 
   const [updated] = await db
     .update(complianceItemsTable)
@@ -133,11 +183,6 @@ router.patch("/compliance-items/:id/status", async (req, res) => {
     .where(eq(complianceItemsTable.id, id))
     .returning();
 
-  if (!updated) {
-    res.status(404).json({ error: "Compliance item not found" });
-    return;
-  }
-
   const [catResult] = updated.categoryId
     ? await db.select().from(categoriesTable).where(eq(categoriesTable.id, updated.categoryId))
     : [];
@@ -148,19 +193,30 @@ router.patch("/compliance-items/:id/status", async (req, res) => {
   res.json(buildItemResponse(updated, catResult ?? null, conResult ?? null));
 });
 
-router.get("/dashboard/stats", async (_req, res) => {
+router.get("/dashboard/stats", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
   const now = new Date();
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const [items, contractors, certs] = await Promise.all([
-    db.select().from(complianceItemsTable),
-    db.select().from(contractorsTable),
-    db.select().from(categoriesTable),
-  ]);
+  const itemConditions = [eq(complianceItemsTable.clientId, clientId)];
+  if (user.role === "client_staff" && user.departmentId) {
+    itemConditions.push(eq(complianceItemsTable.departmentId, user.departmentId));
+  }
 
   const { certificatesTable } = await import("@workspace/db/schema");
-  const certificates = await db.select().from(certificatesTable);
+
+  const [items, contractors, certificates] = await Promise.all([
+    db.select().from(complianceItemsTable).where(and(...itemConditions)),
+    db.select().from(contractorsTable).where(eq(contractorsTable.clientId, clientId)),
+    db.select().from(certificatesTable),
+  ]);
 
   const total = items.length;
   const pending = items.filter(i => i.status === "pending").length;

@@ -17,6 +17,11 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _clientIdGetter: (() => number | null) | null = null;
+
+export function setClientIdGetter(getter: (() => number | null) | null): void {
+  _clientIdGetter = getter;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -355,9 +360,22 @@ export async function customFetch<T = unknown>(
     }
   }
 
+  // Inject clientId into all GET-like requests so the API can scope results
+  if (_clientIdGetter && method === "GET") {
+    const clientId = _clientIdGetter();
+    if (clientId !== null) {
+      const rawUrl = resolveUrl(input);
+      const separator = rawUrl.includes("?") ? "&" : "?";
+      const patchedUrl = `${rawUrl}${separator}clientId=${clientId}`;
+      if (typeof input === "string") input = patchedUrl;
+      else if (isUrl(input)) input = new URL(patchedUrl);
+      else input = new Request(patchedUrl, input as Request);
+    }
+  }
+
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

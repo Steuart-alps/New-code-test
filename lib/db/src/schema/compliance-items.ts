@@ -3,6 +3,8 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { categoriesTable } from "./categories";
 import { contractorsTable } from "./contractors";
+import { clientsTable } from "./clients";
+import { departmentsTable } from "./departments";
 
 export const complianceStatusEnum = ["pending", "in_progress", "completed", "overdue"] as const;
 export const compliancePriorityEnum = ["low", "medium", "high", "critical"] as const;
@@ -10,6 +12,10 @@ export const complianceTypeEnum = ["internal", "external"] as const;
 
 export const complianceItemsTable = pgTable("compliance_items", {
   id: serial("id").primaryKey(),
+  clientId: integer("client_id")
+    .notNull()
+    .references(() => clientsTable.id, { onDelete: "cascade" }),
+  departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description"),
   type: text("type").$type<(typeof complianceTypeEnum)[number]>().notNull().default("internal"),

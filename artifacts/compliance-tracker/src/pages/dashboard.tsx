@@ -4,10 +4,37 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Cell as PieCell
 } from "recharts";
-import { FileWarning, Clock, ShieldAlert, Building, Briefcase, ListTodo, Activity } from "lucide-react";
+import { FileWarning, Clock, ShieldAlert, Building, Briefcase, ListTodo, Activity, Building2 } from "lucide-react";
+import { useAuth, useIsConsultant } from "@/context/auth-context";
+import { Link } from "wouter";
 
 export default function Dashboard() {
-  const { data: stats, isLoading } = useGetDashboardStats();
+  const { activeClientId } = useAuth();
+  const isConsultant = useIsConsultant();
+  const { data: stats, isLoading, error } = useGetDashboardStats({ query: { enabled: !!activeClientId } });
+
+  if (isConsultant && !activeClientId) {
+    return (
+      <AppLayout title="Overview">
+        <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
+          <div className="bg-primary/10 p-4 rounded-2xl">
+            <Building2 className="w-10 h-10 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold mb-1">No client selected</h2>
+            <p className="text-muted-foreground text-sm mb-4">
+              Go to the Clients page and click "View" on a client to see their dashboard.
+            </p>
+            <Link href="/clients">
+              <span className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors cursor-pointer">
+                Go to Clients
+              </span>
+            </Link>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (isLoading || !stats) {
     return (

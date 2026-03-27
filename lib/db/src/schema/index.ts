@@ -1,3 +1,6 @@
+export * from "./clients";
+export * from "./departments";
+export * from "./users";
 export * from "./categories";
 export * from "./contractors";
 export * from "./certificates";

@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -17,8 +18,18 @@ const SETTING_KEYS = [
   "companyName",
 ] as const;
 
-router.get("/settings", async (_req, res) => {
-  const rows = await db.select().from(appSettingsTable);
+router.get("/settings", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  const rows = await db
+    .select()
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+
   const settings: Record<string, string | null> = {};
   for (const key of SETTING_KEYS) {
     settings[key] = null;
@@ -29,23 +40,42 @@ router.get("/settings", async (_req, res) => {
   res.json(settings);
 });
 
-router.put("/settings", async (req, res) => {
+router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
   const body = UpdateSettingsBody.parse(req.body);
 
   for (const key of SETTING_KEYS) {
     const value = (body as Record<string, string | null | undefined>)[key];
     if (value !== undefined) {
-      await db
-        .insert(appSettingsTable)
-        .values({ key, value: value ?? null, updatedAt: new Date() })
-        .onConflictDoUpdate({
-          target: appSettingsTable.key,
-          set: { value: value ?? null, updatedAt: new Date() },
-        });
+      const existing = await db
+        .select()
+        .from(appSettingsTable)
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+
+      if (existing.length > 0) {
+        await db
+          .update(appSettingsTable)
+          .set({ value: value ?? null, updatedAt: new Date() })
+          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+      } else {
+        await db
+          .insert(appSettingsTable)
+          .values({ clientId, key, value: value ?? null, updatedAt: new Date() });
+      }
     }
   }
 
-  const rows = await db.select().from(appSettingsTable);
+  const rows = await db
+    .select()
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+
   const settings: Record<string, string | null> = {};
   for (const k of SETTING_KEYS) settings[k] = null;
   for (const row of rows) settings[row.key] = row.value ?? null;

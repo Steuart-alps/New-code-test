@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider, useAuth } from "@/context/auth-context";
 
 import Dashboard from "@/pages/dashboard";
 import ContractorsPage from "@/pages/contractors";
@@ -10,6 +11,9 @@ import ExternalChecksPage from "@/pages/external-checks";
 import InternalChecksPage from "@/pages/internal-checks";
 import CategoriesPage from "@/pages/categories";
 import SettingsPage from "@/pages/settings";
+import UsersPage from "@/pages/users";
+import ClientsPage from "@/pages/clients";
+import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -17,12 +21,29 @@ const queryClient = new QueryClient({
     queries: {
       retry: false,
       refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5, // 5 mins
+      staleTime: 1000 * 60 * 5,
     },
   },
 });
 
-function Router() {
+function ProtectedRoutes() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground text-sm animate-pulse">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  const canAdmin = user.role === "consultant" || user.role === "client_admin";
+  const isConsultant = user.role === "consultant";
+
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
@@ -30,8 +51,10 @@ function Router() {
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />
       <Route path="/internal" component={InternalChecksPage} />
-      <Route path="/categories" component={CategoriesPage} />
-      <Route path="/settings" component={SettingsPage} />
+      {canAdmin && <Route path="/categories" component={CategoriesPage} />}
+      {canAdmin && <Route path="/users" component={UsersPage} />}
+      {canAdmin && <Route path="/settings" component={SettingsPage} />}
+      {isConsultant && <Route path="/clients" component={ClientsPage} />}
       <Route component={NotFound} />
     </Switch>
   );
@@ -41,10 +64,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
+        <AuthProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <ProtectedRoutes />
+          </WouterRouter>
+          <Toaster />
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
