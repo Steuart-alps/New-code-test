@@ -1,4 +1,5 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -25,8 +26,15 @@ const queryClient = new QueryClient({
   },
 });
 
+function Redirect({ to }: { to: string }) {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate(to); }, [to]);
+  return null;
+}
+
 function ProtectedRoutes() {
   const { user, isLoading } = useAuth();
+  const [location] = useLocation();
 
   if (isLoading) {
     return (
@@ -37,7 +45,14 @@ function ProtectedRoutes() {
   }
 
   if (!user) {
+    if (location !== "/login") {
+      return <Redirect to="/login" />;
+    }
     return <LoginPage />;
+  }
+
+  if (location === "/login") {
+    return <Redirect to="/" />;
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
