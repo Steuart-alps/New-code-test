@@ -295,11 +295,6 @@ paths:
           schema:
             type: string
             enum: [low, medium, high, critical]
-        - name: type
-          in: query
-          schema:
-            type: string
-            enum: [internal, external]
         - name: contractorId
           in: query
           schema:
@@ -691,9 +686,6 @@ components:
         description:
           type: string
           nullable: true
-        type:
-          type: string
-          enum: [internal, external]
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -748,7 +740,6 @@ components:
       required:
         - id
         - title
-        - type
         - status
         - priority
         - createdAt
@@ -762,10 +753,6 @@ components:
         description:
           type: string
           nullable: true
-        type:
-          type: string
-          enum: [internal, external]
-          default: internal
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -804,9 +791,6 @@ components:
         description:
           type: string
           nullable: true
-        type:
-          type: string
-          enum: [internal, external]
         status:
           type: string
           enum: [pending, in_progress, completed, overdue]
@@ -861,10 +845,6 @@ components:
           type: integer
         completionRate:
           type: number
-        externalTotal:
-          type: integer
-        internalTotal:
-          type: integer
         contractorsCount:
           type: integer
         certificatesExpiringSoon:
@@ -878,8 +858,6 @@ components:
         - criticalItems
         - dueSoon
         - completionRate
-        - externalTotal
-        - internalTotal
         - contractorsCount
         - certificatesExpiringSoon
 

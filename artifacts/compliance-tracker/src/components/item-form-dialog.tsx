@@ -89,7 +89,6 @@ export function ItemFormDialog({
     try {
       const payload = {
         ...data,
-        type: "external" as const,
         categoryId: data.categoryId || null,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,

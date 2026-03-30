@@ -162,7 +162,7 @@ export default function Dashboard() {
                     <h4 className="text-sm font-semibold">Compliance Checks</h4>
                     <p className="text-xs text-muted-foreground">Contractor requirements</p>
                   </div>
-                  <span className="text-xl font-display font-bold">{stats.externalTotal}</span>
+                  <span className="text-xl font-display font-bold">{stats.total}</span>
                 </div>
 
                 <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">

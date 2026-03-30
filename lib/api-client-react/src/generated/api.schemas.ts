@@ -65,14 +65,6 @@ export interface CreateCertificateRequest {
   notes?: string | null;
 }
 
-export type ComplianceItemType =
-  (typeof ComplianceItemType)[keyof typeof ComplianceItemType];
-
-export const ComplianceItemType = {
-  internal: "internal",
-  external: "external",
-} as const;
-
 export type ComplianceItemStatus =
   (typeof ComplianceItemStatus)[keyof typeof ComplianceItemStatus];
 
@@ -97,7 +89,6 @@ export interface ComplianceItem {
   id: number;
   title: string;
   description?: string | null;
-  type: ComplianceItemType;
   status: ComplianceItemStatus;
   priority: ComplianceItemPriority;
   categoryId?: number | null;
@@ -115,14 +106,6 @@ export interface ComplianceItem {
   createdAt: string;
   updatedAt: string;
 }
-
-export type CreateComplianceItemRequestType =
-  (typeof CreateComplianceItemRequestType)[keyof typeof CreateComplianceItemRequestType];
-
-export const CreateComplianceItemRequestType = {
-  internal: "internal",
-  external: "external",
-} as const;
 
 export type CreateComplianceItemRequestStatus =
   (typeof CreateComplianceItemRequestStatus)[keyof typeof CreateComplianceItemRequestStatus];
@@ -147,7 +130,6 @@ export const CreateComplianceItemRequestPriority = {
 export interface CreateComplianceItemRequest {
   title: string;
   description?: string | null;
-  type?: CreateComplianceItemRequestType;
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   categoryId?: number | null;
@@ -157,14 +139,6 @@ export interface CreateComplianceItemRequest {
   leadTimeDays?: number | null;
   notes?: string | null;
 }
-
-export type UpdateComplianceItemRequestType =
-  (typeof UpdateComplianceItemRequestType)[keyof typeof UpdateComplianceItemRequestType];
-
-export const UpdateComplianceItemRequestType = {
-  internal: "internal",
-  external: "external",
-} as const;
 
 export type UpdateComplianceItemRequestStatus =
   (typeof UpdateComplianceItemRequestStatus)[keyof typeof UpdateComplianceItemRequestStatus];
@@ -189,7 +163,6 @@ export const UpdateComplianceItemRequestPriority = {
 export interface UpdateComplianceItemRequest {
   title?: string;
   description?: string | null;
-  type?: UpdateComplianceItemRequestType;
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
   categoryId?: number | null;
@@ -223,8 +196,6 @@ export interface DashboardStats {
   criticalItems: number;
   dueSoon: number;
   completionRate: number;
-  externalTotal: number;
-  internalTotal: number;
   contractorsCount: number;
   certificatesExpiringSoon: number;
 }
@@ -288,7 +259,6 @@ export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   categoryId?: number;
   priority?: ListComplianceItemsPriority;
-  type?: ListComplianceItemsType;
   contractorId?: number;
 };
 
@@ -312,10 +282,3 @@ export const ListComplianceItemsPriority = {
   critical: "critical",
 } as const;
 
-export type ListComplianceItemsType =
-  (typeof ListComplianceItemsType)[keyof typeof ListComplianceItemsType];
-
-export const ListComplianceItemsType = {
-  internal: "internal",
-  external: "external",
-} as const;

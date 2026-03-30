@@ -200,7 +200,6 @@ export const ListComplianceItemsQueryParams = zod.object({
     .optional(),
   categoryId: zod.coerce.number().optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
-  type: zod.enum(["internal", "external"]).optional(),
   contractorId: zod.coerce.number().optional(),
 });
 
@@ -208,7 +207,6 @@ export const ListComplianceItemsResponseItem = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
-  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
@@ -233,16 +231,12 @@ export const ListComplianceItemsResponse = zod.array(
 /**
  * @summary Create a compliance item
  */
-export const createComplianceItemBodyTypeDefault = `internal`;
 export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
 
 export const CreateComplianceItemBody = zod.object({
   title: zod.string(),
   description: zod.string().nullish(),
-  type: zod
-    .enum(["internal", "external"])
-    .default(createComplianceItemBodyTypeDefault),
   status: zod
     .enum(["pending", "in_progress", "completed", "overdue"])
     .default(createComplianceItemBodyStatusDefault),
@@ -268,7 +262,6 @@ export const GetComplianceItemResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
-  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
@@ -297,7 +290,6 @@ export const UpdateComplianceItemParams = zod.object({
 export const UpdateComplianceItemBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().nullish(),
-  type: zod.enum(["internal", "external"]).optional(),
   status: zod
     .enum(["pending", "in_progress", "completed", "overdue"])
     .optional(),
@@ -314,7 +306,6 @@ export const UpdateComplianceItemResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
-  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
@@ -355,7 +346,6 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
   description: zod.string().nullish(),
-  type: zod.enum(["internal", "external"]),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
   categoryId: zod.number().nullish(),
@@ -386,8 +376,6 @@ export const GetDashboardStatsResponse = zod.object({
   criticalItems: zod.number(),
   dueSoon: zod.number(),
   completionRate: zod.number(),
-  externalTotal: zod.number(),
-  internalTotal: zod.number(),
   contractorsCount: zod.number(),
   certificatesExpiringSoon: zod.number(),
 });

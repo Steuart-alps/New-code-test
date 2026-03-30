@@ -8,7 +8,6 @@ import { departmentsTable } from "./departments";
 
 export const complianceStatusEnum = ["pending", "in_progress", "completed", "overdue"] as const;
 export const compliancePriorityEnum = ["low", "medium", "high", "critical"] as const;
-export const complianceTypeEnum = ["internal", "external"] as const;
 
 export const complianceItemsTable = pgTable("compliance_items", {
   id: serial("id").primaryKey(),
@@ -18,7 +17,6 @@ export const complianceItemsTable = pgTable("compliance_items", {
   departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description"),
-  type: text("type").$type<(typeof complianceTypeEnum)[number]>().notNull().default("internal"),
   status: text("status").$type<(typeof complianceStatusEnum)[number]>().notNull().default("pending"),
   priority: text("priority").$type<(typeof compliancePriorityEnum)[number]>().notNull().default("medium"),
   categoryId: integer("category_id").references(() => categoriesTable.id, { onDelete: "set null" }),

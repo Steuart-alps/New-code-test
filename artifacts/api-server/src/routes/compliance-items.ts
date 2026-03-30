@@ -44,7 +44,6 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   if (query.status) conditions.push(eq(complianceItemsTable.status, query.status));
   if (query.priority) conditions.push(eq(complianceItemsTable.priority, query.priority));
   if (query.categoryId) conditions.push(eq(complianceItemsTable.categoryId, query.categoryId));
-  if (query.type) conditions.push(eq(complianceItemsTable.type, query.type));
   if (query.contractorId) conditions.push(eq(complianceItemsTable.contractorId, query.contractorId));
 
   // Scope staff to their department
@@ -229,8 +228,6 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
     new Date(i.dueDate) <= sevenDaysFromNow && new Date(i.dueDate) >= now
   ).length;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const externalTotal = items.filter(i => i.type === "external").length;
-  const internalTotal = items.filter(i => i.type === "internal").length;
   const contractorsCount = contractors.length;
   const certificatesExpiringSoon = certificates.filter(c =>
     c.expiryDate && new Date(c.expiryDate) <= thirtyDaysFromNow && new Date(c.expiryDate) >= now
@@ -238,7 +235,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
 
   res.json({
     total, pending, inProgress, completed, overdue, criticalItems, dueSoon, completionRate,
-    externalTotal, internalTotal, contractorsCount, certificatesExpiringSoon
+    contractorsCount, certificatesExpiringSoon
   });
 });
 
