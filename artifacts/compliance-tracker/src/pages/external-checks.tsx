@@ -21,7 +21,7 @@ export default function ExternalChecksPage() {
   const { deleteItem, updateItemStatus, triggerReminders } = useAppMutations();
 
   return (
-    <AppLayout title="External Checks">
+    <AppLayout title="Compliance Checks">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <p className="text-muted-foreground">Compliance requirements managed by external contractors.</p>
         <div className="flex gap-3 w-full sm:w-auto">
@@ -136,7 +136,6 @@ export default function ExternalChecksPage() {
         isOpen={isFormOpen} 
         onClose={() => setIsFormOpen(false)} 
         item={editingItem}
-        defaultType="external"
       />
     </AppLayout>
   );

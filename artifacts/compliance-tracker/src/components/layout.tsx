@@ -2,7 +2,6 @@ import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, 
-  ListTodo, 
   Tags, 
   ShieldCheck,
   Bell,
@@ -14,10 +13,6 @@ import {
   LogOut,
   ChevronDown,
   ArrowLeftRight,
-  Flame,
-  UtensilsCrossed,
-  Wrench,
-  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -28,7 +23,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
-  const { user } = useAuth();
 
   const groups = [
     {
@@ -38,19 +32,10 @@ function useNavGroups() {
       ]
     },
     {
-      title: "External Compliance",
+      title: "Contractor Compliance",
       items: [
         { href: "/contractors", label: "Contractors", icon: Building },
-        { href: "/external", label: "External Checks", icon: Briefcase },
-      ]
-    },
-    {
-      title: "Internal Compliance",
-      items: [
-        { href: "/internal", label: "Internal Checks", icon: ListTodo },
-        { href: "/internal/fire", label: "Fire Safety", icon: Flame },
-        { href: "/internal/food", label: "Food Safety", icon: UtensilsCrossed },
-        { href: "/internal/maintenance", label: "Maintenance", icon: Wrench },
+        { href: "/external", label: "Compliance Checks", icon: Briefcase },
       ]
     },
   ];
@@ -62,7 +47,6 @@ function useNavGroups() {
   }
   if (isConsultant) {
     systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });
-    systemItems.push({ href: "/billing", label: "Billing & Plans", icon: CreditCard });
   }
   if (canAdmin) {
     systemItems.push({ href: "/settings", label: "Settings", icon: Settings });
@@ -77,7 +61,7 @@ function useNavGroups() {
 
 export function AppLayout({ children, title }: { children: ReactNode; title: string }) {
   const [location] = useLocation();
-  const { user, client, logout, activeClientId, setActiveClientId } = useAuth();
+  const { user, client, logout, activeClientId } = useAuth();
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
 
@@ -101,7 +85,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               </div>
             )}
             <span className="font-display font-bold text-lg tracking-tight truncate">
-              {client ? client.name : <><span>Comply</span><span style={{ color: primaryColor }}>Track</span></>}
+              {client ? client.name : <><span>ALPS</span><span style={{ color: primaryColor }}> Compliance</span></>}
             </span>
           </Link>
         </div>

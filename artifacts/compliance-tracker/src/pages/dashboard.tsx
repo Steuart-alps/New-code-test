@@ -2,16 +2,16 @@ import { AppLayout } from "@/components/layout";
 import { useGetDashboardStats } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Cell as PieCell
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
-import { FileWarning, Clock, ShieldAlert, Building, Briefcase, ListTodo, Activity, Building2 } from "lucide-react";
+import { FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link } from "wouter";
 
 export default function Dashboard() {
   const { activeClientId } = useAuth();
   const isConsultant = useIsConsultant();
-  const { data: stats, isLoading, error } = useGetDashboardStats({ query: { enabled: !!activeClientId } });
+  const { data: stats, isLoading } = useGetDashboardStats({ query: { enabled: !!activeClientId } });
 
   if (isConsultant && !activeClientId) {
     return (
@@ -155,22 +155,11 @@ export default function Dashboard() {
             <CardContent>
               <div className="space-y-4">
                 <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
-                  <div className="bg-primary/20 p-2.5 rounded-lg mr-4">
-                    <ListTodo className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-sm font-semibold">Internal Checks</h4>
-                    <p className="text-xs text-muted-foreground">Managed by staff</p>
-                  </div>
-                  <span className="text-xl font-display font-bold">{stats.internalTotal}</span>
-                </div>
-
-                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
                   <div className="bg-emerald-500/20 p-2.5 rounded-lg mr-4">
                     <Briefcase className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-sm font-semibold">External Checks</h4>
+                    <h4 className="text-sm font-semibold">Compliance Checks</h4>
                     <p className="text-xs text-muted-foreground">Contractor requirements</p>
                   </div>
                   <span className="text-xl font-display font-bold">{stats.externalTotal}</span>
