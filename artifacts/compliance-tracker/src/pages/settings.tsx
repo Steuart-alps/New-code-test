@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Settings2, Mail, Send } from "lucide-react";
+import { Settings2, Mail, Send, Bell } from "lucide-react";
 
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
@@ -15,7 +15,8 @@ export default function SettingsPage() {
 
   const [formData, setFormData] = useState({
     companyName: "",
-    defaultLeadTimeDays: "7",
+    defaultLeadTimeDays: "30",
+    maintenanceEmail: "",
     smtpHost: "",
     smtpPort: "587",
     smtpUser: "",
@@ -30,7 +31,8 @@ export default function SettingsPage() {
     if (settings) {
       setFormData({
         companyName: settings.companyName || "",
-        defaultLeadTimeDays: settings.defaultLeadTimeDays || "7",
+        defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
+        maintenanceEmail: (settings as any).maintenanceEmail || "",
         smtpHost: settings.smtpHost || "",
         smtpPort: settings.smtpPort || "587",
         smtpUser: settings.smtpUser || "",
@@ -77,8 +79,35 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-1.5 col-span-2 sm:col-span-1">
                   <Label>Default Reminder Lead Time (Days)</Label>
+                  <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
                   <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-lg border-border/50 bg-card mb-6">
+            <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-amber-500" />
+                <CardTitle className="font-display">Reminder Notifications</CardTitle>
+              </div>
+              <CardDescription>
+                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window. 
+                You can also copy in a maintenance contact on every reminder email.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-1.5 max-w-md">
+                <Label>Maintenance Contact CC Email</Label>
+                <p className="text-xs text-muted-foreground">This address will be copied on every contractor reminder email.</p>
+                <Input
+                  name="maintenanceEmail"
+                  type="email"
+                  value={formData.maintenanceEmail}
+                  onChange={handleChange}
+                  placeholder="maintenance@yourcompany.com"
+                />
               </div>
             </CardContent>
           </Card>

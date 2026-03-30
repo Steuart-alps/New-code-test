@@ -34,16 +34,18 @@ export async function sendEmail(opts: {
   subject: string;
   html: string;
   text?: string;
+  cc?: string;
 }) {
   const settings = await getEmailSettings();
   const transporter = createTransporter(settings);
   const from = settings["smtpFrom"]
-    ? `${settings["smtpFromName"] ?? "Compliance Tracker"} <${settings["smtpFrom"]}>`
-    : `"Compliance Tracker" <noreply@compliance-tracker.local>`;
+    ? `${settings["smtpFromName"] ?? "ALPS Compliance"} <${settings["smtpFrom"]}>`
+    : `"ALPS Compliance" <noreply@alps-compliance.local>`;
 
   await transporter.sendMail({
     from,
     to: opts.to,
+    cc: opts.cc,
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
@@ -57,6 +59,7 @@ export function buildReminderEmail(opts: {
   dueDate: Date;
   leadTimeDays: number;
   notes?: string | null;
+  ccMaintenanceEmail?: string | null;
 }) {
   const dueDateStr = opts.dueDate.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -76,6 +79,7 @@ export function buildReminderEmail(opts: {
       </div>
       <p>Please contact us to arrange your visit or inspection at your earliest convenience.</p>
       <p>Best regards,<br><strong>${opts.companyName}</strong></p>
+      ${opts.ccMaintenanceEmail ? `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 12px;">This email has been copied to ${opts.ccMaintenanceEmail} for your records.</p>` : ""}
     </div>
   `;
 

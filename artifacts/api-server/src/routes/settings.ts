@@ -16,6 +16,7 @@ const SETTING_KEYS = [
   "smtpFromName",
   "defaultLeadTimeDays",
   "companyName",
+  "maintenanceEmail",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {
