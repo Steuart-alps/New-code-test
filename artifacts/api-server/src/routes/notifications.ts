@@ -2,24 +2,74 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { sendEmail, buildReminderEmail, getEmailSettings } from "../lib/email";
+import { sendEmail, buildReminderEmail, buildCalendarInvite, getEmailSettings } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+async function sendReminderForItem(opts: {
+  item: typeof complianceItemsTable.$inferSelect;
+  contractor: typeof contractorsTable.$inferSelect;
+  companyName: string;
+  fromEmail: string;
+  maintenanceEmail: string | null;
+  defaultLeadTimeDays: number;
+  now: Date;
+}): Promise<void> {
+  const { item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now } = opts;
+
+  const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
+  const dueDate = new Date(item.dueDate!);
+
+  const { html, text } = buildReminderEmail({
+    contractorName: contractor.name,
+    companyName,
+    itemTitle: item.title,
+    dueDate,
+    leadTimeDays,
+    notes: item.notes,
+    ccMaintenanceEmail: maintenanceEmail,
+  });
+
+  const icsContent = buildCalendarInvite({
+    itemTitle: item.title,
+    dueDate,
+    contractorName: contractor.name,
+    contractorEmail: contractor.email!,
+    companyName,
+    fromEmail,
+    notes: item.notes,
+  });
+
+  const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+
+  await sendEmail({
+    to: contractor.email!,
+    cc: maintenanceEmail ?? undefined,
+    subject: `Compliance Check Reminder: ${item.title}`,
+    html,
+    text,
+    icsAttachment: icsContent,
+    icsFilename: `${safeTitle}.ics`,
+  });
+
+  await db
+    .update(complianceItemsTable)
+    .set({ notificationSentAt: now })
+    .where(eq(complianceItemsTable.id, item.id));
+}
 
 export async function runReminderJob(): Promise<{ sent: number; skipped: number; errors: number }> {
   const settings = await getEmailSettings();
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
   const companyName = settings["companyName"] ?? "ALPS Compliance";
   const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+  const fromEmail = settings["smtpFrom"] ?? "noreply@alps-compliance.local";
 
   const now = new Date();
 
   const items = await db
-    .select({
-      item: complianceItemsTable,
-      contractor: contractorsTable,
-    })
+    .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(eq(complianceItemsTable.type, "external"));
@@ -29,41 +79,16 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
   let errors = 0;
 
   for (const { item, contractor } of items) {
-    if (!contractor?.email) { skipped++; continue; }
-    if (!item.dueDate) { skipped++; continue; }
-    if (item.status === "completed") { skipped++; continue; }
+    if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
     const dueDate = new Date(item.dueDate);
     const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
 
-    if (now < notifyDate) { skipped++; continue; }
-    if (item.notificationSentAt) { skipped++; continue; }
+    if (now < notifyDate || item.notificationSentAt) { skipped++; continue; }
 
     try {
-      const { html, text } = buildReminderEmail({
-        contractorName: contractor.name,
-        companyName,
-        itemTitle: item.title,
-        dueDate,
-        leadTimeDays,
-        notes: item.notes,
-        ccMaintenanceEmail: maintenanceEmail,
-      });
-
-      await sendEmail({
-        to: contractor.email,
-        cc: maintenanceEmail ?? undefined,
-        subject: `Compliance Check Reminder: ${item.title}`,
-        html,
-        text,
-      });
-
-      await db
-        .update(complianceItemsTable)
-        .set({ notificationSentAt: now })
-        .where(eq(complianceItemsTable.id, item.id));
-
+      await sendReminderForItem({ item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now });
       sent++;
     } catch {
       errors++;
@@ -78,14 +103,12 @@ router.post("/notifications/send-reminders", async (req, res) => {
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
   const companyName = settings["companyName"] ?? "ALPS Compliance";
   const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+  const fromEmail = settings["smtpFrom"] ?? "noreply@alps-compliance.local";
 
   const now = new Date();
 
   const items = await db
-    .select({
-      item: complianceItemsTable,
-      contractor: contractorsTable,
-    })
+    .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(eq(complianceItemsTable.type, "external"));
@@ -105,20 +128,15 @@ router.post("/notifications/send-reminders", async (req, res) => {
   for (const { item, contractor } of items) {
     if (!contractor?.email) {
       results.push({ itemId: item.id, title: item.title, contractorEmail: "", status: "skipped", reason: "No contractor email" });
-      skipped++;
-      continue;
+      skipped++; continue;
     }
-
     if (!item.dueDate) {
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: "No due date" });
-      skipped++;
-      continue;
+      skipped++; continue;
     }
-
     if (item.status === "completed") {
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: "Item completed" });
-      skipped++;
-      continue;
+      skipped++; continue;
     }
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
@@ -127,40 +145,15 @@ router.post("/notifications/send-reminders", async (req, res) => {
 
     if (now < notifyDate) {
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: `Not yet in notification window (notify from ${notifyDate.toLocaleDateString()})` });
-      skipped++;
-      continue;
+      skipped++; continue;
     }
-
     if (item.notificationSentAt) {
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: `Already notified on ${new Date(item.notificationSentAt).toLocaleDateString()}` });
-      skipped++;
-      continue;
+      skipped++; continue;
     }
 
     try {
-      const { html, text } = buildReminderEmail({
-        contractorName: contractor.name,
-        companyName,
-        itemTitle: item.title,
-        dueDate,
-        leadTimeDays,
-        notes: item.notes,
-        ccMaintenanceEmail: maintenanceEmail,
-      });
-
-      await sendEmail({
-        to: contractor.email,
-        cc: maintenanceEmail ?? undefined,
-        subject: `Compliance Check Reminder: ${item.title}`,
-        html,
-        text,
-      });
-
-      await db
-        .update(complianceItemsTable)
-        .set({ notificationSentAt: now })
-        .where(eq(complianceItemsTable.id, item.id));
-
+      await sendReminderForItem({ item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now });
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "sent" });
       sent++;
     } catch (err) {
