@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/users";
 import ClientsPage from "@/pages/clients";
 import LoginPage from "@/pages/login";
+import ResetPasswordPage from "@/pages/reset-password";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -35,6 +36,10 @@ function Redirect({ to }: { to: string }) {
 function ProtectedRoutes() {
   const { user, isLoading } = useAuth();
   const [location] = useLocation();
+
+  if (location === "/reset-password") {
+    return <ResetPasswordPage />;
+  }
 
   if (isLoading) {
     return (
