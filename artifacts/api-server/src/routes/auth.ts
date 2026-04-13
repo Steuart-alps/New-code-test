@@ -9,6 +9,7 @@ import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
+import { getUncachableStripeClient } from "../lib/stripeClient";
 
 const router = Router();
 
@@ -165,6 +166,84 @@ router.post("/auth/reset-password", async (req, res) => {
     .where(eq(passwordResetTokensTable.id, tokenRow.id));
 
   res.json({ ok: true });
+});
+
+const RegisterBody = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(8),
+  priceId: z.string().optional(),
+  promoCode: z.string().optional(),
+});
+
+router.post("/auth/register", async (req, res) => {
+  const body = RegisterBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Please provide a valid name, email, and password (min 8 characters)." });
+    return;
+  }
+
+  const { name, email, password, priceId, promoCode } = body.data;
+
+  const existing = await getUserWithClientByEmail(email);
+  if (existing) {
+    res.status(409).json({ error: "An account with this email already exists." });
+    return;
+  }
+
+  const passwordHash = await hashPassword(password);
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({ name, email, passwordHash, role: "consultant", subscriptionStatus: "trial" })
+    .returning();
+
+  // Log the user in immediately
+  (req.session as any).userId = user.id;
+
+  let checkoutUrl: string | null = null;
+
+  if (priceId) {
+    try {
+      const stripe = await getUncachableStripeClient();
+      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+
+      const customer = await stripe.customers.create({ name, email, metadata: { userId: String(user.id) } });
+
+      await db.update(usersTable)
+        .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+
+      // Resolve promo code if provided
+      let discounts: { promotion_code: string }[] | undefined;
+      if (promoCode) {
+        const codes = await stripe.promotionCodes.list({ code: promoCode, active: true, limit: 1 });
+        if (codes.data.length > 0) {
+          discounts = [{ promotion_code: codes.data[0].id }];
+        }
+      }
+
+      const sessionParams: Parameters<typeof stripe.checkout.sessions.create>[0] = {
+        customer: customer.id,
+        payment_method_types: ["card"],
+        line_items: [{ price: priceId, quantity: 1 }],
+        mode: "subscription",
+        success_url: `${baseUrl}/dashboard?billing=success`,
+        cancel_url: `${baseUrl}/signup?cancelled=1`,
+        client_reference_id: String(user.id),
+        metadata: { userId: String(user.id) },
+        ...(discounts ? { discounts } : { allow_promotion_codes: true }),
+      };
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+      checkoutUrl = session.url;
+    } catch (err) {
+      console.error("Stripe checkout creation failed:", err);
+    }
+  }
+
+  const safeUser = { id: user.id, email: user.email, name: user.name, role: user.role };
+  res.json({ user: safeUser, checkoutUrl });
 });
 
 export default router;

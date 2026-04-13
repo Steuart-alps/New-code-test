@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
+import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ type View = "login" | "forgot" | "forgot-sent";
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const [, navigate] = useLocation();
   const [view, setView] = useState<View>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -213,9 +215,17 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          Contact your Health & Safety consultant if you need access.
-        </p>
+        <div className="text-center mt-6 space-y-2">
+          <p className="text-sm text-muted-foreground">
+            New to ComplyTrack?{" "}
+            <button onClick={() => navigate("/signup")} className="text-primary font-medium hover:underline">
+              Create a free account
+            </button>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Or contact your Health & Safety consultant if you need access.
+          </p>
+        </div>
       </motion.div>
     </div>
   );

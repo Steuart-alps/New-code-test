@@ -16,6 +16,8 @@ export const usersTable = pgTable("users", {
   clientId: integer("client_id").references(() => clientsTable.id, { onDelete: "cascade" }),
   departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   active: boolean("active").notNull().default(true),
+  stripeCustomerId: text("stripe_customer_id"),
+  subscriptionStatus: text("subscription_status").default("trial"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

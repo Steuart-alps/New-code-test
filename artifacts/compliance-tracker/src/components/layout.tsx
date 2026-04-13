@@ -28,7 +28,7 @@ function useNavGroups() {
     {
       title: "Overview",
       items: [
-        { href: "/", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       ]
     },
     {
@@ -76,7 +76,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border shadow-xl z-20">
         <div className="h-16 flex items-center px-6 border-b border-sidebar-border bg-sidebar/50 backdrop-blur-sm">
-          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+          <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             {client?.logoUrl ? (
               <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-lg" />
             ) : (
@@ -98,7 +98,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               </div>
               <div className="space-y-1">
                 {group.items.map((item) => {
-                  const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
+                  const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
                   return (
                     <Link key={item.href} href={item.href} className="block">
                       <div className={cn(

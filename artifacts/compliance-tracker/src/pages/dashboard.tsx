@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { useGetDashboardStats } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,10 +8,20 @@ import {
 import { FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { activeClientId } = useAuth();
   const isConsultant = useIsConsultant();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("billing") === "success") {
+      toast({ title: "Payment successful!", description: "Welcome to ComplyTrack. Your subscription is now active." });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
   const { data: stats, isLoading } = useGetDashboardStats({ query: { enabled: !!activeClientId } });
 
   if (isConsultant && !activeClientId) {

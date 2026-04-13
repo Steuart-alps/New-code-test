@@ -14,6 +14,8 @@ import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/users";
 import ClientsPage from "@/pages/clients";
 import LoginPage from "@/pages/login";
+import SignupPage from "@/pages/signup";
+import LandingPage from "@/pages/landing";
 import ResetPasswordPage from "@/pages/reset-password";
 import NotFound from "@/pages/not-found";
 
@@ -37,9 +39,9 @@ function ProtectedRoutes() {
   const { user, isLoading } = useAuth();
   const [location] = useLocation();
 
-  if (location === "/reset-password") {
-    return <ResetPasswordPage />;
-  }
+  // Always-public routes
+  if (location === "/reset-password") return <ResetPasswordPage />;
+  if (location === "/signup") return <SignupPage />;
 
   if (isLoading) {
     return (
@@ -49,15 +51,17 @@ function ProtectedRoutes() {
     );
   }
 
+  // Not logged in
   if (!user) {
-    if (location !== "/login") {
-      return <Redirect to="/login" />;
-    }
-    return <LoginPage />;
+    if (location === "/login") return <LoginPage />;
+    // Show landing page at root when not logged in
+    if (location === "/" || location === "") return <LandingPage />;
+    return <Redirect to="/" />;
   }
 
-  if (location === "/login") {
-    return <Redirect to="/" />;
+  // Logged in — redirect away from public pages
+  if (location === "/login" || location === "/") {
+    return <Redirect to="/dashboard" />;
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
@@ -65,7 +69,7 @@ function ProtectedRoutes() {
 
   return (
     <Switch>
-      <Route path="/" component={Dashboard} />
+      <Route path="/dashboard" component={Dashboard} />
       <Route path="/contractors" component={ContractorsPage} />
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />
