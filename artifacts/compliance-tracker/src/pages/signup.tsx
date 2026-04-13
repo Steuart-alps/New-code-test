@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft, CreditCard, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,16 @@ interface Plan {
   name: string;
   description: string | null;
   prices: { id: string; unitAmount: number; currency: string; interval: string | null }[];
+  slug?: string;
 }
+
+const PLAN_SLUGS: Record<string, string> = {
+  Starter: "starter",
+  Professional: "professional",
+  Enterprise: "enterprise",
+};
+
+type PaymentMethod = "card" | "direct_debit";
 
 export default function SignupPage() {
   const [, navigate] = useLocation();
@@ -20,6 +29,8 @@ export default function SignupPage() {
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPriceId, setSelectedPriceId] = useState<string>("");
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -39,14 +50,14 @@ export default function SignupPage() {
           const aPrice = a.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
           const bPrice = b.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
           return aPrice - bPrice;
-        });
+        }).map(p => ({ ...p, slug: PLAN_SLUGS[p.name] ?? p.name.toLowerCase() }));
         setPlans(sorted);
-        // Default to Professional (middle tier)
         const professional = sorted.find(p => p.name?.toLowerCase().includes("professional"));
         const defaultPlan = professional ?? sorted[1] ?? sorted[0];
         if (defaultPlan) {
           const monthlyPrice = defaultPlan.prices.find(p => p.interval === "month") ?? defaultPlan.prices[0];
           if (monthlyPrice) setSelectedPriceId(monthlyPrice.id);
+          if (defaultPlan.slug) setSelectedPlanSlug(defaultPlan.slug);
         }
       })
       .catch(() => setPlans([]));
@@ -58,27 +69,49 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}api/auth/register`, {
+      // Step 1: Register account (always)
+      const registerBody: Record<string, any> = { name, email, password };
+      if (paymentMethod === "card" && selectedPriceId) {
+        registerBody.priceId = selectedPriceId;
+        if (promoCode.trim()) registerBody.promoCode = promoCode.trim();
+      }
+
+      const registerRes = await fetch(`${import.meta.env.BASE_URL}api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name, email, password, priceId: selectedPriceId || undefined, promoCode: promoCode.trim() || undefined }),
+        body: JSON.stringify(registerBody),
       });
+      const registerData = await registerRes.json();
+      if (!registerRes.ok) throw new Error(registerData.error ?? "Registration failed.");
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error ?? "Registration failed. Please try again.");
+      // Step 2: Handle payment
+      if (paymentMethod === "card") {
+        if (registerData.checkoutUrl) {
+          window.location.href = registerData.checkoutUrl;
+          return;
+        }
+        // No Stripe plans configured — go straight to dashboard
+        toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
+        navigate("/dashboard");
+        return;
       }
 
-      if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
-      } else {
-        toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
-        navigate("/");
+      // Direct Debit via GoCardless
+      if (paymentMethod === "direct_debit") {
+        const gcRes = await fetch(`${import.meta.env.BASE_URL}api/billing/gocardless/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ planSlug: selectedPlanSlug || "professional" }),
+        });
+        const gcData = await gcRes.json();
+        if (!gcRes.ok) throw new Error(gcData.error ?? "Could not start Direct Debit setup.");
+        window.location.href = gcData.redirectUrl;
+        return;
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -87,15 +120,14 @@ export default function SignupPage() {
   function formatPrice(plan: Plan) {
     const monthly = plan.prices.find(p => p.interval === "month");
     if (!monthly) return "";
-    const amount = monthly.unitAmount / 100;
-    return `£${amount}/mo`;
+    return `£${(monthly.unitAmount / 100).toFixed(0)}/mo`;
   }
 
   const passwordStrength = password.length === 0 ? null : password.length < 8 ? "weak" : password.length < 12 ? "good" : "strong";
+  const isDirectDebit = paymentMethod === "direct_debit";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-background to-indigo-50/20 flex flex-col">
-      {/* Top bar */}
       <div className="p-5 flex items-center justify-between max-w-6xl mx-auto w-full">
         <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm">
           <ArrowLeft className="w-4 h-4" /> Back
@@ -111,7 +143,6 @@ export default function SignupPage() {
         </button>
       </div>
 
-      {/* Main */}
       <div className="flex-1 flex items-start justify-center px-4 py-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -127,19 +158,16 @@ export default function SignupPage() {
           <div className="bg-card border border-border/50 rounded-2xl shadow-xl p-8 space-y-6">
             <form onSubmit={handleSubmit} className="space-y-5">
 
-              {/* Name */}
               <div className="space-y-1.5">
                 <Label htmlFor="name">Full name</Label>
                 <Input id="name" value={name} onChange={e => setName(e.target.value)} placeholder="Jane Smith" required className="h-11" />
               </div>
 
-              {/* Email */}
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email address</Label>
                 <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@yourcompany.com" required className="h-11" />
               </div>
 
-              {/* Password */}
               <div className="space-y-1.5">
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
@@ -151,6 +179,7 @@ export default function SignupPage() {
                     placeholder="Min. 8 characters"
                     required
                     minLength={8}
+                    autoComplete="new-password"
                     className="h-11 pr-10"
                   />
                   <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowPassword(!showPassword)}>
@@ -161,14 +190,11 @@ export default function SignupPage() {
                   <div className="flex items-center gap-2 mt-1">
                     <div className="flex gap-1 flex-1">
                       {["weak", "good", "strong"].map((level, i) => (
-                        <div
-                          key={level}
-                          className={`h-1 flex-1 rounded-full transition-all ${
-                            passwordStrength === "weak" && i === 0 ? "bg-red-400" :
-                            passwordStrength === "good" && i <= 1 ? "bg-amber-400" :
-                            passwordStrength === "strong" ? "bg-green-500" : "bg-muted"
-                          }`}
-                        />
+                        <div key={level} className={`h-1 flex-1 rounded-full transition-all ${
+                          passwordStrength === "weak" && i === 0 ? "bg-red-400" :
+                          passwordStrength === "good" && i <= 1 ? "bg-amber-400" :
+                          passwordStrength === "strong" ? "bg-green-500" : "bg-muted"
+                        }`} />
                       ))}
                     </div>
                     <span className={`text-xs ${passwordStrength === "weak" ? "text-red-500" : passwordStrength === "good" ? "text-amber-500" : "text-green-600"}`}>
@@ -191,10 +217,8 @@ export default function SignupPage() {
                         <button
                           type="button"
                           key={plan.id}
-                          onClick={() => setSelectedPriceId(monthlyPrice.id)}
-                          className={`text-left p-4 rounded-xl border-2 transition-all ${
-                            isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"
-                          }`}
+                          onClick={() => { setSelectedPriceId(monthlyPrice.id); setSelectedPlanSlug(plan.slug ?? ""); }}
+                          className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
                         >
                           <div className="flex items-center justify-between">
                             <div>
@@ -213,34 +237,98 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* Promo Code */}
-              <div>
-                {!showPromo ? (
+              {/* GoCardless fallback plan picker (when Stripe plans aren't seeded) */}
+              {plans.length === 0 && (
+                <div className="space-y-2">
+                  <Label>Choose your plan</Label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {(["starter", "professional", "enterprise"] as const).map(slug => {
+                      const info = { starter: { label: "Starter", price: "£49/mo" }, professional: { label: "Professional", price: "£99/mo" }, enterprise: { label: "Enterprise", price: "£249/mo" } }[slug];
+                      const isSelected = selectedPlanSlug === slug;
+                      return (
+                        <button
+                          type="button"
+                          key={slug}
+                          onClick={() => setSelectedPlanSlug(slug)}
+                          className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <p className="font-semibold text-sm">{info.label}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-primary">{info.price}</span>
+                              {isSelected && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Payment Method */}
+              <div className="space-y-2">
+                <Label>How would you like to pay?</Label>
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setShowPromo(true)}
-                    className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+                    onClick={() => setPaymentMethod("card")}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${paymentMethod === "card" ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
                   >
-                    <Tag className="w-3.5 h-3.5" /> Have a discount code?
+                    <CreditCard className={`w-5 h-5 ${paymentMethod === "card" ? "text-primary" : "text-muted-foreground"}`} />
+                    <div className="text-center">
+                      <p className="font-semibold text-sm">Card</p>
+                      <p className="text-xs text-muted-foreground">via Stripe</p>
+                    </div>
                   </button>
-                ) : (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="promo" className="flex items-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5 text-primary" /> Discount / promo code
-                    </Label>
-                    <Input
-                      id="promo"
-                      value={promoCode}
-                      onChange={e => setPromoCode(e.target.value.toUpperCase())}
-                      placeholder="e.g. LAUNCH50"
-                      className="h-11 font-mono tracking-wider"
-                    />
-                    <p className="text-xs text-muted-foreground">Applied automatically when you proceed to payment.</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("direct_debit")}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${paymentMethod === "direct_debit" ? "border-indigo-500 bg-indigo-500/5" : "border-border/50 hover:border-indigo-400/40"}`}
+                  >
+                    <Building2 className={`w-5 h-5 ${paymentMethod === "direct_debit" ? "text-indigo-600" : "text-muted-foreground"}`} />
+                    <div className="text-center">
+                      <p className="font-semibold text-sm">Direct Debit</p>
+                      <p className="text-xs text-muted-foreground">via GoCardless</p>
+                    </div>
+                  </button>
+                </div>
+                {isDirectDebit && (
+                  <motion.p
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-xs text-muted-foreground bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2"
+                  >
+                    You'll be taken to GoCardless to authorise a Direct Debit mandate from your bank account. Safe, paperless, and no card details needed.
+                  </motion.p>
                 )}
               </div>
 
-              {/* Error */}
+              {/* Promo Code — only visible for card payments */}
+              {!isDirectDebit && (
+                <div>
+                  {!showPromo ? (
+                    <button type="button" onClick={() => setShowPromo(true)} className="flex items-center gap-1.5 text-sm text-primary hover:underline">
+                      <Tag className="w-3.5 h-3.5" /> Have a discount code?
+                    </button>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="promo" className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-primary" /> Discount / promo code
+                      </Label>
+                      <Input
+                        id="promo"
+                        value={promoCode}
+                        onChange={e => setPromoCode(e.target.value.toUpperCase())}
+                        placeholder="e.g. LAUNCH50"
+                        className="h-11 font-mono tracking-wider"
+                      />
+                      <p className="text-xs text-muted-foreground">Applied automatically when you proceed to payment.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {error && (
                 <motion.div
                   initial={{ opacity: 0, y: -4 }}
@@ -252,15 +340,19 @@ export default function SignupPage() {
               )}
 
               <Button type="submit" className="w-full h-11 font-semibold shadow-lg shadow-primary/20" disabled={loading}>
-                {loading ? "Creating your account..." : selectedPriceId ? "Create account & choose payment →" : "Create free account"}
+                {loading
+                  ? "Setting up your account..."
+                  : isDirectDebit
+                  ? "Create account & set up Direct Debit →"
+                  : "Create account & proceed to payment →"}
               </Button>
             </form>
 
             <div className="flex flex-col gap-3 pt-2 border-t border-border/50">
-              <div className="flex items-center justify-center gap-5 text-xs text-muted-foreground">
-                {["14-day free trial", "Cancel anytime", "Secure payments via Stripe"].map(t => (
+              <div className="flex items-center justify-center gap-5 text-xs text-muted-foreground flex-wrap">
+                {["14-day free trial", "Cancel anytime", isDirectDebit ? "Protected by the Direct Debit Guarantee" : "Secure payments via Stripe"].map(t => (
                   <div key={t} className="flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-green-500" /> {t}
+                    <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" /> {t}
                   </div>
                 ))}
               </div>

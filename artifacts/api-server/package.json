@@ -17,6 +17,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "gocardless-nodejs": "^8.1.0",
     "google-auth-library": "^10.6.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.4",

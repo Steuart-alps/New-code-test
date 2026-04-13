@@ -12,12 +12,14 @@ import settingsRouter from "./settings";
 import notificationsRouter from "./notifications";
 import storageRouter from "./storage";
 import billingRouter from "./billing";
+import gocardlessRouter from "./gocardless";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use("/billing", billingRouter);
+router.use(gocardlessRouter);
 router.use(clientsRouter);
 router.use(usersRouter);
 router.use(departmentsRouter);
