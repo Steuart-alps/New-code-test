@@ -13,6 +13,7 @@ import {
   LogOut,
   ChevronDown,
   ArrowLeftRight,
+  FlameKindling,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -29,6 +30,12 @@ function useNavGroups() {
       title: "Overview",
       items: [
         { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      ]
+    },
+    {
+      title: "Fire Safety",
+      items: [
+        { href: "/sites", label: "Sites", icon: FlameKindling },
       ]
     },
     {
