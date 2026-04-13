@@ -1,11 +1,24 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { complianceItemsTable, contractorsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
-import { sendEmail, buildReminderEmail, buildCalendarInvite, getEmailSettings } from "../lib/email";
+import { complianceItemsTable, contractorsTable, appSettingsTable } from "@workspace/db/schema";
+import { eq, and } from "drizzle-orm";
+import { sendEmail } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+async function getClientSettings(clientId: number): Promise<Record<string, string>> {
+  const rows = await db
+    .select()
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+  const settings: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.value != null) settings[row.key] = row.value;
+  }
+  return settings;
+}
 
 async function sendReminderForItem(opts: {
   item: typeof complianceItemsTable.$inferSelect;
@@ -51,6 +64,7 @@ async function sendReminderForItem(opts: {
     text,
     icsAttachment: icsContent,
     icsFilename: `${safeTitle}.ics`,
+    clientId: item.clientId,
   });
 
   await db
@@ -60,12 +74,6 @@ async function sendReminderForItem(opts: {
 }
 
 export async function runReminderJob(): Promise<{ sent: number; skipped: number; errors: number }> {
-  const settings = await getEmailSettings();
-  const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
-  const companyName = settings["companyName"] ?? "ALPS Compliance";
-  const maintenanceEmail = settings["maintenanceEmail"] ?? null;
-  const fromEmail = settings["smtpFrom"] ?? "noreply@alps-compliance.local";
-
   const now = new Date();
 
   const items = await db
@@ -74,6 +82,8 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(eq(complianceItemsTable.type, "external"));
 
+  const settingsCache: Record<number, Record<string, string>> = {};
+
   let sent = 0;
   let skipped = 0;
   let errors = 0;
@@ -81,11 +91,20 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
   for (const { item, contractor } of items) {
     if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
 
-    const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
+    const leadTimeDays = item.leadTimeDays ?? 30;
     const dueDate = new Date(item.dueDate);
     const notifyDate = new Date(dueDate.getTime() - leadTimeDays * 24 * 60 * 60 * 1000);
 
     if (now < notifyDate || item.notificationSentAt) { skipped++; continue; }
+
+    if (!settingsCache[item.clientId]) {
+      settingsCache[item.clientId] = await getClientSettings(item.clientId);
+    }
+    const settings = settingsCache[item.clientId];
+    const companyName = settings["companyName"] ?? "ComplyTrack";
+    const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+    const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
     try {
       await sendReminderForItem({ item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now });
@@ -99,12 +118,6 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
 }
 
 router.post("/notifications/send-reminders", async (req, res) => {
-  const settings = await getEmailSettings();
-  const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
-  const companyName = settings["companyName"] ?? "ALPS Compliance";
-  const maintenanceEmail = settings["maintenanceEmail"] ?? null;
-  const fromEmail = settings["smtpFrom"] ?? "noreply@alps-compliance.local";
-
   const now = new Date();
 
   const items = await db
@@ -112,6 +125,8 @@ router.post("/notifications/send-reminders", async (req, res) => {
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(eq(complianceItemsTable.type, "external"));
+
+  const settingsCache: Record<number, Record<string, string>> = {};
 
   const results: Array<{
     itemId: number;
@@ -138,6 +153,15 @@ router.post("/notifications/send-reminders", async (req, res) => {
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "skipped", reason: "Item completed" });
       skipped++; continue;
     }
+
+    if (!settingsCache[item.clientId]) {
+      settingsCache[item.clientId] = await getClientSettings(item.clientId);
+    }
+    const settings = settingsCache[item.clientId];
+    const companyName = settings["companyName"] ?? "ComplyTrack";
+    const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+    const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
     const dueDate = new Date(item.dueDate);
@@ -172,9 +196,13 @@ router.post("/notifications/test-email", async (req, res) => {
   try {
     await sendEmail({
       to,
-      subject: "ALPS Compliance — Test Email",
-      html: `<p>This is a test email from your ALPS Compliance system. Your email settings are configured correctly!</p>`,
-      text: "This is a test email from your ALPS Compliance system. Your email settings are configured correctly!",
+      subject: "ComplyTrack — Test Email",
+      html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1e293b;">Test Email</h2>
+        <p>This is a test email from your ComplyTrack system. Your email settings are configured correctly!</p>
+        <p style="color: #64748b; font-size: 14px;">Sent via Resend.</p>
+      </div>`,
+      text: "This is a test email from your ComplyTrack system. Your email settings are configured correctly!",
     });
     res.json({ success: true, message: `Test email sent to ${to}` });
   } catch (err) {

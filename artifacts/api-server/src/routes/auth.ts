@@ -8,7 +8,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull } from "drizzle-orm";
-import { sendEmail } from "../lib/email";
+import { sendSystemEmail } from "../lib/email";
 
 const router = Router();
 
@@ -97,7 +97,7 @@ router.post("/auth/forgot-password", async (req, res) => {
     const resetUrl = `${appUrl}/reset-password?token=${token}`;
 
     try {
-      await sendEmail({
+      await sendSystemEmail({
         to: result.user.email,
         subject: "Reset your password",
         html: `

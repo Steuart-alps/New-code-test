@@ -6,8 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Settings2, Mail, Send, Bell } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2 } from "lucide-react";
 
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
@@ -17,10 +16,6 @@ export default function SettingsPage() {
     companyName: "",
     defaultLeadTimeDays: "30",
     maintenanceEmail: "",
-    smtpHost: "",
-    smtpPort: "587",
-    smtpUser: "",
-    smtpPass: "",
     smtpFrom: "",
     smtpFromName: "",
   });
@@ -33,10 +28,6 @@ export default function SettingsPage() {
         companyName: settings.companyName || "",
         defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
         maintenanceEmail: (settings as any).maintenanceEmail || "",
-        smtpHost: settings.smtpHost || "",
-        smtpPort: settings.smtpPort || "587",
-        smtpUser: settings.smtpUser || "",
-        smtpPass: settings.smtpPass || "",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
       });
@@ -93,7 +84,7 @@ export default function SettingsPage() {
                 <CardTitle className="font-display">Reminder Notifications</CardTitle>
               </div>
               <CardDescription>
-                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window. 
+                Reminders are sent automatically to contractors every day at 8am when a compliance check enters its lead-time window.
                 You can also copy in a maintenance contact on every reminder email.
               </CardDescription>
             </CardHeader>
@@ -116,34 +107,22 @@ export default function SettingsPage() {
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
               <div className="flex items-center gap-2">
                 <Mail className="w-5 h-5 text-indigo-500" />
-                <CardTitle className="font-display">SMTP Email Configuration</CardTitle>
+                <CardTitle className="font-display">Email Settings</CardTitle>
               </div>
-              <CardDescription>Configure SMTP credentials to send automated reminders to contractors.</CardDescription>
+              <CardDescription>
+                Configure the sender name and address for outgoing emails. All emails are delivered via Resend.
+              </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>SMTP Host</Label>
-                  <Input name="smtpHost" value={formData.smtpHost} onChange={handleChange} placeholder="smtp.sendgrid.net" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>SMTP Port</Label>
-                  <Input name="smtpPort" value={formData.smtpPort} onChange={handleChange} placeholder="587" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>SMTP Username</Label>
-                  <Input name="smtpUser" value={formData.smtpUser} onChange={handleChange} placeholder="apikey" />
-                </div>
-                <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>SMTP Password</Label>
-                  <Input type="password" name="smtpPass" value={formData.smtpPass} onChange={handleChange} placeholder="••••••••" />
-                </div>
-                <div className="col-span-2">
-                  <Separator className="my-2" />
-                </div>
+              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
+                <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                Resend is configured as your email provider. No additional credentials are required.
+              </div>
+              <div className="grid grid-cols-2 gap-6 pt-2">
                 <div className="space-y-1.5 col-span-2 sm:col-span-1">
                   <Label>From Email Address</Label>
-                  <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@acmecorp.com" />
+                  <p className="text-xs text-muted-foreground">Must be a verified sender domain in your Resend account.</p>
+                  <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
                 </div>
                 <div className="space-y-1.5 col-span-2 sm:col-span-1">
                   <Label>From Name</Label>
@@ -153,10 +132,10 @@ export default function SettingsPage() {
             </CardContent>
             <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <Input 
-                  placeholder="Test recipient email" 
-                  value={testEmail} 
-                  onChange={(e) => setTestEmail(e.target.value)} 
+                <Input
+                  placeholder="Test recipient email"
+                  value={testEmail}
+                  onChange={(e) => setTestEmail(e.target.value)}
                   className="w-64"
                 />
                 <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>

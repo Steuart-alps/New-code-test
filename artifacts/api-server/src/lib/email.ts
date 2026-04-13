@@ -1,10 +1,20 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
 
-export async function getEmailSettings(): Promise<Record<string, string>> {
-  const rows = await db.select().from(appSettingsTable);
+function getResend() {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
+  return new Resend(apiKey);
+}
+
+export async function getEmailSettings(clientId?: number | null): Promise<Record<string, string>> {
+  if (!clientId) return {};
+  const rows = await db
+    .select()
+    .from(appSettingsTable)
+    .where((await import("drizzle-orm")).eq(appSettingsTable.clientId, clientId));
   const settings: Record<string, string> = {};
   for (const row of rows) {
     if (row.value !== null && row.value !== undefined) {
@@ -14,19 +24,61 @@ export async function getEmailSettings(): Promise<Record<string, string>> {
   return settings;
 }
 
-export function createTransporter(settings: Record<string, string>) {
-  const host = settings["smtpHost"] ?? "";
-  const port = parseInt(settings["smtpPort"] ?? "587", 10);
-  const user = settings["smtpUser"] ?? "";
-  const pass = settings["smtpPass"] ?? "";
+function buildFrom(settings: Record<string, string>): string {
+  const email = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const name = settings["smtpFromName"] ?? "ComplyTrack";
+  return `${name} <${email}>`;
+}
 
-  if (!host) throw new Error("SMTP host not configured. Please configure email settings.");
+export async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  cc?: string;
+  icsAttachment?: string;
+  icsFilename?: string;
+  clientId?: number | null;
+}) {
+  const resend = getResend();
+  const settings = await getEmailSettings(opts.clientId ?? null);
+  const from = buildFrom(settings);
 
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: user ? { user, pass } : undefined,
+  const attachments = opts.icsAttachment
+    ? [
+        {
+          filename: opts.icsFilename ?? "invite.ics",
+          content: Buffer.from(opts.icsAttachment),
+        },
+      ]
+    : undefined;
+
+  await resend.emails.send({
+    from,
+    to: opts.to,
+    cc: opts.cc,
+    subject: opts.subject,
+    html: opts.html,
+    text: opts.text,
+    attachments,
+  });
+}
+
+export async function sendSystemEmail(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}) {
+  const resend = getResend();
+  const email = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const from = `ComplyTrack <${email}>`;
+  await resend.emails.send({
+    from,
+    to: opts.to,
+    subject: opts.subject,
+    html: opts.html,
+    text: opts.text,
   });
 }
 
@@ -61,7 +113,7 @@ export function buildCalendarInvite(opts: {
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    `PRODID:-//ALPS Compliance//EN`,
+    `PRODID:-//ComplyTrack//EN`,
     "METHOD:REQUEST",
     "BEGIN:VEVENT",
     `UID:${uid}`,
@@ -81,42 +133,6 @@ export function buildCalendarInvite(opts: {
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");
-}
-
-export async function sendEmail(opts: {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-  cc?: string;
-  icsAttachment?: string;
-  icsFilename?: string;
-}) {
-  const settings = await getEmailSettings();
-  const transporter = createTransporter(settings);
-  const from = settings["smtpFrom"]
-    ? `${settings["smtpFromName"] ?? "ALPS Compliance"} <${settings["smtpFrom"]}>`
-    : `"ALPS Compliance" <noreply@alps-compliance.local>`;
-
-  const attachments = opts.icsAttachment
-    ? [
-        {
-          filename: opts.icsFilename ?? "invite.ics",
-          content: opts.icsAttachment,
-          contentType: "text/calendar; method=REQUEST",
-        },
-      ]
-    : undefined;
-
-  await transporter.sendMail({
-    from,
-    to: opts.to,
-    cc: opts.cc,
-    subject: opts.subject,
-    html: opts.html,
-    text: opts.text,
-    attachments,
-  });
 }
 
 export function buildReminderEmail(opts: {

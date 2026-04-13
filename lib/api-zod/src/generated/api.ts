@@ -398,25 +398,19 @@ export const GetSettingsResponse = zod.object({
  * @summary Update app settings
  */
 export const UpdateSettingsBody = zod.object({
-  smtpHost: zod.string().nullish(),
-  smtpPort: zod.string().nullish(),
-  smtpUser: zod.string().nullish(),
-  smtpPass: zod.string().nullish(),
   smtpFrom: zod.string().nullish(),
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
+  maintenanceEmail: zod.string().nullish(),
 });
 
 export const UpdateSettingsResponse = zod.object({
-  smtpHost: zod.string().nullish(),
-  smtpPort: zod.string().nullish(),
-  smtpUser: zod.string().nullish(),
-  smtpPass: zod.string().nullish(),
   smtpFrom: zod.string().nullish(),
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
+  maintenanceEmail: zod.string().nullish(),
 });
 
 /**

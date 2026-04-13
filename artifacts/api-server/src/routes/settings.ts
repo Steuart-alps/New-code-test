@@ -8,10 +8,6 @@ import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requ
 const router: IRouter = Router();
 
 const SETTING_KEYS = [
-  "smtpHost",
-  "smtpPort",
-  "smtpUser",
-  "smtpPass",
   "smtpFrom",
   "smtpFromName",
   "defaultLeadTimeDays",

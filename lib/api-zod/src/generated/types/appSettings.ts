@@ -7,12 +7,9 @@
  */
 
 export interface AppSettings {
-  smtpHost?: string | null;
-  smtpPort?: string | null;
-  smtpUser?: string | null;
-  smtpPass?: string | null;
   smtpFrom?: string | null;
   smtpFromName?: string | null;
   defaultLeadTimeDays?: string | null;
   companyName?: string | null;
+  maintenanceEmail?: string | null;
 }
