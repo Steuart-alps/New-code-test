@@ -11,7 +11,6 @@ import certificatesRouter from "./certificates";
 import settingsRouter from "./settings";
 import notificationsRouter from "./notifications";
 import storageRouter from "./storage";
-import sitesRouter from "./sites";
 
 const router: IRouter = Router();
 
@@ -27,6 +26,5 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use("/storage", storageRouter);
-router.use(sitesRouter);
 
 export default router;

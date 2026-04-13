@@ -36,8 +36,6 @@ Each client organisation gets a branded login experience and scoped access to th
 ## Navigation Structure
 
 - **Dashboard** — overview with external/internal split (consultant sees "select client" prompt if no client active)
-- **FIRE SAFETY**
-  - Sites — manage physical locations; each site has a fire alarm test history
 - **EXTERNAL COMPLIANCE**
   - Contractors — manage external contractors
   - External Checks — compliance items assigned to contractors, with lead time email reminders
@@ -62,8 +60,6 @@ Each client organisation gets a branded login experience and scoped access to th
 - `certificates` — certificates per contractor
 - `compliance_items` — compliance tasks with type, status, priority, contractorId, departmentId, leadTimeDays
 - `app_settings` — key/value settings (SMTP config, company name, lead time defaults) — unique per (clientId, key)
-- `sites` — physical locations per client (name, address, active)
-- `fire_alarm_tests` — weekly fire alarm test records per site (weekOf, testedBy, result pass/fail, alarmActivated, allCallPointsTested, faultFound, actionTaken, notes)
 - `password_reset_tokens` — one-time tokens for password reset flow (expiresAt 1h, usedAt)
 
 ## Auth Endpoints

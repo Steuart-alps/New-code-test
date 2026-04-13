@@ -15,8 +15,6 @@ import UsersPage from "@/pages/users";
 import ClientsPage from "@/pages/clients";
 import LoginPage from "@/pages/login";
 import ResetPasswordPage from "@/pages/reset-password";
-import SitesPage from "@/pages/sites";
-import SiteDetailPage from "@/pages/site-detail";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -68,8 +66,6 @@ function ProtectedRoutes() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
-      <Route path="/sites" component={SitesPage} />
-      <Route path="/sites/:id" component={SiteDetailPage} />
       <Route path="/contractors" component={ContractorsPage} />
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />
