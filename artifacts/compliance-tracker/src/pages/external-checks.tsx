@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout";
-import { useListComplianceItems } from "@workspace/api-client-react";
+import { useListComplianceItems, useSendReminderForItem } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { toast } from "sonner";
 import { StatusBadge, PriorityBadge } from "@/components/badges";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
@@ -19,6 +20,12 @@ export default function ExternalChecksPage() {
 
   const { data: items = [], isLoading } = useListComplianceItems({ type: "external" });
   const { deleteItem, updateItemStatus, triggerReminders } = useAppMutations();
+  const sendOne = useSendReminderForItem({
+    mutation: {
+      onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
+      onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
+    },
+  });
 
   return (
     <AppLayout title="Compliance Checks">
@@ -118,6 +125,13 @@ export default function ExternalChecksPage() {
                         <DropdownMenuContent align="end" className="w-48 shadow-xl">
                           <DropdownMenuItem onClick={() => { setEditingItem(item); setIsFormOpen(true); }}>
                             Edit Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={!item.contractorEmail || sendOne.isPending}
+                            onClick={() => sendOne.mutate({ itemId: item.id })}
+                          >
+                            <Send className="w-3.5 h-3.5 mr-2 text-indigo-500" />
+                            {sendOne.isPending && sendOne.variables?.itemId === item.id ? "Sending..." : "Send Reminder Now"}
                           </DropdownMenuItem>
                           <DropdownMenuSub>
                             <DropdownMenuSubTrigger>Update Status</DropdownMenuSubTrigger>

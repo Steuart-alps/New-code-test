@@ -617,6 +617,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/SendRemindersResponse"
 
+  /notifications/send-reminder/{itemId}:
+    post:
+      operationId: sendReminderForItem
+      tags: [notifications]
+      summary: Send an email reminder for a single compliance check
+      parameters:
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reminder send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestEmailResponse"
+
   /notifications/test-email:
     post:
       operationId: testEmail

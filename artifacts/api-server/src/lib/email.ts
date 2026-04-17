@@ -53,7 +53,7 @@ export async function sendEmail(opts: {
       ]
     : undefined;
 
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from,
     to: opts.to,
     cc: opts.cc,
@@ -62,6 +62,9 @@ export async function sendEmail(opts: {
     text: opts.text,
     attachments,
   });
+  if (result.error) {
+    throw new Error(`Email delivery failed: ${result.error.message ?? result.error.name ?? "unknown error"}`);
+  }
 }
 
 export async function sendSystemEmail(opts: {
@@ -73,13 +76,16 @@ export async function sendSystemEmail(opts: {
   const resend = getResend();
   const email = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const from = `ComplyTrack <${email}>`;
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from,
     to: opts.to,
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
   });
+  if (result.error) {
+    throw new Error(`Email delivery failed: ${result.error.message ?? result.error.name ?? "unknown error"}`);
+  }
 }
 
 function toIcsDate(date: Date): string {

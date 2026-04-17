@@ -556,6 +556,18 @@ export const SendRemindersResponse = zod.object({
 });
 
 /**
+ * @summary Send an email reminder for a single compliance check
+ */
+export const SendReminderForItemParams = zod.object({
+  itemId: zod.coerce.number(),
+});
+
+export const SendReminderForItemResponse = zod.object({
+  success: zod.boolean(),
+  message: zod.string(),
+});
+
+/**
  * @summary Send a test email to verify SMTP settings
  */
 export const TestEmailBody = zod.object({

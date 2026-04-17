@@ -190,6 +190,44 @@ router.post("/notifications/send-reminders", async (req, res) => {
   res.json({ sent, skipped, errors, details: results });
 });
 
+router.post("/notifications/send-reminder/:itemId", async (req, res) => {
+  const itemId = parseInt(req.params.itemId, 10);
+  if (!Number.isFinite(itemId)) return res.status(400).json({ error: "Invalid item id" });
+
+  const rows = await db
+    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .from(complianceItemsTable)
+    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .where(eq(complianceItemsTable.id, itemId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return res.status(404).json({ error: "Compliance check not found" });
+  const { item, contractor } = row;
+
+  if (!contractor) return res.status(400).json({ error: "This check has no contractor assigned." });
+  if (!contractor.email) return res.status(400).json({ error: `${contractor.name} does not have an email address on file.` });
+  if (!item.dueDate) return res.status(400).json({ error: "This check has no due date set." });
+
+  const settings = await getClientSettings(item.clientId);
+  const companyName = settings["companyName"] ?? "ComplyTrack";
+  const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+
+  await sendReminderForItem({
+    item,
+    contractor,
+    companyName,
+    fromEmail,
+    maintenanceEmail,
+    defaultLeadTimeDays,
+    now: new Date(),
+  });
+
+  res.json({ success: true, message: `Reminder sent to ${contractor.email}` });
+});
+
 router.post("/notifications/test-email", async (req, res) => {
   const { to } = TestEmailBody.parse(req.body);
 

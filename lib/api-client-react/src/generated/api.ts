@@ -2585,6 +2585,90 @@ export const useSendReminders = <
 };
 
 /**
+ * @summary Send an email reminder for a single compliance check
+ */
+export const getSendReminderForItemUrl = (itemId: number) => {
+  return `/api/notifications/send-reminder/${itemId}`;
+};
+
+export const sendReminderForItem = async (
+  itemId: number,
+  options?: RequestInit,
+): Promise<TestEmailResponse> => {
+  return customFetch<TestEmailResponse>(getSendReminderForItemUrl(itemId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSendReminderForItemMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendReminderForItem>>,
+    TError,
+    { itemId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendReminderForItem>>,
+  TError,
+  { itemId: number },
+  TContext
+> => {
+  const mutationKey = ["sendReminderForItem"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendReminderForItem>>,
+    { itemId: number }
+  > = (props) => {
+    const { itemId } = props ?? {};
+
+    return sendReminderForItem(itemId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendReminderForItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendReminderForItem>>
+>;
+
+export type SendReminderForItemMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Send an email reminder for a single compliance check
+ */
+export const useSendReminderForItem = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendReminderForItem>>,
+    TError,
+    { itemId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendReminderForItem>>,
+  TError,
+  { itemId: number },
+  TContext
+> => {
+  return useMutation(getSendReminderForItemMutationOptions(options));
+};
+
+/**
  * @summary Send a test email to verify SMTP settings
  */
 export const getTestEmailUrl = () => {
