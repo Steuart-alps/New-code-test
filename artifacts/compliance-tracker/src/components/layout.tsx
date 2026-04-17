@@ -60,16 +60,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
     <div className="min-h-screen bg-background flex flex-col md:flex-row font-sans">
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border shadow-xl z-20">
-        <div className="h-16 flex items-center px-6 border-b border-sidebar-border bg-sidebar/50 backdrop-blur-sm">
-          <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+        <div className="min-h-16 flex items-center px-6 py-3 border-b border-sidebar-border bg-sidebar/50 backdrop-blur-sm">
+          <Link href="/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full min-w-0">
             {client?.logoUrl ? (
-              <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-lg" />
+              <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-lg flex-shrink-0" />
             ) : (
-              <div className="p-2 rounded-xl border" style={{ backgroundColor: `${primaryColor}25`, borderColor: `${primaryColor}40` }}>
+              <div className="p-2 rounded-xl border flex-shrink-0" style={{ backgroundColor: `${primaryColor}25`, borderColor: `${primaryColor}40` }}>
                 <ShieldCheck className="w-5 h-5" style={{ color: primaryColor }} />
               </div>
             )}
-            <span className="font-display font-bold text-lg tracking-tight truncate">
+            <span className="font-display font-bold text-base tracking-tight leading-tight break-words min-w-0 flex-1">
               {client ? client.name : <><span>ALPS</span><span style={{ color: primaryColor }}> Compliance</span></>}
             </span>
           </Link>
