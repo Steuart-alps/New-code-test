@@ -86,7 +86,25 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(complianceItemsTable.createdAt);
 
-  res.json(items.map(({ item, site, category, contractor }) => buildItemResponse(item, site, category, contractor)));
+  // Annotate each item with its latest certificate expiry date (if any) so
+  // the UI can surface "expired certificate" filtering without extra queries.
+  const { certificatesTable } = await import("@workspace/db/schema");
+  const certs = await db
+    .select({ itemId: certificatesTable.itemId, expiryDate: certificatesTable.expiryDate })
+    .from(certificatesTable)
+    .where(eq(certificatesTable.clientId, clientId));
+  const latestExpiryByItem = new Map<number, Date>();
+  for (const c of certs) {
+    if (!c.itemId || !c.expiryDate) continue;
+    const existing = latestExpiryByItem.get(c.itemId);
+    const next = new Date(c.expiryDate);
+    if (!existing || next > existing) latestExpiryByItem.set(c.itemId, next);
+  }
+
+  res.json(items.map(({ item, site, category, contractor }) => ({
+    ...buildItemResponse(item, site, category, contractor),
+    latestCertExpiryDate: latestExpiryByItem.get(item.id)?.toISOString() ?? null,
+  })));
 });
 
 async function fetchJoinedItem(itemId: number) {
@@ -307,7 +325,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const criticalItems = items.filter(i => i.priority === "critical" && i.status !== "completed").length;
   const dueSoon = items.filter(i =>
     i.dueDate && i.status !== "completed" &&
-    new Date(i.dueDate) <= sevenDaysFromNow && new Date(i.dueDate) >= now
+    new Date(i.dueDate) <= thirtyDaysFromNow && new Date(i.dueDate) >= now
   ).length;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
   const contractorsCount = contractors.length;

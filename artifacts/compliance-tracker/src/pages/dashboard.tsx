@@ -84,52 +84,58 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Action Needed</p>
-                <p className="text-3xl font-display font-bold text-destructive">{stats.overdue + stats.criticalItems}</p>
+        <Link href="/external-checks?filter=action-needed">
+          <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Action Needed</p>
+                  <p className="text-3xl font-display font-bold text-destructive">{stats.overdue + stats.criticalItems}</p>
+                </div>
+                <div className="p-3 bg-destructive/10 rounded-xl">
+                  <ShieldAlert className="w-5 h-5 text-destructive" />
+                </div>
               </div>
-              <div className="p-3 bg-destructive/10 rounded-xl">
-                <ShieldAlert className="w-5 h-5 text-destructive" />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-4">
-              {stats.overdue} overdue, {stats.criticalItems} critical
-            </p>
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground mt-4">
+                {stats.overdue} overdue, {stats.criticalItems} critical
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Due Soon (7d)</p>
-                <p className="text-3xl font-display font-bold text-amber-500">{stats.dueSoon}</p>
+        <Link href="/external-checks?filter=due-soon">
+          <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Due Soon (30d)</p>
+                  <p className="text-3xl font-display font-bold text-amber-500">{stats.dueSoon}</p>
+                </div>
+                <div className="p-3 bg-amber-500/10 rounded-xl">
+                  <Clock className="w-5 h-5 text-amber-500" />
+                </div>
               </div>
-              <div className="p-3 bg-amber-500/10 rounded-xl">
-                <Clock className="w-5 h-5 text-amber-500" />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-4">Approaching deadlines</p>
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground mt-4">Approaching deadlines</p>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Expired Certs</p>
-                <p className="text-3xl font-display font-bold text-red-600">{(stats as any).certificatesExpired ?? 0}</p>
+        <Link href="/external-checks?filter=expired-certs">
+          <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Expired Certs</p>
+                  <p className="text-3xl font-display font-bold text-red-600">{(stats as any).certificatesExpired ?? 0}</p>
+                </div>
+                <div className="p-3 bg-red-600/10 rounded-xl">
+                  <FileWarning className="w-5 h-5 text-red-600" />
+                </div>
               </div>
-              <div className="p-3 bg-red-600/10 rounded-xl">
-                <FileWarning className="w-5 h-5 text-red-600" />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-4">Contractor certificates past expiry</p>
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground mt-4">Contractor certificates past expiry</p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
