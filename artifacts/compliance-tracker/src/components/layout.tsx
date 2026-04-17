@@ -186,6 +186,15 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 </AvatarFallback>
               </Avatar>
             </div>
+            <button
+              onClick={logout}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium text-destructive bg-destructive/10 hover:bg-destructive/20 border border-destructive/20 transition-colors"
+              data-testid="button-sign-out"
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
           </div>
         </header>
 
