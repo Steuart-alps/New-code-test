@@ -223,6 +223,12 @@ export default function ItemDetailPage() {
                 <p className="text-xs text-muted-foreground">Created</p>
                 <p className="font-medium">{fmt(item.createdAt)}</p>
               </div>
+              {item.dueDate && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Due Date</p>
+                  <p className="font-medium">{fmt(item.dueDate)}</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-muted-foreground">Last Updated</p>
                 <p className="font-medium">{fmt(item.updatedAt)}</p>
