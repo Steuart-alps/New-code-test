@@ -7,13 +7,14 @@ import {
 } from "recharts";
 import { FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { activeClientId } = useAuth();
   const isConsultant = useIsConsultant();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -58,10 +59,10 @@ export default function Dashboard() {
   }
 
   const statusData = [
-    { name: "Pending", value: stats.pending, color: "#94a3b8" },
-    { name: "In Progress", value: stats.inProgress, color: "#3b82f6" },
-    { name: "Completed", value: stats.completed, color: "#10b981" },
-    { name: "Overdue", value: stats.overdue, color: "#ef4444" },
+    { name: "Pending", value: stats.pending, color: "#94a3b8", filter: "status-pending" },
+    { name: "In Progress", value: stats.inProgress, color: "#3b82f6", filter: "status-in_progress" },
+    { name: "Completed", value: stats.completed, color: "#10b981", filter: "status-completed" },
+    { name: "Overdue", value: stats.overdue, color: "#ef4444", filter: "overdue" },
   ];
 
   return (
@@ -153,7 +154,16 @@ export default function Dashboard() {
                     cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} 
                   />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={60}>
+                  <Bar
+                    dataKey="value"
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={60}
+                    cursor="pointer"
+                    onClick={(payload: any) => {
+                      const f = payload?.payload?.filter ?? payload?.filter;
+                      if (f) navigate(`/external-checks?filter=${f}`);
+                    }}
+                  >
                     {statusData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}

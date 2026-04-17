@@ -86,25 +86,42 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(complianceItemsTable.createdAt);
 
-  // Annotate each item with its latest certificate expiry date (if any) so
+  // Annotate each item with its latest related certificate expiry date so
   // the UI can surface "expired certificate" filtering without extra queries.
+  // A cert is considered related to an item if it's directly linked via
+  // certificates.itemId, OR it belongs to the contractor assigned to the item.
   const { certificatesTable } = await import("@workspace/db/schema");
   const certs = await db
-    .select({ itemId: certificatesTable.itemId, expiryDate: certificatesTable.expiryDate })
+    .select({
+      itemId: certificatesTable.itemId,
+      contractorId: certificatesTable.contractorId,
+      expiryDate: certificatesTable.expiryDate,
+    })
     .from(certificatesTable)
     .where(eq(certificatesTable.clientId, clientId));
+
   const latestExpiryByItem = new Map<number, Date>();
+  const latestExpiryByContractor = new Map<number, Date>();
+  const trackLatest = (map: Map<number, Date>, key: number, d: Date) => {
+    const existing = map.get(key);
+    if (!existing || d > existing) map.set(key, d);
+  };
   for (const c of certs) {
-    if (!c.itemId || !c.expiryDate) continue;
-    const existing = latestExpiryByItem.get(c.itemId);
-    const next = new Date(c.expiryDate);
-    if (!existing || next > existing) latestExpiryByItem.set(c.itemId, next);
+    if (!c.expiryDate) continue;
+    const d = new Date(c.expiryDate);
+    if (c.itemId) trackLatest(latestExpiryByItem, c.itemId, d);
+    if (c.contractorId) trackLatest(latestExpiryByContractor, c.contractorId, d);
   }
 
-  res.json(items.map(({ item, site, category, contractor }) => ({
-    ...buildItemResponse(item, site, category, contractor),
-    latestCertExpiryDate: latestExpiryByItem.get(item.id)?.toISOString() ?? null,
-  })));
+  res.json(items.map(({ item, site, category, contractor }) => {
+    const direct = latestExpiryByItem.get(item.id);
+    const viaContractor = item.contractorId ? latestExpiryByContractor.get(item.contractorId) : undefined;
+    const latest = [direct, viaContractor].filter(Boolean).sort((a, b) => (b!.getTime() - a!.getTime()))[0];
+    return {
+      ...buildItemResponse(item, site, category, contractor),
+      latestCertExpiryDate: latest?.toISOString() ?? null,
+    };
+  }));
 });
 
 async function fetchJoinedItem(itemId: number) {
@@ -321,7 +338,12 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const pending = items.filter(i => i.status === "pending").length;
   const inProgress = items.filter(i => i.status === "in_progress").length;
   const completed = items.filter(i => i.status === "completed").length;
-  const overdue = items.filter(i => i.status === "overdue").length;
+  // Treat any past-due, not-yet-completed item as overdue regardless of stored
+  // status, so the dashboard count matches what the filtered list shows.
+  const overdue = items.filter(i =>
+    i.status === "overdue" ||
+    (i.status !== "completed" && i.dueDate && new Date(i.dueDate) < now)
+  ).length;
   const criticalItems = items.filter(i => i.priority === "critical" && i.status !== "completed").length;
   const dueSoon = items.filter(i =>
     i.dueDate && i.status !== "completed" &&

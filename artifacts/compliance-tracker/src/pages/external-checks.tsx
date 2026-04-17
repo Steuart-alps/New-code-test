@@ -15,13 +15,23 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 
-type FilterKey = "due-soon" | "action-needed" | "overdue" | "expired-certs";
+type FilterKey =
+  | "due-soon"
+  | "action-needed"
+  | "overdue"
+  | "expired-certs"
+  | "status-pending"
+  | "status-in_progress"
+  | "status-completed";
 
 const FILTER_LABELS: Record<FilterKey, { label: string; description: string }> = {
   "due-soon": { label: "Due in next 30 days", description: "Compliance checks with a due date in the next 30 days." },
   "action-needed": { label: "Action needed", description: "Overdue checks and any critical-priority checks that aren't yet completed." },
-  "overdue": { label: "Overdue", description: "Checks past their due date." },
-  "expired-certs": { label: "Expired certificates", description: "Checks whose latest contractor certificate is past its expiry date." },
+  "overdue": { label: "Overdue", description: "Checks past their due date or marked overdue." },
+  "expired-certs": { label: "Expired certificates", description: "Checks whose latest related contractor certificate is past its expiry date." },
+  "status-pending": { label: "Pending", description: "Checks waiting to be started." },
+  "status-in_progress": { label: "In progress", description: "Checks currently being worked on." },
+  "status-completed": { label: "Completed", description: "Checks that have been completed." },
 };
 
 export default function ExternalChecksPage() {
@@ -58,6 +68,12 @@ export default function ExternalChecksPage() {
           );
         case "expired-certs":
           return i.latestCertExpiryDate && new Date(i.latestCertExpiryDate) < now;
+        case "status-pending":
+          return i.status === "pending";
+        case "status-in_progress":
+          return i.status === "in_progress";
+        case "status-completed":
+          return i.status === "completed";
         default:
           return true;
       }
