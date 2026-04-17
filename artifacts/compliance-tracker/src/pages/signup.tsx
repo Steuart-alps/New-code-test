@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft, CreditCard, Building2 } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -266,45 +266,7 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* Payment Method */}
-              <div className="space-y-2">
-                <Label>How would you like to pay?</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("card")}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${paymentMethod === "card" ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
-                  >
-                    <CreditCard className={`w-5 h-5 ${paymentMethod === "card" ? "text-primary" : "text-muted-foreground"}`} />
-                    <div className="text-center">
-                      <p className="font-semibold text-sm">Card</p>
-                      <p className="text-xs text-muted-foreground">via Stripe</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("direct_debit")}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${paymentMethod === "direct_debit" ? "border-indigo-500 bg-indigo-500/5" : "border-border/50 hover:border-indigo-400/40"}`}
-                  >
-                    <Building2 className={`w-5 h-5 ${paymentMethod === "direct_debit" ? "text-indigo-600" : "text-muted-foreground"}`} />
-                    <div className="text-center">
-                      <p className="font-semibold text-sm">Direct Debit</p>
-                      <p className="text-xs text-muted-foreground">via GoCardless</p>
-                    </div>
-                  </button>
-                </div>
-                {isDirectDebit && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-xs text-muted-foreground bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2"
-                  >
-                    You'll be taken to GoCardless to authorise a Direct Debit mandate from your bank account. Safe, paperless, and no card details needed.
-                  </motion.p>
-                )}
-              </div>
-
-              {/* Promo Code — only visible for card payments */}
+              {/* Promo Code */}
               {!isDirectDebit && (
                 <div>
                   {!showPromo ? (
