@@ -42,7 +42,7 @@ function useNavGroups() {
 
   const systemItems = [];
   if (canAdmin) {
-    systemItems.push({ href: "/categories", label: "Categories", icon: Tags });
+    systemItems.push({ href: "/categories", label: "Sites", icon: Building2 });
     systemItems.push({ href: "/users", label: "Users", icon: Users });
   }
   if (isConsultant) {

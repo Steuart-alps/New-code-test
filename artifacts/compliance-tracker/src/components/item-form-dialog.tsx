@@ -128,7 +128,7 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium">Category</Label>
+              <Label className="text-xs font-medium">Site</Label>
               <Select
                 value={form.watch("categoryId")?.toString() || "none"}
                 onValueChange={(val) => form.setValue("categoryId", val === "none" ? undefined : parseInt(val))}
