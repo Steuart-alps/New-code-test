@@ -20,6 +20,7 @@ import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import ResetPasswordPage from "@/pages/reset-password";
+import SchedulePage from "@/pages/schedule";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -45,6 +46,7 @@ function ProtectedRoutes() {
   // Always-public routes
   if (location === "/reset-password") return <ResetPasswordPage />;
   if (location === "/signup") return <SignupPage />;
+  if (location.startsWith("/schedule/")) return <SchedulePage />;
 
   if (isLoading) {
     return (

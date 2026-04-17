@@ -29,6 +29,8 @@ export const complianceItemsTable = pgTable("compliance_items", {
   notificationSentAt: timestamp("notification_sent_at"),
   completedAt: timestamp("completed_at"),
   notes: text("notes"),
+  scheduleToken: text("schedule_token"),
+  visitScheduledAt: timestamp("visit_scheduled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

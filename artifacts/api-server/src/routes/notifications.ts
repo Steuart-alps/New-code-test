@@ -2,9 +2,10 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
-import { sendEmail } from "../lib/email";
-import { buildReminderEmail, buildCalendarInvite } from "../lib/email";
+import { sendEmail, sendSystemEmail } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
+import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,11 @@ async function sendReminderForItem(opts: {
   const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
   const dueDate = new Date(item.dueDate!);
 
+  // Generate (or rotate) a single-use schedule token so the contractor can
+  // propose a visit date directly from the email.
+  const scheduleToken = randomUUID();
+  const scheduleLink = `${getPublicAppUrl()}/schedule/${scheduleToken}`;
+
   const { html, text } = buildReminderEmail({
     contractorName: contractor.name,
     companyName,
@@ -42,19 +48,8 @@ async function sendReminderForItem(opts: {
     leadTimeDays,
     notes: item.notes,
     ccMaintenanceEmail: maintenanceEmail,
+    scheduleLink,
   });
-
-  const icsContent = buildCalendarInvite({
-    itemTitle: item.title,
-    dueDate,
-    contractorName: contractor.name,
-    contractorEmail: contractor.email!,
-    companyName,
-    fromEmail,
-    notes: item.notes,
-  });
-
-  const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
 
   await sendEmail({
     to: contractor.email!,
@@ -62,14 +57,12 @@ async function sendReminderForItem(opts: {
     subject: `Compliance Check Reminder: ${item.title}`,
     html,
     text,
-    icsAttachment: icsContent,
-    icsFilename: `${safeTitle}.ics`,
     clientId: item.clientId,
   });
 
   await db
     .update(complianceItemsTable)
-    .set({ notificationSentAt: now })
+    .set({ notificationSentAt: now, scheduleToken, visitScheduledAt: null })
     .where(eq(complianceItemsTable.id, item.id));
 }
 
@@ -226,6 +219,99 @@ router.post("/notifications/send-reminder/:itemId", async (req, res) => {
   });
 
   res.json({ success: true, message: `Reminder sent to ${contractor.email}` });
+});
+
+// ----- Public scheduling endpoints (no auth — token is the credential) -----
+
+router.get("/notifications/public/schedule/:token", async (req, res) => {
+  const token = req.params.token;
+  const rows = await db
+    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .from(complianceItemsTable)
+    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .where(eq(complianceItemsTable.scheduleToken, token))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return res.status(404).json({ error: "This scheduling link is no longer valid." });
+
+  const settings = await getClientSettings(row.item.clientId);
+  res.json({
+    itemTitle: row.item.title,
+    notes: row.item.notes,
+    dueDate: row.item.dueDate,
+    contractorName: row.contractor?.name ?? null,
+    companyName: settings["companyName"] ?? "ComplyTrack",
+    alreadyScheduled: row.item.visitScheduledAt,
+  });
+});
+
+router.post("/notifications/public/schedule/:token", async (req, res) => {
+  const token = req.params.token;
+  const { date } = req.body ?? {};
+  if (!date || typeof date !== "string") return res.status(400).json({ error: "Please choose a date." });
+
+  const proposed = new Date(date);
+  if (Number.isNaN(proposed.getTime())) return res.status(400).json({ error: "That date isn't valid." });
+  if (proposed.getTime() < Date.now() - 24 * 60 * 60 * 1000) return res.status(400).json({ error: "Please choose a date in the future." });
+
+  const rows = await db
+    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .from(complianceItemsTable)
+    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .where(eq(complianceItemsTable.scheduleToken, token))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return res.status(404).json({ error: "This scheduling link is no longer valid." });
+  const { item, contractor } = row;
+  if (!contractor?.email) return res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
+
+  const settings = await getClientSettings(item.clientId);
+  const companyName = settings["companyName"] ?? "ComplyTrack";
+  const maintenanceEmail = settings["maintenanceEmail"] ?? null;
+  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+
+  const ics = buildCalendarInvite({
+    itemTitle: item.title,
+    dueDate: proposed,
+    contractorName: contractor.name,
+    contractorEmail: contractor.email,
+    companyName,
+    fromEmail,
+    notes: item.notes,
+  });
+
+  const dateStr = proposed.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #1e293b;">Visit Confirmed</h2>
+      <p>Thank you ${contractor.name}.</p>
+      <p>Your visit for <strong>${item.title}</strong> is scheduled for <strong>${dateStr}</strong>.</p>
+      <p>A calendar invite is attached — open it to add the appointment to your calendar.</p>
+      <p>Best regards,<br><strong>${companyName}</strong></p>
+    </div>`;
+  const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\nA calendar invite is attached.\n\n${companyName}`;
+
+  await sendEmail({
+    to: contractor.email,
+    cc: maintenanceEmail ?? undefined,
+    subject: `Visit Confirmed: ${item.title} — ${dateStr}`,
+    html,
+    text,
+    icsAttachment: ics,
+    icsFilename: `${safeTitle}.ics`,
+    clientId: item.clientId,
+  });
+
+  // Burn the token so the link can't be reused, and record the chosen date.
+  await db
+    .update(complianceItemsTable)
+    .set({ visitScheduledAt: proposed, scheduleToken: null })
+    .where(eq(complianceItemsTable.id, item.id));
+
+  res.json({ success: true, message: `Visit scheduled for ${dateStr}.`, scheduledFor: proposed });
 });
 
 router.post("/notifications/test-email", async (req, res) => {

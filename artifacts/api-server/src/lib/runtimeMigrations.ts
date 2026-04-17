@@ -74,6 +74,21 @@ export async function runRuntimeMigrations() {
       await db.execute(sql`ALTER TABLE "sites" DROP COLUMN IF EXISTS "category_id"`);
     }
 
+    // ---- Per-reminder scheduling token + chosen visit date ----
+    await db.execute(sql`
+      ALTER TABLE "compliance_items"
+      ADD COLUMN IF NOT EXISTS "schedule_token" text
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "compliance_items_schedule_token_idx"
+      ON "compliance_items" ("schedule_token")
+      WHERE "schedule_token" IS NOT NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE "compliance_items"
+      ADD COLUMN IF NOT EXISTS "visit_scheduled_at" timestamp
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

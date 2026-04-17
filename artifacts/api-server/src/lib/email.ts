@@ -141,6 +141,14 @@ export function buildCalendarInvite(opts: {
   ].join("\r\n");
 }
 
+export function getPublicAppUrl(): string {
+  const explicit = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "");
+  if (explicit) return explicit;
+  const domain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
+  if (domain) return `https://${domain}`;
+  return "http://localhost:5173";
+}
+
 export function buildReminderEmail(opts: {
   contractorName: string;
   companyName: string;
@@ -149,6 +157,7 @@ export function buildReminderEmail(opts: {
   leadTimeDays: number;
   notes?: string | null;
   ccMaintenanceEmail?: string | null;
+  scheduleLink?: string | null;
 }) {
   const dueDateStr = opts.dueDate.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -166,8 +175,16 @@ export function buildReminderEmail(opts: {
         <h3 style="margin: 0 0 8px; color: #1e293b;">${opts.itemTitle}</h3>
         ${opts.notes ? `<p style="color: #64748b; margin: 0;">${opts.notes}</p>` : ""}
       </div>
+      ${opts.scheduleLink ? `
+      <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0 0 12px; color: #1e293b; font-weight: 600;">Pick a suitable visit date</p>
+        <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Click below to choose the day that works best for you. Once you confirm, a calendar invite will be sent to everyone.</p>
+        <a href="${opts.scheduleLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Propose a Visit Date</a>
+      </div>
+      ` : `
       <p>Please contact us to arrange your visit or inspection at your earliest convenience.</p>
       <p style="color: #475569;">A calendar appointment has been attached to this email — click it to add the due date directly to your calendar.</p>
+      `}
       <p>Best regards,<br><strong>${opts.companyName}</strong></p>
       ${opts.ccMaintenanceEmail ? `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 12px;">This email has been copied to ${opts.ccMaintenanceEmail} for your records.</p>` : ""}
     </div>
@@ -183,9 +200,7 @@ This is a reminder that the following compliance check is due in ${opts.leadTime
 ${opts.itemTitle}
 ${opts.notes ? opts.notes : ""}
 
-A calendar appointment is attached — open it to add the due date to your calendar.
-
-Please contact us to arrange your visit or inspection at your earliest convenience.
+${opts.scheduleLink ? `Pick a suitable visit date here:\n${opts.scheduleLink}\n\nOnce you confirm, a calendar invite will be sent to everyone.` : "A calendar appointment is attached — open it to add the due date to your calendar.\n\nPlease contact us to arrange your visit or inspection at your earliest convenience."}
 
 Best regards,
 ${opts.companyName}
