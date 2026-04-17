@@ -122,7 +122,6 @@ async function main() {
 
   console.log("\n✓ Demo seed complete!\n");
   console.log("Sign in at /login with:");
-  console.log(`  Admin:  ${DEMO.adminEmail}  /  ${DEMO.adminPassword}`);
   console.log(`  Staff:  ${DEMO.staffEmail}  /  ${DEMO.staffPassword}`);
   console.log(`  Viewer: ${DEMO.viewerEmail}  /  ${DEMO.viewerPassword}`);
 
