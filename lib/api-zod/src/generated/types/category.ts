@@ -10,5 +10,8 @@ export interface Category {
   id: number;
   name: string;
   color: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
   createdAt: Date;
 }

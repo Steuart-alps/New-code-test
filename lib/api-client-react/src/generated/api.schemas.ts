@@ -17,12 +17,26 @@ export interface Category {
   id: number;
   name: string;
   color: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
   createdAt: string;
 }
 
 export interface CreateCategoryRequest {
   name: string;
   color: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
+}
+
+export interface UpdateCategoryRequest {
+  name?: string;
+  color?: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
 }
 
 export interface Contractor {
@@ -281,4 +295,3 @@ export const ListComplianceItemsPriority = {
   high: "high",
   critical: "critical",
 } as const;
-

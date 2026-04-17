@@ -4,6 +4,7 @@ import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./lib/stripeClient";
 import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
+import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 
 const rawPort = process.env["PORT"];
 
@@ -63,6 +64,7 @@ app.listen(port, async (err?: any) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+  await runRuntimeMigrations();
   await initStripe();
   startScheduler();
 });

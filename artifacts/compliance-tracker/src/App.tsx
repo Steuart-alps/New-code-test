@@ -10,6 +10,7 @@ import ContractorsPage from "@/pages/contractors";
 import ContractorDetailPage from "@/pages/contractor-detail";
 import ExternalChecksPage from "@/pages/external-checks";
 import CategoriesPage from "@/pages/categories";
+import SiteDetailPage from "@/pages/site-detail";
 import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/users";
 import ClientsPage from "@/pages/clients";
@@ -73,6 +74,7 @@ function ProtectedRoutes() {
       <Route path="/contractors" component={ContractorsPage} />
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />
+      {canAdmin && <Route path="/categories/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}

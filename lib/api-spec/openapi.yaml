@@ -70,6 +70,48 @@ paths:
                 $ref: "#/components/schemas/Category"
 
   /categories/{id}:
+    get:
+      operationId: getCategory
+      tags: [categories]
+      summary: Get a single category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateCategory
+      tags: [categories]
+      summary: Update a category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCategoryRequest"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
     delete:
       operationId: deleteCategory
       tags: [categories]
@@ -545,6 +587,15 @@ components:
           type: string
         color:
           type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -561,9 +612,35 @@ components:
           type: string
         color:
           type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
       required:
         - name
         - color
+
+    UpdateCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
 
     Contractor:
       type: object

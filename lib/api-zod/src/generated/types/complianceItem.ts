@@ -7,13 +7,11 @@
  */
 import type { ComplianceItemPriority } from "./complianceItemPriority";
 import type { ComplianceItemStatus } from "./complianceItemStatus";
-import type { ComplianceItemType } from "./complianceItemType";
 
 export interface ComplianceItem {
   id: number;
   title: string;
   description?: string | null;
-  type: ComplianceItemType;
   status: ComplianceItemStatus;
   priority: ComplianceItemPriority;
   categoryId?: number | null;

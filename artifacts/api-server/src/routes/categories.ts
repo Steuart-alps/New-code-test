@@ -1,10 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { categoriesTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   CreateCategoryBody,
+  UpdateCategoryBody,
   DeleteCategoryParams,
+  GetCategoryParams,
+  UpdateCategoryParams,
 } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
@@ -24,6 +27,21 @@ router.get("/categories", requireAuth, async (req, res) => {
   res.json(categories);
 });
 
+router.get("/categories/:id", requireAuth, async (req, res) => {
+  const { id } = GetCategoryParams.parse({ id: Number(req.params.id) });
+  const user = req.currentUser!;
+  const [category] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, id));
+  if (!category) {
+    res.status(404).json({ error: "Site not found" });
+    return;
+  }
+  if (user.role !== "consultant" && category.clientId !== user.clientId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  res.json(category);
+});
+
 router.post("/categories", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
   const body = CreateCategoryBody.parse(req.body);
@@ -34,6 +52,29 @@ router.post("/categories", requireAuth, requireClientAdmin, async (req, res) => 
   }
   const [category] = await db.insert(categoriesTable).values({ ...body, clientId }).returning();
   res.status(201).json(category);
+});
+
+router.patch("/categories/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const { id } = UpdateCategoryParams.parse({ id: Number(req.params.id) });
+  const body = UpdateCategoryBody.parse(req.body);
+  const user = req.currentUser!;
+
+  const [existing] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Site not found" });
+    return;
+  }
+  if (user.role !== "consultant" && existing.clientId !== user.clientId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(categoriesTable)
+    .set(body)
+    .where(eq(categoriesTable.id, id))
+    .returning();
+  res.json(updated);
 });
 
 router.delete("/categories/:id", requireAuth, requireClientAdmin, async (req, res) => {

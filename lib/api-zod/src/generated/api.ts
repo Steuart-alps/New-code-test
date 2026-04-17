@@ -21,6 +21,9 @@ export const ListCategoriesResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   color: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
   createdAt: zod.date(),
 });
 export const ListCategoriesResponse = zod.array(ListCategoriesResponseItem);
@@ -31,6 +34,51 @@ export const ListCategoriesResponse = zod.array(ListCategoriesResponseItem);
 export const CreateCategoryBody = zod.object({
   name: zod.string(),
   color: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+});
+
+/**
+ * @summary Get a single category
+ */
+export const GetCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetCategoryResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  color: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Update a category
+ */
+export const UpdateCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateCategoryBody = zod.object({
+  name: zod.string().optional(),
+  color: zod.string().optional(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+});
+
+export const UpdateCategoryResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  color: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  createdAt: zod.date(),
 });
 
 /**
@@ -398,19 +446,25 @@ export const GetSettingsResponse = zod.object({
  * @summary Update app settings
  */
 export const UpdateSettingsBody = zod.object({
+  smtpHost: zod.string().nullish(),
+  smtpPort: zod.string().nullish(),
+  smtpUser: zod.string().nullish(),
+  smtpPass: zod.string().nullish(),
   smtpFrom: zod.string().nullish(),
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
-  maintenanceEmail: zod.string().nullish(),
 });
 
 export const UpdateSettingsResponse = zod.object({
+  smtpHost: zod.string().nullish(),
+  smtpPort: zod.string().nullish(),
+  smtpUser: zod.string().nullish(),
+  smtpPass: zod.string().nullish(),
   smtpFrom: zod.string().nullish(),
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
-  maintenanceEmail: zod.string().nullish(),
 });
 
 /**

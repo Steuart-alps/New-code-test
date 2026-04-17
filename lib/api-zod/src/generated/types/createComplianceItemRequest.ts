@@ -7,12 +7,10 @@
  */
 import type { CreateComplianceItemRequestPriority } from "./createComplianceItemRequestPriority";
 import type { CreateComplianceItemRequestStatus } from "./createComplianceItemRequestStatus";
-import type { CreateComplianceItemRequestType } from "./createComplianceItemRequestType";
 
 export interface CreateComplianceItemRequest {
   title: string;
   description?: string | null;
-  type?: CreateComplianceItemRequestType;
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   categoryId?: number | null;

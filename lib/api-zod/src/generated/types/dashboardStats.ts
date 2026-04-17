@@ -15,8 +15,6 @@ export interface DashboardStats {
   criticalItems: number;
   dueSoon: number;
   completionRate: number;
-  externalTotal: number;
-  internalTotal: number;
   contractorsCount: number;
   certificatesExpiringSoon: number;
 }

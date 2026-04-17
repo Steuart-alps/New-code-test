@@ -7,8 +7,10 @@ import {
   useUpdateComplianceItemStatus,
   getListComplianceItemsQueryKey,
   useCreateCategory,
+  useUpdateCategory,
   useDeleteCategory,
   getListCategoriesQueryKey,
+  getGetCategoryQueryKey,
   useCreateContractor,
   useUpdateContractor,
   useDeleteContractor,
@@ -77,7 +79,18 @@ export function useAppMutations() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
-        toast({ title: "Category created" });
+        toast({ title: "Site created" });
+      },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const updateCategory = useUpdateCategory({
+    mutation: {
+      onSuccess: (_, { id }) => {
+        queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetCategoryQueryKey(id) });
+        toast({ title: "Site updated" });
       },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
     },
@@ -87,7 +100,7 @@ export function useAppMutations() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
-        toast({ title: "Category deleted" });
+        toast({ title: "Site deleted" });
       },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
     },
@@ -197,6 +210,7 @@ export function useAppMutations() {
     updateItemStatus,
     deleteItem,
     createCategory,
+    updateCategory,
     deleteCategory,
     createContractor,
     updateContractor,

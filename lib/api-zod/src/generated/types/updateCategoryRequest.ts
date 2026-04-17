@@ -6,9 +6,9 @@
  * OpenAPI spec version: 0.2.0
  */
 
-export interface CreateCategoryRequest {
-  name: string;
-  color: string;
+export interface UpdateCategoryRequest {
+  name?: string;
+  color?: string;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
