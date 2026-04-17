@@ -30,9 +30,18 @@ app.use(
   }),
 );
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",")
-  : ["http://localhost:3000", "http://localhost:5173"];
+const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
+  .split(",")
+  .map(d => d.trim())
+  .filter(Boolean)
+  .flatMap(d => [`https://${d}`, `http://${d}`]);
+
+const allowedOrigins = [
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
+  ...replitDeploymentOrigins,
+  "http://localhost:3000",
+  "http://localhost:5173",
+];
 
 app.use(
   cors({
