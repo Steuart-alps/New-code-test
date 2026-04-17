@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useUpload } from "@/hooks/use-upload";
+import { useToast } from "@/hooks/use-toast";
 import { Certificate } from "@workspace/api-client-react";
 import { UploadCloud, FileText } from "lucide-react";
 
@@ -41,7 +42,8 @@ export function CertificateFormDialog({
     createItemCertificate, updateItemCertificate,
   } = useAppMutations();
   const { uploadFile, isUploading, progress } = useUpload();
-  
+  const { toast } = useToast();
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   
   const form = useForm<FormValues>({
@@ -102,9 +104,26 @@ export function CertificateFormDialog({
           await createCertificate.mutateAsync({ contractorId, data: payload });
         }
       }
+      toast({
+        title: certificate ? "Certificate updated" : "Certificate uploaded",
+        description: data.name,
+      });
       onClose();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast({
+        title: "Could not save certificate",
+        description: e?.message || "Something went wrong while uploading. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleFileSelect = (file: File | null) => {
+    setSelectedFile(file);
+    if (file && !form.getValues("name")) {
+      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+      form.setValue("name", nameWithoutExt, { shouldValidate: true });
     }
   };
 
@@ -145,7 +164,7 @@ export function CertificateFormDialog({
                 <input 
                   type="file" 
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
                   accept=".pdf,.jpg,.jpeg,.png"
                 />
                 <UploadCloud className="w-8 h-8 text-muted-foreground mb-2" />
