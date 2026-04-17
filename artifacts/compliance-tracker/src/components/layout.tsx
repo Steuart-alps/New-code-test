@@ -24,39 +24,23 @@ function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
 
-  const groups = [
-    {
-      title: "Overview",
-      items: [
-        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      ]
-    },
-    {
-      title: "Contractor Compliance",
-      items: [
-        { href: "/contractors", label: "Contractors", icon: Building },
-        { href: "/external", label: "Compliance Checks", icon: Briefcase },
-      ]
-    },
+  const items: { href: string; label: string; icon: any }[] = [
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/external", label: "Compliance Checks", icon: Briefcase },
+    { href: "/contractors", label: "Contractors", icon: Building },
   ];
-
-  const systemItems = [];
   if (canAdmin) {
-    systemItems.push({ href: "/categories", label: "Categories & Sites", icon: Building2 });
-    systemItems.push({ href: "/users", label: "Users", icon: Users });
+    items.push({ href: "/categories", label: "Categories", icon: Building2 });
+    items.push({ href: "/users", label: "Users", icon: Users });
   }
   if (isConsultant) {
-    systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });
+    items.push({ href: "/clients", label: "Clients", icon: Building2 });
   }
   if (canAdmin) {
-    systemItems.push({ href: "/settings", label: "Settings", icon: Settings });
+    items.push({ href: "/settings", label: "Settings", icon: Settings });
   }
 
-  if (systemItems.length > 0) {
-    groups.push({ title: "System", items: systemItems });
-  }
-
-  return groups;
+  return [{ title: "", items }];
 }
 
 export function AppLayout({ children, title }: { children: ReactNode; title: string }) {
@@ -93,9 +77,11 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
           {navGroups.map((group) => (
             <div key={group.title} className="space-y-2">
-              <div className="text-xs font-bold text-sidebar-foreground/50 uppercase tracking-wider px-2">
-                {group.title}
-              </div>
+              {group.title && (
+                <div className="text-xs font-bold text-sidebar-foreground/50 uppercase tracking-wider px-2">
+                  {group.title}
+                </div>
+              )}
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
