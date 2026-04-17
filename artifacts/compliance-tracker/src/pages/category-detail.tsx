@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { useGetCategory, useListComplianceItems } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
@@ -32,6 +32,7 @@ function formatDate(d: any): string {
 
 export default function CategoryDetailPage() {
   const [, params] = useRoute("/categories/:id");
+  const [, navigate] = useLocation();
   const id = params ? Number(params.id) : NaN;
   const { data: category, isLoading: catLoading, error } = useGetCategory(id, { query: { enabled: Number.isFinite(id) } });
   const { data: allItems = [], isLoading: itemsLoading } = useListComplianceItems();
@@ -96,7 +97,7 @@ export default function CategoryDetailPage() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => { setEditingItem(item); setIsFormOpen(true); }}
+                  onClick={() => navigate(`/items/${item.id}`)}
                   className="w-full text-left px-6 py-4 flex items-start sm:items-center justify-between gap-4 flex-col sm:flex-row hover:bg-muted/30 transition-colors"
                 >
                   <div className="flex-1 min-w-0">

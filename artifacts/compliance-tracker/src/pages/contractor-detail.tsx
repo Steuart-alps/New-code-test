@@ -1,22 +1,20 @@
 import { useState } from "react";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { 
-  useGetContractor, 
-  useListCertificates, 
-  useListComplianceItems 
+import {
+  useGetContractor,
+  useListComplianceItems
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
-import { CertificateFormDialog } from "@/components/certificate-form-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ExpiryBadge, StatusBadge, PriorityBadge } from "@/components/badges";
+import { StatusBadge, PriorityBadge } from "@/components/badges";
 import { format } from "date-fns";
-import { 
+import {
   Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft,
-  FileText, Plus, ExternalLink, ShieldCheck
+  Plus, ShieldCheck
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
@@ -27,18 +25,15 @@ export default function ContractorDetailPage() {
   const params = useParams();
   const id = parseInt(params.id || "0");
 
+  const [, navigate] = useLocation();
   const { data: contractor, isLoading: loadingContractor } = useGetContractor(id);
-  const { data: certificates = [], isLoading: loadingCerts } = useListCertificates(id);
-  const { data: items = [], isLoading: loadingItems } = useListComplianceItems({ contractorId: id, type: "external" });
+  const { data: items = [] } = useListComplianceItems({ contractorId: id, type: "external" });
 
-  const { deleteContractor, deleteCertificate, deleteItem } = useAppMutations();
+  const { deleteContractor, deleteItem } = useAppMutations();
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
   const [deleteContractorConfirm, setDeleteContractorConfirm] = useState(false);
-  
-  const [certFormOpen, setCertFormOpen] = useState(false);
-  const [editingCert, setEditingCert] = useState<any>(null);
-  
+
   const [itemFormOpen, setItemFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
 
@@ -112,57 +107,6 @@ export default function ContractorDetailPage() {
         {/* Main Content Areas */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* Certificates Section */}
-          <Card className="shadow-lg border-border/50 overflow-hidden">
-            <div className="p-6 bg-muted/20 border-b border-border/50 flex justify-between items-center">
-              <div>
-                <h3 className="font-display text-lg font-bold flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" /> Certificates
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">Upload and track documentation</p>
-              </div>
-              <Button size="sm" onClick={() => { setEditingCert(null); setCertFormOpen(true); }} className="shadow-sm">
-                <Plus className="w-4 h-4 mr-1.5" /> Upload
-              </Button>
-            </div>
-            <div className="p-0">
-              {certificates.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  No certificates uploaded yet.
-                </div>
-              ) : (
-                <div className="divide-y divide-border/50">
-                  {certificates.map(cert => (
-                    <div key={cert.id} className="p-4 hover:bg-muted/30 transition-colors flex justify-between items-center group">
-                      <div>
-                        <h4 className="font-semibold">{cert.name}</h4>
-                        <div className="flex gap-4 mt-1.5 text-sm">
-                          <ExpiryBadge expiryDate={cert.expiryDate} />
-                          {cert.issueDate && <span className="text-muted-foreground">Issued: {format(new Date(cert.issueDate), "MMM d, yyyy")}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {cert.fileUrl && (
-                          <Button variant="outline" size="sm" asChild className="h-8 bg-background">
-                            <a href={`/api/storage${cert.fileUrl}`} target="_blank" rel="noreferrer">
-                              <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> View
-                            </a>
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingCert(cert); setCertFormOpen(true); }}>
-                          <Pencil className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteCertificate.mutate({ contractorId: id, id: cert.id })}>
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-
           {/* Compliance Items Section */}
           <Card className="shadow-lg border-border/50 overflow-hidden">
             <div className="p-6 bg-muted/20 border-b border-border/50 flex justify-between items-center">
@@ -170,7 +114,7 @@ export default function ContractorDetailPage() {
                 <h3 className="font-display text-lg font-bold flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-500" /> Compliance Checks
                 </h3>
-                <p className="text-sm text-muted-foreground mt-1">External requirements assigned to this contractor</p>
+                <p className="text-sm text-muted-foreground mt-1">External requirements assigned to this contractor — click any check to view details &amp; certificates</p>
               </div>
               <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Requirement
@@ -184,9 +128,22 @@ export default function ContractorDetailPage() {
               ) : (
                 <div className="divide-y divide-border/50">
                   {items.map(item => (
-                    <div key={item.id} className="p-4 hover:bg-muted/30 transition-colors flex justify-between items-center group">
+                    <div
+                      key={item.id}
+                      role="link"
+                      tabIndex={0}
+                      aria-label={`View details for ${item.title}`}
+                      className="p-4 hover:bg-muted/30 transition-colors flex justify-between items-center group cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      onClick={() => navigate(`/items/${item.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigate(`/items/${item.id}`);
+                        }
+                      }}
+                    >
                       <div>
-                        <h4 className="font-semibold">{item.title}</h4>
+                        <h4 className="font-semibold hover:text-primary transition-colors">{item.title}</h4>
                         <div className="flex items-center gap-3 mt-2 text-sm">
                           <StatusBadge status={item.status} />
                           <PriorityBadge priority={item.priority} />
@@ -197,7 +154,7 @@ export default function ContractorDetailPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
                           <Pencil className="w-4 h-4" />
                         </Button>
@@ -216,15 +173,14 @@ export default function ContractorDetailPage() {
       </div>
 
       <ContractorFormDialog isOpen={isEditContractorOpen} onClose={() => setIsEditContractorOpen(false)} contractor={contractor} />
-      <CertificateFormDialog isOpen={certFormOpen} onClose={() => setCertFormOpen(false)} contractorId={id} certificate={editingCert} />
-      <ItemFormDialog isOpen={itemFormOpen} onClose={() => setItemFormOpen(false)} defaultType="external" item={editingItem} />
+      <ItemFormDialog isOpen={itemFormOpen} onClose={() => setItemFormOpen(false)} item={editingItem} />
 
       <AlertDialog open={deleteContractorConfirm} onOpenChange={setDeleteContractorConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Contractor?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete {contractor.name} and all their certificates. Compliance items will lose their assignment but won't be deleted.
+              This will permanently delete {contractor.name}. Compliance items will lose their assignment but won't be deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

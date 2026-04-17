@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useUpload } from "@/hooks/use-upload";
 import { Certificate } from "@workspace/api-client-react";
-import { UploadCloud, FileText, CheckCircle2 } from "lucide-react";
+import { UploadCloud, FileText } from "lucide-react";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -27,14 +27,19 @@ export function CertificateFormDialog({
   isOpen,
   onClose,
   contractorId,
+  itemId,
   certificate = null,
 }: {
   isOpen: boolean;
   onClose: () => void;
-  contractorId: number;
+  contractorId?: number;
+  itemId?: number;
   certificate?: Certificate | null;
 }) {
-  const { createCertificate, updateCertificate } = useAppMutations();
+  const {
+    createCertificate, updateCertificate,
+    createItemCertificate, updateItemCertificate,
+  } = useAppMutations();
   const { uploadFile, isUploading, progress } = useUpload();
   
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -84,10 +89,18 @@ export function CertificateFormDialog({
         expiryDate: data.expiryDate ? new Date(data.expiryDate).toISOString() : null,
       };
 
-      if (certificate) {
-        await updateCertificate.mutateAsync({ contractorId, id: certificate.id, data: payload });
-      } else {
-        await createCertificate.mutateAsync({ contractorId, data: payload });
+      if (itemId) {
+        if (certificate) {
+          await updateItemCertificate.mutateAsync({ itemId, id: certificate.id, data: payload });
+        } else {
+          await createItemCertificate.mutateAsync({ itemId, data: payload });
+        }
+      } else if (contractorId) {
+        if (certificate) {
+          await updateCertificate.mutateAsync({ contractorId, id: certificate.id, data: payload });
+        } else {
+          await createCertificate.mutateAsync({ contractorId, data: payload });
+        }
       }
       onClose();
     } catch (e) {
@@ -187,8 +200,8 @@ export function CertificateFormDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} type="button" disabled={isUploading}>Cancel</Button>
-          <Button type="submit" form="certificate-form" disabled={createCertificate.isPending || updateCertificate.isPending || isUploading}>
-            {createCertificate.isPending || updateCertificate.isPending || isUploading ? "Saving..." : "Save Certificate"}
+          <Button type="submit" form="certificate-form" disabled={createCertificate.isPending || updateCertificate.isPending || createItemCertificate.isPending || updateItemCertificate.isPending || isUploading}>
+            {createCertificate.isPending || updateCertificate.isPending || createItemCertificate.isPending || updateItemCertificate.isPending || isUploading ? "Saving..." : "Save Certificate"}
           </Button>
         </DialogFooter>
       </DialogContent>

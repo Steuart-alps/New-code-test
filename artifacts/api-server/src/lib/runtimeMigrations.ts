@@ -89,6 +89,33 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "visit_scheduled_at" timestamp
     `);
 
+    // ---- Certificates can now belong to a compliance item directly ----
+    await db.execute(sql`
+      ALTER TABLE "certificates"
+      ADD COLUMN IF NOT EXISTS "item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE
+    `);
+    await db.execute(sql`
+      ALTER TABLE "certificates"
+      ALTER COLUMN "contractor_id" DROP NOT NULL
+    `);
+
+    // Enforce that every certificate belongs to exactly one of: a contractor OR an item.
+    // Clean up any rows that violate the rule before adding the constraint.
+    await db.execute(sql`
+      DELETE FROM "certificates"
+      WHERE ("contractor_id" IS NULL AND "item_id" IS NULL)
+         OR ("contractor_id" IS NOT NULL AND "item_id" IS NOT NULL)
+    `);
+    await db.execute(sql`
+      ALTER TABLE "certificates"
+      DROP CONSTRAINT IF EXISTS "certificates_owner_xor_chk"
+    `);
+    await db.execute(sql`
+      ALTER TABLE "certificates"
+      ADD CONSTRAINT "certificates_owner_xor_chk"
+      CHECK ((contractor_id IS NOT NULL)::int + (item_id IS NOT NULL)::int = 1)
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

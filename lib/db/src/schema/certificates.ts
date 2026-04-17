@@ -2,10 +2,12 @@ import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { contractorsTable } from "./contractors";
+import { complianceItemsTable } from "./compliance-items";
 
 export const certificatesTable = pgTable("certificates", {
   id: serial("id").primaryKey(),
-  contractorId: integer("contractor_id").notNull().references(() => contractorsTable.id, { onDelete: "cascade" }),
+  contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "cascade" }),
+  itemId: integer("item_id").references(() => complianceItemsTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   fileUrl: text("file_url"),
   issueDate: timestamp("issue_date"),

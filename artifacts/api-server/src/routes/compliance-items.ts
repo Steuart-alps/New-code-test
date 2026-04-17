@@ -242,11 +242,25 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   }
 
   const { certificatesTable } = await import("@workspace/db/schema");
+  const { or, sql: dsql } = await import("drizzle-orm");
 
   const [items, contractors, certificates] = await Promise.all([
     db.select().from(complianceItemsTable).where(and(...itemConditions)),
     db.select().from(contractorsTable).where(eq(contractorsTable.clientId, clientId)),
-    db.select().from(certificatesTable),
+    // Tenant-scoped certificate fetch: a cert belongs to this tenant if it links
+    // to a contractor or compliance item belonging to this client.
+    db
+      .select({
+        id: certificatesTable.id,
+        expiryDate: certificatesTable.expiryDate,
+      })
+      .from(certificatesTable)
+      .where(
+        or(
+          dsql`${certificatesTable.contractorId} IN (SELECT id FROM ${contractorsTable} WHERE ${contractorsTable.clientId} = ${clientId})`,
+          dsql`${certificatesTable.itemId} IN (SELECT id FROM ${complianceItemsTable} WHERE ${complianceItemsTable.clientId} = ${clientId})`,
+        ),
+      ),
   ]);
 
   const total = items.length;

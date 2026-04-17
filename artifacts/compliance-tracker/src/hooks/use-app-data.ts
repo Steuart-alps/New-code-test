@@ -25,6 +25,10 @@ import {
   useUpdateCertificate,
   useDeleteCertificate,
   getListCertificatesQueryKey,
+  useCreateItemCertificate,
+  useUpdateItemCertificate,
+  useDeleteItemCertificate,
+  getListItemCertificatesQueryKey,
   useUpdateSettings,
   getGetSettingsQueryKey,
   useSendReminders,
@@ -205,6 +209,38 @@ export function useAppMutations() {
     },
   });
 
+  const createItemCertificate = useCreateItemCertificate({
+    mutation: {
+      onSuccess: (_, { itemId }) => {
+        queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+        toast({ title: "Certificate uploaded" });
+      },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const updateItemCertificate = useUpdateItemCertificate({
+    mutation: {
+      onSuccess: (_, { itemId }) => {
+        queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        toast({ title: "Certificate updated" });
+      },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const deleteItemCertificate = useDeleteItemCertificate({
+    mutation: {
+      onSuccess: (_, { itemId }) => {
+        queryClient.invalidateQueries({ queryKey: getListItemCertificatesQueryKey(itemId) });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+        toast({ title: "Certificate deleted" });
+      },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
   const updateSettings = useUpdateSettings({
     mutation: {
       onSuccess: () => {
@@ -257,6 +293,9 @@ export function useAppMutations() {
     createCertificate,
     updateCertificate,
     deleteCertificate,
+    createItemCertificate,
+    updateItemCertificate,
+    deleteItemCertificate,
     updateSettings,
     triggerReminders,
     triggerTestEmail

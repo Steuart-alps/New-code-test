@@ -8,7 +8,8 @@
 
 export interface Certificate {
   id: number;
-  contractorId: number;
+  contractorId?: number | null;
+  itemId?: number | null;
   name: string;
   fileUrl?: string | null;
   issueDate?: Date | null;

@@ -62,7 +62,7 @@ consultants managing portfolios of clients.
 ### Compliance tables (all tenant-scoped via clientId)
 - `categories` — compliance categories with name and color
 - `contractors` — external contractors with name, company, email, phone, address, notes
-- `certificates` — certificates per contractor
+- `certificates` — polymorphic: belongs to either a contractor OR a compliance item (XOR check constraint enforced)
 - `compliance_items` — compliance tasks with type, status, priority, contractorId, departmentId, leadTimeDays
 - `app_settings` — key/value settings (SMTP config, company name, lead time defaults) — unique per (clientId, key)
 - `password_reset_tokens` — one-time tokens for password reset flow (expiresAt 1h, usedAt)
@@ -87,6 +87,8 @@ Consultants pass `clientId` as a query param (injected by the frontend via `cust
 - `GET/POST /api/categories`, `DELETE /api/categories/:id`
 - `GET/POST /api/contractors`, `GET/PUT/DELETE /api/contractors/:id`
 - `GET/POST /api/contractors/:id/certificates`, `PUT/DELETE /api/contractors/:id/certificates/:certId`
+- `GET/POST /api/items/:itemId/certificates`, `PUT/DELETE /api/items/:itemId/certificates/:id`
+- `/items/:id` (frontend) — full compliance check detail page incl. cert management
 - `GET/POST /api/compliance-items?type=external|internal&status=...&priority=...`
 - `GET/PUT/DELETE /api/compliance-items/:id`
 - `PATCH /api/compliance-items/:id/status`

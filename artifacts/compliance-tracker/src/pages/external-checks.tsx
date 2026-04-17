@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { useListComplianceItems, useSendReminderForItem } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
@@ -15,6 +16,7 @@ import {
 import { Card } from "@/components/ui/card";
 
 export default function ExternalChecksPage() {
+  const [, navigate] = useLocation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
 
@@ -74,9 +76,22 @@ export default function ExternalChecksPage() {
                 </tr>
               ) : (
                 items.map((item) => (
-                  <tr key={item.id} className="bg-card hover:bg-muted/30 transition-colors">
+                  <tr
+                    key={item.id}
+                    role="link"
+                    tabIndex={0}
+                    aria-label={`View details for ${item.title}`}
+                    className="bg-card hover:bg-muted/30 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    onClick={() => navigate(`/items/${item.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(`/items/${item.id}`);
+                      }
+                    }}
+                  >
                     <td className="px-6 py-4">
-                      <p className="font-semibold text-foreground">{item.title}</p>
+                      <p className="font-semibold text-foreground hover:text-primary transition-colors">{item.title}</p>
                       {(item.siteName || item.categoryName) && (
                         <div className="flex flex-wrap gap-1 mt-1">
                           {item.categoryName && (
@@ -112,7 +127,7 @@ export default function ExternalChecksPage() {
                         </div>
                       ) : "-"}
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" className="h-8 w-8 p-0 border border-transparent hover:border-border">

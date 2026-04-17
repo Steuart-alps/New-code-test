@@ -239,7 +239,8 @@ export const ListCertificatesParams = zod.object({
 
 export const ListCertificatesResponseItem = zod.object({
   id: zod.number(),
-  contractorId: zod.number(),
+  contractorId: zod.number().nullish(),
+  itemId: zod.number().nullish(),
   name: zod.string(),
   fileUrl: zod.string().nullish(),
   issueDate: zod.date().nullish(),
@@ -282,7 +283,8 @@ export const UpdateCertificateBody = zod.object({
 
 export const UpdateCertificateResponse = zod.object({
   id: zod.number(),
-  contractorId: zod.number(),
+  contractorId: zod.number().nullish(),
+  itemId: zod.number().nullish(),
   name: zod.string(),
   fileUrl: zod.string().nullish(),
   issueDate: zod.date().nullish(),
@@ -296,6 +298,79 @@ export const UpdateCertificateResponse = zod.object({
  */
 export const DeleteCertificateParams = zod.object({
   contractorId: zod.coerce.number(),
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary List certificates for a compliance item
+ */
+export const ListItemCertificatesParams = zod.object({
+  itemId: zod.coerce.number(),
+});
+
+export const ListItemCertificatesResponseItem = zod.object({
+  id: zod.number(),
+  contractorId: zod.number().nullish(),
+  itemId: zod.number().nullish(),
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+export const ListItemCertificatesResponse = zod.array(
+  ListItemCertificatesResponseItem,
+);
+
+/**
+ * @summary Add a certificate to a compliance item
+ */
+export const CreateItemCertificateParams = zod.object({
+  itemId: zod.coerce.number(),
+});
+
+export const CreateItemCertificateBody = zod.object({
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Update a compliance item's certificate
+ */
+export const UpdateItemCertificateParams = zod.object({
+  itemId: zod.coerce.number(),
+  id: zod.coerce.number(),
+});
+
+export const UpdateItemCertificateBody = zod.object({
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+export const UpdateItemCertificateResponse = zod.object({
+  id: zod.number(),
+  contractorId: zod.number().nullish(),
+  itemId: zod.number().nullish(),
+  name: zod.string(),
+  fileUrl: zod.string().nullish(),
+  issueDate: zod.date().nullish(),
+  expiryDate: zod.date().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.date(),
+});
+
+/**
+ * @summary Delete a compliance item's certificate
+ */
+export const DeleteItemCertificateParams = zod.object({
+  itemId: zod.coerce.number(),
   id: zod.coerce.number(),
 });
 

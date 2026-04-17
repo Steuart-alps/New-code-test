@@ -412,6 +412,98 @@ paths:
         "204":
           description: Deleted
 
+  /items/{itemId}/certificates:
+    get:
+      operationId: listItemCertificates
+      tags: [certificates]
+      summary: List certificates for a compliance item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of certificates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Certificate"
+    post:
+      operationId: createItemCertificate
+      tags: [certificates]
+      summary: Add a certificate to a compliance item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "201":
+          description: Created certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+
+  /items/{itemId}/certificates/{id}:
+    put:
+      operationId: updateItemCertificate
+      tags: [certificates]
+      summary: Update a compliance item's certificate
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificateRequest"
+      responses:
+        "200":
+          description: Updated certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certificate"
+    delete:
+      operationId: deleteItemCertificate
+      tags: [certificates]
+      summary: Delete a compliance item's certificate
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   /compliance-items:
     get:
       operationId: listComplianceItems
@@ -855,6 +947,10 @@ components:
           type: integer
         contractorId:
           type: integer
+          nullable: true
+        itemId:
+          type: integer
+          nullable: true
         name:
           type: string
         fileUrl:
@@ -876,7 +972,6 @@ components:
           format: date-time
       required:
         - id
-        - contractorId
         - name
         - createdAt
 

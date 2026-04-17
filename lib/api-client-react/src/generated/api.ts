@@ -1734,6 +1734,357 @@ export const useDeleteCertificate = <
 };
 
 /**
+ * @summary List certificates for a compliance item
+ */
+export const getListItemCertificatesUrl = (itemId: number) => {
+  return `/api/items/${itemId}/certificates`;
+};
+
+export const listItemCertificates = async (
+  itemId: number,
+  options?: RequestInit,
+): Promise<Certificate[]> => {
+  return customFetch<Certificate[]>(getListItemCertificatesUrl(itemId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListItemCertificatesQueryKey = (itemId: number) => {
+  return [`/api/items/${itemId}/certificates`] as const;
+};
+
+export const getListItemCertificatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listItemCertificates>>,
+  TError = ErrorType<unknown>,
+>(
+  itemId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listItemCertificates>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListItemCertificatesQueryKey(itemId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listItemCertificates>>
+  > = ({ signal }) =>
+    listItemCertificates(itemId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!itemId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listItemCertificates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListItemCertificatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listItemCertificates>>
+>;
+export type ListItemCertificatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List certificates for a compliance item
+ */
+
+export function useListItemCertificates<
+  TData = Awaited<ReturnType<typeof listItemCertificates>>,
+  TError = ErrorType<unknown>,
+>(
+  itemId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listItemCertificates>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListItemCertificatesQueryOptions(itemId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Add a certificate to a compliance item
+ */
+export const getCreateItemCertificateUrl = (itemId: number) => {
+  return `/api/items/${itemId}/certificates`;
+};
+
+export const createItemCertificate = async (
+  itemId: number,
+  createCertificateRequest: CreateCertificateRequest,
+  options?: RequestInit,
+): Promise<Certificate> => {
+  return customFetch<Certificate>(getCreateItemCertificateUrl(itemId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createCertificateRequest),
+  });
+};
+
+export const getCreateItemCertificateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createItemCertificate>>,
+    TError,
+    { itemId: number; data: BodyType<CreateCertificateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createItemCertificate>>,
+  TError,
+  { itemId: number; data: BodyType<CreateCertificateRequest> },
+  TContext
+> => {
+  const mutationKey = ["createItemCertificate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createItemCertificate>>,
+    { itemId: number; data: BodyType<CreateCertificateRequest> }
+  > = (props) => {
+    const { itemId, data } = props ?? {};
+
+    return createItemCertificate(itemId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateItemCertificateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createItemCertificate>>
+>;
+export type CreateItemCertificateMutationBody =
+  BodyType<CreateCertificateRequest>;
+export type CreateItemCertificateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Add a certificate to a compliance item
+ */
+export const useCreateItemCertificate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createItemCertificate>>,
+    TError,
+    { itemId: number; data: BodyType<CreateCertificateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createItemCertificate>>,
+  TError,
+  { itemId: number; data: BodyType<CreateCertificateRequest> },
+  TContext
+> => {
+  return useMutation(getCreateItemCertificateMutationOptions(options));
+};
+
+/**
+ * @summary Update a compliance item's certificate
+ */
+export const getUpdateItemCertificateUrl = (itemId: number, id: number) => {
+  return `/api/items/${itemId}/certificates/${id}`;
+};
+
+export const updateItemCertificate = async (
+  itemId: number,
+  id: number,
+  createCertificateRequest: CreateCertificateRequest,
+  options?: RequestInit,
+): Promise<Certificate> => {
+  return customFetch<Certificate>(getUpdateItemCertificateUrl(itemId, id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createCertificateRequest),
+  });
+};
+
+export const getUpdateItemCertificateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateItemCertificate>>,
+    TError,
+    { itemId: number; id: number; data: BodyType<CreateCertificateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateItemCertificate>>,
+  TError,
+  { itemId: number; id: number; data: BodyType<CreateCertificateRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateItemCertificate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateItemCertificate>>,
+    { itemId: number; id: number; data: BodyType<CreateCertificateRequest> }
+  > = (props) => {
+    const { itemId, id, data } = props ?? {};
+
+    return updateItemCertificate(itemId, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateItemCertificateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateItemCertificate>>
+>;
+export type UpdateItemCertificateMutationBody =
+  BodyType<CreateCertificateRequest>;
+export type UpdateItemCertificateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a compliance item's certificate
+ */
+export const useUpdateItemCertificate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateItemCertificate>>,
+    TError,
+    { itemId: number; id: number; data: BodyType<CreateCertificateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateItemCertificate>>,
+  TError,
+  { itemId: number; id: number; data: BodyType<CreateCertificateRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateItemCertificateMutationOptions(options));
+};
+
+/**
+ * @summary Delete a compliance item's certificate
+ */
+export const getDeleteItemCertificateUrl = (itemId: number, id: number) => {
+  return `/api/items/${itemId}/certificates/${id}`;
+};
+
+export const deleteItemCertificate = async (
+  itemId: number,
+  id: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteItemCertificateUrl(itemId, id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteItemCertificateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteItemCertificate>>,
+    TError,
+    { itemId: number; id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteItemCertificate>>,
+  TError,
+  { itemId: number; id: number },
+  TContext
+> => {
+  const mutationKey = ["deleteItemCertificate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteItemCertificate>>,
+    { itemId: number; id: number }
+  > = (props) => {
+    const { itemId, id } = props ?? {};
+
+    return deleteItemCertificate(itemId, id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteItemCertificateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteItemCertificate>>
+>;
+
+export type DeleteItemCertificateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a compliance item's certificate
+ */
+export const useDeleteItemCertificate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteItemCertificate>>,
+    TError,
+    { itemId: number; id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteItemCertificate>>,
+  TError,
+  { itemId: number; id: number },
+  TContext
+> => {
+  return useMutation(getDeleteItemCertificateMutationOptions(options));
+};
+
+/**
  * @summary List all compliance items
  */
 export const getListComplianceItemsUrl = (

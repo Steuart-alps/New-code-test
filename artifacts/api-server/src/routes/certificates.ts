@@ -1,18 +1,83 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { certificatesTable, contractorsTable } from "@workspace/db/schema";
+import { certificatesTable, contractorsTable, complianceItemsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
   ListCertificatesParams,
   CreateCertificateParams,
-  CreateCertificateBody,
   UpdateCertificateParams,
-  UpdateCertificateBody,
   DeleteCertificateParams,
 } from "@workspace/api-zod";
+import { z } from "zod";
 import { requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 
+// Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
+// use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
+const CreateCertificateBody = z.object({
+  name: z.string().min(1),
+  fileUrl: z.string().nullish(),
+  issueDate: z.coerce.date().nullish(),
+  expiryDate: z.coerce.date().nullish(),
+  notes: z.string().nullish(),
+});
+
+const UpdateCertificateBody = CreateCertificateBody.partial();
+
 const router: IRouter = Router();
+
+async function assertItemAccess(itemId: number, clientId: number | null, role: string) {
+  const [item] = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, itemId));
+  if (!item) return null;
+  if (role !== "consultant" && item.clientId !== clientId) return null;
+  return item;
+}
+
+// ----- Item-scoped certificates -----
+
+router.get("/items/:itemId/certificates", requireAuth, async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  const user = req.currentUser!;
+  const item = await assertItemAccess(itemId, user.clientId ?? null, user.role);
+  if (!item) return res.status(404).json({ error: "Compliance item not found" });
+  const certs = await db.select().from(certificatesTable).where(eq(certificatesTable.itemId, itemId)).orderBy(certificatesTable.createdAt);
+  res.json(certs);
+});
+
+router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  const user = req.currentUser!;
+  const body = CreateCertificateBody.parse(req.body);
+  const item = await assertItemAccess(itemId, user.clientId ?? null, user.role);
+  if (!item) return res.status(404).json({ error: "Compliance item not found" });
+  const [cert] = await db.insert(certificatesTable).values({ ...body, itemId, contractorId: null }).returning();
+  res.status(201).json(cert);
+});
+
+router.put("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  const id = Number(req.params.id);
+  const user = req.currentUser!;
+  const body = UpdateCertificateBody.parse(req.body);
+  const item = await assertItemAccess(itemId, user.clientId ?? null, user.role);
+  if (!item) return res.status(404).json({ error: "Compliance item not found" });
+  const [cert] = await db
+    .update(certificatesTable)
+    .set(body)
+    .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)))
+    .returning();
+  if (!cert) return res.status(404).json({ error: "Certificate not found" });
+  res.json(cert);
+});
+
+router.delete("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  const id = Number(req.params.id);
+  const user = req.currentUser!;
+  const item = await assertItemAccess(itemId, user.clientId ?? null, user.role);
+  if (!item) return res.status(404).json({ error: "Compliance item not found" });
+  await db.delete(certificatesTable).where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)));
+  res.status(204).send();
+});
 
 async function assertContractorAccess(contractorId: number, clientId: number | null, role: string) {
   const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
