@@ -1,11 +1,46 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { complianceItemsTable, contractorsTable, appSettingsTable } from "@workspace/db/schema";
+import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
-import { sendEmail, sendSystemEmail } from "../lib/email";
+import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
 import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+
+/**
+ * Build the full CC list for a reminder email by combining:
+ *   - the comma-separated `maintenanceEmail` setting (one or many)
+ *   - all active client_admin user emails when `notifyClientAdmins` is "true"
+ *   - any extra `additionalReminderEmails` from settings
+ *   - the optional `actorEmail` (the logged-in user who triggered a manual send)
+ * Excludes the recipient's own address so they don't see themselves CC'd.
+ */
+async function buildReminderCcList(opts: {
+  clientId: number;
+  settings: Record<string, string>;
+  recipient: string;
+  actorEmail?: string | null;
+}): Promise<string[]> {
+  const { clientId, settings, recipient, actorEmail } = opts;
+  const list: string[] = [
+    ...parseEmailList(settings["maintenanceEmail"]),
+    ...parseEmailList(settings["additionalReminderEmails"]),
+  ];
+
+  if (settings["notifyClientAdmins"] === "true") {
+    const admins = await db
+      .select({ email: usersTable.email })
+      .from(usersTable)
+      .where(and(eq(usersTable.clientId, clientId), eq(usersTable.role, "client_admin"), eq(usersTable.active, true)));
+    for (const a of admins) list.push(a.email);
+  }
+
+  if (actorEmail) list.push(actorEmail);
+
+  const recipientLc = recipient.toLowerCase();
+  return Array.from(new Set(list.map((e) => e.toLowerCase()))).filter((e) => e !== recipientLc);
+}
 
 const router: IRouter = Router();
 
@@ -26,11 +61,11 @@ async function sendReminderForItem(opts: {
   contractor: typeof contractorsTable.$inferSelect;
   companyName: string;
   fromEmail: string;
-  maintenanceEmail: string | null;
+  ccList: string[];
   defaultLeadTimeDays: number;
   now: Date;
 }): Promise<void> {
-  const { item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now } = opts;
+  const { item, contractor, companyName, ccList, defaultLeadTimeDays, now } = opts;
 
   const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
   const dueDate = new Date(item.dueDate!);
@@ -40,6 +75,8 @@ async function sendReminderForItem(opts: {
   const scheduleToken = randomUUID();
   const scheduleLink = `${getPublicAppUrl()}/schedule/${scheduleToken}`;
 
+  const ccDisplay = ccList.length > 0 ? ccList.join(", ") : null;
+
   const { html, text } = buildReminderEmail({
     contractorName: contractor.name,
     companyName,
@@ -47,13 +84,13 @@ async function sendReminderForItem(opts: {
     dueDate,
     leadTimeDays,
     notes: item.notes,
-    ccMaintenanceEmail: maintenanceEmail,
+    ccMaintenanceEmail: ccDisplay,
     scheduleLink,
   });
 
   await sendEmail({
     to: contractor.email!,
-    cc: maintenanceEmail ?? undefined,
+    cc: ccList.length > 0 ? ccList : undefined,
     subject: `Compliance Check Reminder: ${item.title}`,
     html,
     text,
@@ -95,12 +132,16 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
     }
     const settings = settingsCache[item.clientId];
     const companyName = settings["companyName"] ?? "ComplyTrack";
-    const maintenanceEmail = settings["maintenanceEmail"] ?? null;
     const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
     const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+    const ccList = await buildReminderCcList({
+      clientId: item.clientId,
+      settings,
+      recipient: contractor.email!,
+    });
 
     try {
-      await sendReminderForItem({ item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now });
+      await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
       sent++;
     } catch {
       errors++;
@@ -110,14 +151,24 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
   return { sent, skipped, errors };
 }
 
-router.post("/notifications/send-reminders", async (req, res) => {
+router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, async (req, res) => {
+  const callerClientId = getClientId(req);
+  if (!callerClientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
   const now = new Date();
 
+  // Scope to the caller's client only — never iterate across tenants.
   const items = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(isNotNull(complianceItemsTable.contractorId));
+    .where(and(
+      eq(complianceItemsTable.clientId, callerClientId),
+      isNotNull(complianceItemsTable.contractorId),
+    ));
 
   const settingsCache: Record<number, Record<string, string>> = {};
 
@@ -152,7 +203,6 @@ router.post("/notifications/send-reminders", async (req, res) => {
     }
     const settings = settingsCache[item.clientId];
     const companyName = settings["companyName"] ?? "ComplyTrack";
-    const maintenanceEmail = settings["maintenanceEmail"] ?? null;
     const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
     const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
@@ -169,8 +219,15 @@ router.post("/notifications/send-reminders", async (req, res) => {
       skipped++; continue;
     }
 
+    const ccList = await buildReminderCcList({
+      clientId: item.clientId,
+      settings,
+      recipient: contractor.email,
+      actorEmail: req.currentUser?.email ?? null,
+    });
+
     try {
-      await sendReminderForItem({ item, contractor, companyName, fromEmail, maintenanceEmail, defaultLeadTimeDays, now });
+      await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "sent" });
       sent++;
     } catch (err) {
@@ -183,9 +240,12 @@ router.post("/notifications/send-reminders", async (req, res) => {
   res.json({ sent, skipped, errors, details: results });
 });
 
-router.post("/notifications/send-reminder/:itemId", async (req, res) => {
+router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAdmin, async (req, res) => {
   const itemId = parseInt(req.params.itemId, 10);
   if (!Number.isFinite(itemId)) return res.status(400).json({ error: "Invalid item id" });
+
+  const callerClientId = getClientId(req);
+  if (!callerClientId) return res.status(400).json({ error: "clientId required" });
 
   const rows = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable })
@@ -198,27 +258,39 @@ router.post("/notifications/send-reminder/:itemId", async (req, res) => {
   if (!row) return res.status(404).json({ error: "Compliance check not found" });
   const { item, contractor } = row;
 
+  // Tenant isolation — block sending reminders for items outside the caller's client.
+  if (item.clientId !== callerClientId) {
+    return res.status(404).json({ error: "Compliance check not found" });
+  }
+
   if (!contractor) return res.status(400).json({ error: "This check has no contractor assigned." });
   if (!contractor.email) return res.status(400).json({ error: `${contractor.name} does not have an email address on file.` });
   if (!item.dueDate) return res.status(400).json({ error: "This check has no due date set." });
 
   const settings = await getClientSettings(item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
-  const maintenanceEmail = settings["maintenanceEmail"] ?? null;
   const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+  const ccList = await buildReminderCcList({
+    clientId: item.clientId,
+    settings,
+    recipient: contractor.email,
+    actorEmail: req.currentUser?.email ?? null,
+  });
 
   await sendReminderForItem({
     item,
     contractor,
     companyName,
     fromEmail,
-    maintenanceEmail,
+    ccList,
     defaultLeadTimeDays,
     now: new Date(),
   });
 
-  res.json({ success: true, message: `Reminder sent to ${contractor.email}` });
+  // Don't echo individual CC addresses back to the caller — only a count.
+  const ccSummary = ccList.length > 0 ? ` (with ${ccList.length} cc'd)` : "";
+  res.json({ success: true, message: `Reminder sent to ${contractor.email}${ccSummary}` });
 });
 
 // ----- Public scheduling endpoints (no auth — token is the credential) -----
@@ -314,7 +386,7 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
   res.json({ success: true, message: `Visit scheduled for ${dateStr}.`, scheduledFor: proposed });
 });
 
-router.post("/notifications/test-email", async (req, res) => {
+router.post("/notifications/test-email", requireAuth, requireClientAdmin, async (req, res) => {
   const { to } = TestEmailBody.parse(req.body);
 
   try {

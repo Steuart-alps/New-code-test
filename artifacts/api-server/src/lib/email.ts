@@ -30,12 +30,25 @@ function buildFrom(settings: Record<string, string>): string {
   return `${name} <${email}>`;
 }
 
+/**
+ * Normalises a comma / semicolon / whitespace separated list of email
+ * addresses into a deduped array. Empty input → [].
+ */
+export function parseEmailList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const parts = raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && /.+@.+\..+/.test(s));
+  return Array.from(new Set(parts.map((s) => s.toLowerCase())));
+}
+
 export async function sendEmail(opts: {
-  to: string;
+  to: string | string[];
   subject: string;
   html: string;
   text?: string;
-  cc?: string;
+  cc?: string | string[];
   icsAttachment?: string;
   icsFilename?: string;
   clientId?: number | null;
@@ -53,10 +66,17 @@ export async function sendEmail(opts: {
       ]
     : undefined;
 
+  const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
+  const ccList = opts.cc
+    ? Array.isArray(opts.cc)
+      ? opts.cc
+      : [opts.cc]
+    : undefined;
+
   const result = await resend.emails.send({
     from,
-    to: opts.to,
-    cc: opts.cc,
+    to: toList,
+    cc: ccList,
     subject: opts.subject,
     html: opts.html,
     text: opts.text,

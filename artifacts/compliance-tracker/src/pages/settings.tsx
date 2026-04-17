@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink } from "lucide-react";
 
 interface DomainRecord {
@@ -266,6 +267,8 @@ export default function SettingsPage() {
     companyName: "",
     defaultLeadTimeDays: "30",
     maintenanceEmail: "",
+    additionalReminderEmails: "",
+    notifyClientAdmins: "false",
     smtpFrom: "",
     smtpFromName: "",
   });
@@ -278,13 +281,15 @@ export default function SettingsPage() {
         companyName: settings.companyName || "",
         defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
         maintenanceEmail: (settings as any).maintenanceEmail || "",
+        additionalReminderEmails: (settings as any).additionalReminderEmails || "",
+        notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
       });
     }
   }, [settings]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
@@ -338,18 +343,50 @@ export default function SettingsPage() {
                 You can also copy in a maintenance contact on every reminder email.
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-6">
-              <div className="space-y-1.5 max-w-md">
-                <Label>Maintenance Contact CC Email</Label>
-                <p className="text-xs text-muted-foreground">This address will be copied on every contractor reminder email.</p>
+            <CardContent className="p-6 space-y-5">
+              <div className="space-y-1.5">
+                <Label>Maintenance / Office CC Emails</Label>
+                <p className="text-xs text-muted-foreground">
+                  These addresses will be copied on every contractor reminder email. Separate multiple addresses with a comma.
+                </p>
                 <Input
                   name="maintenanceEmail"
-                  type="email"
                   value={formData.maintenanceEmail}
                   onChange={handleChange}
-                  placeholder="maintenance@yourcompany.com"
+                  placeholder="maintenance@yourcompany.com, office@yourcompany.com"
                 />
               </div>
+
+              <div className="space-y-1.5">
+                <Label>Additional Recipients</Label>
+                <p className="text-xs text-muted-foreground">
+                  Optional extra addresses to copy on reminders — useful for site managers, directors, or external auditors. Separate with commas, semicolons, or new lines.
+                </p>
+                <Textarea
+                  name="additionalReminderEmails"
+                  value={formData.additionalReminderEmails}
+                  onChange={handleChange}
+                  rows={2}
+                  placeholder="director@yourcompany.com, sitemanager@yourcompany.com"
+                />
+              </div>
+
+              <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                  checked={formData.notifyClientAdmins === "true"}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, notifyClientAdmins: e.target.checked ? "true" : "false" }))
+                  }
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Always copy account admins on every reminder</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    When ticked, every reminder email is automatically copied to the email address of every active admin user on this account — including yours when you trigger a manual send.
+                  </span>
+                </span>
+              </label>
             </CardContent>
           </Card>
 

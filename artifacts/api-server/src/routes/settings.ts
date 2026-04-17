@@ -13,6 +13,8 @@ const SETTING_KEYS = [
   "defaultLeadTimeDays",
   "companyName",
   "maintenanceEmail",
+  "additionalReminderEmails",
+  "notifyClientAdmins",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {
@@ -45,10 +47,15 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     return;
   }
 
-  const body = UpdateSettingsBody.parse(req.body);
+  // Validate the standard fields with the generated zod schema, but read all
+  // whitelisted setting keys directly from req.body so that newer / non-spec
+  // keys (maintenanceEmail, additionalReminderEmails, notifyClientAdmins) are
+  // not silently stripped by the schema.
+  UpdateSettingsBody.parse(req.body);
+  const rawBody = (req.body ?? {}) as Record<string, string | null | undefined>;
 
   for (const key of SETTING_KEYS) {
-    const value = (body as Record<string, string | null | undefined>)[key];
+    const value = rawBody[key];
     if (value !== undefined) {
       const existing = await db
         .select()
