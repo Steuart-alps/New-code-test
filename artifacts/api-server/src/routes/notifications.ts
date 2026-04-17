@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { buildReminderEmail, buildCalendarInvite } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
@@ -80,7 +80,7 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.type, "external"));
+    .where(isNotNull(complianceItemsTable.contractorId));
 
   const settingsCache: Record<number, Record<string, string>> = {};
 
@@ -124,7 +124,7 @@ router.post("/notifications/send-reminders", async (req, res) => {
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.type, "external"));
+    .where(isNotNull(complianceItemsTable.contractorId));
 
   const settingsCache: Record<number, Record<string, string>> = {};
 
