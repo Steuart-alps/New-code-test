@@ -43,6 +43,23 @@ router.get("/items/:itemId/certificates", requireAuth, async (req, res) => {
   res.json(certs);
 });
 
+async function syncItemDueDateFromCertificates(itemId: number) {
+  const certs = await db
+    .select({ expiryDate: certificatesTable.expiryDate })
+    .from(certificatesTable)
+    .where(eq(certificatesTable.itemId, itemId));
+  const expiries = certs
+    .map((c) => c.expiryDate)
+    .filter((d): d is Date => d != null);
+  if (expiries.length === 0) return;
+  // Use the latest expiry across all certificates as the item's next due date
+  const latest = new Date(Math.max(...expiries.map((d) => d.getTime())));
+  await db
+    .update(complianceItemsTable)
+    .set({ dueDate: latest, updatedAt: new Date() })
+    .where(eq(complianceItemsTable.id, itemId));
+}
+
 router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, async (req, res) => {
   const itemId = Number(req.params.itemId);
   const user = req.currentUser!;
@@ -50,6 +67,7 @@ router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, asyn
   const item = await assertItemAccess(itemId, user.clientId ?? null, user.role);
   if (!item) return res.status(404).json({ error: "Compliance item not found" });
   const [cert] = await db.insert(certificatesTable).values({ ...body, itemId, contractorId: null }).returning();
+  await syncItemDueDateFromCertificates(itemId);
   res.status(201).json(cert);
 });
 
@@ -66,6 +84,7 @@ router.put("/items/:itemId/certificates/:id", requireAuth, requireClientAdmin, a
     .where(and(eq(certificatesTable.id, id), eq(certificatesTable.itemId, itemId)))
     .returning();
   if (!cert) return res.status(404).json({ error: "Certificate not found" });
+  await syncItemDueDateFromCertificates(itemId);
   res.json(cert);
 });
 
