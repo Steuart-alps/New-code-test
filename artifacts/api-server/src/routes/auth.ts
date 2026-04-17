@@ -6,10 +6,12 @@ import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
 import { db } from "@workspace/db";
-import { usersTable, passwordResetTokensTable } from "@workspace/db/schema";
+import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
+import { seedStarterContent } from "../lib/seedStarterContent";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -193,10 +195,39 @@ router.post("/auth/register", async (req, res) => {
 
   const passwordHash = await hashPassword(password);
 
+  // Provision a default "business" (client) for the new account so the user has
+  // somewhere to put sites, categories, and compliance checks. The slug is
+  // derived from the email and made unique to avoid collisions with other
+  // self-signups using similar local parts.
+  const slugBase = (email.split("@")[0] || "business")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 32) || "business";
+  const slug = `${slugBase}-${randomBytes(3).toString("hex")}`;
+
+  let clientId: number | null = null;
+  try {
+    const [client] = await db
+      .insert(clientsTable)
+      .values({ name, slug, primaryColor: "#6366f1", active: true })
+      .returning();
+    clientId = client.id;
+  } catch (err) {
+    logger.error({ err, email }, "Failed to create default client during registration");
+  }
+
   const [user] = await db
     .insert(usersTable)
-    .values({ name, email, passwordHash, role: "consultant", subscriptionStatus: "trial" })
+    .values({ name, email, passwordHash, role: "consultant", clientId, subscriptionStatus: "trial" })
     .returning();
+
+  // Pre-populate the new business with starter categories and example
+  // compliance checks so the dashboard isn't empty on first login. All seeded
+  // content is fully editable / deletable.
+  if (clientId !== null) {
+    await seedStarterContent(clientId);
+  }
 
   // Log the user in immediately
   (req.session as any).userId = user.id;
