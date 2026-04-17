@@ -14,6 +14,7 @@ export interface UpdateComplianceItemRequest {
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
   siteId?: number | null;
+  categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: Date | null;

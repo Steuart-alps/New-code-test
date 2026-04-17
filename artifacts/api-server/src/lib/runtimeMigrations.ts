@@ -40,20 +40,38 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL
     `);
 
-    // ---- One-time data migration: convert old categories-as-sites into the new model ----
-    // Detect by presence of the legacy compliance_items.category_id column.
-    const hasLegacyCategoryId = await columnExists("compliance_items", "category_id");
-    if (hasLegacyCategoryId) {
+    // ---- Add category_id column to compliance_items (new model: checks belong to a category) ----
+    await db.execute(sql`
+      ALTER TABLE "compliance_items"
+      ADD COLUMN IF NOT EXISTS "category_id" integer REFERENCES "categories"("id") ON DELETE SET NULL
+    `);
+
+    // ---- One-time legacy migration: convert old categories-as-sites into the sites table ----
+    // Must run BEFORE we drop sites.category_id, because migrateLegacyCategories()
+    // inserts rows into sites with a category_id linkage.
+    const hasLegacyCategoryAddress = await columnExists("categories", "address");
+    if (hasLegacyCategoryAddress) {
       logger.info("Running one-time category→site data migration...");
       await migrateLegacyCategories();
-
-      // Drop legacy column from compliance_items
-      await db.execute(sql`ALTER TABLE "compliance_items" DROP COLUMN IF EXISTS "category_id"`);
       // Drop unused address columns from categories
       await db.execute(sql`ALTER TABLE "categories" DROP COLUMN IF EXISTS "responsible_person"`);
       await db.execute(sql`ALTER TABLE "categories" DROP COLUMN IF EXISTS "address"`);
       await db.execute(sql`ALTER TABLE "categories" DROP COLUMN IF EXISTS "phone"`);
       logger.info("Category→site migration complete");
+    }
+
+    // ---- Backfill compliance_items.category_id from sites.category_id, then drop sites.category_id ----
+    // Catches both: (a) the just-completed legacy migration and (b) the previous refactor
+    // where sites carried the category. After this, sites are independent of categories.
+    const sitesHasCategoryId = await columnExists("sites", "category_id");
+    if (sitesHasCategoryId) {
+      await db.execute(sql`
+        UPDATE compliance_items ci
+        SET category_id = s.category_id
+        FROM sites s
+        WHERE ci.site_id = s.id AND ci.category_id IS NULL AND s.category_id IS NOT NULL
+      `);
+      await db.execute(sql`ALTER TABLE "sites" DROP COLUMN IF EXISTS "category_id"`);
     }
 
     logger.info("Runtime migrations complete");

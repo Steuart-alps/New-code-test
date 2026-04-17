@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useListSites, useListCategories, type Site } from "@workspace/api-client-react";
+import { useListSites, type Site } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,53 +9,38 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
-} from "@/components/ui/select";
-import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search } from "lucide-react";
 
 interface FormState {
   name: string;
-  categoryId: string;
   responsiblePerson: string;
   address: string;
   phone: string;
 }
-const empty: FormState = { name: "", categoryId: "none", responsiblePerson: "", address: "", phone: "" };
+const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "" };
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
-  const { data: categories = [] } = useListCategories();
   const { createSite, updateSite, deleteSite } = useAppMutations();
 
   const [search, setSearch] = useState("");
-  const [filterCat, setFilterCat] = useState<string>("all");
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(empty);
 
-  const categoryById = useMemo(() => {
-    const m = new Map<number, typeof categories[number]>();
-    for (const c of categories) m.set(c.id, c);
-    return m;
-  }, [categories]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sites.filter(s => {
-      if (filterCat !== "all") {
-        if (filterCat === "none" ? s.categoryId != null : String(s.categoryId) !== filterCat) return false;
-      }
-      if (!q) return true;
-      return [s.name, s.address, s.responsiblePerson, s.phone].some(v => v?.toLowerCase().includes(q));
-    });
-  }, [sites, search, filterCat]);
+    if (!q) return sites;
+    return sites.filter(s =>
+      [s.name, s.address, s.responsiblePerson, s.phone].some(v => v?.toLowerCase().includes(q))
+    );
+  }, [sites, search]);
 
   const openCreate = () => {
     setEditingId(null);
-    setForm({ ...empty, categoryId: filterCat !== "all" && filterCat !== "none" ? filterCat : "none" });
+    setForm(empty);
     setIsOpen(true);
   };
 
@@ -63,7 +48,6 @@ export default function SitesPage() {
     setEditingId(s.id);
     setForm({
       name: s.name,
-      categoryId: s.categoryId != null ? String(s.categoryId) : "none",
       responsiblePerson: s.responsiblePerson ?? "",
       address: s.address ?? "",
       phone: s.phone ?? "",
@@ -76,7 +60,6 @@ export default function SitesPage() {
     if (!form.name.trim()) return;
     const payload = {
       name: form.name.trim(),
-      categoryId: form.categoryId === "none" ? null : Number(form.categoryId),
       responsiblePerson: form.responsiblePerson.trim() || null,
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
@@ -90,14 +73,14 @@ export default function SitesPage() {
   return (
     <AppLayout title="Sites">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-        <p className="text-muted-foreground hidden sm:block">All sites across your business. Use categories to group them.</p>
+        <p className="text-muted-foreground hidden sm:block">Your physical locations — the buildings and premises where compliance checks happen.</p>
         <Button onClick={openCreate} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
           <Plus className="w-4 h-4 mr-2" /> Add Site
         </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <div className="relative flex-1">
+      <div className="mb-4">
+        <div className="relative">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search sites by name, address, person..."
@@ -106,16 +89,6 @@ export default function SitesPage() {
             className="pl-9 bg-card"
           />
         </div>
-        <Select value={filterCat} onValueChange={setFilterCat}>
-          <SelectTrigger className="bg-card sm:w-56"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All categories</SelectItem>
-            <SelectItem value="none">Uncategorised</SelectItem>
-            {categories.map(c => (
-              <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -124,53 +97,42 @@ export default function SitesPage() {
         ) : filtered.length === 0 ? (
           <div className="col-span-full py-12 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
             <Building2 className="w-8 h-8 mx-auto mb-3 opacity-20" />
-            {sites.length === 0 ? "No sites yet. Add your first site to get started." : "No sites match your filters."}
+            {sites.length === 0 ? "No sites yet. Add your first site to get started." : "No sites match your search."}
           </div>
         ) : (
-          filtered.map(site => {
-            const cat = site.categoryId != null ? categoryById.get(site.categoryId) : null;
-            return (
-              <Card key={site.id} className="p-5 bg-card shadow-sm hover:shadow-md transition-shadow flex flex-col">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <Link href={`/sites/${site.id}`} className="flex items-center gap-3 flex-1 min-w-0 hover:text-primary transition-colors">
-                    <Building2 className="w-4 h-4 flex-shrink-0 opacity-70" />
-                    <span className="font-semibold text-lg font-display truncate">{site.name}</span>
-                  </Link>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(site)}>
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
-                      if (confirm(`Delete site "${site.name}"? Compliance checks will become unassigned.`)) {
-                        deleteSite.mutate({ id: site.id });
-                      }
-                    }}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                {cat ? (
-                  <span className="inline-flex self-start items-center gap-1.5 text-xs px-2 py-0.5 rounded-md text-white mb-2" style={{ backgroundColor: cat.color }}>
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/80" /> {cat.name}
-                  </span>
-                ) : (
-                  <span className="inline-flex self-start items-center text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground border mb-2">Uncategorised</span>
-                )}
-
-                <div className="space-y-1.5 text-sm text-muted-foreground flex-1">
-                  {site.responsiblePerson && <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 opacity-60" />{site.responsiblePerson}</div>}
-                  {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
-                  {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
-                  {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
-                </div>
-
-                <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
-                  View checks <ChevronRight className="w-3.5 h-3.5" />
+          filtered.map(site => (
+            <Card key={site.id} className="p-5 bg-card shadow-sm hover:shadow-md transition-shadow flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <Link href={`/sites/${site.id}`} className="flex items-center gap-3 flex-1 min-w-0 hover:text-primary transition-colors">
+                  <Building2 className="w-4 h-4 flex-shrink-0 opacity-70" />
+                  <span className="font-semibold text-lg font-display truncate">{site.name}</span>
                 </Link>
-              </Card>
-            );
-          })
+                <div className="flex gap-1 flex-shrink-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(site)}>
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
+                    if (confirm(`Delete site "${site.name}"? Compliance checks will become unassigned.`)) {
+                      deleteSite.mutate({ id: site.id });
+                    }
+                  }}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-sm text-muted-foreground flex-1">
+                {site.responsiblePerson && <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 opacity-60" />{site.responsiblePerson}</div>}
+                {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
+                {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
+                {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
+              </div>
+
+              <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
+                View checks <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </Card>
+          ))
         )}
       </div>
 
@@ -183,18 +145,6 @@ export default function SitesPage() {
             <div className="space-y-1.5">
               <Label>Site Name</Label>
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Manchester Warehouse" autoFocus />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Category</Label>
-              <Select value={form.categoryId} onValueChange={v => setForm({ ...form, categoryId: v })}>
-                <SelectTrigger><SelectValue placeholder="Uncategorised" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Uncategorised</SelectItem>
-                  {categories.map(c => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Responsible Person</Label>

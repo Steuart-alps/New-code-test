@@ -74,16 +74,11 @@ export const DeleteCategoryParams = zod.object({
 });
 
 /**
- * @summary List sites (optionally filtered by category)
+ * @summary List sites
  */
-export const ListSitesQueryParams = zod.object({
-  categoryId: zod.coerce.number().optional(),
-});
-
 export const ListSitesResponseItem = zod.object({
   id: zod.number(),
   clientId: zod.number(),
-  categoryId: zod.number().nullish(),
   name: zod.string(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
@@ -98,7 +93,6 @@ export const ListSitesResponse = zod.array(ListSitesResponseItem);
  */
 export const CreateSiteBody = zod.object({
   name: zod.string(),
-  categoryId: zod.number().nullish(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
   phone: zod.string().nullish(),
@@ -114,7 +108,6 @@ export const GetSiteParams = zod.object({
 export const GetSiteResponse = zod.object({
   id: zod.number(),
   clientId: zod.number(),
-  categoryId: zod.number().nullish(),
   name: zod.string(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
@@ -132,7 +125,6 @@ export const UpdateSiteParams = zod.object({
 
 export const UpdateSiteBody = zod.object({
   name: zod.string().optional(),
-  categoryId: zod.number().nullish(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
   phone: zod.string().nullish(),
@@ -141,7 +133,6 @@ export const UpdateSiteBody = zod.object({
 export const UpdateSiteResponse = zod.object({
   id: zod.number(),
   clientId: zod.number(),
-  categoryId: zod.number().nullish(),
   name: zod.string(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
@@ -363,6 +354,7 @@ export const CreateComplianceItemBody = zod.object({
     .enum(["low", "medium", "high", "critical"])
     .default(createComplianceItemBodyPriorityDefault),
   siteId: zod.number().nullish(),
+  categoryId: zod.number().nullish(),
   contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
@@ -416,6 +408,7 @@ export const UpdateComplianceItemBody = zod.object({
     .optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
   siteId: zod.number().nullish(),
+  categoryId: zod.number().nullish(),
   contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),

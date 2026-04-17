@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { sitesTable, categoriesTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { sitesTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
@@ -12,14 +12,10 @@ router.get("/sites", requireAuth, async (req, res) => {
     res.status(400).json({ error: "clientId required" });
     return;
   }
-  const conditions = [eq(sitesTable.clientId, clientId)];
-  if (req.query.categoryId) {
-    conditions.push(eq(sitesTable.categoryId, Number(req.query.categoryId)));
-  }
   const sites = await db
     .select()
     .from(sitesTable)
-    .where(and(...conditions))
+    .where(eq(sitesTable.clientId, clientId))
     .orderBy(sitesTable.name);
   res.json(sites);
 });
@@ -51,19 +47,10 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: "Site name is required" });
     return;
   }
-  let categoryId: number | null = req.body.categoryId ?? null;
-  if (categoryId != null) {
-    const [cat] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, categoryId));
-    if (!cat || cat.clientId !== clientId) {
-      res.status(400).json({ error: "Invalid categoryId" });
-      return;
-    }
-  }
   const [site] = await db
     .insert(sitesTable)
     .values({
       clientId,
-      categoryId,
       name,
       responsiblePerson: req.body.responsiblePerson ?? null,
       address: req.body.address ?? null,
@@ -87,15 +74,8 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
     return;
   }
   const updates: Record<string, unknown> = { updatedAt: new Date() };
-  for (const key of ["name", "responsiblePerson", "address", "phone", "categoryId"] as const) {
+  for (const key of ["name", "responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
-  }
-  if (updates.categoryId != null) {
-    const [cat] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, updates.categoryId as number));
-    if (!cat || cat.clientId !== existing.clientId) {
-      res.status(400).json({ error: "Invalid categoryId" });
-      return;
-    }
   }
   const [updated] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   res.json(updated);

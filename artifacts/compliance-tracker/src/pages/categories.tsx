@@ -1,13 +1,13 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useListCategories, useListSites, type Category } from "@workspace/api-client-react";
+import { useListCategories, useListComplianceItems, type Category } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Trash2, Tags, Plus, Pencil, ChevronRight, Building2 } from "lucide-react";
+import { Trash2, Tags, Plus, Pencil, ChevronRight, ClipboardCheck } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
@@ -17,20 +17,20 @@ const empty: FormState = { name: "", color: "#6366f1" };
 
 export default function CategoriesPage() {
   const { data: categories = [], isLoading } = useListCategories();
-  const { data: sites = [] } = useListSites();
+  const { data: items = [] } = useListComplianceItems();
   const { createCategory, updateCategory, deleteCategory } = useAppMutations();
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(empty);
 
-  const siteCounts = useMemo(() => {
+  const checkCounts = useMemo(() => {
     const m = new Map<number, number>();
-    for (const s of sites) {
-      if (s.categoryId == null) continue;
-      m.set(s.categoryId, (m.get(s.categoryId) ?? 0) + 1);
+    for (const i of items) {
+      if (i.categoryId == null) continue;
+      m.set(i.categoryId, (m.get(i.categoryId) ?? 0) + 1);
     }
     return m;
-  }, [sites]);
+  }, [items]);
 
   const openCreate = () => { setEditingId(null); setForm(empty); setIsOpen(true); };
   const openEdit = (c: Category) => { setEditingId(c.id); setForm({ name: c.name, color: c.color }); setIsOpen(true); };
@@ -48,7 +48,7 @@ export default function CategoriesPage() {
   return (
     <AppLayout title="Categories">
       <div className="flex justify-between items-center mb-6">
-        <p className="text-muted-foreground hidden sm:block">Group your sites by category. Each category can hold multiple sites.</p>
+        <p className="text-muted-foreground hidden sm:block">Group your compliance checks into categories like Staff, Fire, or Premises. You decide which checks go in each one.</p>
         <Button onClick={openCreate} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
           <Plus className="w-4 h-4 mr-2" /> Add Category
         </Button>
@@ -60,11 +60,11 @@ export default function CategoriesPage() {
         ) : categories.length === 0 ? (
           <div className="col-span-full py-12 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
             <Tags className="w-8 h-8 mx-auto mb-3 opacity-20" />
-            No categories yet. Add one to start grouping your sites.
+            No categories yet. Add one (e.g. Staff, Fire, Premises) to start grouping your compliance checks.
           </div>
         ) : (
           categories.map(cat => {
-            const count = siteCounts.get(cat.id) ?? 0;
+            const count = checkCounts.get(cat.id) ?? 0;
             return (
               <Card key={cat.id} className="p-5 bg-card shadow-sm hover:shadow-md transition-shadow flex flex-col">
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -77,7 +77,7 @@ export default function CategoriesPage() {
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
-                      if (confirm(`Delete category "${cat.name}"? Sites in this category will become uncategorised.`)) {
+                      if (confirm(`Delete category "${cat.name}"? Checks in this category will become uncategorised.`)) {
                         deleteCategory.mutate({ id: cat.id });
                       }
                     }}>
@@ -87,12 +87,12 @@ export default function CategoriesPage() {
                 </div>
 
                 <div className="flex items-center gap-2 text-sm text-muted-foreground flex-1">
-                  <Building2 className="w-3.5 h-3.5 opacity-60" />
-                  {count} site{count === 1 ? "" : "s"}
+                  <ClipboardCheck className="w-3.5 h-3.5 opacity-60" />
+                  {count} compliance check{count === 1 ? "" : "s"}
                 </div>
 
                 <Link href={`/categories/${cat.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
-                  View sites <ChevronRight className="w-3.5 h-3.5" />
+                  View checks <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
               </Card>
             );
@@ -108,7 +108,7 @@ export default function CategoriesPage() {
           <form onSubmit={handleSubmit} id="cat-form" className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Category Name</Label>
-              <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Manufacturing, Office, Warehousing" autoFocus />
+              <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Staff, Fire, Premises, Electrical" autoFocus />
             </div>
             <div className="space-y-1.5">
               <Label>Color Tag</Label>

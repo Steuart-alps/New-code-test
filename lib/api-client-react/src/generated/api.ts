@@ -31,7 +31,6 @@ import type {
   ErrorResponse,
   HealthStatus,
   ListComplianceItemsParams,
-  ListSitesParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SendRemindersResponse,
@@ -548,59 +547,37 @@ export const useDeleteCategory = <
 };
 
 /**
- * @summary List sites (optionally filtered by category)
+ * @summary List sites
  */
-export const getListSitesUrl = (params?: ListSitesParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/sites?${stringifiedParams}`
-    : `/api/sites`;
+export const getListSitesUrl = () => {
+  return `/api/sites`;
 };
 
-export const listSites = async (
-  params?: ListSitesParams,
-  options?: RequestInit,
-): Promise<Site[]> => {
-  return customFetch<Site[]>(getListSitesUrl(params), {
+export const listSites = async (options?: RequestInit): Promise<Site[]> => {
+  return customFetch<Site[]>(getListSitesUrl(), {
     ...options,
     method: "GET",
   });
 };
 
-export const getListSitesQueryKey = (params?: ListSitesParams) => {
-  return [`/api/sites`, ...(params ? [params] : [])] as const;
+export const getListSitesQueryKey = () => {
+  return [`/api/sites`] as const;
 };
 
 export const getListSitesQueryOptions = <
   TData = Awaited<ReturnType<typeof listSites>>,
   TError = ErrorType<unknown>,
->(
-  params?: ListSitesParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listSites>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListSitesQueryKey(params);
+  const queryKey = queryOptions?.queryKey ?? getListSitesQueryKey();
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof listSites>>> = ({
     signal,
-  }) => listSites(params, { signal, ...requestOptions });
+  }) => listSites({ signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listSites>>,
@@ -615,24 +592,17 @@ export type ListSitesQueryResult = NonNullable<
 export type ListSitesQueryError = ErrorType<unknown>;
 
 /**
- * @summary List sites (optionally filtered by category)
+ * @summary List sites
  */
 
 export function useListSites<
   TData = Awaited<ReturnType<typeof listSites>>,
   TError = ErrorType<unknown>,
->(
-  params?: ListSitesParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listSites>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListSitesQueryOptions(params, options);
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSitesQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

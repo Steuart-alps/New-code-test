@@ -62,12 +62,10 @@ export default function SiteDetailPage() {
     return <AppLayout title="Site"><div className="py-12 text-center text-muted-foreground">Site not found.</div></AppLayout>;
   }
 
-  const backHref = site.categoryId ? `/categories/${site.categoryId}` : "/categories";
-
   return (
     <AppLayout title={site.name}>
-      <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
-        <ArrowLeft className="w-4 h-4" /> Back
+      <Link href="/sites" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <ArrowLeft className="w-4 h-4" /> Back to Sites
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

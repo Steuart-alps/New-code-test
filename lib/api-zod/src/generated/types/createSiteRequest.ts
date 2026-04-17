@@ -8,7 +8,6 @@
 
 export interface CreateSiteRequest {
   name: string;
-  categoryId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;

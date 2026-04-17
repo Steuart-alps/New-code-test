@@ -26,7 +26,6 @@ export * from "./healthStatus";
 export * from "./listComplianceItemsParams";
 export * from "./listComplianceItemsPriority";
 export * from "./listComplianceItemsStatus";
-export * from "./listSitesParams";
 export * from "./requestUploadUrlBody";
 export * from "./requestUploadUrlResponse";
 export * from "./sendRemindersResponse";

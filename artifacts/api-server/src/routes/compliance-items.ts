@@ -25,7 +25,6 @@ function buildItemResponse(
   return {
     ...item,
     siteName: site?.name ?? null,
-    categoryId: site?.categoryId ?? null,
     categoryName: category?.name ?? null,
     categoryColor: category?.color ?? null,
     contractorName: contractor?.name ?? null,
@@ -63,7 +62,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
     })
     .from(complianceItemsTable)
     .leftJoin(sitesTable, eq(complianceItemsTable.siteId, sitesTable.id))
-    .leftJoin(categoriesTable, eq(sitesTable.categoryId, categoriesTable.id))
+    .leftJoin(categoriesTable, eq(complianceItemsTable.categoryId, categoriesTable.id))
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(and(...conditions))
     .orderBy(complianceItemsTable.createdAt);
@@ -76,7 +75,7 @@ async function fetchJoinedItem(itemId: number) {
     .select({ item: complianceItemsTable, site: sitesTable, category: categoriesTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(sitesTable, eq(complianceItemsTable.siteId, sitesTable.id))
-    .leftJoin(categoriesTable, eq(sitesTable.categoryId, categoriesTable.id))
+    .leftJoin(categoriesTable, eq(complianceItemsTable.categoryId, categoriesTable.id))
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(eq(complianceItemsTable.id, itemId));
   return rows[0] ?? null;
@@ -95,6 +94,13 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
     if (!s || s.clientId !== clientId) {
       res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+  }
+  if (body.categoryId != null) {
+    const [c] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, body.categoryId));
+    if (!c || c.clientId !== clientId) {
+      res.status(400).json({ error: "Invalid categoryId" });
       return;
     }
   }
@@ -139,6 +145,13 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
     if (!s || s.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+  }
+  if (body.categoryId != null) {
+    const [c] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, body.categoryId));
+    if (!c || c.clientId !== existing[0].clientId) {
+      res.status(400).json({ error: "Invalid categoryId" });
       return;
     }
   }

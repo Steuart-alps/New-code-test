@@ -9,7 +9,6 @@
 export interface Site {
   id: number;
   clientId: number;
-  categoryId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;

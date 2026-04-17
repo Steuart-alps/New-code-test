@@ -2,6 +2,7 @@ import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
+import { categoriesTable } from "./categories";
 import { contractorsTable } from "./contractors";
 import { clientsTable } from "./clients";
 import { departmentsTable } from "./departments";
@@ -20,6 +21,7 @@ export const complianceItemsTable = pgTable("compliance_items", {
   status: text("status").$type<(typeof complianceStatusEnum)[number]>().notNull().default("pending"),
   priority: text("priority").$type<(typeof compliancePriorityEnum)[number]>().notNull().default("medium"),
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  categoryId: integer("category_id").references(() => categoriesTable.id, { onDelete: "set null" }),
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   assignedTo: text("assigned_to"),
   dueDate: timestamp("due_date"),

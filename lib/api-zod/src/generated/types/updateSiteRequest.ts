@@ -8,7 +8,6 @@
 
 export interface UpdateSiteRequest {
   name?: string;
-  categoryId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;

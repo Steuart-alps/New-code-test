@@ -132,12 +132,7 @@ paths:
     get:
       operationId: listSites
       tags: [sites]
-      summary: List sites (optionally filtered by category)
-      parameters:
-        - name: categoryId
-          in: query
-          schema:
-            type: integer
+      summary: List sites
       responses:
         "200":
           description: List of sites
@@ -721,9 +716,6 @@ components:
           type: integer
         clientId:
           type: integer
-        categoryId:
-          type: integer
-          nullable: true
         name:
           type: string
         responsiblePerson:
@@ -753,9 +745,6 @@ components:
       properties:
         name:
           type: string
-        categoryId:
-          type: integer
-          nullable: true
         responsiblePerson:
           type: string
           nullable: true
@@ -773,9 +762,6 @@ components:
       properties:
         name:
           type: string
-        categoryId:
-          type: integer
-          nullable: true
         responsiblePerson:
           type: string
           nullable: true
@@ -991,6 +977,9 @@ components:
         siteId:
           type: integer
           nullable: true
+        categoryId:
+          type: integer
+          nullable: true
         contractorId:
           type: integer
           nullable: true
@@ -1025,6 +1014,9 @@ components:
           type: string
           enum: [low, medium, high, critical]
         siteId:
+          type: integer
+          nullable: true
+        categoryId:
           type: integer
           nullable: true
         contractorId:

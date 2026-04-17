@@ -33,7 +33,6 @@ export interface UpdateCategoryRequest {
 export interface Site {
   id: number;
   clientId: number;
-  categoryId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;
@@ -44,7 +43,6 @@ export interface Site {
 
 export interface CreateSiteRequest {
   name: string;
-  categoryId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -52,7 +50,6 @@ export interface CreateSiteRequest {
 
 export interface UpdateSiteRequest {
   name?: string;
-  categoryId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -168,6 +165,7 @@ export interface CreateComplianceItemRequest {
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   siteId?: number | null;
+  categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
@@ -201,6 +199,7 @@ export interface UpdateComplianceItemRequest {
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
   siteId?: number | null;
+  categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
@@ -289,10 +288,6 @@ export interface RequestUploadUrlResponse {
   uploadURL: string;
   objectPath: string;
 }
-
-export type ListSitesParams = {
-  categoryId?: number;
-};
 
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;

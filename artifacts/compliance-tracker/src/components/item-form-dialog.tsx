@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
@@ -20,6 +20,7 @@ const formSchema = z.object({
   description: z.string().optional(),
   status: z.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: z.enum(["low", "medium", "high", "critical"]),
+  categoryId: z.coerce.number().optional().nullable(),
   siteId: z.coerce.number().optional().nullable(),
   contractorId: z.coerce.number().optional().nullable(),
   dueDate: z.string().optional().nullable(),
@@ -33,33 +34,26 @@ export function ItemFormDialog({
   isOpen,
   onClose,
   item = null,
+  defaultCategoryId = null,
+  defaultSiteId = null,
 }: {
   isOpen: boolean;
   onClose: () => void;
   item?: ComplianceItem | null;
+  defaultCategoryId?: number | null;
+  defaultSiteId?: number | null;
 }) {
   const { createItem, updateItem } = useAppMutations();
   const { data: categories = [] } = useListCategories();
   const { data: sites = [] } = useListSites();
   const { data: contractors = [] } = useListContractors();
 
-  // Group sites by category for the dropdown
-  const grouped = useMemo(() => {
-    const byCat = new Map<number | null, typeof sites>();
-    for (const s of sites) {
-      const k = s.categoryId ?? null;
-      if (!byCat.has(k)) byCat.set(k, [] as any);
-      byCat.get(k)!.push(s);
-    }
-    return categories.map(c => ({ category: c, sites: byCat.get(c.id) ?? [] }))
-      .concat(byCat.has(null) ? [{ category: { id: -1, name: "Uncategorised", color: "#94a3b8", createdAt: "" } as any, sites: byCat.get(null)! }] : []);
-  }, [categories, sites]);
-
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: "", description: "", status: "pending", priority: "medium",
-      siteId: undefined, contractorId: undefined, dueDate: "", leadTimeDays: 7, notes: "",
+      categoryId: undefined, siteId: undefined, contractorId: undefined,
+      dueDate: "", leadTimeDays: 7, notes: "",
     }
   });
 
@@ -70,6 +64,7 @@ export function ItemFormDialog({
         description: item.description || "",
         status: item.status,
         priority: item.priority,
+        categoryId: item.categoryId || undefined,
         siteId: item.siteId || undefined,
         contractorId: item.contractorId || undefined,
         dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
@@ -79,15 +74,19 @@ export function ItemFormDialog({
     } else {
       form.reset({
         title: "", description: "", status: "pending", priority: "medium",
-        siteId: undefined, contractorId: undefined, dueDate: "", leadTimeDays: 7, notes: "",
+        categoryId: defaultCategoryId ?? undefined,
+        siteId: defaultSiteId ?? undefined,
+        contractorId: undefined,
+        dueDate: "", leadTimeDays: 7, notes: "",
       });
     }
-  }, [item, isOpen, form]);
+  }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
 
   const onSubmit = async (data: FormValues) => {
     try {
       const payload = {
         ...data,
+        categoryId: data.categoryId || null,
         siteId: data.siteId || null,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
@@ -123,6 +122,29 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-1">
+              <Label className="text-xs font-medium">Category</Label>
+              <Select
+                value={form.watch("categoryId")?.toString() || "none"}
+                onValueChange={(val) => form.setValue("categoryId", val === "none" ? undefined : parseInt(val))}
+              >
+                <SelectTrigger className="bg-background h-9">
+                  <SelectValue placeholder="Uncategorised" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Uncategorised</SelectItem>
+                  {categories.map(c => (
+                    <SelectItem key={c.id} value={c.id.toString()}>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                        {c.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
               <Label className="text-xs font-medium">Site</Label>
               <Select
                 value={form.watch("siteId")?.toString() || "none"}
@@ -133,15 +155,8 @@ export function ItemFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  {grouped.map(({ category, sites: catSites }) => (
-                    catSites.length > 0 && (
-                      <SelectGroup key={category.id}>
-                        <SelectLabel className="text-xs uppercase tracking-wider opacity-60">{category.name}</SelectLabel>
-                        {catSites.map(s => (
-                          <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    )
+                  {sites.map(s => (
+                    <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

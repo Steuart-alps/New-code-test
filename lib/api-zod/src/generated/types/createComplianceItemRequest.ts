@@ -14,6 +14,7 @@ export interface CreateComplianceItemRequest {
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
   siteId?: number | null;
+  categoryId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: Date | null;
