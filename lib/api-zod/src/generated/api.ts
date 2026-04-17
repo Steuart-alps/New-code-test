@@ -21,9 +21,6 @@ export const ListCategoriesResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   color: zod.string(),
-  responsiblePerson: zod.string().nullish(),
-  address: zod.string().nullish(),
-  phone: zod.string().nullish(),
   createdAt: zod.date(),
 });
 export const ListCategoriesResponse = zod.array(ListCategoriesResponseItem);
@@ -33,10 +30,7 @@ export const ListCategoriesResponse = zod.array(ListCategoriesResponseItem);
  */
 export const CreateCategoryBody = zod.object({
   name: zod.string(),
-  color: zod.string(),
-  responsiblePerson: zod.string().nullish(),
-  address: zod.string().nullish(),
-  phone: zod.string().nullish(),
+  color: zod.string().optional(),
 });
 
 /**
@@ -50,9 +44,6 @@ export const GetCategoryResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   color: zod.string(),
-  responsiblePerson: zod.string().nullish(),
-  address: zod.string().nullish(),
-  phone: zod.string().nullish(),
   createdAt: zod.date(),
 });
 
@@ -66,18 +57,12 @@ export const UpdateCategoryParams = zod.object({
 export const UpdateCategoryBody = zod.object({
   name: zod.string().optional(),
   color: zod.string().optional(),
-  responsiblePerson: zod.string().nullish(),
-  address: zod.string().nullish(),
-  phone: zod.string().nullish(),
 });
 
 export const UpdateCategoryResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   color: zod.string(),
-  responsiblePerson: zod.string().nullish(),
-  address: zod.string().nullish(),
-  phone: zod.string().nullish(),
   createdAt: zod.date(),
 });
 
@@ -85,6 +70,90 @@ export const UpdateCategoryResponse = zod.object({
  * @summary Delete a category
  */
 export const DeleteCategoryParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary List sites (optionally filtered by category)
+ */
+export const ListSitesQueryParams = zod.object({
+  categoryId: zod.coerce.number().optional(),
+});
+
+export const ListSitesResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  categoryId: zod.number().nullish(),
+  name: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListSitesResponse = zod.array(ListSitesResponseItem);
+
+/**
+ * @summary Create a site
+ */
+export const CreateSiteBody = zod.object({
+  name: zod.string(),
+  categoryId: zod.number().nullish(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+});
+
+/**
+ * @summary Get a site
+ */
+export const GetSiteParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetSiteResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  categoryId: zod.number().nullish(),
+  name: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Update a site
+ */
+export const UpdateSiteParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateSiteBody = zod.object({
+  name: zod.string().optional(),
+  categoryId: zod.number().nullish(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+});
+
+export const UpdateSiteResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  categoryId: zod.number().nullish(),
+  name: zod.string(),
+  responsiblePerson: zod.string().nullish(),
+  address: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Delete a site
+ */
+export const DeleteSiteParams = zod.object({
   id: zod.coerce.number(),
 });
 
@@ -246,7 +315,7 @@ export const ListComplianceItemsQueryParams = zod.object({
   status: zod
     .enum(["pending", "in_progress", "completed", "overdue"])
     .optional(),
-  categoryId: zod.coerce.number().optional(),
+  siteId: zod.coerce.number().optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
   contractorId: zod.coerce.number().optional(),
 });
@@ -257,6 +326,8 @@ export const ListComplianceItemsResponseItem = zod.object({
   description: zod.string().nullish(),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
+  siteId: zod.number().nullish(),
+  siteName: zod.string().nullish(),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
@@ -291,7 +362,7 @@ export const CreateComplianceItemBody = zod.object({
   priority: zod
     .enum(["low", "medium", "high", "critical"])
     .default(createComplianceItemBodyPriorityDefault),
-  categoryId: zod.number().nullish(),
+  siteId: zod.number().nullish(),
   contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
@@ -312,6 +383,8 @@ export const GetComplianceItemResponse = zod.object({
   description: zod.string().nullish(),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
+  siteId: zod.number().nullish(),
+  siteName: zod.string().nullish(),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
@@ -342,7 +415,7 @@ export const UpdateComplianceItemBody = zod.object({
     .enum(["pending", "in_progress", "completed", "overdue"])
     .optional(),
   priority: zod.enum(["low", "medium", "high", "critical"]).optional(),
-  categoryId: zod.number().nullish(),
+  siteId: zod.number().nullish(),
   contractorId: zod.number().nullish(),
   assignedTo: zod.string().nullish(),
   dueDate: zod.date().nullish(),
@@ -356,6 +429,8 @@ export const UpdateComplianceItemResponse = zod.object({
   description: zod.string().nullish(),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
+  siteId: zod.number().nullish(),
+  siteName: zod.string().nullish(),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),
@@ -396,6 +471,8 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   description: zod.string().nullish(),
   status: zod.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: zod.enum(["low", "medium", "high", "critical"]),
+  siteId: zod.number().nullish(),
+  siteName: zod.string().nullish(),
   categoryId: zod.number().nullish(),
   categoryName: zod.string().nullish(),
   categoryColor: zod.string().nullish(),

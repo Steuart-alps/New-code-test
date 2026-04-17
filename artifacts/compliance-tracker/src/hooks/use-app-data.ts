@@ -11,6 +11,11 @@ import {
   useDeleteCategory,
   getListCategoriesQueryKey,
   getGetCategoryQueryKey,
+  useCreateSite,
+  useUpdateSite,
+  useDeleteSite,
+  getListSitesQueryKey,
+  getGetSiteQueryKey,
   useCreateContractor,
   useUpdateContractor,
   useDeleteContractor,
@@ -79,7 +84,7 @@ export function useAppMutations() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
-        toast({ title: "Site created" });
+        toast({ title: "Category created" });
       },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
     },
@@ -90,7 +95,7 @@ export function useAppMutations() {
       onSuccess: (_, { id }) => {
         queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetCategoryQueryKey(id) });
-        toast({ title: "Site updated" });
+        toast({ title: "Category updated" });
       },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
     },
@@ -100,8 +105,39 @@ export function useAppMutations() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListCategoriesQueryKey() });
-        toast({ title: "Site deleted" });
+        queryClient.invalidateQueries({ queryKey: [getListSitesQueryKey()[0]] });
+        toast({ title: "Category deleted" });
       },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const invalidateSites = () => {
+    queryClient.invalidateQueries({ queryKey: [getListSitesQueryKey()[0]] });
+    invalidateComplianceItems();
+  };
+
+  const createSite = useCreateSite({
+    mutation: {
+      onSuccess: () => { invalidateSites(); toast({ title: "Site created" }); },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const updateSite = useUpdateSite({
+    mutation: {
+      onSuccess: (_, { id }) => {
+        invalidateSites();
+        queryClient.invalidateQueries({ queryKey: getGetSiteQueryKey(id) });
+        toast({ title: "Site updated" });
+      },
+      onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    },
+  });
+
+  const deleteSite = useDeleteSite({
+    mutation: {
+      onSuccess: () => { invalidateSites(); toast({ title: "Site deleted" }); },
       onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
     },
   });
@@ -212,6 +248,9 @@ export function useAppMutations() {
     createCategory,
     updateCategory,
     deleteCategory,
+    createSite,
+    updateSite,
+    deleteSite,
     createContractor,
     updateContractor,
     deleteContractor,

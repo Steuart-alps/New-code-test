@@ -10,7 +10,7 @@ import type { ListComplianceItemsStatus } from "./listComplianceItemsStatus";
 
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
-  categoryId?: number;
+  siteId?: number;
   priority?: ListComplianceItemsPriority;
   contractorId?: number;
 };

@@ -6,9 +6,14 @@
  * OpenAPI spec version: 0.2.0
  */
 
-export interface Category {
+export interface Site {
   id: number;
+  clientId: number;
+  categoryId?: number | null;
   name: string;
-  color: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
   createdAt: Date;
+  updatedAt: Date;
 }

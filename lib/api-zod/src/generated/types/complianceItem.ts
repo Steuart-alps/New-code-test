@@ -14,6 +14,8 @@ export interface ComplianceItem {
   description?: string | null;
   status: ComplianceItemStatus;
   priority: ComplianceItemPriority;
+  siteId?: number | null;
+  siteName?: string | null;
   categoryId?: number | null;
   categoryName?: string | null;
   categoryColor?: string | null;

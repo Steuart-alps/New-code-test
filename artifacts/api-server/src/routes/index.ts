@@ -15,6 +15,7 @@ import billingRouter from "./billing";
 import gocardlessRouter from "./gocardless";
 import adminRouter from "./admin";
 import emailDomainRouter from "./emailDomain";
+import sitesRouter from "./sites";
 
 const router: IRouter = Router();
 
@@ -24,6 +25,7 @@ router.use("/billing", billingRouter);
 router.use(gocardlessRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
+router.use(sitesRouter);
 router.use(clientsRouter);
 router.use(usersRouter);
 router.use(departmentsRouter);

@@ -8,8 +8,5 @@
 
 export interface CreateCategoryRequest {
   name: string;
-  color: string;
-  responsiblePerson?: string | null;
-  address?: string | null;
-  phone?: string | null;
+  color?: string;
 }

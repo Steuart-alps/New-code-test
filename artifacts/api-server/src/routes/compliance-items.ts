@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { complianceItemsTable, categoriesTable, contractorsTable } from "@workspace/db/schema";
+import { complianceItemsTable, sitesTable, categoriesTable, contractorsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
   CreateComplianceItemBody,
@@ -18,11 +18,14 @@ const router: IRouter = Router();
 
 function buildItemResponse(
   item: typeof complianceItemsTable.$inferSelect,
+  site: typeof sitesTable.$inferSelect | null,
   category: typeof categoriesTable.$inferSelect | null,
   contractor: typeof contractorsTable.$inferSelect | null
 ) {
   return {
     ...item,
+    siteName: site?.name ?? null,
+    categoryId: site?.categoryId ?? null,
     categoryName: category?.name ?? null,
     categoryColor: category?.color ?? null,
     contractorName: contractor?.name ?? null,
@@ -43,7 +46,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   const conditions = [eq(complianceItemsTable.clientId, clientId)];
   if (query.status) conditions.push(eq(complianceItemsTable.status, query.status));
   if (query.priority) conditions.push(eq(complianceItemsTable.priority, query.priority));
-  if (query.categoryId) conditions.push(eq(complianceItemsTable.categoryId, query.categoryId));
+  if (query.siteId) conditions.push(eq(complianceItemsTable.siteId, query.siteId));
   if (query.contractorId) conditions.push(eq(complianceItemsTable.contractorId, query.contractorId));
 
   // Scope staff to their department
@@ -54,17 +57,30 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   const items = await db
     .select({
       item: complianceItemsTable,
+      site: sitesTable,
       category: categoriesTable,
       contractor: contractorsTable,
     })
     .from(complianceItemsTable)
-    .leftJoin(categoriesTable, eq(complianceItemsTable.categoryId, categoriesTable.id))
+    .leftJoin(sitesTable, eq(complianceItemsTable.siteId, sitesTable.id))
+    .leftJoin(categoriesTable, eq(sitesTable.categoryId, categoriesTable.id))
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
     .where(and(...conditions))
     .orderBy(complianceItemsTable.createdAt);
 
-  res.json(items.map(({ item, category, contractor }) => buildItemResponse(item, category, contractor)));
+  res.json(items.map(({ item, site, category, contractor }) => buildItemResponse(item, site, category, contractor)));
 });
+
+async function fetchJoinedItem(itemId: number) {
+  const rows = await db
+    .select({ item: complianceItemsTable, site: sitesTable, category: categoriesTable, contractor: contractorsTable })
+    .from(complianceItemsTable)
+    .leftJoin(sitesTable, eq(complianceItemsTable.siteId, sitesTable.id))
+    .leftJoin(categoriesTable, eq(sitesTable.categoryId, categoriesTable.id))
+    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .where(eq(complianceItemsTable.id, itemId));
+  return rows[0] ?? null;
+}
 
 router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
@@ -75,44 +91,37 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     return;
   }
 
+  if (body.siteId != null) {
+    const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
+    if (!s || s.clientId !== clientId) {
+      res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+  }
+
   const [item] = await db
     .insert(complianceItemsTable)
     .values({ ...body, clientId, updatedAt: new Date() })
     .returning();
 
-  const [catResult] = item.categoryId
-    ? await db.select().from(categoriesTable).where(eq(categoriesTable.id, item.categoryId))
-    : [];
-  const [conResult] = item.contractorId
-    ? await db.select().from(contractorsTable).where(eq(contractorsTable.id, item.contractorId))
-    : [];
-
-  res.status(201).json(buildItemResponse(item, catResult ?? null, conResult ?? null));
+  const joined = await fetchJoinedItem(item.id);
+  res.status(201).json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
 router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   const { id } = GetComplianceItemParams.parse({ id: Number(req.params.id) });
   const user = req.currentUser!;
 
-  const rows = await db
-    .select({ item: complianceItemsTable, category: categoriesTable, contractor: contractorsTable })
-    .from(complianceItemsTable)
-    .leftJoin(categoriesTable, eq(complianceItemsTable.categoryId, categoriesTable.id))
-    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.id, id));
-
-  if (!rows.length) {
+  const joined = await fetchJoinedItem(id);
+  if (!joined) {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }
-
-  const { item, category, contractor } = rows[0];
-  if (user.role !== "consultant" && item.clientId !== user.clientId) {
+  if (user.role !== "consultant" && joined.item.clientId !== user.clientId) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-
-  res.json(buildItemResponse(item, category, contractor));
+  res.json(buildItemResponse(joined.item, joined.site, joined.category, joined.contractor));
 });
 
 router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
@@ -126,24 +135,22 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
     return;
   }
 
+  if (body.siteId != null) {
+    const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
+    if (!s || s.clientId !== existing[0].clientId) {
+      res.status(400).json({ error: "Invalid siteId" });
+      return;
+    }
+  }
+
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
   if (body.status === "completed") updateData.completedAt = new Date();
   else if (body.status) updateData.completedAt = null;
 
-  const [updated] = await db
-    .update(complianceItemsTable)
-    .set(updateData)
-    .where(eq(complianceItemsTable.id, id))
-    .returning();
+  await db.update(complianceItemsTable).set(updateData).where(eq(complianceItemsTable.id, id));
 
-  const [catResult] = updated.categoryId
-    ? await db.select().from(categoriesTable).where(eq(categoriesTable.id, updated.categoryId))
-    : [];
-  const [conResult] = updated.contractorId
-    ? await db.select().from(contractorsTable).where(eq(contractorsTable.id, updated.contractorId))
-    : [];
-
-  res.json(buildItemResponse(updated, catResult ?? null, conResult ?? null));
+  const joined = await fetchJoinedItem(id);
+  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
 router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
@@ -176,20 +183,13 @@ router.patch("/compliance-items/:id/status", requireAuth, async (req, res) => {
     return;
   }
 
-  const [updated] = await db
+  await db
     .update(complianceItemsTable)
     .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
-    .where(eq(complianceItemsTable.id, id))
-    .returning();
+    .where(eq(complianceItemsTable.id, id));
 
-  const [catResult] = updated.categoryId
-    ? await db.select().from(categoriesTable).where(eq(categoriesTable.id, updated.categoryId))
-    : [];
-  const [conResult] = updated.contractorId
-    ? await db.select().from(contractorsTable).where(eq(contractorsTable.id, updated.contractorId))
-    : [];
-
-  res.json(buildItemResponse(updated, catResult ?? null, conResult ?? null));
+  const joined = await fetchJoinedItem(id);
+  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
 router.get("/dashboard/stats", requireAuth, async (req, res) => {

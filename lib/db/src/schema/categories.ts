@@ -10,9 +10,6 @@ export const categoriesTable = pgTable("categories", {
     .references(() => clientsTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   color: text("color").notNull().default("#6366f1"),
-  responsiblePerson: text("responsible_person"),
-  address: text("address"),
-  phone: text("phone"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useRoute } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useGetCategory, useListComplianceItems } from "@workspace/api-client-react";
+import { useGetSite, useListComplianceItems } from "@workspace/api-client-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MapPin, Phone, User, Building2, AlertTriangle, Clock, CheckCircle2, Circle, Loader2 } from "lucide-react";
@@ -25,19 +25,17 @@ function formatDate(d: any): string {
   if (!d) return "—";
   try {
     return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return "—";
-  }
+  } catch { return "—"; }
 }
 
 export default function SiteDetailPage() {
-  const [, params] = useRoute("/categories/:id");
+  const [, params] = useRoute("/sites/:id");
   const id = params ? Number(params.id) : NaN;
-  const { data: site, isLoading, error } = useGetCategory(id, { query: { enabled: Number.isFinite(id) } });
+  const { data: site, isLoading, error } = useGetSite(id, { query: { enabled: Number.isFinite(id) } });
   const { data: allItems = [] } = useListComplianceItems();
 
   const siteItems = useMemo(() => {
-    return allItems.filter(i => i.categoryId === id)
+    return allItems.filter(i => i.siteId === id)
       .sort((a, b) => {
         const order = { overdue: 0, in_progress: 1, pending: 2, completed: 3 };
         const ao = order[a.status as keyof typeof order] ?? 99;
@@ -58,27 +56,24 @@ export default function SiteDetailPage() {
   }, [siteItems]);
 
   if (isLoading) {
-    return (
-      <AppLayout title="Site"><div className="py-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div></AppLayout>
-    );
+    return <AppLayout title="Site"><div className="py-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div></AppLayout>;
+  }
+  if (error || !site) {
+    return <AppLayout title="Site"><div className="py-12 text-center text-muted-foreground">Site not found.</div></AppLayout>;
   }
 
-  if (error || !site) {
-    return (
-      <AppLayout title="Site"><div className="py-12 text-center text-muted-foreground">Site not found.</div></AppLayout>
-    );
-  }
+  const backHref = site.categoryId ? `/categories/${site.categoryId}` : "/categories";
 
   return (
     <AppLayout title={site.name}>
-      <Link href="/categories" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
-        <ArrowLeft className="w-4 h-4" /> Back to Sites
+      <Link href={backHref} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <ArrowLeft className="w-4 h-4" /> Back
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <Card className="p-6 lg:col-span-1 bg-card">
           <div className="flex items-center gap-3 mb-5">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${site.color}25`, color: site.color }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/10 text-primary">
               <Building2 className="w-5 h-5" />
             </div>
             <div>

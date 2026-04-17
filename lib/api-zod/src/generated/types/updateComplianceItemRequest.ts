@@ -13,7 +13,7 @@ export interface UpdateComplianceItemRequest {
   description?: string | null;
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
-  categoryId?: number | null;
+  siteId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: Date | null;

@@ -13,6 +13,8 @@ tags:
     description: Compliance item operations
   - name: categories
     description: Category operations
+  - name: sites
+    description: Site (location) operations
   - name: contractors
     description: Contractor operations
   - name: certificates
@@ -116,6 +118,104 @@ paths:
       operationId: deleteCategory
       tags: [categories]
       summary: Delete a category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /sites:
+    get:
+      operationId: listSites
+      tags: [sites]
+      summary: List sites (optionally filtered by category)
+      parameters:
+        - name: categoryId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Site"
+    post:
+      operationId: createSite
+      tags: [sites]
+      summary: Create a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSiteRequest"
+      responses:
+        "201":
+          description: Created site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+
+  /sites/{id}:
+    get:
+      operationId: getSite
+      tags: [sites]
+      summary: Get a site
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateSite
+      tags: [sites]
+      summary: Update a site
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSiteRequest"
+      responses:
+        "200":
+          description: Updated site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+    delete:
+      operationId: deleteSite
+      tags: [sites]
+      summary: Delete a site
       parameters:
         - name: id
           in: path
@@ -328,7 +428,7 @@ paths:
           schema:
             type: string
             enum: [pending, in_progress, completed, overdue]
-        - name: categoryId
+        - name: siteId
           in: query
           schema:
             type: integer
@@ -587,15 +687,6 @@ components:
           type: string
         color:
           type: string
-        responsiblePerson:
-          type: string
-          nullable: true
-        address:
-          type: string
-          nullable: true
-        phone:
-          type: string
-          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -612,6 +703,59 @@ components:
           type: string
         color:
           type: string
+      required:
+        - name
+
+    UpdateCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        color:
+          type: string
+
+    Site:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        categoryId:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        responsiblePerson:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - name
+        - createdAt
+        - updatedAt
+
+    CreateSiteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        categoryId:
+          type: integer
+          nullable: true
         responsiblePerson:
           type: string
           nullable: true
@@ -623,15 +767,15 @@ components:
           nullable: true
       required:
         - name
-        - color
 
-    UpdateCategoryRequest:
+    UpdateSiteRequest:
       type: object
       properties:
         name:
           type: string
-        color:
-          type: string
+        categoryId:
+          type: integer
+          nullable: true
         responsiblePerson:
           type: string
           nullable: true
@@ -769,6 +913,12 @@ components:
         priority:
           type: string
           enum: [low, medium, high, critical]
+        siteId:
+          type: integer
+          nullable: true
+        siteName:
+          type: string
+          nullable: true
         categoryId:
           type: integer
           nullable: true
@@ -838,7 +988,7 @@ components:
           type: string
           enum: [low, medium, high, critical]
           default: medium
-        categoryId:
+        siteId:
           type: integer
           nullable: true
         contractorId:
@@ -874,7 +1024,7 @@ components:
         priority:
           type: string
           enum: [low, medium, high, critical]
-        categoryId:
+        siteId:
           type: integer
           nullable: true
         contractorId:

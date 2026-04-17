@@ -70,7 +70,18 @@ export default function ExternalChecksPage() {
                   <tr key={item.id} className="bg-card hover:bg-muted/30 transition-colors">
                     <td className="px-6 py-4">
                       <p className="font-semibold text-foreground">{item.title}</p>
-                      {item.categoryName && <span className="text-xs px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground mt-1 inline-block border">{item.categoryName}</span>}
+                      {(item.siteName || item.categoryName) && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {item.categoryName && (
+                            <span className="text-xs px-2 py-0.5 rounded-md text-white inline-block" style={{ backgroundColor: item.categoryColor ?? "#6366f1" }}>
+                              {item.categoryName}
+                            </span>
+                          )}
+                          {item.siteName && (
+                            <span className="text-xs px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground inline-block border">{item.siteName}</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       {item.contractorName ? (

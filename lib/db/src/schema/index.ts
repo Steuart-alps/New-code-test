@@ -2,6 +2,7 @@ export * from "./clients";
 export * from "./departments";
 export * from "./users";
 export * from "./categories";
+export * from "./sites";
 export * from "./contractors";
 export * from "./certificates";
 export * from "./compliance-items";

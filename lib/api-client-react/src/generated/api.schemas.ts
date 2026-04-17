@@ -17,23 +17,42 @@ export interface Category {
   id: number;
   name: string;
   color: string;
-  responsiblePerson?: string | null;
-  address?: string | null;
-  phone?: string | null;
   createdAt: string;
 }
 
 export interface CreateCategoryRequest {
   name: string;
-  color: string;
-  responsiblePerson?: string | null;
-  address?: string | null;
-  phone?: string | null;
+  color?: string;
 }
 
 export interface UpdateCategoryRequest {
   name?: string;
   color?: string;
+}
+
+export interface Site {
+  id: number;
+  clientId: number;
+  categoryId?: number | null;
+  name: string;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSiteRequest {
+  name: string;
+  categoryId?: number | null;
+  responsiblePerson?: string | null;
+  address?: string | null;
+  phone?: string | null;
+}
+
+export interface UpdateSiteRequest {
+  name?: string;
+  categoryId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -105,6 +124,8 @@ export interface ComplianceItem {
   description?: string | null;
   status: ComplianceItemStatus;
   priority: ComplianceItemPriority;
+  siteId?: number | null;
+  siteName?: string | null;
   categoryId?: number | null;
   categoryName?: string | null;
   categoryColor?: string | null;
@@ -146,7 +167,7 @@ export interface CreateComplianceItemRequest {
   description?: string | null;
   status?: CreateComplianceItemRequestStatus;
   priority?: CreateComplianceItemRequestPriority;
-  categoryId?: number | null;
+  siteId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
@@ -179,7 +200,7 @@ export interface UpdateComplianceItemRequest {
   description?: string | null;
   status?: UpdateComplianceItemRequestStatus;
   priority?: UpdateComplianceItemRequestPriority;
-  categoryId?: number | null;
+  siteId?: number | null;
   contractorId?: number | null;
   assignedTo?: string | null;
   dueDate?: string | null;
@@ -269,9 +290,13 @@ export interface RequestUploadUrlResponse {
   objectPath: string;
 }
 
+export type ListSitesParams = {
+  categoryId?: number;
+};
+
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
-  categoryId?: number;
+  siteId?: number;
   priority?: ListComplianceItemsPriority;
   contractorId?: number;
 };
