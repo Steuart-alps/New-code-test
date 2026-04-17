@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin } from "../middleware/requireAuth";
+import { seedStarterContent } from "../lib/seedStarterContent";
 
 const router = Router();
 
@@ -40,6 +41,9 @@ router.get("/clients/:id", requireAuth, async (req, res) => {
 router.post("/clients", requireAuth, requireConsultant, async (req, res) => {
   const body = UpsertClientBody.parse(req.body);
   const rows = await db.insert(clientsTable).values(body).returning();
+  // Pre-populate the new business with example categories and compliance checks.
+  // Everything is fully editable / deletable by the user.
+  await seedStarterContent(rows[0].id);
   res.status(201).json(rows[0]);
 });
 
