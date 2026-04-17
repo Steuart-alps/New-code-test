@@ -1,9 +1,14 @@
-# Compliance Tracker — Multi-Tenant SaaS
+# ComplyTrack — Health & Safety Compliance for UK Businesses
 
 ## Overview
 
-Multi-tenant Health & Safety compliance tracking platform for H&S consultants.
-Each client organisation gets a branded login experience and scoped access to their data.
+Health & Safety compliance tracking platform for **individual UK businesses** managing
+their own compliance — across one site or many. Businesses can optionally invite their
+external H&S consultant in with scoped access when needed.
+
+The underlying architecture is multi-tenant (each business is isolated from others on
+the platform), but the product is positioned and sold direct to businesses, not to
+consultants managing portfolios of clients.
 
 - **External Compliance**: Contractor-managed visits, certificates, email reminders
 - **Internal Compliance**: Internal staff compliance checks

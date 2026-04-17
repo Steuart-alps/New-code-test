@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 
 const FEATURES = [
-  { icon: Users, title: "Multi-Client Management", desc: "Manage unlimited client businesses from one dashboard. Switch between clients instantly." },
-  { icon: Bell, title: "Automated Reminders", desc: "Email contractors automatically as compliance deadlines approach. Never miss a check." },
-  { icon: FileText, title: "Contractor Tracking", desc: "Track certificates, compliance items, and contractor records with full audit trails." },
-  { icon: BarChart3, title: "Dashboard & Reporting", desc: "At-a-glance compliance status for every client. Spot issues before they become problems." },
-  { icon: Lock, title: "Role-Based Access", desc: "Invite clients with granular permissions — admin, staff, or view-only access." },
-  { icon: Zap, title: "ICS Calendar Invites", desc: "Every reminder includes a calendar attachment so contractors can schedule immediately." },
+  { icon: Users, title: "Multi-Site Ready", desc: "Manage compliance across one site or many. Keep each location's records, contractors, and tasks neatly separated." },
+  { icon: Bell, title: "Automated Reminders", desc: "Contractors and staff get email reminders as deadlines approach — so nothing slips through the cracks." },
+  { icon: FileText, title: "Contractor & Certificate Tracking", desc: "Track every contractor, insurance certificate, and compliance check with a full audit trail." },
+  { icon: BarChart3, title: "Live Compliance Dashboard", desc: "See your compliance status at a glance and spot issues long before they become problems." },
+  { icon: Lock, title: "Role-Based Access", desc: "Invite your team — and your H&S consultant if you have one — with the right level of access for each person." },
+  { icon: Zap, title: "Calendar Invites Built In", desc: "Every reminder includes a calendar attachment so contractors and staff can book the work straight in." },
 ];
 
 const PLANS = [
@@ -17,31 +17,31 @@ const PLANS = [
     name: "Starter",
     price: "£49",
     period: "/month",
-    description: "Perfect for independent consultants",
-    features: ["Up to 3 client businesses", "Core compliance tracking", "Email reminders", "Contractor portal"],
+    description: "For a single-site business",
+    features: ["1 site", "Core compliance tracking", "Email reminders", "Contractor portal"],
     highlight: false,
   },
   {
     name: "Professional",
     price: "£99",
     period: "/month",
-    description: "For growing consultancy practices",
-    features: ["Up to 10 client businesses", "All modules", "Priority support", "Advanced reporting"],
+    description: "For multi-site businesses",
+    features: ["Up to 5 sites", "All modules", "Priority support", "Advanced reporting"],
     highlight: true,
   },
   {
     name: "Enterprise",
     price: "£249",
     period: "/month",
-    description: "Unlimited scale for large practices",
-    features: ["Unlimited clients", "White-label branding", "Dedicated onboarding", "SLA guarantee"],
+    description: "For larger organisations",
+    features: ["Unlimited sites", "Custom branding", "Dedicated onboarding", "SLA guarantee"],
     highlight: false,
   },
 ];
 
 const TESTIMONIALS = [
-  { quote: "ComplyTrack saved us hours every week. Our clients love getting automatic reminders instead of us chasing them.", author: "Sarah M.", role: "H&S Consultant, Leeds" },
-  { quote: "Managing 12 client accounts used to be chaos. Now I have everything in one place with full visibility.", author: "James K.", role: "Principal Consultant, London" },
+  { quote: "We used to chase contractors over email and spreadsheets. ComplyTrack does it all for us automatically — our certificates are always up to date.", author: "Sarah M.", role: "Operations Manager, Leeds" },
+  { quote: "We manage compliance across four sites. Having everything in one place — and giving our consultant view-only access when needed — has been a game-changer.", author: "James K.", role: "Facilities Director, London" },
 ];
 
 export default function LandingPage() {
@@ -70,14 +70,14 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center">
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <div className="inline-flex items-center gap-2 bg-primary/10 text-primary rounded-full px-4 py-1.5 text-sm font-medium mb-8">
-              <Star className="w-3.5 h-3.5" /> Trusted by H&S consultants across the UK
+              <Star className="w-3.5 h-3.5" /> Trusted by businesses across the UK
             </div>
             <h1 className="text-5xl sm:text-6xl font-bold font-display leading-tight mb-6 tracking-tight">
-              Health & Safety compliance,<br className="hidden sm:block" />
+              Your Health & Safety compliance,<br className="hidden sm:block" />
               <span className="text-primary"> finally under control.</span>
             </h1>
             <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed">
-              ComplyTrack helps H&S consultants manage multiple client businesses, track contractor compliance, and send automated reminders — all from one platform.
+              ComplyTrack helps your business stay on top of compliance — across one site or many. Track contractors, send automated reminders, and give your H&S consultant access whenever you need a hand.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" className="px-8 py-6 text-base shadow-lg shadow-primary/25" onClick={() => navigate("/signup")}>
@@ -112,8 +112,8 @@ export default function LandingPage() {
       <section className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold font-display mb-3">Everything you need to run a compliance practice</h2>
-            <p className="text-muted-foreground text-lg">Built specifically for Health & Safety consultants in the UK.</p>
+            <h2 className="text-3xl font-bold font-display mb-3">Everything you need to stay compliant</h2>
+            <p className="text-muted-foreground text-lg">Built for UK businesses managing their own Health & Safety compliance.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {FEATURES.map((f, i) => (
@@ -139,7 +139,7 @@ export default function LandingPage() {
       {/* Testimonials */}
       <section className="bg-muted/20 border-y border-border/50 py-20 px-6">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-2xl font-bold font-display text-center mb-12">What consultants are saying</h2>
+          <h2 className="text-2xl font-bold font-display text-center mb-12">What businesses are saying</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {TESTIMONIALS.map((t) => (
               <div key={t.author} className="bg-card border border-border/50 rounded-2xl p-6">
@@ -162,7 +162,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
             <h2 className="text-3xl font-bold font-display mb-3">Simple, transparent pricing</h2>
-            <p className="text-muted-foreground text-lg">Choose the plan that fits your practice. Upgrade or downgrade anytime.</p>
+            <p className="text-muted-foreground text-lg">Choose the plan that fits your business. Upgrade or downgrade anytime.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {PLANS.map((plan) => (
@@ -212,8 +212,8 @@ export default function LandingPage() {
       {/* CTA Banner */}
       <section className="bg-primary py-20 px-6">
         <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-3xl font-bold text-white font-display mb-4">Ready to take control of your compliance practice?</h2>
-          <p className="text-white/70 text-lg mb-8">Join consultants across the UK using ComplyTrack to run more efficient, more profitable practices.</p>
+          <h2 className="text-3xl font-bold text-white font-display mb-4">Ready to take control of your compliance?</h2>
+          <p className="text-white/70 text-lg mb-8">Join businesses across the UK using ComplyTrack to stay safe, organised, and audit-ready.</p>
           <Button size="lg" variant="secondary" className="px-8 py-6 text-base" onClick={() => navigate("/signup")}>
             Create your free account <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
