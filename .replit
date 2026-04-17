@@ -28,3 +28,8 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+DEMO_SEED_TOKEN = "fdbef191917ee87698dc9782e149139d0324804ca5df7475076e6a23139e0acd"

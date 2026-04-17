@@ -13,6 +13,7 @@ import notificationsRouter from "./notifications";
 import storageRouter from "./storage";
 import billingRouter from "./billing";
 import gocardlessRouter from "./gocardless";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,7 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use("/billing", billingRouter);
 router.use(gocardlessRouter);
+router.use(adminRouter);
 router.use(clientsRouter);
 router.use(usersRouter);
 router.use(departmentsRouter);
