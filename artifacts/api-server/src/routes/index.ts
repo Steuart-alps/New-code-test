@@ -35,6 +35,6 @@ router.use(contractorsRouter);
 router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(notificationsRouter);
-router.use("/storage", storageRouter);
+router.use(storageRouter);
 
 export default router;
