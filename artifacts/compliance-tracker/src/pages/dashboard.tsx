@@ -171,7 +171,11 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
+                <Link
+                  href="/external-checks"
+                  className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50 hover:bg-muted hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  aria-label="View all compliance checks"
+                >
                   <div className="bg-emerald-500/20 p-2.5 rounded-lg mr-4">
                     <Briefcase className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                   </div>
@@ -180,9 +184,13 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">Contractor requirements</p>
                   </div>
                   <span className="text-xl font-display font-bold">{stats.total}</span>
-                </div>
+                </Link>
 
-                <div className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50">
+                <Link
+                  href="/contractors"
+                  className="flex items-center p-3 bg-muted/50 rounded-xl border border-border/50 hover:bg-muted hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  aria-label="View all contractors"
+                >
                   <div className="bg-indigo-500/20 p-2.5 rounded-lg mr-4">
                     <Building className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                   </div>
@@ -191,7 +199,7 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">Active in system</p>
                   </div>
                   <span className="text-xl font-display font-bold">{stats.contractorsCount}</span>
-                </div>
+                </Link>
               </div>
             </CardContent>
           </Card>
