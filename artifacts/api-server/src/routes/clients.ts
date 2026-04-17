@@ -70,6 +70,19 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
   res.json(rows[0]);
 });
 
+// POST /api/starter-pack/load — let an existing user re-seed their business
+// with the starter categories and example checks. Useful for accounts that
+// were created before automatic seeding was wired into registration.
+router.post("/starter-pack/load", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  if (!user.clientId) {
+    res.status(400).json({ error: "Your account isn't linked to a business yet." });
+    return;
+  }
+  await seedStarterContent(user.clientId);
+  res.json({ ok: true });
+});
+
 router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) => {
   const id = Number(req.params.id);
   await db.delete(clientsTable).where(eq(clientsTable.id, id));
