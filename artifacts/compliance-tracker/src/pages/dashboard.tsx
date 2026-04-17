@@ -120,14 +120,14 @@ export default function Dashboard() {
           <CardContent className="p-6">
             <div className="flex justify-between items-start">
               <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Expiring Certs</p>
-                <p className="text-3xl font-display font-bold text-orange-500">{stats.certificatesExpiringSoon}</p>
+                <p className="text-sm font-medium text-muted-foreground">Expired Certs</p>
+                <p className="text-3xl font-display font-bold text-red-600">{(stats as any).certificatesExpired ?? 0}</p>
               </div>
-              <div className="p-3 bg-orange-500/10 rounded-xl">
-                <FileWarning className="w-5 h-5 text-orange-500" />
+              <div className="p-3 bg-red-600/10 rounded-xl">
+                <FileWarning className="w-5 h-5 text-red-600" />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-4">Contractor certificates</p>
+            <p className="text-xs text-muted-foreground mt-4">Contractor certificates past expiry</p>
           </CardContent>
         </Card>
       </div>

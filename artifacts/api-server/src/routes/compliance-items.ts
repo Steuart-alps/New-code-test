@@ -314,10 +314,13 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const certificatesExpiringSoon = certificates.filter(c =>
     c.expiryDate && new Date(c.expiryDate) <= thirtyDaysFromNow && new Date(c.expiryDate) >= now
   ).length;
+  const certificatesExpired = certificates.filter(c =>
+    c.expiryDate && new Date(c.expiryDate) < now
+  ).length;
 
   res.json({
     total, pending, inProgress, completed, overdue, criticalItems, dueSoon, completionRate,
-    contractorsCount, certificatesExpiringSoon
+    contractorsCount, certificatesExpiringSoon, certificatesExpired
   });
 });
 
