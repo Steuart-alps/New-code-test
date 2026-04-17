@@ -121,8 +121,7 @@ async function main() {
   console.log(`✓ Created 12 compliance items (2 overdue, 2 in progress, 5 pending, 3 completed)`);
 
   console.log("\n✓ Demo seed complete!\n");
-  console.log("Sign in at /login with:");
-  console.log(`  Viewer: ${DEMO.viewerEmail}  /  ${DEMO.viewerPassword}`);
+  console.log("Sign in at /login with the demo credentials.");
 
   await pool.end();
 }
