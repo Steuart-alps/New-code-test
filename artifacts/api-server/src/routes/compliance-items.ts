@@ -102,6 +102,7 @@ async function fetchJoinedItem(itemId: number) {
 
 router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
+  const applyToAllSites = req.body?.applyToAllSites === true;
   const body = CreateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
   if (!clientId) {
@@ -122,6 +123,34 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
       res.status(400).json({ error: "Invalid categoryId" });
       return;
     }
+  }
+  if (body.contractorId != null) {
+    const [k] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, body.contractorId));
+    if (!k || k.clientId !== clientId) {
+      res.status(400).json({ error: "Invalid contractorId" });
+      return;
+    }
+  }
+
+  // "All Sites" mode: create one independent compliance check per site so each
+  // can have its own certificate, due date, contractor etc.
+  if (applyToAllSites) {
+    const sites = await db.select().from(sitesTable).where(eq(sitesTable.clientId, clientId));
+    if (sites.length === 0) {
+      res.status(400).json({ error: "No sites exist yet — add a site before using 'All Sites'." });
+      return;
+    }
+    const { siteId: _ignored, ...rest } = body;
+    const inserted = await db
+      .insert(complianceItemsTable)
+      .values(sites.map(s => ({ ...rest, siteId: s.id, clientId, updatedAt: new Date() })))
+      .returning();
+
+    const joined = await Promise.all(inserted.map(i => fetchJoinedItem(i.id)));
+    res.status(201).json(
+      joined.map(j => buildItemResponse(j!.item, j!.site, j!.category, j!.contractor)),
+    );
+    return;
   }
 
   const [item] = await db
@@ -171,6 +200,13 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
     const [c] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, body.categoryId));
     if (!c || c.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid categoryId" });
+      return;
+    }
+  }
+  if (body.contractorId != null) {
+    const [k] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, body.contractorId));
+    if (!k || k.clientId !== existing[0].clientId) {
+      res.status(400).json({ error: "Invalid contractorId" });
       return;
     }
   }

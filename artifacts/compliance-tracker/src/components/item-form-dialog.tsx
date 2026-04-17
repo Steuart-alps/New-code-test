@@ -15,13 +15,17 @@ import {
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
 
+const ALL_SITES = "__all__";
+
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
   status: z.enum(["pending", "in_progress", "completed", "overdue"]),
   priority: z.enum(["low", "medium", "high", "critical"]),
   categoryId: z.coerce.number().optional().nullable(),
-  siteId: z.coerce.number().optional().nullable(),
+  // siteId is a string here so we can carry the special "__all__" marker;
+  // it gets converted into either a numeric id or the applyToAllSites flag at submit time.
+  siteId: z.string().optional().nullable(),
   contractorId: z.coerce.number().optional().nullable(),
   dueDate: z.string().optional().nullable(),
   leadTimeDays: z.coerce.number().optional().nullable(),
@@ -65,7 +69,7 @@ export function ItemFormDialog({
         status: item.status,
         priority: item.priority,
         categoryId: item.categoryId || undefined,
-        siteId: item.siteId || undefined,
+        siteId: item.siteId ? String(item.siteId) : undefined,
         contractorId: item.contractorId || undefined,
         dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
         leadTimeDays: item.leadTimeDays || 7,
@@ -75,7 +79,7 @@ export function ItemFormDialog({
       form.reset({
         title: "", description: "", status: "pending", priority: "medium",
         categoryId: defaultCategoryId ?? undefined,
-        siteId: defaultSiteId ?? undefined,
+        siteId: defaultSiteId ? String(defaultSiteId) : undefined,
         contractorId: undefined,
         dueDate: "", leadTimeDays: 7, notes: "",
       });
@@ -84,18 +88,23 @@ export function ItemFormDialog({
 
   const onSubmit = async (data: FormValues) => {
     try {
+      const isAllSites = !item && data.siteId === ALL_SITES;
+      const numericSiteId =
+        data.siteId && data.siteId !== ALL_SITES ? parseInt(data.siteId, 10) : null;
+
       const payload = {
         ...data,
         categoryId: data.categoryId || null,
-        siteId: data.siteId || null,
+        siteId: isAllSites ? null : numericSiteId,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
         assignedTo: null,
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
+        ...(isAllSites ? { applyToAllSites: true } : {}),
       };
 
-      if (item) await updateItem.mutateAsync({ id: item.id, data: payload });
-      else await createItem.mutateAsync({ data: payload });
+      if (item) await updateItem.mutateAsync({ id: item.id, data: payload as any });
+      else await createItem.mutateAsync({ data: payload as any });
       onClose();
     } catch (e) {
       // handled by mutation
@@ -147,19 +156,31 @@ export function ItemFormDialog({
             <div className="space-y-1">
               <Label className="text-xs font-medium">Site</Label>
               <Select
-                value={form.watch("siteId")?.toString() || "none"}
-                onValueChange={(val) => form.setValue("siteId", val === "none" ? undefined : parseInt(val))}
+                value={form.watch("siteId") || "none"}
+                onValueChange={(val) =>
+                  form.setValue("siteId", val === "none" ? undefined : val)
+                }
               >
                 <SelectTrigger className="bg-background h-9">
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
+                  {!item && sites.length > 0 && (
+                    <SelectItem value={ALL_SITES}>
+                      All Sites (creates one check per site)
+                    </SelectItem>
+                  )}
                   {sites.map(s => (
                     <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!item && form.watch("siteId") === ALL_SITES && (
+                <p className="text-xs text-muted-foreground">
+                  {sites.length} separate check{sites.length === 1 ? "" : "s"} will be created — one for each site. Each can be edited independently.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">

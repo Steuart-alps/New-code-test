@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 
 const router: IRouter = Router();
 
@@ -58,6 +59,13 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
       updatedAt: new Date(),
     })
     .returning();
+
+  // Pre-populate the new site with the starter pack of compliance checks,
+  // unless the caller explicitly opted out.
+  if (req.body.seedStarterChecks !== false) {
+    await seedSiteStarterChecks(clientId, site.id);
+  }
+
   res.status(201).json(site);
 });
 

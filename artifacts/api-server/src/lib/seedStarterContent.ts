@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { categoriesTable, complianceItemsTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 import { logger } from "./logger";
 
 const daysFromNow = (n: number) => {
@@ -90,5 +91,54 @@ export async function seedStarterContent(clientId: number) {
     }
   } catch (err) {
     logger.error({ err, clientId }, "Failed to seed starter content for new client");
+  }
+}
+
+/**
+ * Seed a brand-new SITE with the starter pack of compliance checks. Reuses
+ * existing categories on the client (matching by name) and creates any that
+ * are missing. All checks are tagged with the given siteId so they're tracked
+ * independently per site.
+ */
+export async function seedSiteStarterChecks(clientId: number, siteId: number) {
+  try {
+    // Look up existing categories for this client so we can reuse them.
+    const existing = await db
+      .select()
+      .from(categoriesTable)
+      .where(eq(categoriesTable.clientId, clientId));
+    const byName = new Map(existing.map((c) => [c.name.toLowerCase(), c]));
+
+    for (const cat of STARTER) {
+      let categoryId: number;
+      const found = byName.get(cat.name.toLowerCase());
+      if (found) {
+        categoryId = found.id;
+      } else {
+        const [inserted] = await db
+          .insert(categoriesTable)
+          .values({ clientId, name: cat.name, color: cat.color })
+          .returning();
+        categoryId = inserted.id;
+      }
+
+      if (cat.checks.length === 0) continue;
+
+      await db.insert(complianceItemsTable).values(
+        cat.checks.map((c) => ({
+          clientId,
+          siteId,
+          categoryId,
+          title: c.title,
+          description: c.description,
+          status: "pending" as const,
+          priority: c.priority,
+          dueDate: daysFromNow(c.dueInDays),
+          leadTimeDays: c.leadTimeDays,
+        })),
+      );
+    }
+  } catch (err) {
+    logger.error({ err, clientId, siteId }, "Failed to seed starter checks for new site");
   }
 }

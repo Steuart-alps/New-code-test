@@ -18,8 +18,9 @@ interface FormState {
   responsiblePerson: string;
   address: string;
   phone: string;
+  seedStarterChecks: boolean;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "" };
+const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true };
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -51,6 +52,7 @@ export default function SitesPage() {
       responsiblePerson: s.responsiblePerson ?? "",
       address: s.address ?? "",
       phone: s.phone ?? "",
+      seedStarterChecks: false,
     });
     setIsOpen(true);
   };
@@ -58,14 +60,19 @@ export default function SitesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    const payload = {
+    const basePayload = {
       name: form.name.trim(),
       responsiblePerson: form.responsiblePerson.trim() || null,
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
     };
-    if (editingId) await updateSite.mutateAsync({ id: editingId, data: payload });
-    else await createSite.mutateAsync({ data: payload });
+    if (editingId) {
+      await updateSite.mutateAsync({ id: editingId, data: basePayload });
+    } else {
+      await createSite.mutateAsync({
+        data: { ...basePayload, seedStarterChecks: form.seedStarterChecks } as any,
+      });
+    }
     setIsOpen(false);
     setForm(empty);
   };
@@ -158,6 +165,23 @@ export default function SitesPage() {
               <Label>Site Telephone</Label>
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
             </div>
+
+            {!editingId && (
+              <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                  checked={form.seedStarterChecks}
+                  onChange={e => setForm({ ...form, seedStarterChecks: e.target.checked })}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Pre-populate with starter compliance checks</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Adds the standard Fire Safety, Electrical, Staff Training and Premises checks to this site. You can edit or remove any of them afterwards.
+                  </span>
+                </span>
+              </label>
+            )}
           </form>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsOpen(false)} type="button">Cancel</Button>
