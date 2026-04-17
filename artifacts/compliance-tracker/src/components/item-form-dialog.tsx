@@ -88,23 +88,44 @@ export function ItemFormDialog({
 
   const onSubmit = async (data: FormValues) => {
     try {
-      const isAllSites = !item && data.siteId === ALL_SITES;
+      const isAllSites = data.siteId === ALL_SITES;
       const numericSiteId =
         data.siteId && data.siteId !== ALL_SITES ? parseInt(data.siteId, 10) : null;
 
-      const payload = {
+      const basePayload = {
         ...data,
         categoryId: data.categoryId || null,
-        siteId: isAllSites ? null : numericSiteId,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
         assignedTo: null,
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
-        ...(isAllSites ? { applyToAllSites: true } : {}),
       };
 
-      if (item) await updateItem.mutateAsync({ id: item.id, data: payload as any });
-      else await createItem.mutateAsync({ data: payload as any });
+      if (item) {
+        // Edit mode: always update the current item with its existing site,
+        // then optionally fan out copies to every OTHER site if "All Sites"
+        // was selected. This avoids duplicating the current site's check.
+        await updateItem.mutateAsync({
+          id: item.id,
+          data: { ...basePayload, siteId: numericSiteId ?? item.siteId ?? null } as any,
+        });
+
+        if (isAllSites) {
+          const otherSites = sites.filter((s) => s.id !== item.siteId);
+          for (const s of otherSites) {
+            await createItem.mutateAsync({
+              data: { ...basePayload, siteId: s.id } as any,
+            });
+          }
+        }
+      } else {
+        const payload = {
+          ...basePayload,
+          siteId: isAllSites ? null : numericSiteId,
+          ...(isAllSites ? { applyToAllSites: true } : {}),
+        };
+        await createItem.mutateAsync({ data: payload as any });
+      }
       onClose();
     } catch (e) {
       // handled by mutation
@@ -166,9 +187,9 @@ export function ItemFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  {!item && sites.length > 0 && (
+                  {sites.length > 0 && (
                     <SelectItem value={ALL_SITES}>
-                      All Sites (creates one check per site)
+                      {item ? "All Sites (copy this check to every site)" : "All Sites (creates one check per site)"}
                     </SelectItem>
                   )}
                   {sites.map(s => (
@@ -176,9 +197,11 @@ export function ItemFormDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {!item && form.watch("siteId") === ALL_SITES && (
+              {form.watch("siteId") === ALL_SITES && (
                 <p className="text-xs text-muted-foreground">
-                  {sites.length} separate check{sites.length === 1 ? "" : "s"} will be created — one for each site. Each can be edited independently.
+                  {item
+                    ? `This check will be updated, and a copy will be created for the ${Math.max(0, sites.length - (item.siteId ? 1 : 0))} other site${Math.max(0, sites.length - (item.siteId ? 1 : 0)) === 1 ? "" : "s"}. Each copy can then be edited independently.`
+                    : `${sites.length} separate check${sites.length === 1 ? "" : "s"} will be created — one for each site. Each can be edited independently.`}
                 </p>
               )}
             </div>
