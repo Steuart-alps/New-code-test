@@ -10,6 +10,9 @@ import { WebhookHandlers } from "./lib/webhookHandlers";
 
 const app: Express = express();
 
+// Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
