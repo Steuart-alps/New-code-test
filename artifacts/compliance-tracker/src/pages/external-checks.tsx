@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useListComplianceItems, useSendReminderForItem } from "@workspace/api-client-react";
+import { useListComplianceItems, useSendReminderForItem, useListSites } from "@workspace/api-client-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { toast } from "sonner";
 import { StatusBadge, PriorityBadge } from "@/components/badges";
@@ -45,13 +46,34 @@ export default function ExternalChecksPage() {
     return (v && (v in FILTER_LABELS) ? (v as FilterKey) : null);
   }, [search]);
 
-  const { data: rawItems = [], isLoading } = useListComplianceItems({ type: "external" });
+  const siteParam = useMemo(() => {
+    const v = new URLSearchParams(search).get("siteId");
+    return v ?? "all";
+  }, [search]);
+
+  const { data: rawItems = [], isLoading } = useListComplianceItems({});
+  const { data: sites = [] } = useListSites();
+
+  const setSiteFilter = (value: string) => {
+    const params = new URLSearchParams(search);
+    if (value === "all") params.delete("siteId");
+    else params.set("siteId", value);
+    const qs = params.toString();
+    navigate(`/external-checks${qs ? `?${qs}` : ""}`);
+  };
+
+  const siteFilteredItems = useMemo(() => {
+    if (siteParam === "all") return rawItems;
+    if (siteParam === "none") return (rawItems as any[]).filter((i) => !i.siteId);
+    const id = Number(siteParam);
+    return (rawItems as any[]).filter((i) => i.siteId === id);
+  }, [rawItems, siteParam]);
 
   const items = useMemo(() => {
-    if (!filterParam) return rawItems;
+    if (!filterParam) return siteFilteredItems;
     const now = new Date();
     const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    return (rawItems as any[]).filter((i) => {
+    return (siteFilteredItems as any[]).filter((i) => {
       switch (filterParam) {
         case "due-soon": {
           if (!i.dueDate || i.status === "completed") return false;
@@ -99,13 +121,34 @@ export default function ExternalChecksPage() {
     },
   });
 
+  const selectedSiteName =
+    siteParam === "all"
+      ? null
+      : siteParam === "none"
+        ? "No site assigned"
+        : (sites as any[]).find((s) => String(s.id) === siteParam)?.name ?? null;
+
   return (
     <AppLayout title="Compliance Checks">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <p className="text-muted-foreground">
-          {filterParam ? FILTER_LABELS[filterParam].description : "Compliance requirements managed by external contractors."}
+          {filterParam ? FILTER_LABELS[filterParam].description : "All compliance checks across the business."}
+          {selectedSiteName && <span className="ml-1">Site: <span className="font-semibold text-foreground">{selectedSiteName}</span>.</span>}
         </p>
-        <div className="flex gap-3 w-full sm:w-auto">
+        <div className="flex gap-3 w-full sm:w-auto items-center">
+          <Select value={siteParam} onValueChange={setSiteFilter}>
+            <SelectTrigger className="w-[180px] bg-card shadow-sm">
+              <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder="All sites" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sites</SelectItem>
+              {(sites as any[]).map((s) => (
+                <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+              ))}
+              <SelectItem value="none">No site assigned</SelectItem>
+            </SelectContent>
+          </Select>
           <Button 
             variant="secondary" 
             onClick={() => triggerReminders.mutate()} 
