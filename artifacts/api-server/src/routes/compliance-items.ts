@@ -16,6 +16,25 @@ import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requ
 
 const router: IRouter = Router();
 
+/**
+ * Coerce ISO date-time strings on the request body into Date objects.
+ * The OpenAPI spec types these as `string` (so the wire format is JSON-safe),
+ * but the generated zod validators are `z.date()`. This bridge keeps both
+ * happy without regenerating with coerce-dates.
+ */
+function coerceDates<T extends Record<string, unknown>>(body: T, fields: (keyof T)[]): T {
+  const out: Record<string, unknown> = { ...body };
+  for (const f of fields) {
+    const v = out[f as string];
+    if (typeof v === "string" && v.length > 0) {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) out[f as string] = d;
+    }
+  }
+  return out as T;
+}
+const DATE_FIELDS = ["dueDate", "completedAt", "notificationSentAt"] as const;
+
 function buildItemResponse(
   item: typeof complianceItemsTable.$inferSelect,
   site: typeof sitesTable.$inferSelect | null,
@@ -83,7 +102,7 @@ async function fetchJoinedItem(itemId: number) {
 
 router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
-  const body = CreateComplianceItemBody.parse(req.body);
+  const body = CreateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
@@ -132,7 +151,7 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
 
 router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
-  const body = UpdateComplianceItemBody.parse(req.body);
+  const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const user = req.currentUser!;
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));

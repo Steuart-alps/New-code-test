@@ -1,4 +1,5 @@
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { ZodError } from "zod";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -90,5 +91,24 @@ app.use(sessionMiddleware);
 app.use(loadUser);
 
 app.use("/api", router);
+
+// JSON error handler for /api/* — keeps responses copy-pasteable for users
+// instead of returning Express's default HTML stack page.
+app.use("/api", (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (res.headersSent) return _next(err);
+
+  if (err instanceof ZodError) {
+    const issue = err.issues[0];
+    const path = issue?.path?.join(".") || "input";
+    logger.warn({ err }, "Validation error");
+    return res.status(400).json({ error: `Validation error on '${path}': ${issue?.message ?? "invalid value"}` });
+  }
+
+  const e = err as { status?: number; statusCode?: number; message?: string };
+  const status = e?.status ?? e?.statusCode ?? 500;
+  const message = status >= 500 ? "Something went wrong on our end. Please try again." : (e?.message ?? "Request failed");
+  logger.error({ err }, "Unhandled API error");
+  res.status(status).json({ error: message });
+});
 
 export default app;

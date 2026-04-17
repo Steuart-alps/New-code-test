@@ -150,11 +150,24 @@ function truncate(text: string, maxLength = 300): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+function stripHtml(text: string): string {
+  // If the body looks like an HTML error page, surface a concise message
+  // instead of dumping markup into the UI.
+  const trimmed = text.trim();
+  if (/^<(!doctype|html|head|body)/i.test(trimmed)) {
+    const titleMatch = trimmed.match(/<title>([^<]+)<\/title>/i);
+    const preMatch = trimmed.match(/<pre>([^<]+)<\/pre>/i);
+    const inner = (preMatch?.[1] ?? titleMatch?.[1] ?? "").trim();
+    return inner ? truncate(inner) : "Server returned an HTML error page";
+  }
+  return text;
+}
+
 function buildErrorMessage(response: Response, data: unknown): string {
   const prefix = `HTTP ${response.status} ${response.statusText}`;
 
   if (typeof data === "string") {
-    const text = data.trim();
+    const text = stripHtml(data).trim();
     return text ? `${prefix}: ${truncate(text)}` : prefix;
   }
 
