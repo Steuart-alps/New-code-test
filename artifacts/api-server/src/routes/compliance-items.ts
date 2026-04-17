@@ -315,7 +315,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const { certificatesTable } = await import("@workspace/db/schema");
   const { or, sql: dsql } = await import("drizzle-orm");
 
-  const [items, contractors, certificates] = await Promise.all([
+  const [items, contractors, certificates, sites] = await Promise.all([
     db.select().from(complianceItemsTable).where(and(...itemConditions)),
     db.select().from(contractorsTable).where(eq(contractorsTable.clientId, clientId)),
     // Tenant-scoped certificate fetch: a cert belongs to this tenant if it links
@@ -332,6 +332,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
           dsql`${certificatesTable.itemId} IN (SELECT id FROM ${complianceItemsTable} WHERE ${complianceItemsTable.clientId} = ${clientId})`,
         ),
       ),
+    db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.clientId, clientId)),
   ]);
 
   const total = items.length;
@@ -358,9 +359,47 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
     c.expiryDate && new Date(c.expiryDate) < now
   ).length;
 
+  // Compliance rate: a check counts as "in date" when it is completed, has no
+  // due date, or its due date is more than 7 days away. Anything overdue or
+  // due within the next 7 days is treated as out of compliance.
+  const isInDate = (i: typeof items[number]) => {
+    if (i.status === "completed") return true;
+    if (!i.dueDate) return true;
+    return new Date(i.dueDate) > sevenDaysFromNow;
+  };
+  const inDateCount = items.filter(isInDate).length;
+  const complianceRate = total > 0 ? Math.round((inDateCount / total) * 100) : 0;
+
+  // Per-site breakdown so the dashboard can render a clickable list of sites
+  // each with their own compliance percentage. "No site assigned" buckets
+  // anything without a siteId so it's still actionable.
+  const bySite = new Map<number | "none", { siteId: number | null; siteName: string; total: number; inDate: number }>();
+  for (const s of sites) {
+    bySite.set(s.id, { siteId: s.id, siteName: s.name, total: 0, inDate: 0 });
+  }
+  bySite.set("none", { siteId: null, siteName: "No site assigned", total: 0, inDate: 0 });
+  for (const it of items) {
+    const key = it.siteId ?? "none";
+    const bucket = bySite.get(key);
+    if (!bucket) continue;
+    bucket.total += 1;
+    if (isInDate(it)) bucket.inDate += 1;
+  }
+  const complianceRateBySite = Array.from(bySite.values())
+    .filter(b => b.total > 0)
+    .map(b => ({
+      siteId: b.siteId,
+      siteName: b.siteName,
+      total: b.total,
+      inDate: b.inDate,
+      rate: Math.round((b.inDate / b.total) * 100),
+    }))
+    .sort((a, b) => a.rate - b.rate);
+
   res.json({
     total, pending, inProgress, completed, overdue, criticalItems, dueSoon, completionRate,
-    contractorsCount, certificatesExpiringSoon, certificatesExpired
+    complianceRate, complianceRateBySite,
+    contractorsCount, certificatesExpiringSoon, certificatesExpired,
   });
 });
 

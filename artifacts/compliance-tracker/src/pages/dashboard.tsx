@@ -68,22 +68,25 @@ export default function Dashboard() {
   return (
     <AppLayout title="Overview">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <Card className="shadow-lg shadow-black/5 border-border/50 bg-gradient-to-br from-card to-card/50">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">Completion Rate</p>
-                <p className="text-3xl font-display font-bold">{stats.completionRate}%</p>
+        <Link href="/external-checks">
+          <Card className="shadow-lg shadow-black/5 border-border/50 bg-gradient-to-br from-card to-card/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Compliance Rate</p>
+                  <p className="text-3xl font-display font-bold">{(stats as any).complianceRate ?? 0}%</p>
+                </div>
+                <div className="p-3 bg-primary/10 rounded-xl">
+                  <Activity className="w-5 h-5 text-primary" />
+                </div>
               </div>
-              <div className="p-3 bg-primary/10 rounded-xl">
-                <Activity className="w-5 h-5 text-primary" />
+              <div className="mt-4 h-2 bg-secondary rounded-full overflow-hidden">
+                <div className="h-full bg-primary" style={{ width: `${(stats as any).complianceRate ?? 0}%` }} />
               </div>
-            </div>
-            <div className="mt-4 h-2 bg-secondary rounded-full overflow-hidden">
-              <div className="h-full bg-primary" style={{ width: `${stats.completionRate}%` }} />
-            </div>
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground mt-2">In date vs overdue or due ≤7 days</p>
+            </CardContent>
+          </Card>
+        </Link>
 
         <Link href="/external-checks?filter=action-needed">
           <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl">
@@ -175,6 +178,70 @@ export default function Dashboard() {
         </Card>
 
         <div className="space-y-6">
+          <Card className="shadow-lg shadow-black/5 border-border/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-display">Compliance by Site</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Click a site to view its checks. In date = not overdue and not due in the next 7 days.</p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <Link
+                  href="/external-checks"
+                  className="block p-3 bg-muted/50 rounded-xl border border-border/50 hover:bg-muted hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  aria-label="View compliance rate across all sites"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-semibold">All sites</span>
+                    </div>
+                    <span className="text-sm font-display font-bold">{(stats as any).complianceRate ?? 0}%</span>
+                  </div>
+                  <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${((stats as any).complianceRate ?? 0) >= 80 ? "bg-emerald-500" : ((stats as any).complianceRate ?? 0) >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                      style={{ width: `${(stats as any).complianceRate ?? 0}%` }}
+                    />
+                  </div>
+                </Link>
+                {((stats as any).complianceRateBySite ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-4">No sites configured yet.</p>
+                ) : (
+                  ((stats as any).complianceRateBySite as any[]).map((s) => {
+                    const href = s.siteId == null
+                      ? "/external-checks?siteId=none"
+                      : `/external-checks?siteId=${s.siteId}`;
+                    return (
+                      <Link
+                        key={s.siteId ?? "none"}
+                        href={href}
+                        className="block p-3 bg-muted/30 rounded-xl border border-border/40 hover:bg-muted hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        aria-label={`View checks at ${s.siteName}`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Building className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="text-sm font-medium truncate">{s.siteName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <span className="text-xs text-muted-foreground">{s.inDate}/{s.total}</span>
+                            <span className="text-sm font-display font-semibold">{s.rate}%</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${s.rate >= 80 ? "bg-emerald-500" : s.rate >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                            style={{ width: `${s.rate}%` }}
+                          />
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="shadow-lg shadow-black/5 border-border/50">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg font-display">Volume Breakdown</CardTitle>
