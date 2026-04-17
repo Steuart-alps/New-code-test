@@ -31,6 +31,7 @@ function useNavGroups() {
   ];
   if (canAdmin) {
     items.push({ href: "/categories", label: "Categories", icon: Building2 });
+    items.push({ href: "/sites", label: "Sites", icon: Building });
     items.push({ href: "/users", label: "Users", icon: Users });
   }
   if (isConsultant) {
