@@ -54,7 +54,11 @@ export function getClientId(req: Request): number | null {
   if (!req.currentUser) return null;
   if (req.currentUser.role === "consultant") {
     const clientId = req.query.clientId ?? req.body?.clientId;
-    return clientId ? Number(clientId) : null;
+    if (clientId) return Number(clientId);
+    // Self-service sign-ups are created with role "consultant" but linked to a
+    // single auto-provisioned business. Fall back to that linked business when
+    // no explicit clientId is supplied so the user sees their own data.
+    return req.currentUser.clientId ?? null;
   }
   return req.currentUser.clientId ?? null;
 }

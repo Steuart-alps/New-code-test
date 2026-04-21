@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -75,11 +77,37 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
 // were created before automatic seeding was wired into registration.
 router.post("/starter-pack/load", requireAuth, async (req, res) => {
   const user = req.currentUser!;
-  if (!user.clientId) {
-    res.status(400).json({ error: "Your account isn't linked to a business yet." });
-    return;
+
+  let clientId = user.clientId;
+  // If the user signed up before automatic business provisioning was added,
+  // they have no client linked. Create a default business for them now using
+  // the same naming convention as the registration flow so the starter pack
+  // has somewhere to live.
+  if (!clientId) {
+    const slugBase = (user.email.split("@")[0] || "business")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 32) || "business";
+    const slug = `${slugBase}-${randomBytes(3).toString("hex")}`;
+    try {
+      const [client] = await db
+        .insert(clientsTable)
+        .values({ name: user.name || "My Business", slug, primaryColor: "#6366f1", active: true })
+        .returning();
+      clientId = client.id;
+      await db
+        .update(usersTable)
+        .set({ clientId, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+    } catch (err) {
+      logger.error({ err, userId: user.id }, "Failed to provision client during starter-pack load");
+      res.status(500).json({ error: "Couldn't create your business. Please try again." });
+      return;
+    }
   }
-  await seedStarterContent(user.clientId);
+
+  await seedStarterContent(clientId);
   res.json({ ok: true });
 });
 
