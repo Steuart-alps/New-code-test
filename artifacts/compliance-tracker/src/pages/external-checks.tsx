@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import { StatusBadge, PriorityBadge } from "@/components/badges";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
-import { Plus, Briefcase, Mail, Send, Calendar, X, Building2 } from "lucide-react";
+import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
+import { apiFetch } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { 
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, 
@@ -53,6 +55,26 @@ export default function ExternalChecksPage() {
 
   const { data: rawItems = [], isLoading } = useListComplianceItems({});
   const { data: sites = [] } = useListSites();
+  const queryClient = useQueryClient();
+  const [loadingStarter, setLoadingStarter] = useState(false);
+
+  const loadStarterPack = async () => {
+    if (!confirm("Load the starter pack? This adds the standard UK H&S categories and around 27 example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC). Everything is fully editable.")) return;
+    setLoadingStarter(true);
+    try {
+      const res = await apiFetch("/starter-pack/load", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to load starter pack");
+      }
+      await queryClient.invalidateQueries();
+      toast.success("Starter pack loaded — categories and example checks added.");
+    } catch (err: any) {
+      toast.error(err.message ?? "Couldn't load starter pack");
+    } finally {
+      setLoadingStarter(false);
+    }
+  };
 
   const setSiteFilter = (value: string) => {
     const params = new URLSearchParams(search);
@@ -149,6 +171,15 @@ export default function ExternalChecksPage() {
               <SelectItem value="none">No site assigned</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            variant="outline"
+            onClick={loadStarterPack}
+            disabled={loadingStarter}
+            className="flex-1 sm:flex-none shadow-sm hover:shadow-md transition-shadow bg-card"
+          >
+            <Sparkles className="w-4 h-4 mr-2 text-amber-500" />
+            {loadingStarter ? "Loading…" : "Load Starter Pack"}
+          </Button>
           <Button 
             variant="secondary" 
             onClick={() => triggerReminders.mutate()} 

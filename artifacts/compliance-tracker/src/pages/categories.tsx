@@ -7,10 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Trash2, Tags, Plus, Pencil, ChevronRight, ClipboardCheck, Sparkles } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "@/hooks/use-toast";
+import { Trash2, Tags, Plus, Pencil, ChevronRight, ClipboardCheck } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
@@ -22,26 +19,9 @@ export default function CategoriesPage() {
   const { data: categories = [], isLoading } = useListCategories();
   const { data: items = [] } = useListComplianceItems();
   const { createCategory, updateCategory, deleteCategory } = useAppMutations();
-  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(empty);
-  const [loadingStarter, setLoadingStarter] = useState(false);
-
-  const loadStarterPack = async () => {
-    if (!confirm("Load the starter pack? This adds example categories (Fire Safety, Electrical, Staff Training, Premises) and around a dozen sample compliance checks. Everything is fully editable.")) return;
-    setLoadingStarter(true);
-    try {
-      const res = await apiFetch("/starter-pack/load", { method: "POST" });
-      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load starter pack");
-      await queryClient.invalidateQueries();
-      toast({ title: "Starter pack loaded", description: "Categories and example checks have been added." });
-    } catch (err: any) {
-      toast({ title: "Couldn't load starter pack", description: err.message ?? String(err), variant: "destructive" });
-    } finally {
-      setLoadingStarter(false);
-    }
-  };
 
   const checkCounts = useMemo(() => {
     const m = new Map<number, number>();
@@ -67,16 +47,11 @@ export default function CategoriesPage() {
 
   return (
     <AppLayout title="Categories">
-      <div className="flex justify-between items-center mb-6 gap-3">
+      <div className="flex justify-between items-center mb-6">
         <p className="text-muted-foreground hidden sm:block">Group your compliance checks into categories like Staff, Fire, or Premises. You decide which checks go in each one.</p>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button variant="outline" onClick={loadStarterPack} disabled={loadingStarter} className="flex-1 sm:flex-initial">
-            <Sparkles className="w-4 h-4 mr-2" /> {loadingStarter ? "Loading…" : "Load Starter Pack"}
-          </Button>
-          <Button onClick={openCreate} className="shadow-lg shadow-primary/20 flex-1 sm:flex-initial">
-            <Plus className="w-4 h-4 mr-2" /> Add Category
-          </Button>
-        </div>
+        <Button onClick={openCreate} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
+          <Plus className="w-4 h-4 mr-2" /> Add Category
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
