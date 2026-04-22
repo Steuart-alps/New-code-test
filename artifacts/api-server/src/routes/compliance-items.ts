@@ -90,7 +90,11 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   // the UI can surface "expired certificate" filtering without extra queries.
   // A cert is considered related to an item if it's directly linked via
   // certificates.itemId, OR it belongs to the contractor assigned to the item.
+  // Certificates have no direct clientId column — they're tied to either a
+  // compliance item or a contractor. Scope by joining to whichever owner
+  // belongs to the current client.
   const { certificatesTable } = await import("@workspace/db/schema");
+  const { or, sql: dsql } = await import("drizzle-orm");
   const certs = await db
     .select({
       itemId: certificatesTable.itemId,
@@ -98,7 +102,12 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
       expiryDate: certificatesTable.expiryDate,
     })
     .from(certificatesTable)
-    .where(eq(certificatesTable.clientId, clientId));
+    .where(
+      or(
+        dsql`${certificatesTable.contractorId} IN (SELECT id FROM ${contractorsTable} WHERE ${contractorsTable.clientId} = ${clientId})`,
+        dsql`${certificatesTable.itemId} IN (SELECT id FROM ${complianceItemsTable} WHERE ${complianceItemsTable.clientId} = ${clientId})`,
+      ),
+    );
 
   const latestExpiryByItem = new Map<number, Date>();
   const latestExpiryByContractor = new Map<number, Date>();
