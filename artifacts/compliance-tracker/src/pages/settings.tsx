@@ -271,6 +271,7 @@ export default function SettingsPage() {
     notifyClientAdmins: "false",
     smtpFrom: "",
     smtpFromName: "",
+    resendApiKey: "",
   });
 
   const [testEmail, setTestEmail] = useState("");
@@ -285,6 +286,7 @@ export default function SettingsPage() {
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
+        resendApiKey: (settings as any).resendApiKey || "",
       });
     }
   }, [settings]);
@@ -417,6 +419,24 @@ export default function SettingsPage() {
                   <Label>From Name</Label>
                   <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
                 </div>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-border/50 mt-2">
+                <Label>Your Own Resend API Key (optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Leave blank to send through the shared ComplyTrack account. To send under your own Resend account
+                  (your own billing, your own verified domain), paste an API key from{" "}
+                  <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="underline">resend.com/api-keys</a>.
+                  Stored privately and used only for emails from this account.
+                </p>
+                <Input
+                  name="resendApiKey"
+                  type="password"
+                  autoComplete="off"
+                  value={formData.resendApiKey}
+                  onChange={handleChange}
+                  placeholder="re_********************"
+                />
               </div>
             </CardContent>
             <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">

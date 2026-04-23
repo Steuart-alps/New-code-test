@@ -15,6 +15,7 @@ const SETTING_KEYS = [
   "maintenanceEmail",
   "additionalReminderEmails",
   "notifyClientAdmins",
+  "resendApiKey",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {

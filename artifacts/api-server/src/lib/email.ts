@@ -3,8 +3,8 @@ import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
 
-function getResend() {
-  const apiKey = process.env.RESEND_API_KEY;
+function getResend(apiKeyOverride?: string | null) {
+  const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
   return new Resend(apiKey);
 }
@@ -53,8 +53,8 @@ export async function sendEmail(opts: {
   icsFilename?: string;
   clientId?: number | null;
 }) {
-  const resend = getResend();
   const settings = await getEmailSettings(opts.clientId ?? null);
+  const resend = getResend(settings["resendApiKey"]);
   const from = buildFrom(settings);
 
   const attachments = opts.icsAttachment
