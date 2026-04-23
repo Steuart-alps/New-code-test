@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "U8c3jOKkiGAmdZjbxfLOK"
+uri = "file://myproject.tar.gz"
+type = "unspecified"
+title = "ComplyTrack project archive"
