@@ -388,6 +388,7 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
 
 router.post("/notifications/test-email", requireAuth, requireClientAdmin, async (req, res) => {
   const { to } = TestEmailBody.parse(req.body);
+  const callerClientId = getClientId(req);
 
   try {
     await sendEmail({
@@ -399,6 +400,7 @@ router.post("/notifications/test-email", requireAuth, requireClientAdmin, async 
         <p style="color: #64748b; font-size: 14px;">Sent via Resend.</p>
       </div>`,
       text: "This is a test email from your ComplyTrack system. Your email settings are configured correctly!",
+      clientId: callerClientId,
     });
     res.json({ success: true, message: `Test email sent to ${to}` });
   } catch (err) {

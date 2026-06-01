@@ -15,22 +15,12 @@ interface Plan {
   slug?: string;
 }
 
-const PLAN_SLUGS: Record<string, string> = {
-  Starter: "starter",
-  Professional: "professional",
-  Enterprise: "enterprise",
-};
-
-type PaymentMethod = "card" | "direct_debit";
-
 export default function SignupPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPriceId, setSelectedPriceId] = useState<string>("");
-  const [selectedPlanSlug, setSelectedPlanSlug] = useState<string>("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -50,14 +40,13 @@ export default function SignupPage() {
           const aPrice = a.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
           const bPrice = b.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
           return aPrice - bPrice;
-        }).map(p => ({ ...p, slug: PLAN_SLUGS[p.name] ?? p.name.toLowerCase() }));
+        });
         setPlans(sorted);
         const professional = sorted.find(p => p.name?.toLowerCase().includes("professional"));
         const defaultPlan = professional ?? sorted[1] ?? sorted[0];
         if (defaultPlan) {
           const monthlyPrice = defaultPlan.prices.find(p => p.interval === "month") ?? defaultPlan.prices[0];
           if (monthlyPrice) setSelectedPriceId(monthlyPrice.id);
-          if (defaultPlan.slug) setSelectedPlanSlug(defaultPlan.slug);
         }
       })
       .catch(() => setPlans([]));
@@ -69,9 +58,9 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      // Step 1: Register account (always)
+      // Step 1: Register account
       const registerBody: Record<string, any> = { name, email, password };
-      if (paymentMethod === "card" && selectedPriceId) {
+      if (selectedPriceId) {
         registerBody.priceId = selectedPriceId;
         if (promoCode.trim()) registerBody.promoCode = promoCode.trim();
       }
@@ -85,31 +74,15 @@ export default function SignupPage() {
       const registerData = await registerRes.json();
       if (!registerRes.ok) throw new Error(registerData.error ?? "Registration failed.");
 
-      // Step 2: Handle payment
-      if (paymentMethod === "card") {
-        if (registerData.checkoutUrl) {
-          window.location.href = registerData.checkoutUrl;
-          return;
-        }
-        // No Stripe plans configured — go straight to dashboard
-        toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
-        navigate("/dashboard");
+      // Step 2: Proceed to Stripe checkout if a plan was selected
+      if (registerData.checkoutUrl) {
+        window.location.href = registerData.checkoutUrl;
         return;
       }
-
-      // Direct Debit via GoCardless
-      if (paymentMethod === "direct_debit") {
-        const gcRes = await fetch(`${import.meta.env.BASE_URL}api/billing/gocardless/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ planSlug: selectedPlanSlug || "professional" }),
-        });
-        const gcData = await gcRes.json();
-        if (!gcRes.ok) throw new Error(gcData.error ?? "Could not start Direct Debit setup.");
-        window.location.href = gcData.redirectUrl;
-        return;
-      }
+      // No Stripe plans configured — go straight to dashboard
+      toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
+      navigate("/dashboard");
+      return;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -124,7 +97,6 @@ export default function SignupPage() {
   }
 
   const passwordStrength = password.length === 0 ? null : password.length < 8 ? "weak" : password.length < 12 ? "good" : "strong";
-  const isDirectDebit = paymentMethod === "direct_debit";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-background to-indigo-50/20 flex flex-col">
@@ -217,7 +189,7 @@ export default function SignupPage() {
                         <button
                           type="button"
                           key={plan.id}
-                          onClick={() => { setSelectedPriceId(monthlyPrice.id); setSelectedPlanSlug(plan.slug ?? ""); }}
+                          onClick={() => setSelectedPriceId(monthlyPrice.id)}
                           className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
                         >
                           <div className="flex items-center justify-between">
@@ -237,38 +209,8 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* GoCardless fallback plan picker (when Stripe plans aren't seeded) */}
-              {plans.length === 0 && (
-                <div className="space-y-2">
-                  <Label>Choose your plan</Label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {(["starter", "professional", "enterprise"] as const).map(slug => {
-                      const info = { starter: { label: "Starter", price: "£49/mo" }, professional: { label: "Professional", price: "£99/mo" }, enterprise: { label: "Enterprise", price: "£249/mo" } }[slug];
-                      const isSelected = selectedPlanSlug === slug;
-                      return (
-                        <button
-                          type="button"
-                          key={slug}
-                          onClick={() => setSelectedPlanSlug(slug)}
-                          className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <p className="font-semibold text-sm">{info.label}</p>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-primary">{info.price}</span>
-                              {isSelected && <CheckCircle2 className="w-4 h-4 text-primary" />}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {/* Promo Code */}
-              {!isDirectDebit && (
-                <div>
+              <div>
                   {!showPromo ? (
                     <button type="button" onClick={() => setShowPromo(true)} className="flex items-center gap-1.5 text-sm text-primary hover:underline">
                       <Tag className="w-3.5 h-3.5" /> Have a discount code?
@@ -288,8 +230,7 @@ export default function SignupPage() {
                       <p className="text-xs text-muted-foreground">Applied automatically when you proceed to payment.</p>
                     </div>
                   )}
-                </div>
-              )}
+              </div>
 
               {error && (
                 <motion.div
@@ -302,17 +243,13 @@ export default function SignupPage() {
               )}
 
               <Button type="submit" className="w-full h-11 font-semibold shadow-lg shadow-primary/20" disabled={loading}>
-                {loading
-                  ? "Setting up your account..."
-                  : isDirectDebit
-                  ? "Create account & set up Direct Debit →"
-                  : "Create account & proceed to payment →"}
+                {loading ? "Setting up your account..." : "Create account & proceed to payment →"}
               </Button>
             </form>
 
             <div className="flex flex-col gap-3 pt-2 border-t border-border/50">
               <div className="flex items-center justify-center gap-5 text-xs text-muted-foreground flex-wrap">
-                {["14-day free trial", "Cancel anytime", isDirectDebit ? "Protected by the Direct Debit Guarantee" : "Secure payments via Stripe"].map(t => (
+                {["14-day free trial", "Cancel anytime", "Secure payments via Stripe"].map(t => (
                   <div key={t} className="flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" /> {t}
                   </div>

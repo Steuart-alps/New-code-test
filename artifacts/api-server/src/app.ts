@@ -63,11 +63,6 @@ app.use(
 app.use(cookieParser());
 
 // Webhook endpoints MUST be registered before express.json() — they need raw Buffer bodies
-app.use(
-  "/api/billing/gocardless/webhook",
-  express.raw({ type: "application/json" }),
-);
-
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
