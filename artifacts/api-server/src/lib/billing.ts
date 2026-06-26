@@ -97,13 +97,19 @@ export async function syncClientSubscriptionQuantity(clientId: number): Promise<
     const active = await findLiveSubscription(client.stripeCustomerId);
     if (!active) return;
 
-    // Target the per-site line item specifically (falling back to the first item
-    // for safety) so we never resize the wrong item on the subscription.
+    // Only ever resize the per-site line item. If the subscription has no item on
+    // the per-site price (e.g. a legacy tiered subscription), do nothing — we must
+    // never apply per-site quantity logic to a non-per-site plan.
     const perSite = await getPerSitePrice();
-    const item =
-      active.items.data.find((i) => i.price?.id === perSite?.priceId) ??
-      active.items.data[0];
-    if (!item) return;
+    if (!perSite) return;
+    const item = active.items.data.find((i) => i.price?.id === perSite.priceId);
+    if (!item) {
+      logger.info(
+        { clientId, subscriptionId: active.id },
+        "No per-site line item on subscription; skipping quantity sync",
+      );
+      return;
+    }
 
     const desired = quantityForSiteCount(await countClientSites(clientId));
     if (item.quantity === desired) return;
