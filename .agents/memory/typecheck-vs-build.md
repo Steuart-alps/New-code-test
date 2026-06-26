@@ -1,12 +1,10 @@
 ---
 name: Typecheck vs build
-description: Why `tsc` typecheck fails repo-wide here but the app still builds and runs.
+description: The real build signal in this repo is esbuild/vite, not repo-wide tsc.
 ---
 
-# Typecheck is not the build signal here
+# Trust the build, not repo-wide tsc
 
-Running `pnpm --filter ... run typecheck` (`tsc --noEmit`) fails across many files with errors like `Module '@workspace/db/schema' has no exported member 'sitesTable'` and missing `@workspace/api-client-react` hooks.
+Repo-wide `tsc --noEmit` fails here because it depends on generated codegen and built workspace package output that aren't present in the dev environment. The dev workflows compile sources directly via esbuild (api-server) and vite (frontend).
 
-**Why:** these depend on generated codegen (orval client, api-zod) and the built `dist` of workspace packages, which are not present in the dev environment. `tsc` can't resolve them, but the dev workflows compile with **esbuild** (api-server `build.mjs`) and **vite** (frontend), which resolve sources directly.
-
-**How to apply:** Treat a clean esbuild/vite build + server start + route responses as the real verification, not `tsc`. Don't chase these repo-wide typecheck errors as if a single task introduced them — confirm a file you changed isn't the source, then move on.
+**How to apply:** verify changes with a clean esbuild/vite build + server start + live route responses. Don't treat the standing repo-wide typecheck failures as something a single task introduced — just confirm a file you changed isn't a new source of errors.

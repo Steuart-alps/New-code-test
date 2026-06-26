@@ -1,14 +1,12 @@
 ---
 name: Multi-tenant authz caveat
-description: getClientId trusts client-supplied clientId for consultant role — cross-tenant risk.
+description: Self-signup owners share the "consultant" role, which can pass an arbitrary clientId — cross-tenant risk.
 ---
 
-# getClientId cross-tenant caveat
+# Cross-tenant authz caveat
 
-`getClientId(req)` (api-server `middleware/requireAuth.ts`) returns, for a user with role `"consultant"`, `req.query.clientId ?? req.body?.clientId` when supplied, otherwise `req.currentUser.clientId`.
+The "consultant" role is overloaded: real H&S consultants legitimately manage *multiple* client businesses, but self-signup account owners are also given this role for their single account. The access helper therefore lets any consultant-role user act on a `clientId` supplied by the browser.
 
-**Why this exists:** real H&S consultants legitimately manage multiple client businesses, so the app lets them pass a `clientId`. BUT self-signup account owners are *also* assigned role `"consultant"` and linked to one auto-provisioned client. There is no consultant↔client membership model, so the two cases are indistinguishable.
+**Risk:** a self-signup owner can target another account's id and act on it (billing and core data alike).
 
-**Risk:** a self-signup owner can pass another account's `clientId` and operate on it (billing checkout/portal/config, sites, etc.) — cross-tenant access.
-
-**How to apply:** A proper fix needs a membership/ownership table to constrain which clientIds a consultant may act on; it is app-wide (every consultant endpoint), not billing-specific. Do not "fix" it piecemeal in one route — that gives false assurance while leaving the rest open.
+**Why it isn't fixed inline:** there is no consultant↔client membership model to tell the two cases apart, and the gap spans every consultant endpoint — fixing one route gives false assurance. A real fix needs a membership/ownership model and must be applied app-wide.

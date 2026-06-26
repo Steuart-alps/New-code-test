@@ -94,7 +94,7 @@ router.get("/plans", async (_req, res) => {
 
 // POST /api/billing/checkout — create Stripe checkout session
 router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res) => {
-  const { priceId, clientId: bodyClientId } = req.body as { priceId: string; clientId?: number };
+  const { clientId: bodyClientId } = req.body as { clientId?: number };
   const clientId = bodyClientId ?? getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -105,9 +105,10 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
     const stripe = await getUncachableStripeClient();
     const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
 
-    // Per-site billing: the line is the £10/month-per-site price and the quantity
-    // is the client's current number of sites (never below 1).
-    const resolvedPriceId = priceId ?? (await getPerSitePrice())?.priceId;
+    // Per-site billing: the line is always the server-resolved £10/month-per-site
+    // price (never a client-supplied priceId), and the quantity is the client's
+    // current number of sites (never below 1).
+    const resolvedPriceId = (await getPerSitePrice())?.priceId;
     if (!resolvedPriceId) return res.status(400).json({ error: "No per-site price configured" });
     const quantity = quantityForSiteCount(await countClientSites(clientId));
 

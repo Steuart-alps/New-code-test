@@ -1,15 +1,13 @@
 ---
 name: Billing architecture
-description: How ComplyTrack billing is wired — per-site Stripe pricing, account model, and subscription lookup.
+description: Durable billing decisions for ComplyTrack — per-site pricing model and subscription rules.
 ---
 
-# ComplyTrack billing
+# ComplyTrack billing decisions
 
-- **Account = client** (`clientsTable`), not user. Stripe customer id is stored on the **client** (`clientsTable.stripeCustomerId`). It is set both at register (auth.ts) and lazily in `/billing/checkout`.
-- **Pricing model**: single £10/month per-site Stripe price. Subscription `quantity` = client's site count, floored at 1 (`quantityForSiteCount = max(n,1)`). Updated with `proration_behavior: "create_prorations"` on site create/delete (`sites.ts` → `syncClientSubscriptionQuantity`).
-- **Subscription lookup is dynamic**: nothing reliably stores `clientsTable.stripeSubscriptionId` — the Stripe webhook only runs stripe-replit-sync into `stripe.*` tables. So `findLiveSubscription(customerId)` lists subs via the Stripe API and picks the first active/trialing/past_due. One subscription per client is enforced in `/checkout` (409 if a live sub exists → use portal).
-- **Per-site price resolution** (`getPerSitePrice`) queries the synced `stripe.prices`/`stripe.products` tables for the cheapest active monthly recurring price. Returns null if Stripe sync hasn't populated (e.g. seed not run) — callers must handle null.
-
-**Why:** The sync tables are eventually-consistent and a stored sub id can go stale; looking up by customer id is robust.
-
-**How to apply:** When touching billing, keep customer id on the client, never assume a stored subscription id, and keep `syncClientSubscriptionQuantity` best-effort (must not throw and break site CRUD).
+- **Account = client, not user.** The Stripe customer lives on the client record. Anything billing-related keys off the client.
+- **One price, quantity = site count.** Single £10/month per-site price; subscription quantity tracks the account's site count, floored at 1, updated with proration when sites are added/removed.
+- **Never trust a client-supplied price id.** Checkout (both signup and the in-app route) must resolve the per-site price server-side and ignore any priceId from the request, or callers can subscribe to a different price. **Why:** a rejected review caught exactly this billing-integrity hole.
+- **Look subscriptions up dynamically by customer id.** No stored subscription id is reliable — the Stripe webhook only populates the synced `stripe.*` mirror tables. **Why:** a stored id goes stale; customer-id lookup is robust.
+- **One subscription per client.** Checkout refuses to create a second subscription when a live (active/trialing/past_due) one exists; users manage it via the Stripe billing portal instead.
+- **Quantity sync is best-effort.** It must never throw and break site create/delete; the price resolver returns null when Stripe isn't seeded, and callers must tolerate that.

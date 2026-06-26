@@ -10,6 +10,7 @@ import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/d
 import { eq, and, gt, isNull } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
+import { getPerSitePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
 
@@ -185,7 +186,7 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  const { name, email, password, priceId, promoCode } = body.data;
+  const { name, email, password, promoCode } = body.data;
 
   const existing = await getUserWithClientByEmail(email);
   if (existing) {
@@ -234,7 +235,11 @@ router.post("/auth/register", async (req, res) => {
 
   let checkoutUrl: string | null = null;
 
-  if (priceId) {
+  // Pricing is always the server-resolved per-site price — never a client-
+  // supplied priceId — so checkout can't be steered onto a different plan.
+  const perSite = await getPerSitePrice();
+
+  if (perSite) {
     try {
       const stripe = await getUncachableStripeClient();
       const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
@@ -267,10 +272,16 @@ router.post("/auth/register", async (req, res) => {
         }
       }
 
+      // Quantity follows the account's site count (floored at 1); at signup the
+      // account has no sites yet, so this is 1.
+      const quantity = clientId !== null
+        ? quantityForSiteCount(await countClientSites(clientId))
+        : 1;
+
       const sessionParams: Parameters<typeof stripe.checkout.sessions.create>[0] = {
         customer: customer.id,
         payment_method_types: ["card"],
-        line_items: [{ price: priceId, quantity: 1 }],
+        line_items: [{ price: perSite.priceId, quantity }],
         mode: "subscription",
         success_url: `${baseUrl}/dashboard?billing=success`,
         cancel_url: `${baseUrl}/signup?cancelled=1`,
