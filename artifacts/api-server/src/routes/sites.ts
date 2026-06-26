@@ -4,6 +4,7 @@ import { sitesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
+import { syncClientSubscriptionQuantity } from "../lib/billing";
 
 const router: IRouter = Router();
 
@@ -66,6 +67,9 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     await seedSiteStarterChecks(clientId, site.id);
   }
 
+  // Per-site billing: a new site increases the subscription quantity (£10/mo more).
+  await syncClientSubscriptionQuantity(clientId);
+
   res.status(201).json(site);
 });
 
@@ -102,6 +106,10 @@ router.delete("/sites/:id", requireAuth, requireClientAdmin, async (req, res) =>
     return;
   }
   await db.delete(sitesTable).where(eq(sitesTable.id, id));
+
+  // Per-site billing: removing a site decreases the subscription quantity (with proration).
+  await syncClientSubscriptionQuantity(existing.clientId);
+
   res.status(204).send();
 });
 

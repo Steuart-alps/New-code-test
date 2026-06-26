@@ -1,26 +1,24 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 
-interface Plan {
-  id: string;
-  name: string;
-  description: string | null;
-  prices: { id: string; unitAmount: number; currency: string; interval: string | null }[];
-  slug?: string;
+interface PerSitePrice {
+  priceId: string;
+  unitAmount: number;
+  currency: string;
+  interval: string | null;
 }
 
 export default function SignupPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPriceId, setSelectedPriceId] = useState<string>("");
+  const [perSite, setPerSite] = useState<PerSitePrice | null>(null);
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -36,20 +34,9 @@ export default function SignupPage() {
     fetch(`${import.meta.env.BASE_URL}api/billing/plans`)
       .then(r => r.json())
       .then(data => {
-        const sorted = (data.plans as Plan[]).sort((a, b) => {
-          const aPrice = a.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
-          const bPrice = b.prices.find(p => p.interval === "month")?.unitAmount ?? 0;
-          return aPrice - bPrice;
-        });
-        setPlans(sorted);
-        const professional = sorted.find(p => p.name?.toLowerCase().includes("professional"));
-        const defaultPlan = professional ?? sorted[1] ?? sorted[0];
-        if (defaultPlan) {
-          const monthlyPrice = defaultPlan.prices.find(p => p.interval === "month") ?? defaultPlan.prices[0];
-          if (monthlyPrice) setSelectedPriceId(monthlyPrice.id);
-        }
+        if (data?.perSite) setPerSite(data.perSite as PerSitePrice);
       })
-      .catch(() => setPlans([]));
+      .catch(() => setPerSite(null));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -60,8 +47,8 @@ export default function SignupPage() {
     try {
       // Step 1: Register account
       const registerBody: Record<string, any> = { name, email, password };
-      if (selectedPriceId) {
-        registerBody.priceId = selectedPriceId;
+      if (perSite) {
+        registerBody.priceId = perSite.priceId;
         if (promoCode.trim()) registerBody.promoCode = promoCode.trim();
       }
 
@@ -74,12 +61,12 @@ export default function SignupPage() {
       const registerData = await registerRes.json();
       if (!registerRes.ok) throw new Error(registerData.error ?? "Registration failed.");
 
-      // Step 2: Proceed to Stripe checkout if a plan was selected
+      // Step 2: Proceed to Stripe checkout if pricing is configured
       if (registerData.checkoutUrl) {
         window.location.href = registerData.checkoutUrl;
         return;
       }
-      // No Stripe plans configured — go straight to dashboard
+      // No Stripe price configured — go straight to dashboard
       toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
       navigate("/dashboard");
       return;
@@ -90,11 +77,7 @@ export default function SignupPage() {
     }
   }
 
-  function formatPrice(plan: Plan) {
-    const monthly = plan.prices.find(p => p.interval === "month");
-    if (!monthly) return "";
-    return `£${(monthly.unitAmount / 100).toFixed(0)}/mo`;
-  }
+  const perSitePrice = perSite ? `£${(perSite.unitAmount / 100).toFixed(0)}` : "£10";
 
   const passwordStrength = password.length === 0 ? null : password.length < 8 ? "weak" : password.length < 12 ? "good" : "strong";
 
@@ -176,38 +159,24 @@ export default function SignupPage() {
                 )}
               </div>
 
-              {/* Plan Selection */}
-              {plans.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Choose your plan</Label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {plans.map(plan => {
-                      const monthlyPrice = plan.prices.find(p => p.interval === "month");
-                      if (!monthlyPrice) return null;
-                      const isSelected = selectedPriceId === monthlyPrice.id;
-                      return (
-                        <button
-                          type="button"
-                          key={plan.id}
-                          onClick={() => setSelectedPriceId(monthlyPrice.id)}
-                          className={`text-left p-4 rounded-xl border-2 transition-all ${isSelected ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold text-sm">{plan.name}</p>
-                              {plan.description && <p className="text-xs text-muted-foreground">{plan.description}</p>}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-primary">{formatPrice(plan)}</span>
-                              {isSelected && <CheckCircle2 className="w-4 h-4 text-primary" />}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+              {/* Per-site pricing */}
+              <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="bg-primary/10 p-2 rounded-lg">
+                    <Building2 className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-2xl font-bold font-display">{perSitePrice}</span>
+                      <span className="text-sm text-muted-foreground">per site / month</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Pay only for the sites you manage. You start with one site — add or remove sites anytime and your
+                      bill adjusts automatically (prorated).
+                    </p>
                   </div>
                 </div>
-              )}
+              </div>
 
               {/* Promo Code */}
               <div>

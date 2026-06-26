@@ -4,6 +4,12 @@ import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth";
 import { getUncachableStripeClient, getStripePublishableKey } from "../lib/stripeClient";
+import {
+  countClientSites,
+  getPerSitePrice,
+  quantityForSiteCount,
+  findLiveSubscription,
+} from "../lib/billing";
 
 const router = Router();
 
@@ -14,6 +20,7 @@ router.get("/config", requireAuth, async (req, res) => {
 
     const clientId = getClientId(req);
     let subscription = null;
+    let siteCount = 0;
     if (clientId) {
       const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       if (client?.stripeSubscriptionId) {
@@ -25,9 +32,14 @@ router.get("/config", requireAuth, async (req, res) => {
       if (client) {
         subscription = subscription ?? { status: client.subscriptionStatus ?? "trial" };
       }
+      siteCount = await countClientSites(clientId);
     }
 
-    res.json({ publishableKey, subscription });
+    const perSite = await getPerSitePrice();
+    const billableQuantity = quantityForSiteCount(siteCount);
+    const monthlyTotal = perSite ? perSite.unitAmount * billableQuantity : null;
+
+    res.json({ publishableKey, subscription, siteCount, perSite, billableQuantity, monthlyTotal });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -73,9 +85,10 @@ router.get("/plans", async (_req, res) => {
       }
     }
 
-    res.json({ plans: Array.from(map.values()) });
+    const perSite = await getPerSitePrice();
+    res.json({ perSite, plans: Array.from(map.values()) });
   } catch {
-    res.json({ plans: [] });
+    res.json({ perSite: null, plans: [] });
   }
 });
 
@@ -84,7 +97,6 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
   const { priceId, clientId: bodyClientId } = req.body as { priceId: string; clientId?: number };
   const clientId = bodyClientId ?? getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  if (!priceId) return res.status(400).json({ error: "priceId required" });
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
@@ -92,6 +104,12 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
   try {
     const stripe = await getUncachableStripeClient();
     const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+
+    // Per-site billing: the line is the £10/month-per-site price and the quantity
+    // is the client's current number of sites (never below 1).
+    const resolvedPriceId = priceId ?? (await getPerSitePrice())?.priceId;
+    if (!resolvedPriceId) return res.status(400).json({ error: "No per-site price configured" });
+    const quantity = quantityForSiteCount(await countClientSites(clientId));
 
     let customerId = client.stripeCustomerId ?? undefined;
     if (!customerId) {
@@ -103,12 +121,22 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
       await db.update(clientsTable)
         .set({ stripeCustomerId: customerId, updatedAt: new Date() })
         .where(eq(clientsTable.id, clientId));
+    } else {
+      // Enforce one subscription per client: if a live subscription already
+      // exists, don't create a second one — send them to the portal instead.
+      const existing = await findLiveSubscription(customerId);
+      if (existing) {
+        return res.status(409).json({
+          error: "This account already has an active subscription. Manage it from the billing portal.",
+          hasSubscription: true,
+        });
+      }
     }
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: [{ price: priceId, quantity: 1 }],
+      line_items: [{ price: resolvedPriceId, quantity }],
       mode: "subscription",
       success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
       cancel_url: `${baseUrl}/?billing=cancel`,

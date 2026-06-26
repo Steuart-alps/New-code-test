@@ -1,86 +1,57 @@
 import { getUncachableStripeClient } from "./stripeClient";
 
+const PRODUCT_NAME = "ComplyTrack";
+const PER_SITE_AMOUNT = 1000; // £10.00 / month per site, in pence
+const LEGACY_TIERS = ["Starter", "Professional", "Enterprise"];
+
 async function seedPlans() {
   const stripe = await getUncachableStripeClient();
-  console.log("Checking existing ComplyTrack plans...");
+  console.log("Configuring ComplyTrack per-site pricing...");
 
   const existing = await stripe.products.search({ query: "active:'true'" });
-  const names = existing.data.map((p) => p.name);
-  console.log("Existing active products:", names.length ? names.join(", ") : "none");
 
-  // ── Starter plan ────────────────────────────────────────────────────────────
-  if (!names.includes("Starter")) {
-    const starter = await stripe.products.create({
-      name: "Starter",
-      description: "Up to 3 users · Core compliance tracking · Email reminders",
-      metadata: { features: "3 users,External checks,Internal checks,Email reminders" },
-    });
-    await stripe.prices.create({
-      product: starter.id,
-      unit_amount: 4900,
-      currency: "gbp",
-      recurring: { interval: "month" },
-    });
-    await stripe.prices.create({
-      product: starter.id,
-      unit_amount: 49000,
-      currency: "gbp",
-      recurring: { interval: "year" },
-    });
-    console.log("✓ Created Starter plan (£49/mo · £490/yr)");
-  } else {
-    console.log("  Starter already exists, skipping");
+  // ── Archive legacy tiered products ──────────────────────────────────────────
+  // Existing subscriptions on these prices keep running; archiving only stops the
+  // tiers from appearing for new customers (and from /billing/plans).
+  for (const product of existing.data) {
+    if (LEGACY_TIERS.includes(product.name)) {
+      await stripe.products.update(product.id, { active: false });
+      console.log(`  Archived legacy plan: ${product.name}`);
+    }
   }
 
-  // ── Professional plan ────────────────────────────────────────────────────────
-  if (!names.includes("Professional")) {
-    const pro = await stripe.products.create({
-      name: "Professional",
-      description: "Up to 10 users · All modules · Departments · Priority support",
-      metadata: {
-        features: "10 users,All modules,Departments,Priority support",
-        recommended: "true",
-      },
+  // ── Per-site product + price ────────────────────────────────────────────────
+  let product = existing.data.find((p) => p.name === PRODUCT_NAME);
+  if (!product) {
+    product = await stripe.products.create({
+      name: PRODUCT_NAME,
+      description: "Health & safety compliance tracking — billed per site",
+      metadata: { per_site: "true" },
     });
-    await stripe.prices.create({
-      product: pro.id,
-      unit_amount: 9900,
-      currency: "gbp",
-      recurring: { interval: "month" },
-    });
-    await stripe.prices.create({
-      product: pro.id,
-      unit_amount: 99000,
-      currency: "gbp",
-      recurring: { interval: "year" },
-    });
-    console.log("✓ Created Professional plan (£99/mo · £990/yr)");
+    console.log(`✓ Created product: ${PRODUCT_NAME}`);
   } else {
-    console.log("  Professional already exists, skipping");
+    console.log(`  Product ${PRODUCT_NAME} already exists`);
   }
 
-  // ── Enterprise plan ──────────────────────────────────────────────────────────
-  if (!names.includes("Enterprise")) {
-    const enterprise = await stripe.products.create({
-      name: "Enterprise",
-      description: "Unlimited users · White-label · Dedicated onboarding · SLA",
-      metadata: { features: "Unlimited users,White-label,Dedicated onboarding,SLA" },
-    });
+  const prices = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
+  const hasPerSitePrice = prices.data.some(
+    (pr) =>
+      pr.recurring?.interval === "month" &&
+      pr.unit_amount === PER_SITE_AMOUNT &&
+      pr.currency === "gbp",
+  );
+
+  if (!hasPerSitePrice) {
     await stripe.prices.create({
-      product: enterprise.id,
-      unit_amount: 24900,
+      product: product.id,
+      unit_amount: PER_SITE_AMOUNT,
       currency: "gbp",
       recurring: { interval: "month" },
+      metadata: { per_site: "true" },
     });
-    await stripe.prices.create({
-      product: enterprise.id,
-      unit_amount: 249000,
-      currency: "gbp",
-      recurring: { interval: "year" },
-    });
-    console.log("✓ Created Enterprise plan (£249/mo · £2,490/yr)");
+    console.log("✓ Created per-site price (£10/site/month)");
   } else {
-    console.log("  Enterprise already exists, skipping");
+    console.log("  Per-site price already exists, skipping");
   }
 
   console.log("\nDone. Webhooks will sync these to the database automatically.");

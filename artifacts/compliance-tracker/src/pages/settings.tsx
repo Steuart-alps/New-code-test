@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2 } from "lucide-react";
 
 interface DomainRecord {
   record?: string;
@@ -259,6 +259,96 @@ function SenderDomainCard() {
   );
 }
 
+interface BillingConfig {
+  subscription?: { status?: string } | null;
+  siteCount: number;
+  perSite: { priceId: string; unitAmount: number; currency: string } | null;
+  billableQuantity: number;
+  monthlyTotal: number | null;
+}
+
+function BillingCard() {
+  const { toast } = useToast();
+  const [config, setConfig] = useState<BillingConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    apiFetch<BillingConfig>("/billing/config")
+      .then(setConfig)
+      .catch(() => setConfig(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const openPortal = async () => {
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ url: string }>("/billing/portal", { method: "POST" });
+      if (data.url) window.location.href = data.url;
+    } catch (err: any) {
+      toast({ title: "Couldn't open billing portal", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const perSiteRate = config?.perSite ? config.perSite.unitAmount / 100 : 10;
+  const sites = config?.siteCount ?? 0;
+  const billable = config?.billableQuantity ?? Math.max(sites, 1);
+  const total = config?.monthlyTotal != null ? config.monthlyTotal / 100 : billable * perSiteRate;
+  const status = config?.subscription?.status ?? "trial";
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <CreditCard className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
+        </div>
+        <CardDescription>
+          You're billed <strong>£{perSiteRate.toFixed(0)} per site / month</strong>. Your total scales automatically with the number of sites on your account.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-5">
+        {loading ? (
+          <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary/10 p-2 rounded-lg">
+                  <Building2 className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <div className="font-semibold">
+                    {billable} {billable === 1 ? "site" : "sites"} × £{perSiteRate.toFixed(0)}/month
+                  </div>
+                  {sites === 0 && (
+                    <div className="text-xs text-muted-foreground">Minimum of one site is billed.</div>
+                  )}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold font-display">£{total.toFixed(0)}</div>
+                <div className="text-xs text-muted-foreground">per month</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                Status: <span className="font-medium text-foreground capitalize">{status}</span>
+              </div>
+              <Button variant="outline" onClick={openPortal} disabled={busy}>
+                <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
@@ -310,6 +400,7 @@ export default function SettingsPage() {
   return (
     <AppLayout title="System Settings">
       <div className="max-w-4xl space-y-6">
+        <BillingCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">

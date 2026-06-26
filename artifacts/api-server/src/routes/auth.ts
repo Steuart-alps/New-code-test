@@ -239,11 +239,24 @@ router.post("/auth/register", async (req, res) => {
       const stripe = await getUncachableStripeClient();
       const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
 
-      const customer = await stripe.customers.create({ name, email, metadata: { userId: String(user.id) } });
+      const customer = await stripe.customers.create({
+        name,
+        email,
+        metadata: { userId: String(user.id), ...(clientId !== null ? { clientId: String(clientId) } : {}) },
+      });
 
       await db.update(usersTable)
         .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
         .where(eq(usersTable.id, user.id));
+
+      // Per-site billing is scoped to the account (client), so store the customer
+      // on the client too — that's where the billing routes and site-count sync
+      // look it up.
+      if (clientId !== null) {
+        await db.update(clientsTable)
+          .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
+          .where(eq(clientsTable.id, clientId));
+      }
 
       // Resolve promo code if provided
       let discounts: { promotion_code: string }[] | undefined;

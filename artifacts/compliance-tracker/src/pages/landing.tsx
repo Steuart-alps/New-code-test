@@ -12,31 +12,12 @@ const FEATURES = [
   { icon: Zap, title: "Calendar Invites Built In", desc: "Every reminder includes a calendar attachment so contractors and staff can book the work straight in." },
 ];
 
-const PLANS = [
-  {
-    name: "Starter",
-    price: "£49",
-    period: "/month",
-    description: "For a single-site business",
-    features: ["1 site", "Core compliance tracking", "Email reminders", "Contractor portal"],
-    highlight: false,
-  },
-  {
-    name: "Professional",
-    price: "£99",
-    period: "/month",
-    description: "For multi-site businesses",
-    features: ["Up to 5 sites", "All modules", "Priority support", "Advanced reporting"],
-    highlight: true,
-  },
-  {
-    name: "Enterprise",
-    price: "£249",
-    period: "/month",
-    description: "For larger organisations",
-    features: ["Unlimited sites", "Custom branding", "Dedicated onboarding", "SLA guarantee"],
-    highlight: false,
-  },
+const PRICING_FEATURES = [
+  "Every compliance module included",
+  "Unlimited users on your account",
+  "Automated email reminders & calendar invites",
+  "Contractor & certificate tracking",
+  "Add or remove sites anytime — billing adjusts automatically",
 ];
 
 const TESTIMONIALS = [
@@ -162,49 +143,38 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
             <h2 className="text-3xl font-bold font-display mb-3">Simple, transparent pricing</h2>
-            <p className="text-muted-foreground text-lg">Choose the plan that fits your business. Upgrade or downgrade anytime.</p>
+            <p className="text-muted-foreground text-lg">One price. Pay only for the sites you manage.</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {PLANS.map((plan) => (
-              <div
-                key={plan.name}
-                className={`relative rounded-2xl border p-8 flex flex-col ${
-                  plan.highlight
-                    ? "border-primary bg-primary text-white shadow-2xl shadow-primary/30 scale-105"
-                    : "border-border/50 bg-card"
-                }`}
-              >
-                {plan.highlight && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-amber-400 text-amber-900 text-xs font-bold px-3 py-1 rounded-full">
-                    Most popular
-                  </div>
-                )}
-                <h3 className={`font-bold text-lg mb-1 ${plan.highlight ? "text-white" : ""}`}>{plan.name}</h3>
-                <p className={`text-xs mb-4 ${plan.highlight ? "text-white/70" : "text-muted-foreground"}`}>{plan.description}</p>
-                <div className="flex items-baseline gap-1 mb-6">
-                  <span className={`text-4xl font-bold ${plan.highlight ? "text-white" : ""}`}>{plan.price}</span>
-                  <span className={`text-sm ${plan.highlight ? "text-white/70" : "text-muted-foreground"}`}>{plan.period}</span>
-                </div>
-                <ul className="space-y-3 mb-8 flex-1">
-                  {plan.features.map(f => (
-                    <li key={f} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 className={`w-4 h-4 flex-shrink-0 ${plan.highlight ? "text-white/80" : "text-green-500"}`} />
-                      <span className={plan.highlight ? "text-white/90" : ""}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Button
-                  onClick={() => navigate("/signup")}
-                  variant={plan.highlight ? "secondary" : "outline"}
-                  className={`w-full ${plan.highlight ? "bg-white text-primary hover:bg-white/90" : ""}`}
-                >
-                  Get started
-                </Button>
+          <div className="max-w-md mx-auto">
+            <div className="relative rounded-2xl border border-primary bg-primary text-white shadow-2xl shadow-primary/30 p-8 flex flex-col">
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-amber-400 text-amber-900 text-xs font-bold px-3 py-1 rounded-full">
+                Everything included
               </div>
-            ))}
+              <h3 className="font-bold text-lg mb-1 text-white">Per site</h3>
+              <p className="text-xs mb-4 text-white/70">Scales with your business — one site or one hundred</p>
+              <div className="flex items-baseline gap-1 mb-6">
+                <span className="text-5xl font-bold text-white">£10</span>
+                <span className="text-sm text-white/70">per site / month</span>
+              </div>
+              <ul className="space-y-3 mb-8 flex-1">
+                {PRICING_FEATURES.map(f => (
+                  <li key={f} className="flex items-center gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-white/80" />
+                    <span className="text-white/90">{f}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                onClick={() => navigate("/signup")}
+                variant="secondary"
+                className="w-full bg-white text-primary hover:bg-white/90"
+              >
+                Start free trial
+              </Button>
+            </div>
           </div>
           <p className="text-center text-sm text-muted-foreground mt-8">
-            All plans include a 14-day free trial. Have a discount code? Enter it during checkout.
+            Includes a 14-day free trial. Add or remove sites anytime — your bill adjusts automatically with proration. Have a discount code? Enter it during checkout.
           </p>
         </div>
       </section>
