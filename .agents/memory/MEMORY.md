@@ -1,0 +1,1 @@
+- [SEO static files](seo-static-files.md) — robots.txt/sitemap.xml/llms.txt are build-time generated (gitignored); edit the generator's publicPages/privatePaths, not the output files.

@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --config vite.config.ts --host 0.0.0.0",
-    "build": "vite build --config vite.config.ts",
+    "dev": "node scripts/generate-seo.mjs && vite --config vite.config.ts --host 0.0.0.0",
+    "build": "node scripts/generate-seo.mjs && vite build --config vite.config.ts",
+    "generate-seo": "node scripts/generate-seo.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
