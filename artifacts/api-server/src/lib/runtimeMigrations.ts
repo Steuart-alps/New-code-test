@@ -182,8 +182,7 @@ export async function runRuntimeMigrations() {
       DROP INDEX IF EXISTS "billing_pending_charges_transition_uq"
     `);
 
-    // Trial-expiry email reminder dedup marker: set once the "trial ends in
-    // 3 days" email has been sent, so the daily job never emails twice.
+    // ---- Track when the "trial ending soon" reminder email was sent ----
     await db.execute(sql`
       ALTER TABLE "clients"
       ADD COLUMN IF NOT EXISTS "trial_reminder_sent_at" timestamp

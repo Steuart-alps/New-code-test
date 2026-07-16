@@ -91,8 +91,20 @@ export async function findLiveSubscription(customerId: string) {
 // if a sync is already queued (not yet started) for a client, additional
 // requests piggyback on it instead of queueing more redundant Stripe calls.
 // ---------------------------------------------------------------------------
-const syncChains = new Map<number, Promise<void>>();
+const syncChains = new Map<number, Promise<QuantityCorrection | null>>();
 const syncPending = new Set<number>();
+
+/**
+ * Details of a subscription quantity change applied by a sync — i.e. billing
+ * drift that was detected and corrected.
+ */
+export interface QuantityCorrection {
+  clientId: number;
+  clientName: string | null;
+  subscriptionId: string;
+  fromQuantity: number;
+  toQuantity: number;
+}
 
 /**
  * Bring a client's Stripe subscription quantity in line with their current site
@@ -100,22 +112,25 @@ const syncPending = new Set<number>();
  * removed sites get no refund). Best-effort: logs and returns on any problem so the
  * triggering site create/delete still succeeds. Concurrent calls for the same
  * client are serialized (and coalesced) so updates can't land out of order.
+ * Resolves with the correction applied, or null when nothing changed.
  */
-export function syncClientSubscriptionQuantity(clientId: number): Promise<void> {
+export function syncClientSubscriptionQuantity(
+  clientId: number,
+): Promise<QuantityCorrection | null> {
   // Already queued but not started: that run will read the latest state.
   if (syncPending.has(clientId)) {
-    return syncChains.get(clientId) ?? Promise.resolve();
+    return syncChains.get(clientId) ?? Promise.resolve(null);
   }
   syncPending.add(clientId);
 
-  const prev = syncChains.get(clientId) ?? Promise.resolve();
+  const prev = syncChains.get(clientId) ?? Promise.resolve(null);
   const run = prev.then(() => {
     // Now starting: later callers must queue a fresh run to observe their changes.
     syncPending.delete(clientId);
     return doSyncClientSubscriptionQuantity(clientId);
   });
   // Never propagate rejections into the chain (doSync catches internally anyway).
-  const chained = run.catch(() => {});
+  const chained = run.catch(() => null);
   syncChains.set(clientId, chained);
   chained.finally(() => {
     // Drop the map entry once the chain is fully drained to avoid unbounded growth.
@@ -132,13 +147,30 @@ export function syncClientSubscriptionQuantity(clientId: number): Promise<void> 
  * without waiting for the next site change. Clients are processed sequentially
  * to keep Stripe API usage gentle; each sync is best-effort and never throws.
  */
-export async function reconcileAllSubscriptionQuantities(): Promise<{ clients: number }> {
+export async function reconcileAllSubscriptionQuantities(): Promise<{
+  clients: number;
+  corrections: QuantityCorrection[];
+}> {
   const clients = await db
     .select({ id: clientsTable.id })
     .from(clientsTable)
     .where(sql`${clientsTable.stripeCustomerId} IS NOT NULL`);
+  const corrections: QuantityCorrection[] = [];
   for (const c of clients) {
-    await syncClientSubscriptionQuantity(c.id);
+    const correction = await syncClientSubscriptionQuantity(c.id);
+    if (correction) {
+      logger.warn(
+        {
+          clientId: correction.clientId,
+          clientName: correction.clientName,
+          subscriptionId: correction.subscriptionId,
+          fromQuantity: correction.fromQuantity,
+          toQuantity: correction.toQuantity,
+        },
+        "Billing drift corrected: subscription quantity did not match site count",
+      );
+      corrections.push(correction);
+    }
   }
 
   // Retry any outbox charges that a previous run failed to collect (e.g. a
@@ -154,61 +186,67 @@ export async function reconcileAllSubscriptionQuantities(): Promise<{ clients: n
     }
   }
 
-  return { clients: clients.length };
+  return { clients: clients.length, corrections };
 }
 
 // Namespace for advisory lock keys so we don't collide with other lock users.
 const BILLING_SYNC_LOCK_NS = 0x42494c4c; // "BILL"
 
-async function doSyncClientSubscriptionQuantity(clientId: number): Promise<void> {
+async function doSyncClientSubscriptionQuantity(
+  clientId: number,
+): Promise<QuantityCorrection | null> {
   try {
     // Cross-instance serialization: the in-process queue above only covers a
     // single server process. A Postgres transaction-scoped advisory lock keyed
     // by client id guarantees that even with multiple API instances, only one
     // sync per client runs at a time; each waits its turn and then re-reads
     // the latest site count, so the final Stripe quantity matches reality.
-    await db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       await tx.execute(
         sql`SELECT pg_advisory_xact_lock(${BILLING_SYNC_LOCK_NS}, ${clientId})`,
       );
-      await syncWithStripe(clientId, tx);
+      return await syncWithStripe(clientId, tx);
     });
   } catch (err) {
     logger.error({ err, clientId }, "Failed to sync subscription quantity");
+    return null;
   }
 }
 
 type DbLike = Pick<typeof db, "select" | "execute">;
 
-async function syncWithStripe(clientId: number, dbc: DbLike = db): Promise<void> {
+async function syncWithStripe(
+  clientId: number,
+  dbc: DbLike = db,
+): Promise<QuantityCorrection | null> {
   try {
     const [client] = await dbc
       .select()
       .from(clientsTable)
       .where(eq(clientsTable.id, clientId))
       .limit(1);
-    if (!client?.stripeCustomerId) return; // not a paying customer yet
+    if (!client?.stripeCustomerId) return null; // not a paying customer yet
 
     const active = await findLiveSubscription(client.stripeCustomerId);
-    if (!active) return;
+    if (!active) return null;
 
     // Only ever resize the per-site line item. If the subscription has no item on
     // the per-site price (e.g. a legacy tiered subscription), do nothing — we must
     // never apply per-site quantity logic to a non-per-site plan.
     const perSite = await getPerSitePrice();
-    if (!perSite) return;
+    if (!perSite) return null;
     const item = active.items.data.find((i) => i.price?.id === perSite.priceId);
     if (!item) {
       logger.info(
         { clientId, subscriptionId: active.id },
         "No per-site line item on subscription; skipping quantity sync",
       );
-      return;
+      return null;
     }
 
     const desired = quantityForSiteCount(await countClientSites(clientId));
     const current = item.quantity ?? 0;
-    if (current === desired) return;
+    if (current === desired) return null;
 
     // Billing policy: no proration in either direction.
     // - Adding sites: the full monthly fee per added site is charged
@@ -219,6 +257,9 @@ async function syncWithStripe(clientId: number, dbc: DbLike = db): Promise<void>
     const added = desired - current;
 
     const stripe = await getUncachableStripeClient();
+    // No proration: quantity changes take effect on the next invoice, so a
+    // month is always billed in full regardless of when sites are added or
+    // removed. Keeps invoices and tax simple.
     await stripe.subscriptions.update(active.id, {
       items: [{ id: item.id, quantity: desired }],
       proration_behavior: "none",
@@ -226,18 +267,26 @@ async function syncWithStripe(clientId: number, dbc: DbLike = db): Promise<void>
 
     if (added > 0) {
       logger.info(
-        { clientId, subscriptionId: active.id, quantity: desired, added },
+        { clientId, subscriptionId: active.id, fromQuantity: current, quantity: desired, added },
         "Increased subscription quantity; full-month charge queued",
       );
       await processPendingCharges(clientId);
     } else {
       logger.info(
-        { clientId, subscriptionId: active.id, quantity: desired },
+        { clientId, subscriptionId: active.id, fromQuantity: current, quantity: desired },
         "Decreased subscription quantity (no refund/credit)",
       );
     }
+    return {
+      clientId,
+      clientName: client.name ?? null,
+      subscriptionId: active.id,
+      fromQuantity: current,
+      toQuantity: desired,
+    };
   } catch (err) {
     logger.error({ err, clientId }, "Failed to sync subscription quantity");
+    return null;
   }
 }
 

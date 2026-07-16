@@ -1,10 +1,12 @@
 import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { logger } from "./logger";
+import { sendSystemEmail, getPublicAppUrl } from "./email";
+import { countClientSites, getPerSitePrice, quantityForSiteCount } from "./billing";
 
-const REMINDER_LEAD_DAYS = 3;
+/** How many days before the trial ends the reminder is sent. */
+export const TRIAL_REMINDER_LEAD_DAYS = 3;
 
 function daysUntil(date: Date): number {
   return Math.max(1, Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
@@ -14,7 +16,9 @@ function buildTrialReminderEmail(opts: {
   recipientName: string;
   companyName: string;
   trialEndsAt: Date;
-  appUrl: string;
+  siteCount: number;
+  monthlyTotal: string | null;
+  billingUrl: string;
 }) {
   const endDateStr = opts.trialEndsAt.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -22,35 +26,40 @@ function buildTrialReminderEmail(opts: {
     month: "long",
     day: "numeric",
   });
+
   const daysLeft = daysUntil(opts.trialEndsAt);
   const daysPhrase = `${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
   const subject = `Your ComplyTrack free trial ends in ${daysPhrase}`;
 
+  const priceLine = opts.monthlyTotal
+    ? `Based on your current ${opts.siteCount} site${opts.siteCount === 1 ? "" : "s"}, your subscription would be £${opts.monthlyTotal} per month.`
+    : "Pricing is per site, per month.";
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Your free trial ends soon</h2>
+      <h2 style="color: #1e293b;">Your free trial is ending soon</h2>
       <p>Hi ${opts.recipientName},</p>
-      <p>The ComplyTrack free trial for <strong>${opts.companyName}</strong> ends in <strong>${daysPhrase}</strong>, on <strong>${endDateStr}</strong>.</p>
-      <div style="background: #f1f5f9; border-left: 4px solid #6366f1; padding: 16px; margin: 16px 0;">
-        <p style="margin: 0; color: #1e293b;">To keep your compliance tracking, reminders, and contractor records running without interruption, choose a plan before your trial ends.</p>
+      <p>The free trial for <strong>${opts.companyName}</strong> ends in <strong>${daysPhrase}</strong>, on <strong>${endDateStr}</strong>.</p>
+      <p>${priceLine}</p>
+      <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>
+        <a href="${opts.billingUrl}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Set Up Billing</a>
       </div>
-      <div style="text-align: center; margin: 24px 0;">
-        <a href="${opts.appUrl}" style="display: inline-block; background: #6366f1; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Choose a plan</a>
-      </div>
-      <p style="color: #64748b; font-size: 14px;">If you have any questions about plans or pricing, just reply to this email.</p>
       <p>Best regards,<br><strong>ComplyTrack</strong></p>
     </div>
   `;
 
   const text = `
-Your free trial ends soon
+Your free trial is ending soon
 
 Hi ${opts.recipientName},
 
-The ComplyTrack free trial for ${opts.companyName} ends in ${daysPhrase}, on ${endDateStr}.
+The free trial for ${opts.companyName} ends in ${daysPhrase}, on ${endDateStr}.
 
-To keep your compliance tracking, reminders, and contractor records running without interruption, choose a plan before your trial ends:
-${opts.appUrl}
+${priceLine}
+
+Subscribe here to keep everything running without interruption:
+${opts.billingUrl}
 
 Best regards,
 ComplyTrack
@@ -60,7 +69,7 @@ ComplyTrack
 }
 
 /**
- * Send a one-time trial-expiry warning email to every active admin of each
+ * Send a one-time trial-expiry warning email to every active consultant of each
  * trial client whose trial ends within the next 3 days. The window is a broad
  * band (not an exact 3-day slot) so trials created with <3 days left, or runs
  * delayed by downtime, are never missed; the email wording always reflects the
@@ -74,7 +83,7 @@ export async function runTrialReminderJob(): Promise<{
   emailsSent: number;
 }> {
   const now = new Date();
-  const windowEnd = new Date(now.getTime() + REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000);
+  const windowEnd = new Date(now.getTime() + TRIAL_REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000);
 
   const candidates = await db
     .select()
@@ -82,7 +91,7 @@ export async function runTrialReminderJob(): Promise<{
     .where(
       and(
         eq(clientsTable.active, true),
-        eq(clientsTable.subscriptionStatus, "trial"),
+        sql`${clientsTable.subscriptionStatus} IN ('trial', 'trialing')`,
         sql`${clientsTable.trialEndsAt} IS NOT NULL`,
         sql`${clientsTable.trialEndsAt} > ${now}`,
         sql`${clientsTable.trialEndsAt} <= ${windowEnd}`,
@@ -103,33 +112,43 @@ export async function runTrialReminderJob(): Promise<{
     `);
     if ((claim.rows ?? []).length === 0) continue;
 
-    const admins = await db
+    const consultants = await db
       .select()
       .from(usersTable)
       .where(
         and(
           eq(usersTable.clientId, client.id),
-          eq(usersTable.role, "client_admin"),
+          eq(usersTable.role, "consultant"),
           eq(usersTable.active, true),
         ),
       );
 
-    if (admins.length === 0) {
-      logger.warn({ clientId: client.id }, "Trial reminder: no active admins to email");
+    if (consultants.length === 0) {
+      logger.warn({ clientId: client.id }, "Trial reminder: no active consultants to email");
       continue;
     }
 
+    // Show what they'd pay so the email doubles as a clear billing preview.
+    const siteCount = await countClientSites(client.id);
+    const perSite = await getPerSitePrice();
+    const quantity = quantityForSiteCount(siteCount);
+    const monthlyTotal = perSite
+      ? ((perSite.unitAmount * quantity) / 100).toFixed(2)
+      : null;
+
     let sentForClient = 0;
-    for (const admin of admins) {
+    for (const consultant of consultants) {
       try {
         const { html, text, subject } = buildTrialReminderEmail({
-          recipientName: admin.name,
+          recipientName: consultant.name,
           companyName: client.name,
           trialEndsAt: client.trialEndsAt!,
-          appUrl: getPublicAppUrl(),
+          siteCount,
+          monthlyTotal,
+          billingUrl: `${getPublicAppUrl()}/billing`,
         });
         await sendSystemEmail({
-          to: admin.email,
+          to: consultant.email,
           subject,
           html,
           text,
@@ -137,7 +156,7 @@ export async function runTrialReminderJob(): Promise<{
         sentForClient++;
       } catch (err) {
         logger.error(
-          { err, clientId: client.id, userId: admin.id },
+          { err, clientId: client.id, userId: consultant.id },
           "Trial reminder email failed",
         );
       }

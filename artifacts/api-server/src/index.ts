@@ -4,9 +4,10 @@ import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./lib/stripeClient";
 import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
-import { runTrialReminderJob } from "./lib/trialReminders";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
-import { reconcileAllSubscriptionQuantities } from "./lib/billing";
+import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
+import { sendSystemEmail } from "./lib/email";
+import { runTrialReminderJob } from "./lib/trialReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -64,18 +65,18 @@ function startScheduler() {
   cron.schedule("30 8 * * *", runBillingReconciliation);
   logger.info("Billing reconciliation scheduler started (daily at 08:30)");
 
-  // Warn trial clients 3 days before their free trial expires.
+  // Remind clients whose free trial is about to end (daily at 08:15)
   cron.schedule("15 8 * * *", runTrialReminders);
-  logger.info("Trial expiry reminder scheduler started (daily at 08:15)");
+  logger.info("Trial reminder scheduler started (daily at 08:15)");
 }
 
 async function runTrialReminders() {
-  logger.info("Running trial expiry reminder job...");
+  logger.info("Running trial ending reminder job...");
   try {
     const result = await runTrialReminderJob();
-    logger.info({ result }, "Trial expiry reminder job complete");
+    logger.info({ result }, "Trial ending reminder job complete");
   } catch (err) {
-    logger.error({ err }, "Trial expiry reminder job failed");
+    logger.error({ err }, "Trial ending reminder job failed");
   }
 }
 
@@ -83,9 +84,78 @@ async function runBillingReconciliation() {
   logger.info("Running billing reconciliation...");
   try {
     const result = await reconcileAllSubscriptionQuantities();
-    logger.info({ result }, "Billing reconciliation complete");
+    if (result.corrections.length > 0) {
+      logger.warn(
+        {
+          clientsChecked: result.clients,
+          driftCount: result.corrections.length,
+          corrections: result.corrections,
+        },
+        "Billing reconciliation corrected drift — investigate upstream cause (missed webhook or failed sync)",
+      );
+      await notifyAdminOfBillingDrift(result.corrections);
+    } else {
+      logger.info(
+        { clientsChecked: result.clients, driftCount: 0 },
+        "Billing reconciliation complete — no drift detected",
+      );
+    }
   } catch (err) {
     logger.error({ err }, "Billing reconciliation failed");
+  }
+}
+
+/**
+ * Best-effort admin email when the reconciliation job had to correct drift.
+ * Requires ADMIN_EMAIL (and Resend) to be configured; otherwise just logs.
+ */
+async function notifyAdminOfBillingDrift(corrections: QuantityCorrection[]) {
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  if (!adminEmail) {
+    logger.info(
+      "ADMIN_EMAIL not configured — skipping billing drift notification email",
+    );
+    return;
+  }
+  const rowsHtml = corrections
+    .map(
+      (c) =>
+        `<tr><td style="padding:6px 12px;border:1px solid #e2e8f0;">${c.clientName ?? "(unknown)"} (id ${c.clientId})</td><td style="padding:6px 12px;border:1px solid #e2e8f0;">${c.subscriptionId}</td><td style="padding:6px 12px;border:1px solid #e2e8f0;text-align:center;">${c.fromQuantity}</td><td style="padding:6px 12px;border:1px solid #e2e8f0;text-align:center;">${c.toQuantity}</td></tr>`,
+    )
+    .join("");
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+      <h2 style="color:#1e293b;">Billing drift detected and corrected</h2>
+      <p>The daily billing reconciliation found ${corrections.length} client subscription${corrections.length === 1 ? "" : "s"} whose Stripe quantity did not match the real site count. The quantities have been corrected automatically, but drift usually means something upstream broke (missed webhook or failed sync) and is worth investigating.</p>
+      <table style="border-collapse:collapse;margin:16px 0;">
+        <tr>
+          <th style="padding:6px 12px;border:1px solid #e2e8f0;background:#f1f5f9;text-align:left;">Client</th>
+          <th style="padding:6px 12px;border:1px solid #e2e8f0;background:#f1f5f9;text-align:left;">Subscription</th>
+          <th style="padding:6px 12px;border:1px solid #e2e8f0;background:#f1f5f9;">Was billing</th>
+          <th style="padding:6px 12px;border:1px solid #e2e8f0;background:#f1f5f9;">Corrected to</th>
+        </tr>
+        ${rowsHtml}
+      </table>
+    </div>`;
+  const text = [
+    `Billing drift detected and corrected (${corrections.length} client${corrections.length === 1 ? "" : "s"}):`,
+    ...corrections.map(
+      (c) =>
+        `- ${c.clientName ?? "(unknown)"} (id ${c.clientId}), subscription ${c.subscriptionId}: quantity ${c.fromQuantity} -> ${c.toQuantity}`,
+    ),
+    "",
+    "Drift usually means something upstream broke (missed webhook or failed sync) and is worth investigating.",
+  ].join("\n");
+  try {
+    await sendSystemEmail({
+      to: adminEmail,
+      subject: `Billing drift corrected for ${corrections.length} client${corrections.length === 1 ? "" : "s"}`,
+      html,
+      text,
+    });
+    logger.info({ adminEmail }, "Billing drift notification email sent");
+  } catch (err) {
+    logger.error({ err }, "Failed to send billing drift notification email");
   }
 }
 
