@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:isolation": "node tests/tenant-isolation.mjs",
+    "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
     "test:trial-reminders": "node tests/trial-reminders.mjs"
   },
   "dependencies": {
