@@ -56,7 +56,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center relative z-10">
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: "easeOut" }}>
             <div className="inline-flex items-center gap-2 border border-white/20 text-white/80 rounded-full px-4 py-1.5 text-sm font-medium mb-10 tracking-wide">
-              <Star className="w-3.5 h-3.5 text-primary fill-primary" /> Trusted by businesses across the UK
+              <Star className="w-3.5 h-3.5 text-primary fill-primary" /> Trusted by businesses worldwide
             </div>
             <h1 className="text-5xl sm:text-7xl font-display leading-[1.1] mb-8 tracking-tight text-white">
               Health & Safety<br />
@@ -84,7 +84,7 @@ export default function LandingPage() {
       {/* Social proof bar */}
       <div className="bg-white border-b border-border/50 py-6 px-6">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-10 text-sm font-medium text-muted-foreground uppercase tracking-widest">
-          {["ISO 45001 aligned", "GDPR compliant", "UK-based support", "14-day free trial"].map(item => (
+          {["ISO 45001 aligned", "GDPR compliant", "Friendly human support", "14-day free trial"].map(item => (
             <div key={item} className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
               {item}
@@ -98,7 +98,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-20">
             <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Everything you need to stay compliant</h2>
-            <p className="text-muted-foreground text-xl font-light max-w-2xl mx-auto">Built for UK businesses managing their own Health & Safety compliance, with the elegance and clarity of professional consultancy.</p>
+            <p className="text-muted-foreground text-xl font-light max-w-2xl mx-auto">Built for businesses anywhere in the world managing their own Health & Safety compliance, with the elegance and clarity of professional consultancy.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
             {FEATURES.map((f, i) => (

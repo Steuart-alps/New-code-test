@@ -73,9 +73,9 @@ ${publicPages
 
 const llmsTxt = `# ComplyTrack
 
-> Health & Safety compliance tracking for UK businesses. ComplyTrack helps companies stay on top of their statutory H&S obligations across one site or many — tracking compliance checks, storing certificates, managing contractors, and sending automated reminders before things fall due.
+> Health & Safety compliance tracking for businesses worldwide. ComplyTrack helps companies stay on top of their statutory H&S obligations across one site or many — tracking compliance checks, storing certificates, managing contractors, and sending automated reminders before things fall due.
 
-ComplyTrack is a multi-tenant SaaS platform aimed at UK businesses managing their own Health & Safety compliance. Each business's data is fully isolated. Businesses can optionally invite their external H&S consultant in with scoped access. Pricing is per site (per building) on a simple monthly subscription.
+ComplyTrack is a multi-tenant SaaS platform for businesses anywhere in the world managing their own Health & Safety compliance. Each business's data is fully isolated. Businesses can optionally invite their external H&S consultant in with scoped access. Pricing is per site (per building) on a simple monthly subscription.
 
 ## Primary pages
 - [Home](${baseUrl}/): What ComplyTrack does, who it serves, and key features.

@@ -59,7 +59,7 @@ export default function ExternalChecksPage() {
   const [loadingStarter, setLoadingStarter] = useState(false);
 
   const loadStarterPack = async () => {
-    if (!confirm("Load the starter pack? This adds the standard UK H&S categories and around 27 example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC). Everything is fully editable.")) return;
+    if (!confirm("Load the starter pack? This adds the standard H&S categories and around 27 example compliance checks (Gas, Fire, Electrical, LOLER, Legionella, Pressure Systems, HVAC). Everything is fully editable.")) return;
     setLoadingStarter(true);
     try {
       const res = await apiFetch("/starter-pack/load", { method: "POST" });
