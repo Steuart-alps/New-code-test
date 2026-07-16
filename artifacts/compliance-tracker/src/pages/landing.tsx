@@ -174,7 +174,7 @@ export default function LandingPage() {
             </div>
           </div>
           <p className="text-center text-sm text-muted-foreground mt-8">
-            Includes a 14-day free trial. Add or remove sites anytime — your bill adjusts automatically with proration. Have a discount code? Enter it during checkout.
+            Includes a 14-day free trial. Add or remove sites anytime — each added site is charged one month's access up front (no proration, no refunds). Have a discount code? Enter it during checkout.
           </p>
         </div>
       </section>

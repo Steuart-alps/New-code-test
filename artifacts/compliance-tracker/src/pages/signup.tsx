@@ -171,8 +171,8 @@ export default function SignupPage() {
                       <span className="text-sm text-muted-foreground">per site / month</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Pay only for the sites you manage. You start with one site — add or remove sites anytime and your
-                      bill adjusts automatically (prorated).
+                      Pay only for the sites you manage. You start with one site — each added site is charged one
+                      month's access up front. No proration, no refunds.
                     </p>
                   </div>
                 </div>

@@ -46,6 +46,17 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+let _unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Register a handler invoked whenever any API response comes back 401.
+ * Lets the app clear its auth state and route to the login screen when a
+ * session expires mid-use. Pass `null` to clear.
+ */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _unauthorizedHandler = handler;
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
@@ -391,6 +402,13 @@ export async function customFetch<T = unknown>(
   const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
+    if (response.status === 401 && _unauthorizedHandler) {
+      try {
+        _unauthorizedHandler();
+      } catch {
+        // never let the handler break error propagation
+      }
+    }
     const errorData = await parseErrorBody(response, method);
     throw new ApiError(response, errorData, requestInfo);
   }

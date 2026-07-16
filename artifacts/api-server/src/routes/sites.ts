@@ -4,7 +4,7 @@ import { sitesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
-import { syncClientSubscriptionQuantity } from "../lib/billing";
+import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 
 const router: IRouter = Router();
 
@@ -49,17 +49,23 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: "Site name is required" });
     return;
   }
-  const [site] = await db
-    .insert(sitesTable)
-    .values({
-      clientId,
-      name,
-      responsiblePerson: req.body.responsiblePerson ?? null,
-      address: req.body.address ?? null,
-      phone: req.body.phone ?? null,
-      updatedAt: new Date(),
-    })
-    .returning();
+  // The site row and its billing charge intent are created atomically: a
+  // crash can never produce an added site that was never billed.
+  const site = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(sitesTable)
+      .values({
+        clientId,
+        name,
+        responsiblePerson: req.body.responsiblePerson ?? null,
+        address: req.body.address ?? null,
+        phone: req.body.phone ?? null,
+        updatedAt: new Date(),
+      })
+      .returning();
+    await queueSiteAddedCharge(tx, clientId, created.id);
+    return created;
+  });
 
   // Pre-populate the new site with the starter pack of compliance checks,
   // unless the caller explicitly opted out.
@@ -107,7 +113,8 @@ router.delete("/sites/:id", requireAuth, requireClientAdmin, async (req, res) =>
   }
   await db.delete(sitesTable).where(eq(sitesTable.id, id));
 
-  // Per-site billing: removing a site decreases the subscription quantity (with proration).
+  // Per-site billing: removing a site decreases the subscription quantity
+  // at the next renewal (no refund or credit for the remainder of the month).
   await syncClientSubscriptionQuantity(existing.clientId);
 
   res.status(204).send();

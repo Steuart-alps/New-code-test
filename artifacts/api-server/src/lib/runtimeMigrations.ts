@@ -138,6 +138,50 @@ export async function runRuntimeMigrations() {
       ON CONFLICT DO NOTHING
     `);
 
+    // ---- Billing outbox: pending one-off charges for added sites ----
+    // Recorded BEFORE touching Stripe so a crash between the subscription
+    // quantity update and the invoice charge can never lose a billable event.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "billing_pending_charges" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "sites_added" integer NOT NULL,
+        "amount" integer NOT NULL,
+        "currency" text NOT NULL,
+        "from_quantity" integer NOT NULL DEFAULT 0,
+        "to_quantity" integer NOT NULL DEFAULT 0,
+        "status" text NOT NULL DEFAULT 'pending',
+        "stripe_invoice_id" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "charged_at" timestamp
+      )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "billing_pending_charges"
+      ADD COLUMN IF NOT EXISTS "from_quantity" integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "to_quantity" integer NOT NULL DEFAULT 0
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "billing_pending_charges_status_idx"
+      ON "billing_pending_charges" ("status", "client_id")
+    `);
+    // Event-based charge intent: one outbox row per added site, created in the
+    // same transaction as the site row itself. Exactly one charge row may ever
+    // exist per site.
+    await db.execute(sql`
+      ALTER TABLE "billing_pending_charges"
+      ADD COLUMN IF NOT EXISTS "site_id" integer
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "billing_pending_charges_site_uq"
+      ON "billing_pending_charges" ("site_id")
+      WHERE "site_id" IS NOT NULL
+    `);
+    // Superseded by per-site event rows (quantity-delta dedup no longer used).
+    await db.execute(sql`
+      DROP INDEX IF EXISTS "billing_pending_charges_transition_uq"
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

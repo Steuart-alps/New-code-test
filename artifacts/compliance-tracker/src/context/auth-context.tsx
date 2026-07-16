@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
 import { apiFetch } from "@/lib/api";
-import { setClientIdGetter } from "@workspace/api-client-react";
+import { setClientIdGetter, setUnauthorizedHandler } from "@workspace/api-client-react";
 
 export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
 
@@ -52,6 +52,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setClientIdGetter(() => activeClientIdRef.current);
     return () => setClientIdGetter(null);
+  }, []);
+
+  // If any API call returns 401 the session has expired: clear auth state so
+  // the router sends the user back to the login page instead of leaving stale
+  // pages showing errors like "Site not found".
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setClient(null);
+      setActiveClientId(null);
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   async function refresh() {

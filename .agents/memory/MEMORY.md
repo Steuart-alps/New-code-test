@@ -1,4 +1,6 @@
 - [Billing architecture](billing-architecture.md) — per-site Stripe pricing, account = client, subscription looked up dynamically; billing endpoints bypass openapi.
+- [No-proration billing outbox](billing-no-proration.md) — added sites billed via per-site event outbox + idempotent claiming; never charge from quantity deltas; skip only strictly pre-subscription rows.
 - [Multi-tenant authz](multitenant-authz.md) — tenant access enforced via consultant_clients membership + canAccessClient/enforceClientAccess; never trust client-supplied clientId.
 - [Typecheck vs build](typecheck-vs-build.md) — `tsc` typecheck fails repo-wide (codegen/db dist absent); dev workflows use esbuild/vite, which is the real build signal.
 - [Schema change workflow](schema-changes.md) — drizzle push is interactive (unusable headless); prod schema comes from api-server runtime migrations, so every new table/column must be added there too.
+- Session-expiry: API-client 401s fire `setUnauthorizedHandler` (registered in auth-context) to clear auth and route to login; prod "Site not found" reports were stale sessions on the published site.
