@@ -12,31 +12,16 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBaseUrl, assertCanonicalForProduction } from "./site-url.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
-
-function resolveBaseUrl() {
-  if (process.env.PUBLIC_SITE_URL) {
-    return { baseUrl: process.env.PUBLIC_SITE_URL.replace(/\/+$/, ""), source: "PUBLIC_SITE_URL" };
-  }
-  const domains = (process.env.REPLIT_DOMAINS ?? "").split(",").map((d) => d.trim()).filter(Boolean);
-  if (domains.length > 0) {
-    return { baseUrl: `https://${domains[0]}`, source: "REPLIT_DOMAINS" };
-  }
-  return { baseUrl: "http://localhost:21186", source: "localhost-fallback" };
-}
 
 const { baseUrl, source } = resolveBaseUrl();
 
 // Never ship a production build with a non-canonical (localhost) host — that would
 // publish broken sitemap/llms URLs. Fail loudly so the deployment is corrected.
-if (source === "localhost-fallback" && process.env.NODE_ENV === "production") {
-  throw new Error(
-    "[generate-seo] No canonical site URL available for production build. " +
-      "Set PUBLIC_SITE_URL (custom domain) or ensure REPLIT_DOMAINS is present.",
-  );
-}
+assertCanonicalForProduction(source);
 const today = new Date().toISOString().slice(0, 10);
 
 // Public, indexable pages. Everything else is behind auth.

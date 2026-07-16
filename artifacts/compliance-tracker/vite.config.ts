@@ -3,6 +3,21 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+// @ts-expect-error plain .mjs module without type declarations
+import { resolveBaseUrl, assertCanonicalForProduction } from "./scripts/site-url.mjs";
+
+// Injects the canonical site URL into index.html (canonical link, Open Graph,
+// Twitter, JSON-LD) at dev-serve and build time via the __SITE_URL__ placeholder.
+function siteUrlHtmlPlugin() {
+  return {
+    name: "site-url-html",
+    transformIndexHtml(html: string) {
+      const { baseUrl, source } = resolveBaseUrl();
+      assertCanonicalForProduction(source);
+      return html.replaceAll("__SITE_URL__", baseUrl);
+    },
+  };
+}
 
 const rawPort = process.env.PORT;
 
@@ -32,6 +47,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     runtimeErrorOverlay(),
+    siteUrlHtmlPlugin(),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
