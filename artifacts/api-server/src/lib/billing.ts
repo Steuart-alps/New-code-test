@@ -79,13 +79,74 @@ export async function findLiveSubscription(customerId: string) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Per-client serialization of quantity syncs.
+//
+// Two site changes landing at nearly the same moment could otherwise interleave
+// their read-count → update-Stripe steps and apply updates out of order,
+// briefly leaving the billed quantity out of step with the real site count.
+// Each client's syncs run one at a time; because every run re-reads the site
+// count and current subscription state at its start, the last run in the chain
+// always converges Stripe to the true count. A pending flag coalesces bursts:
+// if a sync is already queued (not yet started) for a client, additional
+// requests piggyback on it instead of queueing more redundant Stripe calls.
+// ---------------------------------------------------------------------------
+const syncChains = new Map<number, Promise<void>>();
+const syncPending = new Set<number>();
+
 /**
  * Bring a client's Stripe subscription quantity in line with their current site
  * count (with proration). Best-effort: logs and returns on any problem so the
- * triggering site create/delete still succeeds. Looks the subscription up
- * dynamically by customer id rather than relying on a stored subscription id.
+ * triggering site create/delete still succeeds. Concurrent calls for the same
+ * client are serialized (and coalesced) so updates can't land out of order.
  */
-export async function syncClientSubscriptionQuantity(clientId: number): Promise<void> {
+export function syncClientSubscriptionQuantity(clientId: number): Promise<void> {
+  // Already queued but not started: that run will read the latest state.
+  if (syncPending.has(clientId)) {
+    return syncChains.get(clientId) ?? Promise.resolve();
+  }
+  syncPending.add(clientId);
+
+  const prev = syncChains.get(clientId) ?? Promise.resolve();
+  const run = prev.then(() => {
+    // Now starting: later callers must queue a fresh run to observe their changes.
+    syncPending.delete(clientId);
+    return doSyncClientSubscriptionQuantity(clientId);
+  });
+  // Never propagate rejections into the chain (doSync catches internally anyway).
+  const chained = run.catch(() => {});
+  syncChains.set(clientId, chained);
+  chained.finally(() => {
+    // Drop the map entry once the chain is fully drained to avoid unbounded growth.
+    if (syncChains.get(clientId) === chained) {
+      syncChains.delete(clientId);
+    }
+  });
+  return run;
+}
+
+// Namespace for advisory lock keys so we don't collide with other lock users.
+const BILLING_SYNC_LOCK_NS = 0x42494c4c; // "BILL"
+
+async function doSyncClientSubscriptionQuantity(clientId: number): Promise<void> {
+  try {
+    // Cross-instance serialization: the in-process queue above only covers a
+    // single server process. A Postgres transaction-scoped advisory lock keyed
+    // by client id guarantees that even with multiple API instances, only one
+    // sync per client runs at a time; each waits its turn and then re-reads
+    // the latest site count, so the final Stripe quantity matches reality.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${BILLING_SYNC_LOCK_NS}, ${clientId})`,
+      );
+      await syncWithStripe(clientId);
+    });
+  } catch (err) {
+    logger.error({ err, clientId }, "Failed to sync subscription quantity");
+  }
+}
+
+async function syncWithStripe(clientId: number): Promise<void> {
   try {
     const [client] = await db
       .select()
