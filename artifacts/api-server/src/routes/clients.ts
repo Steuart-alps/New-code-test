@@ -2,9 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { clientsTable, usersTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
-import { requireAuth, requireConsultant, requireClientAdmin } from "../middleware/requireAuth";
+import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
+import { eq, inArray } from "drizzle-orm";
+import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
 
@@ -18,8 +18,17 @@ const UpsertClientBody = z.object({
   active: z.boolean().default(true),
 });
 
-router.get("/clients", requireAuth, requireConsultant, async (_req, res) => {
-  const clients = await db.select().from(clientsTable).orderBy(clientsTable.name);
+router.get("/clients", requireAuth, requireConsultant, async (req, res) => {
+  const allowed = Array.from(req.allowedClientIds ?? []);
+  if (allowed.length === 0) {
+    res.json([]);
+    return;
+  }
+  const clients = await db
+    .select()
+    .from(clientsTable)
+    .where(inArray(clientsTable.id, allowed))
+    .orderBy(clientsTable.name);
   res.json(clients);
 });
 
@@ -27,7 +36,7 @@ router.get("/clients/:id", requireAuth, async (req, res) => {
   const user = req.currentUser!;
   const id = Number(req.params.id);
 
-  if (user.role !== "consultant" && user.clientId !== id) {
+  if (!canAccessClient(req, id)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -43,6 +52,12 @@ router.get("/clients/:id", requireAuth, async (req, res) => {
 router.post("/clients", requireAuth, requireConsultant, async (req, res) => {
   const body = UpsertClientBody.parse(req.body);
   const rows = await db.insert(clientsTable).values(body).returning();
+  // Link the creating consultant to the new client so they can access it.
+  await db
+    .insert(consultantClientsTable)
+    .values({ userId: req.currentUser!.id, clientId: rows[0].id })
+    .onConflictDoNothing();
+  req.allowedClientIds?.add(rows[0].id);
   // Pre-populate the new business with example categories and compliance checks.
   // Everything is fully editable / deletable by the user.
   await seedStarterContent(rows[0].id);
@@ -53,7 +68,7 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
   const user = req.currentUser!;
   const id = Number(req.params.id);
 
-  if (user.role !== "consultant" && user.clientId !== id) {
+  if (!canAccessClient(req, id)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -100,6 +115,10 @@ router.post("/starter-pack/load", requireAuth, async (req, res) => {
         .update(usersTable)
         .set({ clientId, updatedAt: new Date() })
         .where(eq(usersTable.id, user.id));
+      await db
+        .insert(consultantClientsTable)
+        .values({ userId: user.id, clientId })
+        .onConflictDoNothing();
     } catch (err) {
       logger.error({ err, userId: user.id }, "Failed to provision client during starter-pack load");
       res.status(500).json({ error: "Couldn't create your business. Please try again." });
@@ -113,6 +132,10 @@ router.post("/starter-pack/load", requireAuth, async (req, res) => {
 
 router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) => {
   const id = Number(req.params.id);
+  if (!canAccessClient(req, id)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   await db.delete(clientsTable).where(eq(clientsTable.id, id));
   res.json({ ok: true });
 });

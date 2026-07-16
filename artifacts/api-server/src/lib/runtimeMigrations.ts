@@ -116,6 +116,28 @@ export async function runRuntimeMigrations() {
       CHECK ((contractor_id IS NOT NULL)::int + (item_id IS NOT NULL)::int = 1)
     `);
 
+    // ---- Consultant <-> client tenant membership (cross-tenant IDOR fix) ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "consultant_clients" (
+        "id" serial PRIMARY KEY,
+        "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "consultant_clients_user_client_uq"
+      ON "consultant_clients" ("user_id", "client_id")
+    `);
+    // Backfill: every consultant-role user is linked to their own client so
+    // existing accounts keep access to their data. Idempotent via ON CONFLICT.
+    await db.execute(sql`
+      INSERT INTO "consultant_clients" ("user_id", "client_id")
+      SELECT id, client_id FROM "users"
+      WHERE role = 'consultant' AND client_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

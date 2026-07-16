@@ -6,7 +6,7 @@ import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
 import { db } from "@workspace/db";
-import { usersTable, passwordResetTokensTable, clientsTable } from "@workspace/db/schema";
+import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
@@ -222,6 +222,15 @@ router.post("/auth/register", async (req, res) => {
     .insert(usersTable)
     .values({ name, email, passwordHash, role: "consultant", clientId, subscriptionStatus: "trial" })
     .returning();
+
+  // Link the new owner to their auto-provisioned business so tenant access
+  // checks (consultant_clients membership) recognise it.
+  if (clientId !== null) {
+    await db
+      .insert(consultantClientsTable)
+      .values({ userId: user.id, clientId })
+      .onConflictDoNothing();
+  }
 
   // Pre-populate the new business with starter categories and example
   // compliance checks so the dashboard isn't empty on first login. All seeded

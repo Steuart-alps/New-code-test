@@ -1,12 +1,17 @@
 ---
-name: Multi-tenant authz caveat
-description: Self-signup owners share the "consultant" role, which can pass an arbitrary clientId — cross-tenant risk.
+name: Multi-tenant authz
+description: How tenant isolation is enforced — consultant_clients membership, canAccessClient, enforceClientAccess. Rules for adding new endpoints.
 ---
 
-# Cross-tenant authz caveat
+# Multi-tenant authorization model
 
-The "consultant" role is overloaded: real H&S consultants legitimately manage *multiple* client businesses, but self-signup account owners are also given this role for their single account. The access helper therefore lets any consultant-role user act on a `clientId` supplied by the browser.
+The "consultant" role is overloaded: real H&S consultants manage *multiple* client businesses, and self-signup account owners also get this role for their single account. Access is resolved through an explicit membership model, not the role alone.
 
-**Risk:** a self-signup owner can target another account's id and act on it (billing and core data alike).
+**The rule:** never trust a browser-supplied `clientId`. Every consultant's permitted clients live in the `consultant_clients` table (plus their own `users.client_id`).
 
-**Why it isn't fixed inline:** there is no consultant↔client membership model to tell the two cases apart, and the gap spans every consultant endpoint — fixing one route gives false assurance. A real fix needs a membership/ownership model and must be applied app-wide.
+**How to apply when adding endpoints:**
+- Per-request, `loadUser` populates `req.allowedClientIds` for consultant users; a global `enforceClientAccess` middleware rejects any query/body `clientId` outside that set (mounted right after `loadUser`).
+- Resolve tenant scope with `getClientId(req)` (already vetted) and gate direct resource-ID access with `canAccessClient(req, resource.clientId)` — never with `role !== "consultant"` bypasses.
+- Any flow that provisions a new client for a consultant (registration, client creation, self-provisioning) must insert a `consultant_clients` row or the creator locks themselves out.
+
+**Why:** self-signup owners previously could pass another account's id and read/write its data (cross-tenant IDOR); fixed app-wide via this membership model.

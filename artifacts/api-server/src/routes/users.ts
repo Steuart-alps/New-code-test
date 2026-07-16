@@ -2,9 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { usersTable, userRoleEnum } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
-import { requireAuth, requireClientAdmin, requireConsultant, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -34,14 +34,28 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
   if (user.role === "consultant") {
     const clientId = req.query.clientId ? Number(req.query.clientId) : null;
     if (clientId) {
+      // enforceClientAccess already rejected unauthorized ids; check again for
+      // defense in depth.
+      if (!canAccessClient(req, clientId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
       rows = await db
         .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(eq(usersTable.clientId, clientId));
     } else {
+      // No explicit client selected: list users across the clients this
+      // consultant is linked to — never every user in the system.
+      const allowed = Array.from(req.allowedClientIds ?? []);
+      if (allowed.length === 0) {
+        res.json([]);
+        return;
+      }
       rows = await db
         .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
-        .from(usersTable);
+        .from(usersTable)
+        .where(inArray(usersTable.clientId, allowed));
     }
   } else {
     rows = await db
@@ -98,7 +112,7 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     return;
   }
 
-  if (actor.role !== "consultant" && target.clientId !== actor.clientId) {
+  if (target.id !== actor.id && !canAccessClient(req, target.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -133,7 +147,7 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
     return;
   }
 
-  if (actor.role !== "consultant" && target.clientId !== actor.clientId) {
+  if (target.id !== actor.id && !canAccessClient(req, target.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

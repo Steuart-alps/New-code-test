@@ -1,3 +1,4 @@
 - [Billing architecture](billing-architecture.md) — per-site Stripe pricing, account = client, subscription looked up dynamically; billing endpoints bypass openapi.
-- [Multi-tenant authz caveat](multitenant-authz.md) — getClientId trusts client-supplied clientId for "consultant" role; self-signup owners share that role (cross-tenant risk).
+- [Multi-tenant authz](multitenant-authz.md) — tenant access enforced via consultant_clients membership + canAccessClient/enforceClientAccess; never trust client-supplied clientId.
 - [Typecheck vs build](typecheck-vs-build.md) — `tsc` typecheck fails repo-wide (codegen/db dist absent); dev workflows use esbuild/vite, which is the real build signal.
+- [Schema change workflow](schema-changes.md) — drizzle push is interactive (unusable headless); prod schema comes from api-server runtime migrations, so every new table/column must be added there too.

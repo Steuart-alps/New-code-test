@@ -6,7 +6,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/session";
-import { loadUser } from "./middleware/requireAuth";
+import { loadUser, enforceClientAccess } from "./middleware/requireAuth";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 
 const app: Express = express();
@@ -84,6 +84,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 app.use(loadUser);
+app.use(enforceClientAccess);
 
 app.use("/api", router);
 

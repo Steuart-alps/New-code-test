@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { departmentsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -22,7 +22,7 @@ router.get("/departments", requireAuth, async (req, res) => {
     return;
   }
 
-  if (user.role !== "consultant" && user.clientId !== clientId) {
+  if (!canAccessClient(req, clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -38,7 +38,7 @@ router.post("/departments", requireAuth, requireClientAdmin, async (req, res) =>
   const actor = req.currentUser!;
   const body = UpsertDepartmentBody.parse(req.body);
 
-  const clientId = actor.role === "consultant" ? (body.clientId ?? getClientId(req)) : actor.clientId;
+  const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
@@ -61,7 +61,7 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
     return;
   }
 
-  if (actor.role !== "consultant" && existing[0].clientId !== actor.clientId) {
+  if (!canAccessClient(req, existing[0].clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -85,7 +85,7 @@ router.delete("/departments/:id", requireAuth, requireClientAdmin, async (req, r
     return;
   }
 
-  if (actor.role !== "consultant" && existing[0].clientId !== actor.clientId) {
+  if (!canAccessClient(req, existing[0].clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

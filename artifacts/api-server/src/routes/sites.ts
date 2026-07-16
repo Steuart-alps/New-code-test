@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity } from "../lib/billing";
 
@@ -30,7 +30,7 @@ router.get("/sites/:id", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Site not found" });
     return;
   }
-  if (user.role !== "consultant" && site.clientId !== user.clientId) {
+  if (!canAccessClient(req, site.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -39,7 +39,7 @@ router.get("/sites/:id", requireAuth, async (req, res) => {
 
 router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
-  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
@@ -81,7 +81,7 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
     res.status(404).json({ error: "Site not found" });
     return;
   }
-  if (user.role !== "consultant" && existing.clientId !== user.clientId) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -101,7 +101,7 @@ router.delete("/sites/:id", requireAuth, requireClientAdmin, async (req, res) =>
     res.status(404).json({ error: "Site not found" });
     return;
   }
-  if (user.role !== "consultant" && existing.clientId !== user.clientId) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

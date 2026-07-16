@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { categoriesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -28,7 +28,7 @@ router.get("/categories/:id", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Category not found" });
     return;
   }
-  if (user.role !== "consultant" && category.clientId !== user.clientId) {
+  if (!canAccessClient(req, category.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -37,7 +37,7 @@ router.get("/categories/:id", requireAuth, async (req, res) => {
 
 router.post("/categories", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
-  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
@@ -60,7 +60,7 @@ router.patch("/categories/:id", requireAuth, requireClientAdmin, async (req, res
     res.status(404).json({ error: "Category not found" });
     return;
   }
-  if (user.role !== "consultant" && existing.clientId !== user.clientId) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -79,7 +79,7 @@ router.delete("/categories/:id", requireAuth, requireClientAdmin, async (req, re
     res.status(404).json({ error: "Category not found" });
     return;
   }
-  if (user.role !== "consultant" && existing.clientId !== user.clientId) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

@@ -12,7 +12,7 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -148,7 +148,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
   const user = req.currentUser!;
   const applyToAllSites = req.body?.applyToAllSites === true;
   const body = CreateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
-  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
@@ -215,7 +215,7 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }
-  if (user.role !== "consultant" && joined.item.clientId !== user.clientId) {
+  if (!canAccessClient(req, joined.item.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -228,7 +228,7 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   const user = req.currentUser!;
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
-  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+  if (!existing[0] || (!canAccessClient(req, existing[0].clientId))) {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }
@@ -270,7 +270,7 @@ router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (r
   const user = req.currentUser!;
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
-  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+  if (!existing[0] || (!canAccessClient(req, existing[0].clientId))) {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }
@@ -290,7 +290,7 @@ router.patch("/compliance-items/:id/status", requireAuth, async (req, res) => {
   }
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
-  if (!existing[0] || (user.role !== "consultant" && existing[0].clientId !== user.clientId)) {
+  if (!existing[0] || (!canAccessClient(req, existing[0].clientId))) {
     res.status(404).json({ error: "Compliance item not found" });
     return;
   }

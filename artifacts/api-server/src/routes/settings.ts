@@ -41,8 +41,7 @@ router.get("/settings", requireAuth, async (req, res) => {
 });
 
 router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
-  const user = req.currentUser!;
-  const clientId = user.role === "consultant" ? (req.body.clientId ?? getClientId(req)) : user.clientId;
+  const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
