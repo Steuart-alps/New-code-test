@@ -125,6 +125,23 @@ export function syncClientSubscriptionQuantity(clientId: number): Promise<void> 
   return run;
 }
 
+/**
+ * Reconcile every client that has a Stripe customer: re-run the quantity sync
+ * so any billing drift (missed webhooks, transient Stripe failures) self-heals
+ * without waiting for the next site change. Clients are processed sequentially
+ * to keep Stripe API usage gentle; each sync is best-effort and never throws.
+ */
+export async function reconcileAllSubscriptionQuantities(): Promise<{ clients: number }> {
+  const clients = await db
+    .select({ id: clientsTable.id })
+    .from(clientsTable)
+    .where(sql`${clientsTable.stripeCustomerId} IS NOT NULL`);
+  for (const c of clients) {
+    await syncClientSubscriptionQuantity(c.id);
+  }
+  return { clients: clients.length };
+}
+
 // Namespace for advisory lock keys so we don't collide with other lock users.
 const BILLING_SYNC_LOCK_NS = 0x42494c4c; // "BILL"
 
