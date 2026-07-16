@@ -223,7 +223,7 @@ export default function LoginPage() {
             </button>
           </p>
           <p className="text-xs text-muted-foreground">
-            Or contact your Health & Safety consultant if you need access.
+            Or ask your account owner to invite you if your business already uses ComplyTrack.
           </p>
         </div>
       </motion.div>

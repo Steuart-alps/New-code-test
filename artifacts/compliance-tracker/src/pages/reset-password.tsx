@@ -154,7 +154,7 @@ export default function ResetPasswordPage() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          Contact your Health & Safety consultant if you need access.
+          Ask your account owner to invite you if you need access.
         </p>
       </motion.div>
     </div>

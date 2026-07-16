@@ -27,8 +27,8 @@ interface Department {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  consultant: "Consultant",
-  client_admin: "Client Admin",
+  consultant: "Owner",
+  client_admin: "Admin",
   client_staff: "Staff",
   client_viewer: "Viewer",
 };

@@ -172,7 +172,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             {isConsultant && (
               <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-full">
                 <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-                <span className="text-amber-700 font-medium">Consultant</span>
+                <span className="text-amber-700 font-medium">Owner</span>
               </div>
             )}
             <button className="relative p-2 rounded-full hover:bg-card border border-transparent hover:border-border transition-all shadow-sm bg-card/30">

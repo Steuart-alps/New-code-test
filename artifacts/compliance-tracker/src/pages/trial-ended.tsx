@@ -74,7 +74,7 @@ export default function TrialEndedPage() {
             {client?.name ? `The free trial for ${client.name} has expired.` : "Your free trial has expired."}{" "}
             {canPay
               ? "Set up billing to restore full access for your team — access is restored immediately after payment."
-              : "Ask your account administrator or consultant to set up billing. Access is restored immediately after payment."}
+              : "Ask your account owner or administrator to set up billing. Access is restored immediately after payment."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
