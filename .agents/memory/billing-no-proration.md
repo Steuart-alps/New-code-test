@@ -7,4 +7,6 @@ description: How added-site charges work (event outbox, idempotency) and why —
 
 **Why:** Architect review found quantity-delta charging loses charges under concurrent add+remove (netting) and that idempotency keys alone can duplicate after Stripe key eviction. Three review rounds converged on: event-based intent + row claiming + metadata lookup. Also: rows queued strictly BEFORE `subscription.created` are skipped (initial checkout already covers them); the comparator must be `<` (skip) not `<=`, or same-second adds lose valid charges.
 
+**Portal policy:** Billing periods are 1 month, no refunds. The Stripe billing portal is pinned to an app-created configuration (metadata marker `complytrack_no_refund_v1`): cancel takes effect at period end only, subscription self-service updates disabled. Config creation is deduped via a Postgres advisory lock + paginated marker lookup — never create a portal config unconditionally.
+
 **How to apply:** Any new site-creation path must call `queueSiteAddedCharge` inside the same transaction. Never re-derive charges from quantity deltas. Charge amount/billability are resolved at charge time, not enqueue time. Rows can be `pending | charged | skipped | error | void | uncollectible`; drift alerting should watch `error`.

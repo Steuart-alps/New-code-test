@@ -342,6 +342,10 @@ function BillingCard() {
                 <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
               </Button>
             </div>
+
+            <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
+              Each billing period is one month. Added sites are charged a full month up front; removed sites and cancellations take effect at the end of the paid month — no refunds or part-month credits.
+            </p>
           </>
         )}
       </CardContent>

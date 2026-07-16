@@ -197,6 +197,85 @@ router.get("/invoices", requireAuth, requireRole("consultant"), async (req, res)
   }
 });
 
+// Billing policy: each billing period is one calendar month and there are
+// no refunds. The portal configuration below enforces this — cancellation
+// only takes effect at the end of the already-paid month (no immediate
+// cancel, no prorated refund), and plan/quantity self-service is disabled
+// because site count is managed by the app (which itself never prorates).
+const PORTAL_CONFIG_MARKER = "complytrack_no_refund_v1";
+let cachedPortalConfigId: string | null = null;
+
+async function findPortalConfigByMarker(stripe: any): Promise<string | null> {
+  // Paginate the full list so an older config is never missed (which would
+  // cause a duplicate to be created).
+  let startingAfter: string | undefined;
+  for (;;) {
+    const page = await stripe.billingPortal.configurations.list({
+      limit: 100,
+      active: true,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const found = page.data.find((c: any) => c.metadata?.marker === PORTAL_CONFIG_MARKER);
+    if (found) return found.id;
+    if (!page.has_more || page.data.length === 0) return null;
+    startingAfter = page.data[page.data.length - 1].id;
+  }
+}
+
+async function getNoRefundPortalConfigId(stripe: any): Promise<string> {
+  if (cachedPortalConfigId) return cachedPortalConfigId;
+
+  const found = await findPortalConfigByMarker(stripe);
+  if (found) {
+    cachedPortalConfigId = found;
+    return found;
+  }
+
+  // Serialize first-time creation across concurrent requests and instances
+  // with a session-level advisory lock, then re-check before creating so
+  // only one configuration ever exists for the marker.
+  const LOCK_KEY = 792_314_601; // arbitrary app-unique key for portal config creation
+  await db.execute(sql`SELECT pg_advisory_lock(${LOCK_KEY})`);
+  try {
+    if (cachedPortalConfigId) return cachedPortalConfigId;
+    const recheck = await findPortalConfigByMarker(stripe);
+    if (recheck) {
+      cachedPortalConfigId = recheck;
+      return recheck;
+    }
+    const created = await createNoRefundPortalConfig(stripe);
+    cachedPortalConfigId = created;
+    return created;
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(${LOCK_KEY})`).catch(() => {});
+  }
+}
+
+async function createNoRefundPortalConfig(stripe: any): Promise<string> {
+  const created = await stripe.billingPortal.configurations.create({
+    metadata: { marker: PORTAL_CONFIG_MARKER },
+    business_profile: {
+      headline: "ComplyTrack billing — monthly billing, cancellations take effect at the end of the paid month.",
+    },
+    features: {
+      invoice_history: { enabled: true },
+      payment_method_update: { enabled: true },
+      customer_update: { enabled: true, allowed_updates: ["email", "address"] },
+      subscription_cancel: {
+        enabled: true,
+        mode: "at_period_end",
+        cancellation_reason: {
+          enabled: true,
+          options: ["too_expensive", "missing_features", "switched_service", "unused", "other"],
+        },
+      },
+      subscription_update: { enabled: false },
+    },
+  });
+  cachedPortalConfigId = created.id;
+  return created.id;
+}
+
 // POST /api/billing/portal — customer portal for managing subscription
 router.post("/portal", requireAuth, requireRole("consultant"), async (req, res) => {
   const clientId = getClientId(req);
@@ -208,8 +287,10 @@ router.post("/portal", requireAuth, requireRole("consultant"), async (req, res) 
   try {
     const stripe = await getUncachableStripeClient();
     const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+    const configuration = await getNoRefundPortalConfigId(stripe);
     const session = await stripe.billingPortal.sessions.create({
       customer: client.stripeCustomerId,
+      configuration,
       return_url: `${baseUrl}/`,
     });
     res.json({ url: session.url });
