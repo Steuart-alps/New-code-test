@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import alpsLogo from "@/assets/alps-logo.png";
 
 interface PerSitePrice {
   priceId: string;
@@ -82,18 +83,16 @@ export default function SignupPage() {
   const passwordStrength = password.length === 0 ? null : password.length < 8 ? "weak" : password.length < 12 ? "good" : "strong";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-background to-indigo-50/20 flex flex-col">
-      <div className="p-5 flex items-center justify-between max-w-6xl mx-auto w-full">
-        <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm">
+    <div className="min-h-screen bg-[#F7F2E4] flex flex-col font-sans">
+      <div className="p-6 flex items-center justify-between max-w-6xl mx-auto w-full">
+        <button onClick={() => navigate("/")} className="flex items-center gap-2 text-muted-foreground hover:text-[#162D42] transition-colors text-sm">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <div className="flex items-center gap-2">
-          <div className="bg-primary p-1.5 rounded-lg">
-            <ShieldCheck className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-bold font-display">ComplyTrack</span>
+        <div className="flex items-center gap-3">
+          <ShieldCheck className="w-6 h-6 text-primary" />
+          <span className="font-medium font-display text-xl text-[#162D42]">ComplyTrack</span>
         </div>
-        <button onClick={() => navigate("/login")} className="text-sm text-muted-foreground hover:text-foreground">
+        <button onClick={() => navigate("/login")} className="text-sm font-medium text-muted-foreground hover:text-[#162D42] transition-colors">
           Sign in
         </button>
       </div>
@@ -102,29 +101,33 @@ export default function SignupPage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
           className="w-full max-w-xl"
         >
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold font-display mb-2">Create your account</h1>
-            <p className="text-muted-foreground text-sm">Start your 14-day free trial. No credit card required.</p>
+          <div className="text-center mb-10">
+            <div className="flex justify-center items-center gap-2 mb-6 opacity-70">
+              <span className="text-xs font-display italic text-[#162D42]">by</span>
+              <img src={alpsLogo} alt="Alps Consultancy" className="h-4 grayscale invert-0 mix-blend-multiply" />
+            </div>
+            <h1 className="text-4xl font-display text-[#162D42] mb-3">Create your account</h1>
+            <p className="text-muted-foreground text-sm font-light">Start your 14-day free trial. No credit card required.</p>
           </div>
 
-          <div className="bg-card border border-border/50 rounded-2xl shadow-xl p-8 space-y-6">
-            <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="bg-white border-none rounded-none shadow-xl p-10 space-y-8">
+            <form onSubmit={handleSubmit} className="space-y-6">
 
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Full name</Label>
-                <Input id="name" value={name} onChange={e => setName(e.target.value)} placeholder="Jane Smith" required className="h-11" />
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-[#1A1A1A]">Full name</Label>
+                <Input id="name" value={name} onChange={e => setName(e.target.value)} placeholder="Jane Smith" required className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary" />
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email address</Label>
-                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@yourcompany.com" required className="h-11" />
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-[#1A1A1A]">Email address</Label>
+                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@yourcompany.com" required className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary" />
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-[#1A1A1A]">Password</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -135,24 +138,24 @@ export default function SignupPage() {
                     required
                     minLength={8}
                     autoComplete="new-password"
-                    className="h-11 pr-10"
+                    className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary pr-10"
                   />
-                  <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowPassword(!showPassword)}>
+                  <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-[#162D42]" onClick={() => setShowPassword(!showPassword)}>
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
                 {passwordStrength && (
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-3 mt-2">
                     <div className="flex gap-1 flex-1">
                       {["weak", "good", "strong"].map((level, i) => (
-                        <div key={level} className={`h-1 flex-1 rounded-full transition-all ${
+                        <div key={level} className={`h-1 flex-1 rounded-none transition-all ${
                           passwordStrength === "weak" && i === 0 ? "bg-red-400" :
                           passwordStrength === "good" && i <= 1 ? "bg-amber-400" :
                           passwordStrength === "strong" ? "bg-green-500" : "bg-muted"
                         }`} />
                       ))}
                     </div>
-                    <span className={`text-xs ${passwordStrength === "weak" ? "text-red-500" : passwordStrength === "good" ? "text-amber-500" : "text-green-600"}`}>
+                    <span className={`text-xs uppercase tracking-wider font-medium ${passwordStrength === "weak" ? "text-red-500" : passwordStrength === "good" ? "text-amber-500" : "text-green-600"}`}>
                       {passwordStrength}
                     </span>
                   </div>
@@ -160,17 +163,17 @@ export default function SignupPage() {
               </div>
 
               {/* Per-site pricing */}
-              <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="bg-primary/10 p-2 rounded-lg">
-                    <Building2 className="w-5 h-5 text-primary" />
+              <div className="border border-primary/20 bg-primary/5 p-6 rounded-none mt-4">
+                <div className="flex items-start gap-4">
+                  <div className="bg-primary/10 p-3 rounded-none">
+                    <Building2 className="w-6 h-6 text-primary" />
                   </div>
                   <div>
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-2xl font-bold font-display">{perSitePrice}</span>
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-3xl font-display text-[#162D42]">{perSitePrice}</span>
                       <span className="text-sm text-muted-foreground">per site / month</span>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
+                    <p className="text-sm text-muted-foreground font-light leading-relaxed">
                       Pay only for the sites you manage. You start with one site — each added site is charged one
                       month's access up front. No proration, no refunds.
                     </p>
@@ -179,24 +182,24 @@ export default function SignupPage() {
               </div>
 
               {/* Promo Code */}
-              <div>
+              <div className="pt-2">
                   {!showPromo ? (
-                    <button type="button" onClick={() => setShowPromo(true)} className="flex items-center gap-1.5 text-sm text-primary hover:underline">
-                      <Tag className="w-3.5 h-3.5" /> Have a discount code?
+                    <button type="button" onClick={() => setShowPromo(true)} className="flex items-center gap-2 text-sm text-primary font-medium hover:underline transition-all">
+                      <Tag className="w-4 h-4" /> Have a discount code?
                     </button>
                   ) : (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="promo" className="flex items-center gap-1.5">
-                        <Tag className="w-3.5 h-3.5 text-primary" /> Discount / promo code
+                    <div className="space-y-2">
+                      <Label htmlFor="promo" className="flex items-center gap-2 text-[#1A1A1A]">
+                        <Tag className="w-4 h-4 text-primary" /> Discount / promo code
                       </Label>
                       <Input
                         id="promo"
                         value={promoCode}
                         onChange={e => setPromoCode(e.target.value.toUpperCase())}
                         placeholder="e.g. LAUNCH50"
-                        className="h-11 font-mono tracking-wider"
+                        className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none font-mono tracking-widest text-[#162D42]"
                       />
-                      <p className="text-xs text-muted-foreground">Applied automatically when you proceed to payment.</p>
+                      <p className="text-xs text-muted-foreground font-light">Applied automatically when you proceed to payment.</p>
                     </div>
                   )}
               </div>
@@ -205,26 +208,26 @@ export default function SignupPage() {
                 <motion.div
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-destructive/10 border border-destructive/20 text-destructive text-sm px-4 py-3 rounded-lg"
+                  className="bg-destructive/10 border-l-2 border-destructive text-destructive text-sm px-4 py-3"
                 >
                   {error}
                 </motion.div>
               )}
 
-              <Button type="submit" className="w-full h-11 font-semibold shadow-lg shadow-primary/20" disabled={loading}>
-                {loading ? "Setting up your account..." : "Create account & proceed to payment →"}
+              <Button type="submit" className="w-full h-14 text-base font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading}>
+                {loading ? "Setting up your account..." : "Create account & proceed to payment"}
               </Button>
             </form>
 
-            <div className="flex flex-col gap-3 pt-2 border-t border-border/50">
-              <div className="flex items-center justify-center gap-5 text-xs text-muted-foreground flex-wrap">
+            <div className="flex flex-col gap-5 pt-8 border-t border-border/50">
+              <div className="flex items-center justify-center gap-6 text-xs text-muted-foreground uppercase tracking-wider font-medium flex-wrap">
                 {["14-day free trial", "Cancel anytime", "Secure payments via Stripe"].map(t => (
-                  <div key={t} className="flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" /> {t}
+                  <div key={t} className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" /> {t}
                   </div>
                 ))}
               </div>
-              <p className="text-center text-sm text-muted-foreground">
+              <p className="text-center text-sm text-[#1A1A1A]">
                 Already have an account?{" "}
                 <button onClick={() => navigate("/login")} className="text-primary font-medium hover:underline">Sign in</button>
               </p>

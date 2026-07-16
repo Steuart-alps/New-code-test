@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
 import { CreditCard, LogOut, RefreshCw, Lock } from "lucide-react";
+import alpsLogo from "@/assets/alps-logo.png";
 
 export default function TrialEndedPage() {
   const { user, client, activeClientId, logout, refresh } = useAuth();
@@ -63,38 +64,44 @@ export default function TrialEndedPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#F7F2E4] p-4 font-sans">
+      <Card className="w-full max-w-md border-none shadow-xl rounded-none relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-[40px] pointer-events-none" />
+        <CardHeader className="text-center pt-10 pb-6 relative z-10">
+          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-none bg-[#162D42] text-white">
             <Lock className="h-6 w-6" />
           </div>
-          <CardTitle>Your free trial has ended</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-2xl font-display text-[#162D42]">Your free trial has ended</CardTitle>
+          <CardDescription className="text-base mt-3 leading-relaxed font-light text-[#1A1A1A]">
             {client?.name ? `The free trial for ${client.name} has expired.` : "Your free trial has expired."}{" "}
             {canPay
               ? "Set up billing to restore full access for your team — access is restored immediately after payment."
               : "Ask your account owner or administrator to set up billing. Access is restored immediately after payment."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4 px-10 relative z-10">
           {canPay && (
-            <Button className="w-full" onClick={startCheckout} disabled={checkingOut}>
+            <Button className="w-full h-12 bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" onClick={startCheckout} disabled={checkingOut}>
               <CreditCard className="mr-2 h-4 w-4" />
               {checkingOut ? "Opening checkout…" : "Set up billing"}
             </Button>
           )}
-          <Button variant="outline" className="w-full" onClick={recheck} disabled={refreshing}>
+          <Button variant="outline" className="w-full h-12 rounded-[2px] border-border/60" onClick={recheck} disabled={refreshing}>
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Checking…" : "I've subscribed — check again"}
           </Button>
         </CardContent>
-        <CardFooter className="justify-center">
-          <Button variant="ghost" size="sm" onClick={logout}>
+        <CardFooter className="justify-center pt-6 pb-8 border-t border-border/50 mt-6 relative z-10">
+          <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
             <LogOut className="mr-2 h-4 w-4" /> Log out
           </Button>
         </CardFooter>
       </Card>
+      
+      <div className="mt-8 flex items-center justify-center gap-2 opacity-50">
+        <span className="text-sm font-display italic text-[#162D42]">by</span>
+        <img src={alpsLogo} alt="Alps Consultancy" className="h-5 grayscale invert-0 mix-blend-multiply" />
+      </div>
     </div>
   );
 }
