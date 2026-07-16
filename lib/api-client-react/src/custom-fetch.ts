@@ -57,6 +57,18 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   _unauthorizedHandler = handler;
 }
 
+let _paymentRequiredHandler: (() => void) | null = null;
+
+/**
+ * Register a handler invoked whenever any API response comes back 402
+ * (payment required — e.g. free trial expired without a subscription).
+ * Lets the app switch to a billing-required screen mid-session. Pass `null`
+ * to clear.
+ */
+export function setPaymentRequiredHandler(handler: (() => void) | null): void {
+  _paymentRequiredHandler = handler;
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
@@ -405,6 +417,13 @@ export async function customFetch<T = unknown>(
     if (response.status === 401 && _unauthorizedHandler) {
       try {
         _unauthorizedHandler();
+      } catch {
+        // never let the handler break error propagation
+      }
+    }
+    if (response.status === 402 && _paymentRequiredHandler) {
+      try {
+        _paymentRequiredHandler();
       } catch {
         // never let the handler break error propagation
       }

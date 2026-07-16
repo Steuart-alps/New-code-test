@@ -7,6 +7,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess } from "./middleware/requireAuth";
+import { enforceTrialLock } from "./middleware/trialLock";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 
 const app: Express = express();
@@ -85,6 +86,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 app.use(loadUser);
 app.use(enforceClientAccess);
+app.use("/api", enforceTrialLock);
 
 app.use("/api", router);
 

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
 import { apiFetch } from "@/lib/api";
-import { setClientIdGetter, setUnauthorizedHandler } from "@workspace/api-client-react";
+import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler } from "@workspace/api-client-react";
 
 export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
 
@@ -26,6 +26,7 @@ export interface AuthClient {
 interface AuthContextValue {
   user: AuthUser | null;
   client: AuthClient | null;
+  billingLocked: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -39,6 +40,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [client, setClient] = useState<AuthClient | null>(null);
+  const [billingLocked, setBillingLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
   const activeClientIdRef = useRef<number | null>(null);
@@ -64,6 +66,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setActiveClientId(null);
     });
     return () => setUnauthorizedHandler(null);
+  }, []);
+
+  // If any API call returns 402 the client's trial has expired without a
+  // subscription: flip to the billing-required screen mid-session.
+  useEffect(() => {
+    setPaymentRequiredHandler(() => {
+      setBillingLocked(true);
+    });
+    return () => setPaymentRequiredHandler(null);
   }, []);
 
   // Auto log-out after 30 minutes of inactivity, matching the server-side
@@ -130,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setUser(data.user);
         setClient(data.client);
+        setBillingLocked(Boolean(data.billingLocked));
         if (data.client && !activeClientId) {
           setActiveClientId(data.client.id);
         }
@@ -159,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     setUser(data.user);
     setClient(data.client);
+    setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
   }
 
@@ -166,11 +179,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiFetch("/auth/logout", { method: "POST" });
     setUser(null);
     setClient(null);
+    setBillingLocked(false);
     setActiveClientId(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, client, isLoading, login, logout, refresh, activeClientId, setActiveClientId }}>
+    <AuthContext.Provider value={{ user, client, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId }}>
       {children}
     </AuthContext.Provider>
   );

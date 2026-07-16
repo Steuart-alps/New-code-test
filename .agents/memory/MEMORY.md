@@ -4,3 +4,4 @@
 - [Typecheck vs build](typecheck-vs-build.md) — `tsc` typecheck fails repo-wide (codegen/db dist absent); dev workflows use esbuild/vite, which is the real build signal.
 - [Schema change workflow](schema-changes.md) — drizzle push is interactive (unusable headless); prod schema comes from api-server runtime migrations, so every new table/column must be added there too.
 - [Session expiry handling](session-expiry-handling.md) — API-client 401s fire setUnauthorizedHandler (registered in auth-context) to clear auth and route to login; stale prod sessions caused "Site not found".
+- [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.

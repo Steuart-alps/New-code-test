@@ -20,6 +20,7 @@ import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import ResetPasswordPage from "@/pages/reset-password";
+import TrialEndedPage from "@/pages/trial-ended";
 import SchedulePage from "@/pages/schedule";
 import ItemDetailPage from "@/pages/item-detail";
 import NotFound from "@/pages/not-found";
@@ -41,7 +42,7 @@ function Redirect({ to }: { to: string }) {
 }
 
 function ProtectedRoutes() {
-  const { user, isLoading } = useAuth();
+  const { user, billingLocked, isLoading } = useAuth();
   const [location] = useLocation();
 
   // Always-public routes
@@ -63,6 +64,12 @@ function ProtectedRoutes() {
     // Show landing page at root when not logged in
     if (location === "/" || location === "") return <LandingPage />;
     return <Redirect to="/" />;
+  }
+
+  // Trial expired without a subscription: the whole app is replaced by the
+  // billing-required screen (which lets consultants pay and everyone log out).
+  if (billingLocked) {
+    return <TrialEndedPage />;
   }
 
   // Logged in — redirect away from public pages

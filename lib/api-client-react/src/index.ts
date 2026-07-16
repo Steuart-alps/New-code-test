@@ -5,5 +5,6 @@ export {
   setAuthTokenGetter,
   setClientIdGetter,
   setUnauthorizedHandler,
+  setPaymentRequiredHandler,
 } from "./custom-fetch";
 export type { AuthTokenGetter } from "./custom-fetch";

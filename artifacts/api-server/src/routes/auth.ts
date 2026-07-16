@@ -12,6 +12,7 @@ import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { getPerSitePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
 import { seedStarterContent } from "../lib/seedStarterContent";
+import { isClientBillingLocked } from "../lib/trialLock";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -43,9 +44,18 @@ router.post("/auth/login", async (req, res) => {
   req.session.userId = result.user.id;
 
   const { passwordHash: _, ...safeUser } = result.user;
+  let billingLocked = false;
+  if (safeUser.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(safeUser.clientId);
+    } catch {
+      // Fail open — login must never break on a billing check.
+    }
+  }
   res.json({
     user: safeUser,
     client: result.client,
+    billingLocked,
   });
 });
 
@@ -71,7 +81,16 @@ router.get("/auth/me", requireAuth, async (req, res) => {
     client = rows[0] ?? null;
   }
 
-  res.json({ user, client });
+  let billingLocked = false;
+  if (user.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(user.clientId);
+    } catch {
+      // Fail open — never block /me on a billing check.
+    }
+  }
+
+  res.json({ user, client, billingLocked });
 });
 
 const ForgotPasswordBody = z.object({

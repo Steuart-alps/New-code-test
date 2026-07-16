@@ -10,6 +10,7 @@ import {
   quantityForSiteCount,
   findLiveSubscription,
 } from "../lib/billing";
+import { invalidateTrialLock, isClientBillingLocked } from "../lib/trialLock";
 
 const router = Router();
 
@@ -92,8 +93,10 @@ router.get("/plans", async (_req, res) => {
   }
 });
 
-// POST /api/billing/checkout — create Stripe checkout session
-router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res) => {
+// POST /api/billing/checkout — create Stripe checkout session.
+// Consultants AND client admins may pay: when a trial expires the client's
+// own admin must be able to set up billing, not just the consultant.
+router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const { clientId: bodyClientId } = req.body as { clientId?: number };
   const clientId = bodyClientId ?? getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -167,7 +170,7 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
 // GET /api/billing/invoices — list the client's Stripe invoices (scoped to
 // the authenticated client's own Stripe customer; customer id is always
 // resolved server-side, never taken from the request).
-router.get("/invoices", requireAuth, requireRole("consultant"), async (req, res) => {
+router.get("/invoices", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -277,7 +280,7 @@ async function createNoRefundPortalConfig(stripe: any): Promise<string> {
 }
 
 // POST /api/billing/portal — customer portal for managing subscription
-router.post("/portal", requireAuth, requireRole("consultant"), async (req, res) => {
+router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -294,6 +297,22 @@ router.post("/portal", requireAuth, requireRole("consultant"), async (req, res) 
       return_url: `${baseUrl}/`,
     });
     res.json({ url: session.url });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/refresh-access — drop the cached trial-lock decision for
+// the caller's client and re-check Stripe fresh. Called by the lock screen
+// after checkout so a new subscription restores access immediately instead of
+// waiting out the cache TTL.
+router.post("/refresh-access", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.json({ billingLocked: false });
+  try {
+    invalidateTrialLock(clientId);
+    const billingLocked = await isClientBillingLocked(clientId);
+    res.json({ billingLocked });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
