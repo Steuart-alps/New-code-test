@@ -112,10 +112,12 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
     if (!resolvedPriceId) return res.status(400).json({ error: "No per-site price configured" });
     const quantity = quantityForSiteCount(await countClientSites(clientId));
 
+    const billingEmail = req.currentUser?.email ?? undefined;
     let customerId = client.stripeCustomerId ?? undefined;
     if (!customerId) {
       const customer = await stripe.customers.create({
         name: client.name,
+        email: billingEmail,
         metadata: { clientId: String(clientId) },
       });
       customerId = customer.id;
@@ -123,6 +125,18 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
         .set({ stripeCustomerId: customerId, updatedAt: new Date() })
         .where(eq(clientsTable.id, clientId));
     } else {
+      // Backfill the billing email so Stripe invoice/receipt emails reach the
+      // consultant even for customers created before emails were captured.
+      if (billingEmail) {
+        try {
+          const existingCustomer = await stripe.customers.retrieve(customerId);
+          if (!("deleted" in existingCustomer) && !existingCustomer.email) {
+            await stripe.customers.update(customerId, { email: billingEmail });
+          }
+        } catch {
+          // Non-fatal: checkout still works without the email backfill.
+        }
+      }
       // Enforce one subscription per client: if a live subscription already
       // exists, don't create a second one — send them to the portal instead.
       const existing = await findLiveSubscription(customerId);
@@ -145,6 +159,39 @@ router.post("/checkout", requireAuth, requireRole("consultant"), async (req, res
     });
 
     res.json({ url: session.url });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/billing/invoices — list the client's Stripe invoices (scoped to
+// the authenticated client's own Stripe customer; customer id is always
+// resolved server-side, never taken from the request).
+router.get("/invoices", requireAuth, requireRole("consultant"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client) return res.status(404).json({ error: "Client not found" });
+  if (!client.stripeCustomerId) return res.json({ invoices: [] });
+
+  try {
+    const stripe = await getUncachableStripeClient();
+    const list = await stripe.invoices.list({ customer: client.stripeCustomerId, limit: 24 });
+    const invoices = list.data
+      .filter((inv) => inv.status !== "draft")
+      .map((inv) => ({
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        created: inv.created,
+        currency: inv.currency,
+        amountDue: inv.amount_due,
+        amountPaid: inv.amount_paid,
+        hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+        invoicePdf: inv.invoice_pdf ?? null,
+      }));
+    res.json({ invoices });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2 } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download } from "lucide-react";
 
 interface DomainRecord {
   record?: string;
@@ -349,6 +349,91 @@ function BillingCard() {
   );
 }
 
+interface InvoiceRow {
+  id: string;
+  number: string | null;
+  status: string | null;
+  created: number;
+  currency: string;
+  amountDue: number;
+  amountPaid: number;
+  hostedInvoiceUrl: string | null;
+  invoicePdf: string | null;
+}
+
+function InvoicesCard() {
+  const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ invoices: InvoiceRow[] }>("/billing/invoices")
+      .then((d) => setInvoices(d.invoices))
+      .catch((err: any) => setError(err.message || "Couldn't load invoices"));
+  }, []);
+
+  const fmtAmount = (inv: InvoiceRow) => {
+    const amount = (inv.status === "paid" ? inv.amountPaid : inv.amountDue) / 100;
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: (inv.currency || "gbp").toUpperCase() }).format(amount);
+  };
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <FileText className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display">Invoices</CardTitle>
+        </div>
+        <CardDescription>
+          Invoices are issued by Stripe each billing cycle and emailed to you automatically. Download past invoices here.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6">
+        {error ? (
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" /> {error}
+          </div>
+        ) : invoices === null ? (
+          <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+        ) : invoices.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            No invoices yet. Your first invoice will appear here after your first billing cycle.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-sm truncate">
+                    {inv.number ?? inv.id}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(inv.created * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    {" · "}
+                    <span className="capitalize">{inv.status ?? "unknown"}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="font-semibold text-sm">{fmtAmount(inv)}</div>
+                  {inv.hostedInvoiceUrl && (
+                    <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs inline-flex items-center gap-1">
+                      <ExternalLink className="w-3.5 h-3.5" /> View
+                    </a>
+                  )}
+                  {inv.invoicePdf && (
+                    <a href={inv.invoicePdf} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs inline-flex items-center gap-1">
+                      <Download className="w-3.5 h-3.5" /> PDF
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
@@ -401,6 +486,7 @@ export default function SettingsPage() {
     <AppLayout title="System Settings">
       <div className="max-w-4xl space-y-6">
         <BillingCard />
+        <InvoicesCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
