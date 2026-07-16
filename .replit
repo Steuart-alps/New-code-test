@@ -26,6 +26,10 @@ author = "agent"
 task = "workflow.run"
 args = "tenant-isolation"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "trial-reminders"
+
 [[workflows.workflow]]
 name = "tenant-isolation"
 author = "agent"
@@ -36,6 +40,17 @@ args = "pnpm --filter @workspace/api-server run test:isolation"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "trial-reminders"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:trial-reminders"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

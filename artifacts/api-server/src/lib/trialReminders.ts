@@ -78,10 +78,15 @@ ComplyTrack
  * so concurrent runs can never double-email; if every send then fails, the
  * marker is released so the next run retries.
  */
-export async function runTrialReminderJob(): Promise<{
+export async function runTrialReminderJob(
+  deps: {
+    sendEmail?: typeof sendSystemEmail;
+  } = {},
+): Promise<{
   clientsNotified: number;
   emailsSent: number;
 }> {
+  const sendEmail = deps.sendEmail ?? sendSystemEmail;
   const now = new Date();
   const windowEnd = new Date(now.getTime() + TRIAL_REMINDER_LEAD_DAYS * 24 * 60 * 60 * 1000);
 
@@ -147,7 +152,7 @@ export async function runTrialReminderJob(): Promise<{
           monthlyTotal,
           billingUrl: `${getPublicAppUrl()}/billing`,
         });
-        await sendSystemEmail({
+        await sendEmail({
           to: consultant.email,
           subject,
           html,
