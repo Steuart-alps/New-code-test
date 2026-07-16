@@ -17,10 +17,15 @@ export const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  // Sessions expire after 30 minutes of inactivity. `rolling: true` refreshes
+  // the expiry on every request, so active users stay signed in; after 30
+  // idle minutes the session is gone and the next API call returns 401, which
+  // the web client turns into an automatic redirect to the login page.
+  rolling: true,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    maxAge: 1000 * 60 * 30, // 30 minutes of inactivity
     sameSite: "lax",
   },
 });

@@ -66,6 +66,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
+  // Auto log-out after 30 minutes of inactivity, matching the server-side
+  // session expiry. The last-activity timestamp is shared across tabs via
+  // localStorage so an idle background tab never logs out a user who is
+  // actively working in another tab — logout fires only once EVERY tab has
+  // been idle for 30 minutes. The server session (rolling 30-min expiry) is
+  // the source of truth; this timer just brings idle tabs to the login page
+  // promptly and best-effort destroys the by-then-idle server session.
+  const lastActivityRef = useRef<number>(Date.now());
+  const userRef = useRef<AuthUser | null>(null);
+  userRef.current = user;
+  useEffect(() => {
+    const IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const STORAGE_KEY = "complytrack:lastActivity";
+    const WRITE_THROTTLE_MS = 15_000;
+
+    const readShared = (): number => {
+      try {
+        const v = Number(window.localStorage.getItem(STORAGE_KEY));
+        return Number.isFinite(v) ? v : 0;
+      } catch {
+        return 0;
+      }
+    };
+    let lastWrite = 0;
+    const markActivity = () => {
+      const now = Date.now();
+      lastActivityRef.current = now;
+      if (now - lastWrite >= WRITE_THROTTLE_MS) {
+        lastWrite = now;
+        try {
+          window.localStorage.setItem(STORAGE_KEY, String(now));
+        } catch {
+          // localStorage unavailable: fall back to per-tab tracking.
+        }
+      }
+    };
+    markActivity();
+    const events: (keyof WindowEventMap)[] = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, markActivity, { passive: true }));
+
+    const interval = window.setInterval(() => {
+      if (!userRef.current) return;
+      const lastAnywhere = Math.max(lastActivityRef.current, readShared());
+      if (Date.now() - lastAnywhere >= IDLE_LIMIT_MS) {
+        apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
+        setUser(null);
+        setClient(null);
+        setActiveClientId(null);
+      }
+    }, 30_000);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, markActivity));
+      window.clearInterval(interval);
+    };
+  }, []);
+
   async function refresh() {
     try {
       const res = await apiFetch("/auth/me");
