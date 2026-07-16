@@ -14,6 +14,7 @@ export const clientsTable = pgTable("clients", {
   stripePriceId: text("stripe_price_id"),
   subscriptionStatus: text("subscription_status").default("trial"),
   trialEndsAt: timestamp("trial_ends_at"),
+  trialReminderSentAt: timestamp("trial_reminder_sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

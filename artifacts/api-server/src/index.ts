@@ -4,6 +4,7 @@ import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./lib/stripeClient";
 import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
+import { runTrialReminderJob } from "./lib/trialReminders";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities } from "./lib/billing";
 
@@ -62,6 +63,20 @@ function startScheduler() {
   // missed webhooks or transient Stripe failures self-heals.
   cron.schedule("30 8 * * *", runBillingReconciliation);
   logger.info("Billing reconciliation scheduler started (daily at 08:30)");
+
+  // Warn trial clients 3 days before their free trial expires.
+  cron.schedule("15 8 * * *", runTrialReminders);
+  logger.info("Trial expiry reminder scheduler started (daily at 08:15)");
+}
+
+async function runTrialReminders() {
+  logger.info("Running trial expiry reminder job...");
+  try {
+    const result = await runTrialReminderJob();
+    logger.info({ result }, "Trial expiry reminder job complete");
+  } catch (err) {
+    logger.error({ err }, "Trial expiry reminder job failed");
+  }
 }
 
 async function runBillingReconciliation() {
@@ -86,4 +101,7 @@ app.listen(port, async (err?: any) => {
   // Also reconcile once shortly after startup so drift never waits a full day
   // (best-effort; exits quietly per client when Stripe isn't reachable).
   setTimeout(runBillingReconciliation, 15_000);
+  // Catch up trial reminders on startup too, so a server that was down at
+  // 08:15 doesn't miss the 3-day warning window (deduped per client).
+  setTimeout(runTrialReminders, 20_000);
 });
