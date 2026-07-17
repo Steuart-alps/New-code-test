@@ -191,8 +191,12 @@ export default function LandingPage() {
               <img src={alpsLogo} alt="Alps Consultancy" className="h-6 opacity-70 brightness-0 invert" />
             </div>
           </div>
-          <p className="text-sm font-light">© {new Date().getFullYear()} Alps Consultancy. All rights reserved.</p>
-          <button onClick={() => navigate("/login")} className="text-sm font-light hover:text-white transition-colors">Sign in</button>
+          <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
+          <div className="flex items-center gap-5">
+            <button onClick={() => navigate("/terms")} className="text-sm font-light hover:text-white transition-colors">Terms</button>
+            <button onClick={() => navigate("/privacy")} className="text-sm font-light hover:text-white transition-colors">Privacy</button>
+            <button onClick={() => navigate("/login")} className="text-sm font-light hover:text-white transition-colors">Sign in</button>
+          </div>
         </div>
       </footer>
     </div>

@@ -217,6 +217,13 @@ export default function SignupPage() {
               <Button type="submit" className="w-full h-14 text-base font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading}>
                 {loading ? "Setting up your account..." : "Create account & proceed to payment"}
               </Button>
+
+              <p className="text-center text-xs text-muted-foreground">
+                By creating an account you agree to our{" "}
+                <button type="button" onClick={() => navigate("/terms")} className="underline underline-offset-2 hover:text-foreground">Terms of Service</button>{" "}
+                and{" "}
+                <button type="button" onClick={() => navigate("/privacy")} className="underline underline-offset-2 hover:text-foreground">Privacy Policy</button>.
+              </p>
             </form>
 
             <div className="flex flex-col gap-5 pt-8 border-t border-border/50">

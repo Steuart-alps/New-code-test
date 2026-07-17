@@ -29,6 +29,8 @@ const publicPages = [
   { path: "/", changefreq: "weekly", priority: "1.0" },
   { path: "/signup", changefreq: "monthly", priority: "0.8" },
   { path: "/login", changefreq: "monthly", priority: "0.5" },
+  { path: "/terms", changefreq: "yearly", priority: "0.3" },
+  { path: "/privacy", changefreq: "yearly", priority: "0.3" },
 ];
 
 // Authenticated app sections — keep crawlers out (they only get the SPA shell).
