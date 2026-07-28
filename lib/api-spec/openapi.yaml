@@ -25,6 +25,10 @@ tags:
     description: Notification operations
   - name: storage
     description: File storage operations
+  - name: fire-safety
+    description: Fire safety logbook operations
+  - name: food-safety
+    description: Kitchen / food safety diary operations
 paths:
   /healthz:
     get:
@@ -766,6 +770,221 @@ paths:
               schema:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
 
+  /fire-safety:
+    get:
+      operationId: listFireSafetyChecks
+      tags: [fire-safety]
+      summary: List fire safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/FireCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of fire safety checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireSafetyCheck"
+    post:
+      operationId: createFireSafetyCheck
+      tags: [fire-safety]
+      summary: Record a fire safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFireSafetyCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyCheck"
+
+  /fire-safety/status:
+    get:
+      operationId: getFireSafetyStatus
+      tags: [fire-safety]
+      summary: Per-check-type due status (last done, next due, overdue flags)
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Status per check type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FireSafetyStatus"
+
+  /fire-safety/{id}:
+    put:
+      operationId: updateFireSafetyCheck
+      tags: [fire-safety]
+      summary: Update a fire safety check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFireSafetyCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyCheck"
+    delete:
+      operationId: deleteFireSafetyCheck
+      tags: [fire-safety]
+      summary: Delete a fire safety check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /food-safety/config:
+    get:
+      operationId: getFoodSafetyConfig
+      tags: [food-safety]
+      summary: Get kitchen configuration (fridge/freezer counts, temperature limits)
+      responses:
+        "200":
+          description: Kitchen configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyConfig"
+    put:
+      operationId: updateFoodSafetyConfig
+      tags: [food-safety]
+      summary: Update kitchen configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FoodSafetyConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /food-safety:
+    get:
+      operationId: listFoodSafetyRecords
+      tags: [food-safety]
+      summary: List food safety diary record summaries (dates and submission state)
+      responses:
+        "200":
+          description: List of record summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FoodSafetyRecordSummary"
+    post:
+      operationId: createFoodSafetyRecord
+      tags: [food-safety]
+      summary: Create a daily food safety record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFoodSafetyRecordRequest"
+      responses:
+        "201":
+          description: Created record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
+  /food-safety/by-date/{date}:
+    get:
+      operationId: getFoodSafetyRecordByDate
+      tags: [food-safety]
+      summary: Get the food safety record for a specific date
+      parameters:
+        - in: path
+          name: date
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Record for the date (null if none)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+        "404":
+          description: No record for this date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /food-safety/{id}:
+    put:
+      operationId: updateFoodSafetyRecord
+      tags: [food-safety]
+      summary: Update a food safety record
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFoodSafetyRecordRequest"
+      responses:
+        "200":
+          description: Updated record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyRecord"
+
 components:
   schemas:
     HealthStatus:
@@ -1302,3 +1521,265 @@ components:
       required:
         - uploadURL
         - objectPath
+
+    FireCheckType:
+      type: string
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill]
+
+    FireSafetyCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - checkType
+        - checkDate
+        - result
+        - createdAt
+        - updatedAt
+
+    CreateFireSafetyCheckRequest:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - checkType
+        - checkDate
+        - result
+
+    UpdateFireSafetyCheckRequest:
+      type: object
+      properties:
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail]
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+
+    FireSafetyStatus:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/FireCheckType"
+        frequencyDays:
+          type: integer
+        lastDate:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ok, due_soon, overdue, never]
+      required:
+        - checkType
+        - frequencyDays
+        - status
+
+    FoodSafetyConfig:
+      type: object
+      properties:
+        food_num_fridges:
+          type: string
+        food_num_freezers:
+          type: string
+        food_cooking_limit:
+          type: string
+        food_cooling_limit:
+          type: string
+        food_reheating_limit:
+          type: string
+        food_hot_holding_limit:
+          type: string
+
+    FoodSafetyRecordSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        recordDate:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - recordDate
+
+    FoodSafetyRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        recordDate:
+          type: string
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+          nullable: true
+        managerSignature:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - recordDate
+        - createdAt
+        - updatedAt
+
+    CreateFoodSafetyRecordRequest:
+      type: object
+      properties:
+        recordDate:
+          type: string
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+        managerSignature:
+          type: string
+        submittedAt:
+          type: string
+      required:
+        - recordDate
+
+    UpdateFoodSafetyRecordRequest:
+      type: object
+      properties:
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+        coolingLimit:
+          type: string
+        reheatingLimit:
+          type: string
+        hotHoldingLimit:
+          type: string
+        correctives:
+          type: string
+        managerSignature:
+          type: string
+        submittedAt:
+          type: string
+          nullable: true

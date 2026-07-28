@@ -7,6 +7,29 @@ import { requireAuth, getClientId } from "../middleware/requireAuth";
 
 const router = Router();
 
+// Rows are user-defined shapes, but must be flat objects of primitive values
+const rowSchema = z.record(z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
+const rowsSchema = z.array(rowSchema).max(200);
+
+const recordFieldsSchema = z.object({
+  deliveries: rowsSchema.optional(),
+  coldFood: rowsSchema.optional(),
+  hotTemperature: rowsSchema.optional(),
+  hotHolding: rowsSchema.optional(),
+  cookingLimit: z.string().max(200).optional(),
+  coolingLimit: z.string().max(200).optional(),
+  reheatingLimit: z.string().max(200).optional(),
+  hotHoldingLimit: z.string().max(200).optional(),
+  correctives: z.string().max(5000).optional(),
+  managerSignature: z.string().max(200).optional(),
+  submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
+});
+
+const createRecordSchema = recordFieldsSchema.extend({
+  recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  submittedAt: z.string().datetime({ offset: true }).optional(),
+});
+
 const CONFIG_KEYS = [
   "food_num_fridges",
   "food_num_freezers",
@@ -79,6 +102,24 @@ router.put("/config", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/food-safety/by-date/:date
+router.get("/by-date/:date", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const date = req.params.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Invalid date" });
+
+  const [record] = await db
+    .select()
+    .from(foodSafetyRecordsTable)
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date)))
+    .limit(1);
+
+  if (!record) return res.status(404).json({ error: "No record for this date" });
+  res.json(record);
+});
+
 // GET /api/food-safety?date=YYYY-MM-DD
 router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -110,22 +151,7 @@ router.post("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const schema = z.object({
-    recordDate: z.string(),
-    deliveries: z.any().optional(),
-    coldFood: z.any().optional(),
-    hotTemperature: z.any().optional(),
-    hotHolding: z.any().optional(),
-    cookingLimit: z.string().optional(),
-    coolingLimit: z.string().optional(),
-    reheatingLimit: z.string().optional(),
-    hotHoldingLimit: z.string().optional(),
-    correctives: z.string().optional(),
-    managerSignature: z.string().optional(),
-    submittedAt: z.string().optional(),
-  });
-
-  const parsed = schema.safeParse(req.body);
+  const parsed = createRecordSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data;
@@ -178,13 +204,16 @@ router.put("/:id", requireAuth, async (req, res) => {
 
   if (!existing) return res.status(404).json({ error: "Not found" });
 
+  const parsedUpdate = recordFieldsSchema.safeParse(req.body);
+  if (!parsedUpdate.success) return res.status(400).json({ error: "Invalid data" });
+
   const updates: any = { updatedAt: new Date() };
-  const allowed = ["deliveries", "coldFood", "hotTemperature", "hotHolding", "cookingLimit", "coolingLimit", "reheatingLimit", "hotHoldingLimit", "correctives", "managerSignature"];
-  for (const key of allowed) {
-    if (key in req.body) updates[key] = req.body[key];
+  const { submittedAt, ...rest } = parsedUpdate.data;
+  for (const [key, value] of Object.entries(rest)) {
+    if (value !== undefined) updates[key] = value;
   }
-  if (req.body.submittedAt !== undefined) {
-    updates.submittedAt = req.body.submittedAt ? new Date(req.body.submittedAt) : null;
+  if (submittedAt !== undefined) {
+    updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
   }
 
   const [updated] = await db

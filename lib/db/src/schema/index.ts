@@ -8,5 +8,6 @@ export * from "./certificates";
 export * from "./compliance-items";
 export * from "./app-settings";
 export * from "./food-safety-records";
+export * from "./fire-safety-checks";
 export * from "./password-reset-tokens";
 export * from "./consultant-clients";

@@ -12,6 +12,8 @@ consultants managing portfolios of clients.
 
 - **External Compliance**: Contractor-managed visits, certificates, email reminders
 - **Internal Compliance**: Internal staff compliance checks
+- **Fire Safety**: Digital fire logbook — 5 check types (alarm weekly, emergency lights & extinguishers monthly, fire doors quarterly, fire drill 6-monthly) with due/overdue status
+- **Kitchen Diary**: Daily food safety record — deliveries, fridge/freezer & hot food temps, corrective actions, manager sign-off; config-driven fridge counts and temperature limits
 
 ## Stack
 
@@ -46,6 +48,10 @@ consultants managing portfolios of clients.
   - External Checks — compliance items assigned to contractors, with lead time email reminders
 - **INTERNAL COMPLIANCE**
   - Internal Checks — staff-managed compliance tasks
+- **FIRE SAFETY**
+  - Fire Logbook (`/fire-safety`) — status cards + check history, record/edit/delete checks
+- **KITCHEN**
+  - Kitchen Diary (`/kitchen`) — daily record with draft save and manager sign-off (locks record)
 - **SYSTEM** (role-gated)
   - Categories — color-coded categories (canAdmin)
   - Users — user management (canAdmin)
@@ -66,6 +72,8 @@ consultants managing portfolios of clients.
 - `compliance_items` — compliance tasks with type, status, priority, contractorId, departmentId, leadTimeDays
 - `app_settings` — key/value settings (SMTP config, company name, lead time defaults) — unique per (clientId, key)
 - `password_reset_tokens` — one-time tokens for password reset flow (expiresAt 1h, usedAt)
+- `fire_safety_checks` — fire logbook entries (checkType, checkDate, result pass/fail, siteId nullable, location, performedBy)
+- `food_safety_records` — one kitchen diary record per (clientId, recordDate); JSON row arrays + submittedAt lock
 
 ## Auth Endpoints
 
@@ -97,6 +105,8 @@ Consultants pass `clientId` as a query param (injected by the frontend via `cust
 - `POST /api/notifications/send-reminders`
 - `POST /api/notifications/test-email`
 - `POST /api/storage/uploads/request-url`
+- `GET/POST /api/fire-safety`, `PUT/DELETE /api/fire-safety/:id`, `GET /api/fire-safety/status` (siteId ownership validated on write)
+- `GET/PUT /api/food-safety/config`, `GET/POST /api/food-safety`, `GET /api/food-safety/by-date/:date` (404 when absent), `PUT /api/food-safety/:id`
 
 ## Frontend Auth Flow
 

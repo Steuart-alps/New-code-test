@@ -13,6 +13,8 @@ import {
   LogOut,
   ChevronDown,
   ArrowLeftRight,
+  Flame,
+  UtensilsCrossed,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -25,24 +27,47 @@ function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
 
-  const items: { href: string; label: string; icon: any }[] = [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/external", label: "Compliance Checks", icon: Briefcase },
-    { href: "/contractors", label: "Contractors", icon: Building },
+  const groups: { title: string; items: { href: string; label: string; icon: any }[] }[] = [
+    {
+      title: "COMPLIANCE",
+      items: [
+        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/external", label: "Compliance Checks", icon: Briefcase },
+        { href: "/contractors", label: "Contractors", icon: Building },
+        { href: "/categories", label: "Categories", icon: Tags },
+      ],
+    },
+    {
+      title: "FIRE SAFETY",
+      items: [
+        { href: "/fire-safety", label: "Fire Logbook", icon: Flame },
+      ],
+    },
+    {
+      title: "KITCHEN",
+      items: [
+        { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed },
+      ],
+    },
   ];
+
+  const systemItems: { href: string; label: string; icon: any }[] = [];
   if (canAdmin) {
-    items.push({ href: "/categories", label: "Categories", icon: Building2 });
-    items.push({ href: "/sites", label: "Sites", icon: Building });
-    items.push({ href: "/users", label: "Users", icon: Users });
+    systemItems.push({ href: "/sites", label: "Sites", icon: Building2 });
+    systemItems.push({ href: "/users", label: "Users", icon: Users });
   }
   if (isConsultant) {
-    items.push({ href: "/clients", label: "Clients", icon: Building2 });
+    systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });
   }
   if (canAdmin) {
-    items.push({ href: "/settings", label: "Settings", icon: Settings });
+    systemItems.push({ href: "/settings", label: "Settings", icon: Settings });
   }
 
-  return [{ title: "", items }];
+  if (systemItems.length > 0) {
+    groups.push({ title: "SYSTEM", items: systemItems });
+  }
+
+  return groups;
 }
 
 export function AppLayout({ children, title }: { children: ReactNode; title: string }) {

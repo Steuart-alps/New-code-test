@@ -15,6 +15,8 @@ import billingRouter from "./billing";
 import adminRouter from "./admin";
 import emailDomainRouter from "./emailDomain";
 import sitesRouter from "./sites";
+import foodSafetyRouter from "./food-safety";
+import fireSafetyRouter from "./fire-safety";
 
 const router: IRouter = Router();
 
@@ -34,5 +36,7 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use(storageRouter);
+router.use("/food-safety", foodSafetyRouter);
+router.use("/fire-safety", fireSafetyRouter);
 
 export default router;

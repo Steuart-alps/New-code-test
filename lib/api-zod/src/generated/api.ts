@@ -667,3 +667,252 @@ export const RequestUploadUrlResponse = zod.object({
   uploadURL: zod.string(),
   objectPath: zod.string(),
 });
+
+/**
+ * @summary List fire safety logbook entries
+ */
+export const ListFireSafetyChecksQueryParams = zod.object({
+  checkType: zod
+    .enum([
+      "alarm",
+      "emergency_lights",
+      "extinguishers",
+      "fire_doors",
+      "fire_drill",
+    ])
+    .optional(),
+  siteId: zod.coerce.number().optional(),
+});
+
+export const ListFireSafetyChecksResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  checkType: zod.enum([
+    "alarm",
+    "emergency_lights",
+    "extinguishers",
+    "fire_doors",
+    "fire_drill",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListFireSafetyChecksResponse = zod.array(
+  ListFireSafetyChecksResponseItem,
+);
+
+/**
+ * @summary Record a fire safety check
+ */
+export const CreateFireSafetyCheckBody = zod.object({
+  checkType: zod.enum([
+    "alarm",
+    "emergency_lights",
+    "extinguishers",
+    "fire_doors",
+    "fire_drill",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  siteId: zod.number().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+});
+
+/**
+ * @summary Per-check-type due status (last done, next due, overdue flags)
+ */
+export const GetFireSafetyStatusQueryParams = zod.object({
+  siteId: zod.coerce.number().optional(),
+});
+
+export const GetFireSafetyStatusResponseItem = zod.object({
+  checkType: zod.enum([
+    "alarm",
+    "emergency_lights",
+    "extinguishers",
+    "fire_doors",
+    "fire_drill",
+  ]),
+  frequencyDays: zod.number(),
+  lastDate: zod.string().nullish(),
+  dueDate: zod.string().nullish(),
+  status: zod.enum(["ok", "due_soon", "overdue", "never"]),
+});
+export const GetFireSafetyStatusResponse = zod.array(
+  GetFireSafetyStatusResponseItem,
+);
+
+/**
+ * @summary Update a fire safety check entry
+ */
+export const UpdateFireSafetyCheckParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateFireSafetyCheckBody = zod.object({
+  checkDate: zod.string().optional(),
+  result: zod.enum(["pass", "fail"]).optional(),
+  siteId: zod.number().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+});
+
+export const UpdateFireSafetyCheckResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  checkType: zod.enum([
+    "alarm",
+    "emergency_lights",
+    "extinguishers",
+    "fire_doors",
+    "fire_drill",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Delete a fire safety check entry
+ */
+export const DeleteFireSafetyCheckParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
+ */
+export const GetFoodSafetyConfigResponse = zod.object({
+  food_num_fridges: zod.string().optional(),
+  food_num_freezers: zod.string().optional(),
+  food_cooking_limit: zod.string().optional(),
+  food_cooling_limit: zod.string().optional(),
+  food_reheating_limit: zod.string().optional(),
+  food_hot_holding_limit: zod.string().optional(),
+});
+
+/**
+ * @summary Update kitchen configuration
+ */
+export const UpdateFoodSafetyConfigBody = zod.object({
+  food_num_fridges: zod.string().optional(),
+  food_num_freezers: zod.string().optional(),
+  food_cooking_limit: zod.string().optional(),
+  food_cooling_limit: zod.string().optional(),
+  food_reheating_limit: zod.string().optional(),
+  food_hot_holding_limit: zod.string().optional(),
+});
+
+export const UpdateFoodSafetyConfigResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List food safety diary record summaries (dates and submission state)
+ */
+export const ListFoodSafetyRecordsResponseItem = zod.object({
+  id: zod.number(),
+  recordDate: zod.string(),
+  submittedAt: zod.date().nullish(),
+});
+export const ListFoodSafetyRecordsResponse = zod.array(
+  ListFoodSafetyRecordsResponseItem,
+);
+
+/**
+ * @summary Create a daily food safety record
+ */
+export const CreateFoodSafetyRecordBody = zod.object({
+  recordDate: zod.string(),
+  deliveries: zod.array(zod.unknown()).optional(),
+  coldFood: zod.array(zod.unknown()).optional(),
+  hotTemperature: zod.array(zod.unknown()).optional(),
+  hotHolding: zod.array(zod.unknown()).optional(),
+  cookingLimit: zod.string().optional(),
+  coolingLimit: zod.string().optional(),
+  reheatingLimit: zod.string().optional(),
+  hotHoldingLimit: zod.string().optional(),
+  correctives: zod.string().optional(),
+  managerSignature: zod.string().optional(),
+  submittedAt: zod.string().optional(),
+});
+
+/**
+ * @summary Get the food safety record for a specific date
+ */
+export const GetFoodSafetyRecordByDateParams = zod.object({
+  date: zod.coerce.string(),
+});
+
+export const GetFoodSafetyRecordByDateResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  recordDate: zod.string(),
+  deliveries: zod.array(zod.unknown()).optional(),
+  coldFood: zod.array(zod.unknown()).optional(),
+  hotTemperature: zod.array(zod.unknown()).optional(),
+  hotHolding: zod.array(zod.unknown()).optional(),
+  cookingLimit: zod.string().optional(),
+  coolingLimit: zod.string().optional(),
+  reheatingLimit: zod.string().optional(),
+  hotHoldingLimit: zod.string().optional(),
+  correctives: zod.string().nullish(),
+  managerSignature: zod.string().nullish(),
+  submittedAt: zod.date().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Update a food safety record
+ */
+export const UpdateFoodSafetyRecordParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateFoodSafetyRecordBody = zod.object({
+  deliveries: zod.array(zod.unknown()).optional(),
+  coldFood: zod.array(zod.unknown()).optional(),
+  hotTemperature: zod.array(zod.unknown()).optional(),
+  hotHolding: zod.array(zod.unknown()).optional(),
+  cookingLimit: zod.string().optional(),
+  coolingLimit: zod.string().optional(),
+  reheatingLimit: zod.string().optional(),
+  hotHoldingLimit: zod.string().optional(),
+  correctives: zod.string().optional(),
+  managerSignature: zod.string().optional(),
+  submittedAt: zod.string().nullish(),
+});
+
+export const UpdateFoodSafetyRecordResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  recordDate: zod.string(),
+  deliveries: zod.array(zod.unknown()).optional(),
+  coldFood: zod.array(zod.unknown()).optional(),
+  hotTemperature: zod.array(zod.unknown()).optional(),
+  hotHolding: zod.array(zod.unknown()).optional(),
+  cookingLimit: zod.string().optional(),
+  coolingLimit: zod.string().optional(),
+  reheatingLimit: zod.string().optional(),
+  hotHoldingLimit: zod.string().optional(),
+  correctives: zod.string().nullish(),
+  managerSignature: zod.string().nullish(),
+  submittedAt: zod.date().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});

@@ -25,6 +25,8 @@ import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
 import SchedulePage from "@/pages/schedule";
 import ItemDetailPage from "@/pages/item-detail";
+import FireSafetyPage from "@/pages/fire-safety";
+import KitchenPage from "@/pages/kitchen";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -92,6 +94,8 @@ function ProtectedRoutes() {
       <Route path="/external" component={ExternalChecksPage} />
       <Route path="/external-checks" component={ExternalChecksPage} />
       <Route path="/items/:id" component={ItemDetailPage} />
+      <Route path="/fire-safety" component={FireSafetyPage} />
+      <Route path="/kitchen" component={KitchenPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}

@@ -290,6 +290,154 @@ export interface RequestUploadUrlResponse {
   objectPath: string;
 }
 
+export type FireCheckType = (typeof FireCheckType)[keyof typeof FireCheckType];
+
+export const FireCheckType = {
+  alarm: "alarm",
+  emergency_lights: "emergency_lights",
+  extinguishers: "extinguishers",
+  fire_doors: "fire_doors",
+  fire_drill: "fire_drill",
+} as const;
+
+export type FireSafetyCheckResult =
+  (typeof FireSafetyCheckResult)[keyof typeof FireSafetyCheckResult];
+
+export const FireSafetyCheckResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+export interface FireSafetyCheck {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  checkType: FireCheckType;
+  checkDate: string;
+  result: FireSafetyCheckResult;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateFireSafetyCheckRequestResult =
+  (typeof CreateFireSafetyCheckRequestResult)[keyof typeof CreateFireSafetyCheckRequestResult];
+
+export const CreateFireSafetyCheckRequestResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+export interface CreateFireSafetyCheckRequest {
+  checkType: FireCheckType;
+  checkDate: string;
+  result: CreateFireSafetyCheckRequestResult;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type UpdateFireSafetyCheckRequestResult =
+  (typeof UpdateFireSafetyCheckRequestResult)[keyof typeof UpdateFireSafetyCheckRequestResult];
+
+export const UpdateFireSafetyCheckRequestResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+export interface UpdateFireSafetyCheckRequest {
+  checkDate?: string;
+  result?: UpdateFireSafetyCheckRequestResult;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type FireSafetyStatusStatus =
+  (typeof FireSafetyStatusStatus)[keyof typeof FireSafetyStatusStatus];
+
+export const FireSafetyStatusStatus = {
+  ok: "ok",
+  due_soon: "due_soon",
+  overdue: "overdue",
+  never: "never",
+} as const;
+
+export interface FireSafetyStatus {
+  checkType: FireCheckType;
+  frequencyDays: number;
+  lastDate?: string | null;
+  dueDate?: string | null;
+  status: FireSafetyStatusStatus;
+}
+
+export interface FoodSafetyConfig {
+  food_num_fridges?: string;
+  food_num_freezers?: string;
+  food_cooking_limit?: string;
+  food_cooling_limit?: string;
+  food_reheating_limit?: string;
+  food_hot_holding_limit?: string;
+}
+
+export interface FoodSafetyRecordSummary {
+  id: number;
+  recordDate: string;
+  submittedAt?: string | null;
+}
+
+export interface FoodSafetyRecord {
+  id: number;
+  clientId: number;
+  recordDate: string;
+  deliveries?: unknown[];
+  coldFood?: unknown[];
+  hotTemperature?: unknown[];
+  hotHolding?: unknown[];
+  cookingLimit?: string;
+  coolingLimit?: string;
+  reheatingLimit?: string;
+  hotHoldingLimit?: string;
+  correctives?: string | null;
+  managerSignature?: string | null;
+  submittedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateFoodSafetyRecordRequest {
+  recordDate: string;
+  deliveries?: unknown[];
+  coldFood?: unknown[];
+  hotTemperature?: unknown[];
+  hotHolding?: unknown[];
+  cookingLimit?: string;
+  coolingLimit?: string;
+  reheatingLimit?: string;
+  hotHoldingLimit?: string;
+  correctives?: string;
+  managerSignature?: string;
+  submittedAt?: string;
+}
+
+export interface UpdateFoodSafetyRecordRequest {
+  deliveries?: unknown[];
+  coldFood?: unknown[];
+  hotTemperature?: unknown[];
+  hotHolding?: unknown[];
+  cookingLimit?: string;
+  coolingLimit?: string;
+  reheatingLimit?: string;
+  hotHoldingLimit?: string;
+  correctives?: string;
+  managerSignature?: string;
+  submittedAt?: string | null;
+}
+
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   siteId?: number;
@@ -316,3 +464,16 @@ export const ListComplianceItemsPriority = {
   high: "high",
   critical: "critical",
 } as const;
+
+export type ListFireSafetyChecksParams = {
+  checkType?: FireCheckType;
+  siteId?: number;
+};
+
+export type GetFireSafetyStatusParams = {
+  siteId?: number;
+};
+
+export type UpdateFoodSafetyConfig200 = {
+  ok: boolean;
+};

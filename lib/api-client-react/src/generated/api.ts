@@ -26,11 +26,20 @@ import type {
   CreateCertificateRequest,
   CreateComplianceItemRequest,
   CreateContractorRequest,
+  CreateFireSafetyCheckRequest,
+  CreateFoodSafetyRecordRequest,
   CreateSiteRequest,
   DashboardStats,
   ErrorResponse,
+  FireSafetyCheck,
+  FireSafetyStatus,
+  FoodSafetyConfig,
+  FoodSafetyRecord,
+  FoodSafetyRecordSummary,
+  GetFireSafetyStatusParams,
   HealthStatus,
   ListComplianceItemsParams,
+  ListFireSafetyChecksParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SendRemindersResponse,
@@ -39,6 +48,9 @@ import type {
   TestEmailResponse,
   UpdateCategoryRequest,
   UpdateComplianceItemRequest,
+  UpdateFireSafetyCheckRequest,
+  UpdateFoodSafetyConfig200,
+  UpdateFoodSafetyRecordRequest,
   UpdateSiteRequest,
   UpdateStatusRequest,
 } from "./api.schemas";
@@ -3189,4 +3201,966 @@ export const useRequestUploadUrl = <
   TContext
 > => {
   return useMutation(getRequestUploadUrlMutationOptions(options));
+};
+
+/**
+ * @summary List fire safety logbook entries
+ */
+export const getListFireSafetyChecksUrl = (
+  params?: ListFireSafetyChecksParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/fire-safety?${stringifiedParams}`
+    : `/api/fire-safety`;
+};
+
+export const listFireSafetyChecks = async (
+  params?: ListFireSafetyChecksParams,
+  options?: RequestInit,
+): Promise<FireSafetyCheck[]> => {
+  return customFetch<FireSafetyCheck[]>(getListFireSafetyChecksUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListFireSafetyChecksQueryKey = (
+  params?: ListFireSafetyChecksParams,
+) => {
+  return [`/api/fire-safety`, ...(params ? [params] : [])] as const;
+};
+
+export const getListFireSafetyChecksQueryOptions = <
+  TData = Awaited<ReturnType<typeof listFireSafetyChecks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListFireSafetyChecksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFireSafetyChecks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListFireSafetyChecksQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listFireSafetyChecks>>
+  > = ({ signal }) =>
+    listFireSafetyChecks(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listFireSafetyChecks>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListFireSafetyChecksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listFireSafetyChecks>>
+>;
+export type ListFireSafetyChecksQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List fire safety logbook entries
+ */
+
+export function useListFireSafetyChecks<
+  TData = Awaited<ReturnType<typeof listFireSafetyChecks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListFireSafetyChecksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFireSafetyChecks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListFireSafetyChecksQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Record a fire safety check
+ */
+export const getCreateFireSafetyCheckUrl = () => {
+  return `/api/fire-safety`;
+};
+
+export const createFireSafetyCheck = async (
+  createFireSafetyCheckRequest: CreateFireSafetyCheckRequest,
+  options?: RequestInit,
+): Promise<FireSafetyCheck> => {
+  return customFetch<FireSafetyCheck>(getCreateFireSafetyCheckUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createFireSafetyCheckRequest),
+  });
+};
+
+export const getCreateFireSafetyCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createFireSafetyCheck>>,
+    TError,
+    { data: BodyType<CreateFireSafetyCheckRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createFireSafetyCheck>>,
+  TError,
+  { data: BodyType<CreateFireSafetyCheckRequest> },
+  TContext
+> => {
+  const mutationKey = ["createFireSafetyCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createFireSafetyCheck>>,
+    { data: BodyType<CreateFireSafetyCheckRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createFireSafetyCheck(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateFireSafetyCheckMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createFireSafetyCheck>>
+>;
+export type CreateFireSafetyCheckMutationBody =
+  BodyType<CreateFireSafetyCheckRequest>;
+export type CreateFireSafetyCheckMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Record a fire safety check
+ */
+export const useCreateFireSafetyCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createFireSafetyCheck>>,
+    TError,
+    { data: BodyType<CreateFireSafetyCheckRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createFireSafetyCheck>>,
+  TError,
+  { data: BodyType<CreateFireSafetyCheckRequest> },
+  TContext
+> => {
+  return useMutation(getCreateFireSafetyCheckMutationOptions(options));
+};
+
+/**
+ * @summary Per-check-type due status (last done, next due, overdue flags)
+ */
+export const getGetFireSafetyStatusUrl = (
+  params?: GetFireSafetyStatusParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/fire-safety/status?${stringifiedParams}`
+    : `/api/fire-safety/status`;
+};
+
+export const getFireSafetyStatus = async (
+  params?: GetFireSafetyStatusParams,
+  options?: RequestInit,
+): Promise<FireSafetyStatus[]> => {
+  return customFetch<FireSafetyStatus[]>(getGetFireSafetyStatusUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetFireSafetyStatusQueryKey = (
+  params?: GetFireSafetyStatusParams,
+) => {
+  return [`/api/fire-safety/status`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetFireSafetyStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFireSafetyStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetFireSafetyStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFireSafetyStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFireSafetyStatusQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFireSafetyStatus>>
+  > = ({ signal }) =>
+    getFireSafetyStatus(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFireSafetyStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFireSafetyStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFireSafetyStatus>>
+>;
+export type GetFireSafetyStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Per-check-type due status (last done, next due, overdue flags)
+ */
+
+export function useGetFireSafetyStatus<
+  TData = Awaited<ReturnType<typeof getFireSafetyStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetFireSafetyStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFireSafetyStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFireSafetyStatusQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update a fire safety check entry
+ */
+export const getUpdateFireSafetyCheckUrl = (id: number) => {
+  return `/api/fire-safety/${id}`;
+};
+
+export const updateFireSafetyCheck = async (
+  id: number,
+  updateFireSafetyCheckRequest: UpdateFireSafetyCheckRequest,
+  options?: RequestInit,
+): Promise<FireSafetyCheck> => {
+  return customFetch<FireSafetyCheck>(getUpdateFireSafetyCheckUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateFireSafetyCheckRequest),
+  });
+};
+
+export const getUpdateFireSafetyCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFireSafetyCheck>>,
+    TError,
+    { id: number; data: BodyType<UpdateFireSafetyCheckRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateFireSafetyCheck>>,
+  TError,
+  { id: number; data: BodyType<UpdateFireSafetyCheckRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateFireSafetyCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateFireSafetyCheck>>,
+    { id: number; data: BodyType<UpdateFireSafetyCheckRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateFireSafetyCheck(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateFireSafetyCheckMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateFireSafetyCheck>>
+>;
+export type UpdateFireSafetyCheckMutationBody =
+  BodyType<UpdateFireSafetyCheckRequest>;
+export type UpdateFireSafetyCheckMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a fire safety check entry
+ */
+export const useUpdateFireSafetyCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFireSafetyCheck>>,
+    TError,
+    { id: number; data: BodyType<UpdateFireSafetyCheckRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateFireSafetyCheck>>,
+  TError,
+  { id: number; data: BodyType<UpdateFireSafetyCheckRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateFireSafetyCheckMutationOptions(options));
+};
+
+/**
+ * @summary Delete a fire safety check entry
+ */
+export const getDeleteFireSafetyCheckUrl = (id: number) => {
+  return `/api/fire-safety/${id}`;
+};
+
+export const deleteFireSafetyCheck = async (
+  id: number,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteFireSafetyCheckUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteFireSafetyCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteFireSafetyCheck>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteFireSafetyCheck>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deleteFireSafetyCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteFireSafetyCheck>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteFireSafetyCheck(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteFireSafetyCheckMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteFireSafetyCheck>>
+>;
+
+export type DeleteFireSafetyCheckMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a fire safety check entry
+ */
+export const useDeleteFireSafetyCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteFireSafetyCheck>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteFireSafetyCheck>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeleteFireSafetyCheckMutationOptions(options));
+};
+
+/**
+ * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
+ */
+export const getGetFoodSafetyConfigUrl = () => {
+  return `/api/food-safety/config`;
+};
+
+export const getFoodSafetyConfig = async (
+  options?: RequestInit,
+): Promise<FoodSafetyConfig> => {
+  return customFetch<FoodSafetyConfig>(getGetFoodSafetyConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetFoodSafetyConfigQueryKey = () => {
+  return [`/api/food-safety/config`] as const;
+};
+
+export const getGetFoodSafetyConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetFoodSafetyConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFoodSafetyConfig>>
+  > = ({ signal }) => getFoodSafetyConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFoodSafetyConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFoodSafetyConfig>>
+>;
+export type GetFoodSafetyConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
+ */
+
+export function useGetFoodSafetyConfig<
+  TData = Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFoodSafetyConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update kitchen configuration
+ */
+export const getUpdateFoodSafetyConfigUrl = () => {
+  return `/api/food-safety/config`;
+};
+
+export const updateFoodSafetyConfig = async (
+  foodSafetyConfig: FoodSafetyConfig,
+  options?: RequestInit,
+): Promise<UpdateFoodSafetyConfig200> => {
+  return customFetch<UpdateFoodSafetyConfig200>(
+    getUpdateFoodSafetyConfigUrl(),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(foodSafetyConfig),
+    },
+  );
+};
+
+export const getUpdateFoodSafetyConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
+    TError,
+    { data: BodyType<FoodSafetyConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
+  TError,
+  { data: BodyType<FoodSafetyConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateFoodSafetyConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
+    { data: BodyType<FoodSafetyConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateFoodSafetyConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateFoodSafetyConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateFoodSafetyConfig>>
+>;
+export type UpdateFoodSafetyConfigMutationBody = BodyType<FoodSafetyConfig>;
+export type UpdateFoodSafetyConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update kitchen configuration
+ */
+export const useUpdateFoodSafetyConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
+    TError,
+    { data: BodyType<FoodSafetyConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
+  TError,
+  { data: BodyType<FoodSafetyConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateFoodSafetyConfigMutationOptions(options));
+};
+
+/**
+ * @summary List food safety diary record summaries (dates and submission state)
+ */
+export const getListFoodSafetyRecordsUrl = () => {
+  return `/api/food-safety`;
+};
+
+export const listFoodSafetyRecords = async (
+  options?: RequestInit,
+): Promise<FoodSafetyRecordSummary[]> => {
+  return customFetch<FoodSafetyRecordSummary[]>(getListFoodSafetyRecordsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListFoodSafetyRecordsQueryKey = () => {
+  return [`/api/food-safety`] as const;
+};
+
+export const getListFoodSafetyRecordsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListFoodSafetyRecordsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listFoodSafetyRecords>>
+  > = ({ signal }) => listFoodSafetyRecords({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListFoodSafetyRecordsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listFoodSafetyRecords>>
+>;
+export type ListFoodSafetyRecordsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List food safety diary record summaries (dates and submission state)
+ */
+
+export function useListFoodSafetyRecords<
+  TData = Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListFoodSafetyRecordsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a daily food safety record
+ */
+export const getCreateFoodSafetyRecordUrl = () => {
+  return `/api/food-safety`;
+};
+
+export const createFoodSafetyRecord = async (
+  createFoodSafetyRecordRequest: CreateFoodSafetyRecordRequest,
+  options?: RequestInit,
+): Promise<FoodSafetyRecord> => {
+  return customFetch<FoodSafetyRecord>(getCreateFoodSafetyRecordUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createFoodSafetyRecordRequest),
+  });
+};
+
+export const getCreateFoodSafetyRecordMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createFoodSafetyRecord>>,
+    TError,
+    { data: BodyType<CreateFoodSafetyRecordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createFoodSafetyRecord>>,
+  TError,
+  { data: BodyType<CreateFoodSafetyRecordRequest> },
+  TContext
+> => {
+  const mutationKey = ["createFoodSafetyRecord"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createFoodSafetyRecord>>,
+    { data: BodyType<CreateFoodSafetyRecordRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createFoodSafetyRecord(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateFoodSafetyRecordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createFoodSafetyRecord>>
+>;
+export type CreateFoodSafetyRecordMutationBody =
+  BodyType<CreateFoodSafetyRecordRequest>;
+export type CreateFoodSafetyRecordMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a daily food safety record
+ */
+export const useCreateFoodSafetyRecord = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createFoodSafetyRecord>>,
+    TError,
+    { data: BodyType<CreateFoodSafetyRecordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createFoodSafetyRecord>>,
+  TError,
+  { data: BodyType<CreateFoodSafetyRecordRequest> },
+  TContext
+> => {
+  return useMutation(getCreateFoodSafetyRecordMutationOptions(options));
+};
+
+/**
+ * @summary Get the food safety record for a specific date
+ */
+export const getGetFoodSafetyRecordByDateUrl = (date: string) => {
+  return `/api/food-safety/by-date/${date}`;
+};
+
+export const getFoodSafetyRecordByDate = async (
+  date: string,
+  options?: RequestInit,
+): Promise<FoodSafetyRecord> => {
+  return customFetch<FoodSafetyRecord>(getGetFoodSafetyRecordByDateUrl(date), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetFoodSafetyRecordByDateQueryKey = (date: string) => {
+  return [`/api/food-safety/by-date/${date}`] as const;
+};
+
+export const getGetFoodSafetyRecordByDateQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  date: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFoodSafetyRecordByDateQueryKey(date);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>
+  > = ({ signal }) =>
+    getFoodSafetyRecordByDate(date, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!date,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFoodSafetyRecordByDateQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>
+>;
+export type GetFoodSafetyRecordByDateQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the food safety record for a specific date
+ */
+
+export function useGetFoodSafetyRecordByDate<
+  TData = Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  date: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFoodSafetyRecordByDateQueryOptions(date, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update a food safety record
+ */
+export const getUpdateFoodSafetyRecordUrl = (id: number) => {
+  return `/api/food-safety/${id}`;
+};
+
+export const updateFoodSafetyRecord = async (
+  id: number,
+  updateFoodSafetyRecordRequest: UpdateFoodSafetyRecordRequest,
+  options?: RequestInit,
+): Promise<FoodSafetyRecord> => {
+  return customFetch<FoodSafetyRecord>(getUpdateFoodSafetyRecordUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateFoodSafetyRecordRequest),
+  });
+};
+
+export const getUpdateFoodSafetyRecordMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFoodSafetyRecord>>,
+    TError,
+    { id: number; data: BodyType<UpdateFoodSafetyRecordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateFoodSafetyRecord>>,
+  TError,
+  { id: number; data: BodyType<UpdateFoodSafetyRecordRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateFoodSafetyRecord"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateFoodSafetyRecord>>,
+    { id: number; data: BodyType<UpdateFoodSafetyRecordRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateFoodSafetyRecord(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateFoodSafetyRecordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateFoodSafetyRecord>>
+>;
+export type UpdateFoodSafetyRecordMutationBody =
+  BodyType<UpdateFoodSafetyRecordRequest>;
+export type UpdateFoodSafetyRecordMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a food safety record
+ */
+export const useUpdateFoodSafetyRecord = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFoodSafetyRecord>>,
+    TError,
+    { id: number; data: BodyType<UpdateFoodSafetyRecordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateFoodSafetyRecord>>,
+  TError,
+  { id: number; data: BodyType<UpdateFoodSafetyRecordRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateFoodSafetyRecordMutationOptions(options));
 };

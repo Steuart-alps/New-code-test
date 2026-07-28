@@ -34,6 +34,50 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- Fire safety logbook table ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "fire_safety_checks" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "check_type" text NOT NULL,
+        "check_date" date NOT NULL,
+        "result" text NOT NULL DEFAULT 'pass',
+        "location" text,
+        "notes" text,
+        "performed_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS "IDX_fire_safety_client_type_date" ON "fire_safety_checks" ("client_id", "check_type", "check_date")`
+    );
+
+    // ---- Food safety (kitchen diary) table ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "food_safety_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_date" date NOT NULL,
+        "deliveries" jsonb NOT NULL DEFAULT '[]',
+        "cold_food" jsonb NOT NULL DEFAULT '[]',
+        "hot_temperature" jsonb NOT NULL DEFAULT '[]',
+        "hot_holding" jsonb NOT NULL DEFAULT '[]',
+        "cooking_limit" text NOT NULL DEFAULT 'Above 75°C (10 seconds)',
+        "cooling_limit" text NOT NULL DEFAULT '8°C within 90 minutes',
+        "reheating_limit" text NOT NULL DEFAULT 'Above 82°C',
+        "hot_holding_limit" text NOT NULL DEFAULT 'Above 63°C',
+        "correctives" text,
+        "manager_signature" text,
+        "submitted_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
     // ---- Add site_id column to compliance_items ----
     await db.execute(sql`
       ALTER TABLE "compliance_items"
