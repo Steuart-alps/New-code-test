@@ -13,7 +13,7 @@ const CHECK_TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors",
 const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   alarm: 7,
   emergency_lights: 30,
-  extinguishers: 30,
+  extinguishers: 7,
   fire_doors: 90,
   fire_drill: 180,
 };

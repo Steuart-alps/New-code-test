@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 const CHECK_TYPE_LABELS: Record<FireCheckType, string> = {
   alarm: "Weekly fire alarm test",
   emergency_lights: "Monthly emergency lighting test",
-  extinguishers: "Extinguisher visual check",
+  extinguishers: "Weekly extinguisher visual check",
   fire_doors: "Fire door check",
   fire_drill: "Fire drill / evacuation",
 };
