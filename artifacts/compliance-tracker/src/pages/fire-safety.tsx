@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/layout";
+import { Link } from "wouter";
 import {
   useListFireSafetyChecks,
   getListFireSafetyChecksQueryKey,
@@ -25,8 +26,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2 } from "lucide-react";
+import { Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 
 const CHECK_TYPE_LABELS: Record<FireCheckType, string> = {
   alarm: "Weekly fire alarm test",
@@ -342,17 +344,24 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 }
 
 export default function FireSafetyPage() {
+  const { hasService } = useAuth();
+  const canAdmin = useCanAdmin();
+  const hasFiretrack = hasService("firetrack");
+
   const [filterType, setFilterType] = useState<FireCheckType | "">("");
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
 
-  const { data: status, isLoading: statusLoading } = useGetFireSafetyStatus({
+  const { data: status, isLoading: statusLoading, error: statusError } = useGetFireSafetyStatus({
     siteId: filterSite,
-  });
+  }, { query: { enabled: hasFiretrack, retry: (count, err: any) => err?.status !== 403 && count < 3 } });
+  // Trust the server over the cached session: a 403 means this tenant isn't
+  // entitled (e.g. consultant viewing a client without the add-on).
+  const serverLocked = (statusError as any)?.status === 403;
   const { data: checks, isLoading: checksLoading } = useListFireSafetyChecks({
     checkType: filterType || undefined,
     siteId: filterSite,
-  });
-  const { data: sites } = useListSites();
+  }, { query: { enabled: hasFiretrack } });
+  const { data: sites } = useListSites({ query: { enabled: hasFiretrack } });
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -374,6 +383,42 @@ export default function FireSafetyPage() {
       }
     );
   };
+
+  if (!hasFiretrack || serverLocked) {
+    return (
+      <AppLayout title="FireTrack — Fire Safety Logbook">
+        <div className="max-w-2xl mx-auto mt-12">
+          <Card className="border-2 border-primary/20 bg-primary/5">
+            <CardContent className="pt-8 pb-8 px-8 text-center space-y-6">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Lock className="w-8 h-8 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-display font-medium text-foreground mb-2">FireTrack</h2>
+                <p className="text-muted-foreground mb-1">
+                  Digital fire safety logbook — record checks and track compliance status.
+                </p>
+                <p className="font-medium text-primary">£10 per site per month</p>
+              </div>
+              <div className="pt-4">
+                {canAdmin ? (
+                  <Link href="/settings">
+                    <Button size="lg" className="w-full sm:w-auto font-medium">
+                      Enable FireTrack
+                    </Button>
+                  </Link>
+                ) : (
+                  <p className="text-sm text-muted-foreground bg-white/50 inline-block px-4 py-2 rounded-md border border-border/50">
+                    Ask your account admin to enable this service.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
 
   const overdueStatuses = status?.filter((s) => s.status === "overdue") || [];
   const dueSoonStatuses = status?.filter((s) => s.status === "due_soon") || [];

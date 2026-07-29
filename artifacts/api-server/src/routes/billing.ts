@@ -7,10 +7,21 @@ import { getUncachableStripeClient, getStripePublishableKey } from "../lib/strip
 import {
   countClientSites,
   getPerSitePrice,
+  getServicePrice,
   quantityForSiteCount,
   findLiveSubscription,
 } from "../lib/billing";
 import { invalidateTrialLock, isClientBillingLocked } from "../lib/trialLock";
+import {
+  SERVICES,
+  ADDON_KEYS,
+  BUNDLE_KEY,
+  BUNDLE_LABEL,
+  SERVICE_CAP_PENCE,
+  getEntitledServices,
+  invalidateEntitlements,
+  type ServiceKey,
+} from "../lib/services";
 
 const router = Router();
 
@@ -38,9 +49,64 @@ router.get("/config", requireAuth, async (req, res) => {
 
     const perSite = await getPerSitePrice();
     const billableQuantity = quantityForSiteCount(siteCount);
-    const monthlyTotal = perSite ? perSite.unitAmount * billableQuantity : null;
 
-    res.json({ publishableKey, subscription, siteCount, perSite, billableQuantity, monthlyTotal });
+    // Per-service breakdown: which branches the client has, and the per-site
+    // monthly rate across all of them (capped by the bundle price).
+    let entitled: "all" | ServiceKey[] = ["core"];
+    let activeAddons: string[] = [];
+    let hasBundle = false;
+    let subscribed = false;
+    let perSiteRate = perSite?.unitAmount ?? 0;
+    if (clientId) {
+      entitled = await getEntitledServices(clientId);
+      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+      if (client?.stripeCustomerId) {
+        try {
+          const live = await findLiveSubscription(client.stripeCustomerId);
+          if (live) {
+            subscribed = true;
+            perSiteRate = 0;
+            for (const item of live.items.data) {
+              const key = item.price?.metadata?.service_key;
+              if (key === BUNDLE_KEY) hasBundle = true;
+              if (key && key !== BUNDLE_KEY && key !== "core") activeAddons.push(key);
+              if (key || (perSite && item.price?.id === perSite.priceId)) {
+                perSiteRate += item.price?.unit_amount ?? 0;
+              }
+            }
+            perSiteRate = Math.min(perSiteRate, SERVICE_CAP_PENCE);
+          }
+        } catch {
+          // best-effort; fall back to core-only rate
+        }
+      }
+    }
+    const monthlyTotal = perSiteRate * billableQuantity;
+
+    res.json({
+      publishableKey,
+      subscription,
+      siteCount,
+      perSite,
+      billableQuantity,
+      monthlyTotal,
+      services: {
+        entitled,
+        addons: activeAddons,
+        bundle: hasBundle,
+        // True only when a LIVE Stripe subscription exists — unlike
+        // `subscription.status`, which falls back to the local
+        // clients.subscription_status field and can say "active" for demo/
+        // trial accounts with no Stripe customer.
+        subscribed,
+        perSiteRate,
+        capPence: SERVICE_CAP_PENCE,
+        catalog: [
+          ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
+          { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
+        ],
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -97,7 +163,11 @@ router.get("/plans", async (_req, res) => {
 // Consultants AND client admins may pay: when a trial expires the client's
 // own admin must be able to set up billing, not just the consultant.
 router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
-  const { clientId: bodyClientId } = req.body as { clientId?: number };
+  const { clientId: bodyClientId, services: requestedServices, bundle } = req.body as {
+    clientId?: number;
+    services?: string[];
+    bundle?: boolean;
+  };
   const clientId = bodyClientId ?? getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -108,12 +178,30 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     const stripe = await getUncachableStripeClient();
     const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
 
-    // Per-site billing: the line is always the server-resolved £10/month-per-site
-    // price (never a client-supplied priceId), and the quantity is the client's
-    // current number of sites (never below 1).
-    const resolvedPriceId = (await getPerSitePrice())?.priceId;
-    if (!resolvedPriceId) return res.status(400).json({ error: "No per-site price configured" });
+    // Per-site billing: prices are always server-resolved (never client-supplied
+    // price ids); the client only picks WHICH services, and quantity is the
+    // client's current number of sites (never below 1).
     const quantity = quantityForSiteCount(await countClientSites(clientId));
+    const lineItems: { price: string; quantity: number }[] = [];
+    if (bundle) {
+      const bundlePrice = await getServicePrice(BUNDLE_KEY);
+      if (!bundlePrice) return res.status(400).json({ error: "Bundle price not configured" });
+      lineItems.push({ price: bundlePrice.priceId, quantity });
+    } else {
+      const corePrice = await getPerSitePrice();
+      if (!corePrice) return res.status(400).json({ error: "No per-site price configured" });
+      lineItems.push({ price: corePrice.priceId, quantity });
+      const requested = Array.from(new Set(requestedServices ?? []));
+      const unknown = requested.filter((s) => !(ADDON_KEYS as readonly string[]).includes(s));
+      if (unknown.length > 0) {
+        return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });
+      }
+      for (const addon of requested) {
+        const price = await getServicePrice(addon);
+        if (!price) return res.status(400).json({ error: `Price not configured for ${addon}` });
+        lineItems.push({ price: price.priceId, quantity });
+      }
+    }
 
     const billingEmail = req.currentUser?.email ?? undefined;
     let customerId = client.stripeCustomerId ?? undefined;
@@ -154,7 +242,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: [{ price: resolvedPriceId, quantity }],
+      line_items: lineItems,
       mode: "subscription",
       success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
       cancel_url: `${baseUrl}/?billing=cancel`,
@@ -162,6 +250,123 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     });
 
     res.json({ url: session.url });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/services — add or remove a per-site add-on service on the
+// client's live subscription. Policy mirrors sites: adding charges a full
+// month immediately (no proration); removing takes effect immediately with no
+// refund. The bundle is only selectable at checkout, not here.
+router.post("/services", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const { service, action } = req.body as { service?: string; action?: string };
+  if (!service || !(ADDON_KEYS as readonly string[]).includes(service)) {
+    return res.status(400).json({ error: "Unknown service" });
+  }
+  if (action !== "add" && action !== "remove") {
+    return res.status(400).json({ error: "Action must be 'add' or 'remove'" });
+  }
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) {
+    return res.status(400).json({ error: "No billing account yet — subscribe first" });
+  }
+
+  try {
+    const stripe = await getUncachableStripeClient();
+    const sub = await findLiveSubscription(client.stripeCustomerId);
+    if (!sub) {
+      return res.status(400).json({ error: "No active subscription — subscribe first" });
+    }
+    if (sub.items.data.some((i) => i.price?.metadata?.service_key === BUNDLE_KEY)) {
+      return res.status(400).json({ error: "This account has the Complete bundle — all services are already included" });
+    }
+
+    const price = await getServicePrice(service);
+    if (!price) return res.status(400).json({ error: "Service price not configured" });
+    const existingItem = sub.items.data.find((i) => i.price?.metadata?.service_key === service);
+    const quantity = quantityForSiteCount(await countClientSites(clientId));
+
+    if (action === "add") {
+      if (existingItem) return res.status(409).json({ error: "Service already active" });
+
+      // Add the line for renewals (no proration), then charge the current
+      // month in full immediately — same no-proration policy as added sites.
+      // Idempotency keys are scoped to subscription + service + billing period
+      // so a double-click can't double-charge, while re-adding the service in
+      // a later period bills again as expected.
+      const periodStart = sub.items.data[0]?.current_period_start ?? sub.created;
+      await stripe.subscriptions.update(
+        sub.id,
+        {
+          items: [{ price: price.priceId, quantity }],
+          proration_behavior: "none",
+        },
+        { idempotencyKey: `svc-add-${sub.id}-${service}-${periodStart}` },
+      );
+
+      const amount = price.unitAmount * quantity;
+      const label = SERVICES[service as ServiceKey].label;
+      const description = `${label} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
+      try {
+        // Charge the current month up front. If the invoice can't even be
+        // created/finalized, the item add is rolled back below so the service
+        // is never silently enabled without its first month's charge.
+        const invoice = await stripe.invoices.create(
+          {
+            customer: client.stripeCustomerId,
+            auto_advance: true,
+            pending_invoice_items_behavior: "exclude",
+            description,
+            metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
+          },
+          { idempotencyKey: `svc-add-inv-${sub.id}-${service}-${periodStart}` },
+        );
+        await stripe.invoiceItems.create(
+          {
+            customer: client.stripeCustomerId,
+            invoice: invoice.id!,
+            amount,
+            currency: price.currency,
+            description,
+          },
+          { idempotencyKey: `svc-add-item-${sub.id}-${service}-${periodStart}` },
+        );
+        const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
+        if (finalized.status === "open") {
+          await stripe.invoices
+            .pay(invoice.id!, undefined, { idempotencyKey: `svc-add-pay-${sub.id}-${service}-${periodStart}` })
+            .catch((err) => {
+              // Card declined etc. — auto_advance retries; access stays on.
+              res.locals.paymentPending = true;
+              req.log?.warn?.({ err, clientId, service }, "Add-on invoice payment failed; Stripe will retry");
+            });
+        }
+      } catch (err: any) {
+        // Roll back the item add: enabling a service without collecting its
+        // first month would violate the pay-up-front policy.
+        try {
+          const fresh = await findLiveSubscription(client.stripeCustomerId);
+          const added = fresh?.items.data.find((i) => i.price?.metadata?.service_key === service);
+          if (added) await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
+        } catch (rollbackErr) {
+          req.log?.error?.({ rollbackErr, clientId, service }, "Add-on rollback failed — manual attention needed");
+        }
+        invalidateEntitlements(clientId);
+        req.log?.error?.({ err, clientId, service }, "Add-on immediate charge failed; item rolled back");
+        return res.status(502).json({ error: "We couldn't complete the charge, so the service wasn't enabled. Please try again." });
+      }
+    } else {
+      if (!existingItem) return res.status(409).json({ error: "Service not active" });
+      await stripe.subscriptionItems.del(existingItem.id, { proration_behavior: "none" });
+    }
+
+    invalidateEntitlements(clientId);
+    const entitled = await getEntitledServices(clientId);
+    res.json({ ok: true, entitled, paymentPending: !!res.locals.paymentPending });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -311,6 +516,7 @@ router.post("/refresh-access", requireAuth, async (req, res) => {
   if (!clientId) return res.json({ billingLocked: false });
   try {
     invalidateTrialLock(clientId);
+    invalidateEntitlements(clientId);
     const billingLocked = await isClientBillingLocked(clientId);
     res.json({ billingLocked });
   } catch (err: any) {

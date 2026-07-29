@@ -17,6 +17,8 @@ import emailDomainRouter from "./emailDomain";
 import sitesRouter from "./sites";
 import foodSafetyRouter from "./food-safety";
 import fireSafetyRouter from "./fire-safety";
+import { requireAuth } from "../middleware/requireAuth";
+import { requireService } from "../lib/services";
 
 const router: IRouter = Router();
 
@@ -36,7 +38,7 @@ router.use(certificatesRouter);
 router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use(storageRouter);
-router.use("/food-safety", foodSafetyRouter);
-router.use("/fire-safety", fireSafetyRouter);
+router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
+router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 
 export default router;

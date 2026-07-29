@@ -28,6 +28,10 @@ export default function SignupPage() {
   const [promoCode, setPromoCode] = useState("");
   const [showPromo, setShowPromo] = useState(false);
 
+  const [firetrack, setFiretrack] = useState(false);
+  const [kitchentrack, setKitchentrack] = useState(false);
+  const [bundle, setBundle] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,7 +51,17 @@ export default function SignupPage() {
 
     try {
       // Step 1: Register account
-      const registerBody: Record<string, any> = { name, email, password };
+      const services = [];
+      if (firetrack) services.push("firetrack");
+      if (kitchentrack) services.push("kitchentrack");
+
+      const registerBody: Record<string, any> = { 
+        name, 
+        email, 
+        password,
+        bundle,
+        services: services.length > 0 ? services : undefined
+      };
       if (perSite) {
         registerBody.priceId = perSite.priceId;
         if (promoCode.trim()) registerBody.promoCode = promoCode.trim();
@@ -162,23 +176,67 @@ export default function SignupPage() {
                 )}
               </div>
 
-              {/* Per-site pricing */}
-              <div className="border border-primary/20 bg-primary/5 p-6 rounded-none mt-4">
-                <div className="flex items-start gap-4">
-                  <div className="bg-primary/10 p-3 rounded-none">
-                    <Building2 className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="text-3xl font-display text-[#162D42]">{perSitePrice}</span>
-                      <span className="text-sm text-muted-foreground">per site / month</span>
+              {/* Per-site pricing & Services */}
+              <div className="space-y-4 pt-2">
+                <h3 className="font-display text-lg text-[#162D42]">Choose your services</h3>
+                <div className="space-y-3">
+                  <label className="flex items-start gap-3 p-4 border border-primary/20 bg-primary/5 cursor-not-allowed opacity-80">
+                    <input type="checkbox" checked disabled className="mt-1 h-4 w-4 rounded border-input accent-primary" />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-[#162D42]">ComplyTrack Core</span>
+                        <span className="font-medium">£10/mo</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-0.5">Compliance checks, contractors, and asset registers.</p>
                     </div>
-                    <p className="text-sm text-muted-foreground font-light leading-relaxed">
-                      Pay only for the sites you manage. You start with one site — each added site is charged one
-                      month's access up front. No proration, no refunds.
-                    </p>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-4 border cursor-pointer transition-colors ${bundle ? "opacity-50 grayscale pointer-events-none border-border" : (firetrack ? "border-primary bg-primary/5" : "border-border hover:border-primary/50")}`}>
+                    <input type="checkbox" checked={firetrack || bundle} disabled={bundle} onChange={(e) => setFiretrack(e.target.checked)} className="mt-1 h-4 w-4 rounded border-input accent-primary" />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-[#162D42]">FireTrack Add-on</span>
+                        <span className="font-medium">£10/mo</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-0.5">Digital fire safety logbook and checks.</p>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-4 border cursor-pointer transition-colors ${bundle ? "opacity-50 grayscale pointer-events-none border-border" : (kitchentrack ? "border-primary bg-primary/5" : "border-border hover:border-primary/50")}`}>
+                    <input type="checkbox" checked={kitchentrack || bundle} disabled={bundle} onChange={(e) => setKitchentrack(e.target.checked)} className="mt-1 h-4 w-4 rounded border-input accent-primary" />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-[#162D42]">KitchenTrack Add-on</span>
+                        <span className="font-medium">£10/mo</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-0.5">Digital food safety diary and temperature logs.</p>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-4 border cursor-pointer transition-colors ${bundle ? "border-emerald-500 bg-emerald-50/50" : "border-border hover:border-emerald-500/50"}`}>
+                    <input type="checkbox" checked={bundle} onChange={(e) => setBundle(e.target.checked)} className="mt-1 h-4 w-4 rounded border-input accent-emerald-600" />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-emerald-800">ComplyTrack Complete Bundle</span>
+                        <span className="font-medium text-emerald-800">£50/mo</span>
+                      </div>
+                      <p className="text-sm text-emerald-700/80 mt-0.5">All current and future services included forever.</p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="bg-muted/30 p-4 flex items-center justify-between border border-border">
+                  <span className="font-medium text-[#162D42]">Total per site</span>
+                  <div className="text-right">
+                    <span className="text-2xl font-display text-[#162D42]">
+                      £{bundle ? 50 : 10 + (firetrack ? 10 : 0) + (kitchentrack ? 10 : 0)}
+                    </span>
+                    <span className="text-sm text-muted-foreground ml-1">/ month</span>
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground font-light text-center">
+                  You start with one site — each added site is charged one month's access up front. No proration, no refunds.
+                </p>
               </div>
 
               {/* Promo Code */}

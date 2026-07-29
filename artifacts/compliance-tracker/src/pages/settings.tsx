@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { useGetSettings } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -265,19 +266,35 @@ interface BillingConfig {
   perSite: { priceId: string; unitAmount: number; currency: string } | null;
   billableQuantity: number;
   monthlyTotal: number | null;
+  services?: {
+    entitled: "all" | string[];
+    addons: string[];
+    bundle: boolean;
+    subscribed: boolean;
+    perSiteRate: number;
+    capPence: number;
+    catalog: { key: string; label: string; amountPence: number }[];
+  };
 }
 
 function BillingCard() {
   const { toast } = useToast();
+  const { refresh: refreshAuth } = useAuth();
+  const canAdmin = useCanAdmin();
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchConfig = () => {
     apiFetch<BillingConfig>("/billing/config")
       .then(setConfig)
       .catch(() => setConfig(null))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchConfig();
   }, []);
 
   const openPortal = async () => {
@@ -292,64 +309,181 @@ function BillingCard() {
     }
   };
 
-  const perSiteRate = config?.perSite ? config.perSite.unitAmount / 100 : 10;
+  const handleServiceAction = async (serviceKey: string, action: "add" | "remove") => {
+    const isAdd = action === "add";
+    const amountPence = config?.services?.catalog.find((c) => c.key === serviceKey)?.amountPence || 1000;
+    const amount = amountPence / 100;
+    const sites = config?.billableQuantity || 1;
+    const initialCost = amount * sites;
+
+    if (isAdd) {
+      if (!confirm(`You'll be charged a full month for ${sites} site(s) now (£${initialCost}); renews monthly with your subscription.`)) return;
+    } else {
+      if (!confirm("Takes effect immediately. No refund for the current month.")) return;
+    }
+
+    setActionBusy(serviceKey);
+    try {
+      const res = await apiFetch<{ ok: boolean; paymentPending?: boolean }>("/billing/services", {
+        method: "POST",
+        body: JSON.stringify({ service: serviceKey, action }),
+      });
+      if (res.paymentPending) {
+        toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
+      } else {
+        toast({ title: `Service ${isAdd ? "added" : "removed"} successfully` });
+      }
+      fetchConfig();
+      await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});
+      await refreshAuth();
+    } catch (err: any) {
+      toast({ title: "Action failed", description: err.message || "Could not update service", variant: "destructive" });
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const servicesConfig = config?.services;
+  // `subscribed` is the live-Stripe-subscription flag; `subscription.status`
+  // can read "active" from local state even with no Stripe subscription.
+  const hasSubscription = config?.services?.subscribed === true;
+  const perSiteRate = servicesConfig ? servicesConfig.perSiteRate / 100 : (config?.perSite ? config.perSite.unitAmount / 100 : 10);
   const sites = config?.siteCount ?? 0;
   const billable = config?.billableQuantity ?? Math.max(sites, 1);
   const total = config?.monthlyTotal != null ? config.monthlyTotal / 100 : billable * perSiteRate;
   const status = config?.subscription?.status ?? "trial";
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card mb-6">
-      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
-        <div className="flex items-center gap-2">
-          <CreditCard className="w-5 h-5 text-primary" />
-          <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
-        </div>
-        <CardDescription>
-          You're billed <strong>£{perSiteRate.toFixed(0)} per site / month</strong>. Your total scales automatically with the number of sites on your account.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-6 space-y-5">
-        {loading ? (
-          <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
-              <div className="flex items-center gap-3">
-                <div className="bg-primary/10 p-2 rounded-lg">
-                  <Building2 className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <div className="font-semibold">
-                    {billable} {billable === 1 ? "site" : "sites"} × £{perSiteRate.toFixed(0)}/month
+    <>
+      <Card className="shadow-lg border-border/50 bg-card mb-6">
+        <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-primary" />
+            <CardTitle className="font-display">Billing &amp; Subscription</CardTitle>
+          </div>
+          <CardDescription>
+            You're billed based on active services and sites. Your total scales automatically with the number of sites on your account.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 space-y-5">
+          {loading ? (
+            <div className="py-6 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/10 p-2 rounded-lg">
+                    <Building2 className="w-5 h-5 text-primary" />
                   </div>
-                  {sites === 0 && (
-                    <div className="text-xs text-muted-foreground">Minimum of one site is billed.</div>
-                  )}
+                  <div>
+                    <div className="font-semibold">
+                      £{perSiteRate.toFixed(0)} per site × {billable} {billable === 1 ? "site" : "sites"}
+                    </div>
+                    {sites === 0 && (
+                      <div className="text-xs text-muted-foreground">Minimum of one site is billed.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold font-display">£{total.toFixed(0)}</div>
+                  <div className="text-xs text-muted-foreground">per month</div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-2xl font-bold font-display">£{total.toFixed(0)}</div>
-                <div className="text-xs text-muted-foreground">per month</div>
-              </div>
-            </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="text-sm text-muted-foreground">
-                Status: <span className="font-medium text-foreground capitalize">{status}</span>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                  Status: <span className="font-medium text-foreground capitalize">{status}</span>
+                </div>
+                <Button variant="outline" onClick={openPortal} disabled={busy}>
+                  <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
+                </Button>
               </div>
-              <Button variant="outline" onClick={openPortal} disabled={busy}>
-                <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
-              </Button>
-            </div>
 
-            <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
-              Each billing period is one month. Added sites are charged a full month up front; removed sites and cancellations take effect at the end of the paid month — no refunds or part-month credits.
-            </p>
-          </>
-        )}
-      </CardContent>
-    </Card>
+              <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
+                Each billing period is one month. Added sites and services are charged a full month up front; removed sites and cancellations take effect at the end of the paid month — no refunds or part-month credits.
+              </p>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {!loading && servicesConfig && (
+        <Card className="shadow-lg border-border/50 bg-card mb-6">
+          <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+            <CardTitle className="font-display text-lg">Services</CardTitle>
+            <CardDescription>Add or remove services from your account.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {servicesConfig.bundle ? (
+              <div className="p-6 text-center text-sm text-muted-foreground bg-primary/5">
+                <CheckCircle2 className="w-8 h-8 text-primary mx-auto mb-3" />
+                <span className="font-medium text-foreground text-base block mb-1">ComplyTrack Complete Bundle Active</span>
+                All current and future services are included in your bundle.
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {servicesConfig.catalog.filter(c => c.key !== "core" && c.key !== "bundle").map(service => {
+                  // "Active" means it's on the paid subscription — not merely
+                  // entitled via a trial (trials unlock everything for free).
+                  const isActive = servicesConfig.addons.includes(service.key);
+                  const onTrial = !hasSubscription && (servicesConfig.entitled === "all" || servicesConfig.entitled.includes(service.key));
+                  return (
+                    <div key={service.key} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6">
+                      <div>
+                        <div className="font-medium text-base">{service.label}</div>
+                        <div className="text-sm text-muted-foreground mt-1">
+                          £{(service.amountPence / 100).toFixed(0)}/site/month
+                        </div>
+                        <div className="mt-2">
+                          {isActive ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Active
+                            </span>
+                          ) : onTrial ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold">
+                              Included in your trial
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">
+                              Not enabled
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {canAdmin && !hasSubscription ? (
+                        <div className="text-xs text-muted-foreground max-w-[200px] text-right">
+                          Choose your services when you subscribe
+                        </div>
+                      ) : canAdmin && (
+                        <div>
+                          {isActive ? (
+                            <Button 
+                              variant="outline" 
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              disabled={actionBusy === service.key}
+                              onClick={() => handleServiceAction(service.key, "remove")}
+                            >
+                              {actionBusy === service.key ? "Removing..." : "Remove"}
+                            </Button>
+                          ) : (
+                            <Button 
+                              disabled={actionBusy === service.key}
+                              onClick={() => handleServiceAction(service.key, "add")}
+                            >
+                              {actionBusy === service.key ? "Adding..." : "Add"}
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </>
   );
 }
 

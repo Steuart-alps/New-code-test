@@ -13,6 +13,10 @@ export default function TrialEndedPage() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [firetrack, setFiretrack] = useState(false);
+  const [kitchentrack, setKitchentrack] = useState(false);
+  const [bundle, setBundle] = useState(false);
+
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
 
   // Force a fresh server-side check (drops the trial-lock cache and hits
@@ -39,9 +43,17 @@ export default function TrialEndedPage() {
     setCheckingOut(true);
     try {
       const clientId = activeClientId ?? user?.clientId ?? undefined;
+      const services = [];
+      if (firetrack) services.push("firetrack");
+      if (kitchentrack) services.push("kitchentrack");
+
       const res = await apiFetch("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify(clientId ? { clientId } : {}),
+        body: JSON.stringify({ 
+          ...(clientId ? { clientId } : {}),
+          bundle,
+          services: services.length > 0 ? services : undefined
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) {
@@ -79,7 +91,46 @@ export default function TrialEndedPage() {
               : "Ask your account owner or administrator to set up billing. Access is restored immediately after payment."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 px-10 relative z-10">
+        <CardContent className="space-y-4 px-6 sm:px-10 relative z-10">
+          {canPay && (
+            <div className="space-y-3 mb-6 bg-white/50 p-4 border border-border">
+              <h3 className="font-display text-sm text-[#162D42] font-semibold mb-2">Choose your services</h3>
+              <label className="flex items-center justify-between opacity-80 cursor-not-allowed text-sm">
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked disabled className="h-4 w-4 rounded accent-primary" />
+                  <span>ComplyTrack Core</span>
+                </div>
+                <span className="font-medium">£10/mo</span>
+              </label>
+
+              <label className={`flex items-center justify-between text-sm cursor-pointer ${bundle ? "opacity-50 pointer-events-none" : ""}`}>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={firetrack || bundle} disabled={bundle} onChange={(e) => setFiretrack(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
+                  <span>FireTrack</span>
+                </div>
+                <span className="font-medium">£10/mo</span>
+              </label>
+
+              <label className={`flex items-center justify-between text-sm cursor-pointer ${bundle ? "opacity-50 pointer-events-none" : ""}`}>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={kitchentrack || bundle} disabled={bundle} onChange={(e) => setKitchentrack(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
+                  <span>KitchenTrack</span>
+                </div>
+                <span className="font-medium">£10/mo</span>
+              </label>
+
+              <div className="border-t border-border pt-3 mt-3">
+                <label className="flex items-center justify-between text-sm cursor-pointer text-emerald-800">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={bundle} onChange={(e) => setBundle(e.target.checked)} className="h-4 w-4 rounded accent-emerald-600" />
+                    <span className="font-semibold">Complete Bundle</span>
+                  </div>
+                  <span className="font-semibold">£50/mo</span>
+                </label>
+              </div>
+            </div>
+          )}
+
           {canPay && (
             <Button className="w-full h-12 bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" onClick={startCheckout} disabled={checkingOut}>
               <CreditCard className="mr-2 h-4 w-4" />

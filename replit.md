@@ -15,6 +15,14 @@ consultants managing portfolios of clients.
 - **FireTrack** (fire safety branch): Digital fire logbook — 5 check types (alarm & extinguisher visual weekly, emergency lights monthly, fire doors quarterly, fire drill 6-monthly) with due/overdue status
 - **KitchenTrack** (kitchen branch): Daily food safety record — deliveries, fridge/freezer & hot food temps, corrective actions, manager sign-off; config-driven fridge counts and temperature limits
 
+## Per-service billing (add-ons)
+- Pricing per site/month: ComplyTrack core £10, FireTrack +£10, KitchenTrack +£10; "ComplyTrack Complete" bundle £50 unlocks everything (incl. future services). Cap: per-site items summing to ≥£50 also unlock all.
+- Stripe products/prices carry `service_key` metadata (core/firetrack/kitchentrack/bundle) — seeded via `scripts/src/seed-plans.ts`; all prices are server-resolved, never client-supplied.
+- Entitlements: `api-server/src/lib/services.ts` (cached per client; trial = all services free). Routes `/fire-safety` & `/food-safety` are guarded by `requireService(...)` → 403 `SERVICE_NOT_ENABLED`.
+- `POST /api/billing/services` add/remove add-ons: add charges a full month immediately (no proration, idempotency-keyed per billing period; item rolled back if the charge can't be created); remove is immediate, no refund. Bundle is selectable at checkout/signup only.
+- `/auth/me` + login return `services` ("all" | keys); frontend `hasService()` gates pages, sidebar lock icons, upgrade cards; Services card in Settings; signup + trial-ended pages offer service/bundle selection.
+- Quantity sync and the added-site outbox charge cover ALL per-site service items (sum of unit amounts).
+
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces

@@ -10,7 +10,8 @@ import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTa
 import { eq, and, gt, isNull } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
-import { getPerSitePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
+import { getPerSitePrice, getServicePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
+import { ADDON_KEYS, BUNDLE_KEY, getEntitledServices } from "../lib/services";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { isClientBillingLocked } from "../lib/trialLock";
 import { logger } from "../lib/logger";
@@ -45,9 +46,11 @@ router.post("/auth/login", async (req, res) => {
 
   const { passwordHash: _, ...safeUser } = result.user;
   let billingLocked = false;
+  let services: "all" | string[] = "all";
   if (safeUser.clientId != null) {
     try {
       billingLocked = await isClientBillingLocked(safeUser.clientId);
+      services = await getEntitledServices(safeUser.clientId);
     } catch {
       // Fail open — login must never break on a billing check.
     }
@@ -56,6 +59,7 @@ router.post("/auth/login", async (req, res) => {
     user: safeUser,
     client: result.client,
     billingLocked,
+    services,
   });
 });
 
@@ -82,15 +86,17 @@ router.get("/auth/me", requireAuth, async (req, res) => {
   }
 
   let billingLocked = false;
+  let services: "all" | string[] = "all";
   if (user.clientId != null) {
     try {
       billingLocked = await isClientBillingLocked(user.clientId);
+      services = await getEntitledServices(user.clientId);
     } catch {
       // Fail open — never block /me on a billing check.
     }
   }
 
-  res.json({ user, client, billingLocked });
+  res.json({ user, client, billingLocked, services });
 });
 
 const ForgotPasswordBody = z.object({
@@ -196,6 +202,8 @@ const RegisterBody = z.object({
   password: z.string().min(8),
   priceId: z.string().optional(),
   promoCode: z.string().optional(),
+  services: z.array(z.enum(ADDON_KEYS)).optional(),
+  bundle: z.boolean().optional(),
 });
 
 router.post("/auth/register", async (req, res) => {
@@ -205,7 +213,7 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  const { name, email, password, promoCode } = body.data;
+  const { name, email, password, promoCode, services: requestedServices, bundle } = body.data;
 
   const existing = await getUserWithClientByEmail(email);
   if (existing) {
@@ -306,10 +314,28 @@ router.post("/auth/register", async (req, res) => {
         ? quantityForSiteCount(await countClientSites(clientId))
         : 1;
 
+      // Service selection: client picks WHICH services (add-ons or the
+      // Complete bundle); every price is resolved server-side.
+      const lineItems: { price: string; quantity: number }[] = [];
+      if (bundle) {
+        const bundlePrice = await getServicePrice(BUNDLE_KEY);
+        if (bundlePrice) lineItems.push({ price: bundlePrice.priceId, quantity });
+      }
+      if (lineItems.length === 0) {
+        lineItems.push({ price: perSite.priceId, quantity });
+        const addons = Array.from(
+          new Set((requestedServices ?? []).filter((s) => (ADDON_KEYS as readonly string[]).includes(s))),
+        );
+        for (const addon of addons) {
+          const price = await getServicePrice(addon);
+          if (price) lineItems.push({ price: price.priceId, quantity });
+        }
+      }
+
       const sessionParams: Parameters<typeof stripe.checkout.sessions.create>[0] = {
         customer: customer.id,
         payment_method_types: ["card"],
-        line_items: [{ price: perSite.priceId, quantity }],
+        line_items: lineItems,
         mode: "subscription",
         success_url: `${baseUrl}/dashboard?billing=success`,
         cancel_url: `${baseUrl}/signup?cancelled=1`,

@@ -34,6 +34,16 @@ export interface PerSitePrice {
  * take the cheapest active monthly price on an active product.
  */
 export async function getPerSitePrice(): Promise<PerSitePrice | null> {
+  return getServicePrice("core");
+}
+
+/**
+ * Resolve the active per-site monthly price for a service by its
+ * `service_key` price metadata. For "core", falls back to the legacy
+ * cheapest-active-monthly-price lookup so pre-metadata deployments keep
+ * working until the seed script has been re-run.
+ */
+export async function getServicePrice(serviceKey: string): Promise<PerSitePrice | null> {
   try {
     const rows = await db.execute(sql`
       SELECT pr.id AS price_id, pr.unit_amount, pr.currency, pr.recurring
@@ -42,9 +52,27 @@ export async function getPerSitePrice(): Promise<PerSitePrice | null> {
       WHERE p.active = true
         AND pr.active = true
         AND (pr.recurring->>'interval') = 'month'
+        AND pr.metadata->>'service_key' = ${serviceKey}
       ORDER BY pr.unit_amount ASC
       LIMIT 1
     `);
+    if (!rows.rows[0] && serviceKey === "core") {
+      // Legacy fallback: single-product era with no metadata. Exclude any
+      // price that carries a different service_key so add-on prices can never
+      // masquerade as the core plan.
+      const legacy = await db.execute(sql`
+        SELECT pr.id AS price_id, pr.unit_amount, pr.currency, pr.recurring
+        FROM stripe.prices pr
+        JOIN stripe.products p ON p.id = pr.product
+        WHERE p.active = true
+          AND pr.active = true
+          AND (pr.recurring->>'interval') = 'month'
+          AND (pr.metadata->>'service_key') IS NULL
+        ORDER BY pr.unit_amount ASC
+        LIMIT 1
+      `);
+      rows.rows[0] = legacy.rows[0];
+    }
     const r = rows.rows[0] as any;
     if (!r) return null;
     return {
@@ -230,13 +258,16 @@ async function syncWithStripe(
     const active = await findLiveSubscription(client.stripeCustomerId);
     if (!active) return null;
 
-    // Only ever resize the per-site line item. If the subscription has no item on
-    // the per-site price (e.g. a legacy tiered subscription), do nothing — we must
-    // never apply per-site quantity logic to a non-per-site plan.
+    // Resize every per-site service line item (core plan, add-ons, bundle) in
+    // lockstep — each is billed per site. Items are recognised by service_key
+    // price metadata, or by matching the resolved core price (legacy, pre-
+    // metadata). Subscriptions with no per-site item (e.g. legacy tiers) are
+    // left untouched.
     const perSite = await getPerSitePrice();
-    if (!perSite) return null;
-    const item = active.items.data.find((i) => i.price?.id === perSite.priceId);
-    if (!item) {
+    const perSiteItems = active.items.data.filter(
+      (i) => i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId),
+    );
+    if (perSiteItems.length === 0) {
       logger.info(
         { clientId, subscriptionId: active.id },
         "No per-site line item on subscription; skipping quantity sync",
@@ -245,8 +276,10 @@ async function syncWithStripe(
     }
 
     const desired = quantityForSiteCount(await countClientSites(clientId));
-    const current = item.quantity ?? 0;
-    if (current === desired) return null;
+    // All per-site items are kept at the same quantity; use the max as the
+    // reference so a partial previous update still converges.
+    const current = Math.max(...perSiteItems.map((i) => i.quantity ?? 0));
+    if (perSiteItems.every((i) => (i.quantity ?? 0) === desired)) return null;
 
     // Billing policy: no proration in either direction.
     // - Adding sites: the full monthly fee per added site is charged
@@ -261,7 +294,7 @@ async function syncWithStripe(
     // month is always billed in full regardless of when sites are added or
     // removed. Keeps invoices and tax simple.
     await stripe.subscriptions.update(active.id, {
-      items: [{ id: item.id, quantity: desired }],
+      items: perSiteItems.map((i) => ({ id: i.id, quantity: desired })),
       proration_behavior: "none",
     });
 
@@ -367,6 +400,16 @@ export async function processPendingCharges(clientId: number): Promise<void> {
         findLiveSubscription(client.stripeCustomerId!),
         getPerSitePrice(),
       ]);
+      // Per-site monthly rate for this client = sum of all their per-site
+      // service items (core + add-ons, or the bundle), so an added site is
+      // charged for every service they subscribe to.
+      const perSiteServiceItems = (active?.items.data ?? []).filter(
+        (i) => i.price?.metadata?.service_key || (perSite && i.price?.id === perSite.priceId),
+      );
+      const perSiteRate = perSiteServiceItems.reduce(
+        (sum, i) => sum + (i.price?.unit_amount ?? 0),
+        0,
+      );
       // A site added BEFORE the subscription existed is already covered by
       // the initial checkout quantity — charging it again would double-bill.
       const rawCreated = row.created_at;
@@ -382,11 +425,7 @@ export async function processPendingCharges(clientId: number): Promise<void> {
       // second-granularity; a site added in the same second as checkout must
       // still be billed (never lose a valid charge at the boundary).
       const preSubscription = queuedAt < subscriptionStartedAt;
-      const billable =
-        active &&
-        perSite &&
-        active.items.data.some((i) => i.price?.id === perSite.priceId) &&
-        !preSubscription;
+      const billable = active && perSiteServiceItems.length > 0 && perSiteRate > 0 && !preSubscription;
       if (!billable) {
         await tx.execute(sql`
           UPDATE billing_pending_charges
@@ -399,8 +438,8 @@ export async function processPendingCharges(clientId: number): Promise<void> {
         );
         return false;
       }
-      const amount = row.amount > 0 ? row.amount : row.sites_added * perSite.unitAmount;
-      const currency = row.currency || perSite.currency;
+      const amount = row.amount > 0 ? row.amount : row.sites_added * perSiteRate;
+      const currency = row.currency || perSiteServiceItems[0]?.price?.currency || "gbp";
 
       const itemDescription = `${row.sites_added} additional site${row.sites_added === 1 ? "" : "s"} — 1 month access (no proration)`;
 

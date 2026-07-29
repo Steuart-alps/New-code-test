@@ -33,6 +33,8 @@ interface AuthContextValue {
   refresh: () => Promise<void>;
   activeClientId: number | null;
   setActiveClientId: (id: number | null) => void;
+  services: "all" | string[] | null;
+  hasService: (key: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,6 +42,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [client, setClient] = useState<AuthClient | null>(null);
+  const [services, setServices] = useState<"all" | string[] | null>(null);
   const [billingLocked, setBillingLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
@@ -48,6 +51,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function setActiveClientId(id: number | null) {
     activeClientIdRef.current = id;
     setActiveClientIdState(id);
+  }
+
+  function hasService(key: string): boolean {
+    if (services === null || services === undefined) return true;
+    if (services === "all") return true;
+    return services.includes(key);
   }
 
   // Wire up the API client to inject clientId into all requests
@@ -63,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       setUser(null);
       setClient(null);
+      setServices(null);
       setActiveClientId(null);
     });
     return () => setUnauthorizedHandler(null);
@@ -124,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
         setUser(null);
         setClient(null);
+        setServices(null);
         setActiveClientId(null);
       }
     }, 30_000);
@@ -141,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setUser(data.user);
         setClient(data.client);
+        setServices(data.services ?? null);
         setBillingLocked(Boolean(data.billingLocked));
         if (data.client && !activeClientId) {
           setActiveClientId(data.client.id);
@@ -148,10 +160,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setClient(null);
+        setServices(null);
       }
     } catch {
       setUser(null);
       setClient(null);
+      setServices(null);
     }
   }
 
@@ -171,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     setUser(data.user);
     setClient(data.client);
+    setServices(data.services ?? null);
     setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
   }
@@ -179,12 +194,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiFetch("/auth/logout", { method: "POST" });
     setUser(null);
     setClient(null);
+    setServices(null);
     setBillingLocked(false);
     setActiveClientId(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, client, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId }}>
+    <AuthContext.Provider value={{ user, client, services, hasService, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId }}>
       {children}
     </AuthContext.Provider>
   );

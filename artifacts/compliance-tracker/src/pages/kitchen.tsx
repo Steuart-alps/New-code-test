@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
+import { Link } from "wouter";
 import {
   useGetFoodSafetyConfig,
   getGetFoodSafetyConfigQueryKey,
@@ -22,8 +23,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 
 type DeliveryRow = { supplier: string; item: string; temp: string; ok: boolean };
 type ColdFoodRow = { unit: string; temp: string; ok: boolean };
@@ -146,13 +148,20 @@ function ConfigDialog() {
 }
 
 export default function KitchenPage() {
+  const { hasService } = useAuth();
+  const canAdmin = useCanAdmin();
+  const hasKitchentrack = hasService("kitchentrack");
+
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
-  const { data: config } = useGetFoodSafetyConfig();
-  const { data: records } = useListFoodSafetyRecords();
+  const { data: config, error: configError } = useGetFoodSafetyConfig({ query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3 } });
+  // Trust the server over the cached session: a 403 means this tenant isn't
+  // entitled (e.g. consultant viewing a client without the add-on).
+  const serverLocked = (configError as any)?.status === 403;
+  const { data: records } = useListFoodSafetyRecords({ query: { enabled: hasKitchentrack } });
   const { data: record, isLoading: recordLoading, error: recordError } = useGetFoodSafetyRecordByDate(selectedDate, {
     query: {
-      enabled: !!selectedDate,
+      enabled: !!selectedDate && hasKitchentrack,
       queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate),
       retry: false,
     },
@@ -180,6 +189,7 @@ export default function KitchenPage() {
 
   // Initialize form when record loads or date changes
   useEffect(() => {
+    if (!hasKitchentrack) return;
     if (record) {
       setDeliveries((record.deliveries || []) as DeliveryRow[]);
       setColdFood((record.coldFood || []) as ColdFoodRow[]);
@@ -206,7 +216,7 @@ export default function KitchenPage() {
       setCorrectives("");
       setManagerSignature("");
     }
-  }, [record, selectedDate, numFridges, numFreezers]);
+  }, [record, selectedDate, numFridges, numFreezers, hasKitchentrack]);
 
   const handleSaveDraft = async () => {
     const data = {
@@ -308,6 +318,42 @@ export default function KitchenPage() {
   };
 
   const isSubmitted = !!record?.submittedAt;
+
+  if (!hasKitchentrack || serverLocked) {
+    return (
+      <AppLayout title="KitchenTrack — Kitchen Diary">
+        <div className="max-w-2xl mx-auto mt-12">
+          <Card className="border-2 border-primary/20 bg-primary/5">
+            <CardContent className="pt-8 pb-8 px-8 text-center space-y-6">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Lock className="w-8 h-8 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-display font-medium text-foreground mb-2">KitchenTrack</h2>
+                <p className="text-muted-foreground mb-1">
+                  Digital food safety diary — record deliveries, temperatures, and actions.
+                </p>
+                <p className="font-medium text-primary">£10 per site per month</p>
+              </div>
+              <div className="pt-4">
+                {canAdmin ? (
+                  <Link href="/settings">
+                    <Button size="lg" className="w-full sm:w-auto font-medium">
+                      Enable KitchenTrack
+                    </Button>
+                  </Link>
+                ) : (
+                  <p className="text-sm text-muted-foreground bg-white/50 inline-block px-4 py-2 rounded-md border border-border/50">
+                    Ask your account admin to enable this service.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout title="KitchenTrack — Kitchen Diary">

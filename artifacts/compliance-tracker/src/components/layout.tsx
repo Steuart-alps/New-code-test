@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   Flame,
   UtensilsCrossed,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -27,7 +28,7 @@ function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
 
-  const groups: { title: string; items: { href: string; label: string; icon: any }[] }[] = [
+  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string }[] }[] = [
     {
       title: "COMPLYTRACK",
       items: [
@@ -40,18 +41,18 @@ function useNavGroups() {
     {
       title: "FIRETRACK",
       items: [
-        { href: "/fire-safety", label: "Fire Logbook", icon: Flame },
+        { href: "/fire-safety", label: "Fire Logbook", icon: Flame, serviceKey: "firetrack" },
       ],
     },
     {
       title: "KITCHENTRACK",
       items: [
-        { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed },
+        { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed, serviceKey: "kitchentrack" },
       ],
     },
   ];
 
-  const systemItems: { href: string; label: string; icon: any }[] = [];
+  const systemItems: { href: string; label: string; icon: any; serviceKey?: string }[] = [];
   if (canAdmin) {
     systemItems.push({ href: "/sites", label: "Sites", icon: Building2 });
     systemItems.push({ href: "/users", label: "Users", icon: Users });
@@ -72,7 +73,7 @@ function useNavGroups() {
 
 export function AppLayout({ children, title }: { children: ReactNode; title: string }) {
   const [location] = useLocation();
-  const { user, client, logout, activeClientId } = useAuth();
+  const { user, client, logout, activeClientId, hasService } = useAuth();
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
 
@@ -110,13 +111,15 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
+                  const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
                   return (
                     <Link key={item.href} href={item.href} className="block">
                       <div className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
                         isActive 
                           ? "text-sidebar-foreground" 
-                          : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                          : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+                        isLocked && "opacity-70"
                       )}
                       >
                         {isActive && (
@@ -128,7 +131,10 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                           />
                         )}
                         <item.icon className={cn("w-4 h-4 z-10 relative", isActive ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive ? { color: primaryColor } : {}} />
-                        <span className="z-10 relative text-sm tracking-wide">{item.label}</span>
+                        <span className="z-10 relative text-sm tracking-wide flex-1">{item.label}</span>
+                        {isLocked && (
+                          <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
+                        )}
                       </div>
                     </Link>
                   );
@@ -225,6 +231,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         <nav className="md:hidden flex overflow-x-auto border-b border-border bg-white px-4 py-3 scrollbar-hide">
           {navGroups.flatMap(g => g.items).map((item) => {
             const isActive = location === item.href;
+            const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
             return (
               <Link key={item.href} href={item.href} className="flex-shrink-0 mr-2">
                 <div className={cn(
@@ -234,6 +241,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 >
                   <item.icon className="w-4 h-4" />
                   {item.label}
+                  {isLocked && <Lock className="w-3 h-3 opacity-60 ml-1" />}
                 </div>
               </Link>
             );
