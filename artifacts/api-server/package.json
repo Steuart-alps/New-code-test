@@ -14,7 +14,9 @@
     "test:modules": "node tests/module-routes.mjs",
     "test:modules:ci": "bash tests/run-module-routes.sh",
     "test:dept-isolation": "node tests/dept-isolation.mjs",
-    "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh"
+    "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",
+    "test:dailytrack-locks": "node tests/dailytrack-locks.mjs",
+    "test:dailytrack-locks:ci": "bash tests/run-dailytrack-locks.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
