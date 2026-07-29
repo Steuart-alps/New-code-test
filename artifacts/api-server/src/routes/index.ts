@@ -18,6 +18,9 @@ import sitesRouter from "./sites";
 import foodSafetyRouter from "./food-safety";
 import fireSafetyRouter from "./fire-safety";
 import legionellaRouter from "./legionella";
+import safeTrackRouter from "./safe-track";
+import dailyTrackAmRouter from "./daily-track-am";
+import dailyTrackPmRouter from "./daily-track-pm";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
 
@@ -42,5 +45,8 @@ router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
+router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
+router.use("/daily-track-am", requireAuth, requireService("dailytrack_am"), dailyTrackAmRouter);
+router.use("/daily-track-pm", requireAuth, requireService("dailytrack_pm"), dailyTrackPmRouter);
 
 export default router;

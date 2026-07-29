@@ -17,6 +17,9 @@ import {
   UtensilsCrossed,
   Droplets,
   Lock,
+  GraduationCap,
+  Sunrise,
+  Sunset,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -55,6 +58,19 @@ function useNavGroups() {
       title: "LEGIONELLATRACK",
       items: [
         { href: "/legionella", label: "LegionellaTrack", icon: Droplets, serviceKey: "legionellatrack" },
+      ],
+    },
+    {
+      title: "SAFETRACK",
+      items: [
+        { href: "/safe-track", label: "SafeTrack", icon: GraduationCap, serviceKey: "safetrack" },
+      ],
+    },
+    {
+      title: "DAILYTRACK",
+      items: [
+        { href: "/daily-track-am", label: "DailyTrack AM", icon: Sunrise, serviceKey: "dailytrack_am" },
+        { href: "/daily-track-pm", label: "DailyTrack PM", icon: Sunset, serviceKey: "dailytrack_pm" },
       ],
     },
   ];

@@ -28,6 +28,9 @@ import ItemDetailPage from "@/pages/item-detail";
 import FireSafetyPage from "@/pages/fire-safety";
 import KitchenPage from "@/pages/kitchen";
 import LegionellaPage from "@/pages/legionella";
+import SafeTrackPage from "@/pages/safe-track";
+import DailyTrackAmPage from "@/pages/daily-track-am";
+import DailyTrackPmPage from "@/pages/daily-track-pm";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -98,6 +101,9 @@ function ProtectedRoutes() {
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
       <Route path="/legionella" component={LegionellaPage} />
+      <Route path="/safe-track" component={SafeTrackPage} />
+      <Route path="/daily-track-am" component={DailyTrackAmPage} />
+      <Route path="/daily-track-pm" component={DailyTrackPmPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}

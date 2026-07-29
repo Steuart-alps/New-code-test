@@ -283,6 +283,130 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL
     `);
 
+    // ---- SafeTrack: risk assessments ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safe_risk_assessments" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "title" text NOT NULL,
+        "description" text,
+        "assessed_by" text,
+        "review_date" date,
+        "status" text NOT NULL DEFAULT 'draft',
+        "version" text NOT NULL DEFAULT '1.0',
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- SafeTrack: SOPs ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safe_sops" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "title" text NOT NULL,
+        "scope" text,
+        "content" text,
+        "version" text NOT NULL DEFAULT '1.0',
+        "published_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- SafeTrack: training records ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safe_training_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "staff_name" text NOT NULL,
+        "training_type" text NOT NULL,
+        "completed_at" date NOT NULL,
+        "expiry_date" date,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- SafeTrack: inductions ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safe_inductions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "staff_name" text NOT NULL,
+        "start_date" date NOT NULL,
+        "completed_at" date,
+        "checklist" text,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- SafeTrack: competency sign-offs ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "safe_competency_signoffs" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "staff_name" text NOT NULL,
+        "task_name" text NOT NULL,
+        "signed_off_by" text NOT NULL,
+        "signed_off_at" date NOT NULL,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- DailyTrack: checklists ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "daily_checklists" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "checklist_type" text NOT NULL,
+        "check_date" date NOT NULL,
+        "items" jsonb NOT NULL DEFAULT '[]',
+        "completed_by" text,
+        "manager_note" text,
+        "submitted_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_daily_checklists_client_site_date_type"
+      ON "daily_checklists" ("client_id", "site_id", "check_date", "checklist_type")
+    `);
+
+    // ---- DailyTrack: manager sign-offs ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "daily_manager_signoffs" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "signoff_date" date NOT NULL,
+        "manager_name" text NOT NULL,
+        "notes" text,
+        "submitted_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
