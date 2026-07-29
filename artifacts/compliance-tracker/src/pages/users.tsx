@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
-import { useAuth, useIsConsultant } from "@/context/auth-context";
+import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, UserCheck, UserX } from "lucide-react";
+
+const NO_DEPT_VALUE = "__none__";
 
 interface User {
   id: number;
@@ -189,11 +191,13 @@ function UserDialog({
 export default function UsersPage() {
   const { activeClientId } = useAuth();
   const isConsultant = useIsConsultant();
+  const canAdmin = useCanAdmin();
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [reassigning, setReassigning] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -223,6 +227,20 @@ export default function UsersPage() {
       body: JSON.stringify({ active: !user.active }),
     });
     load();
+  }
+
+  async function reassignDept(userId: number, value: string) {
+    const departmentId = value === NO_DEPT_VALUE ? null : Number(value);
+    setReassigning(userId);
+    try {
+      await apiFetch(`/users/${userId}`, {
+        method: "PUT",
+        body: JSON.stringify({ departmentId }),
+      });
+      await load();
+    } finally {
+      setReassigning(null);
+    }
   }
 
   return (
@@ -263,7 +281,33 @@ export default function UsersPage() {
                           {ROLE_LABELS[u.role] ?? u.role}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{dept?.name ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        {canAdmin ? (
+                          <Select
+                            value={u.departmentId?.toString() ?? NO_DEPT_VALUE}
+                            onValueChange={val => reassignDept(u.id, val)}
+                            disabled={reassigning === u.id}
+                          >
+                            <SelectTrigger className="h-7 text-xs w-44 border-transparent hover:border-input bg-transparent hover:bg-muted/40 transition-colors">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NO_DEPT_VALUE} className="text-xs text-muted-foreground">
+                                All departments
+                              </SelectItem>
+                              {departments.map(d => (
+                                <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
+                                  {d.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            {dept?.name ?? "All departments"}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 text-xs font-medium ${u.active ? "text-green-600" : "text-muted-foreground"}`}>
                           {u.active ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
