@@ -33,6 +33,7 @@ export interface UpdateCategoryRequest {
 export interface Site {
   id: number;
   clientId: number;
+  departmentId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;
@@ -43,6 +44,7 @@ export interface Site {
 
 export interface CreateSiteRequest {
   name: string;
+  departmentId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -50,9 +52,28 @@ export interface CreateSiteRequest {
 
 export interface UpdateSiteRequest {
   name?: string;
+  departmentId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
+}
+
+export interface Department {
+  id: number;
+  clientId: number;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+}
+
+export interface CreateDepartmentRequest {
+  name: string;
+  description?: string | null;
+}
+
+export interface UpdateDepartmentRequest {
+  name?: string;
+  description?: string | null;
 }
 
 export interface Contractor {

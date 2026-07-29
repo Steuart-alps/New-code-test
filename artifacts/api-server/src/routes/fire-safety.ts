@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { fireSafetyChecksTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
+import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -30,15 +30,45 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
 
-/** Ensure a siteId (if provided) belongs to the tenant. Returns false when it does not. */
-async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
-  if (siteId == null) return true;
+/** Returns the site row if it belongs to the tenant, or null. */
+async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
+  if (siteId == null) return null;
   const [site] = await db
-    .select({ id: sitesTable.id })
+    .select({ id: sitesTable.id, departmentId: sitesTable.departmentId })
     .from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)))
     .limit(1);
-  return !!site;
+  return site ?? null;
+}
+
+/**
+ * Two-step site access check. Returns:
+ *   null        → no siteId supplied; no check needed
+ *   "not_found" → siteId does not belong to this client (→ 400)
+ *   "forbidden" → site is in a different department (→ 403)
+ *   "ok"        → access granted
+ */
+async function checkSiteAccess(
+  siteId: number | null | undefined,
+  clientId: number,
+  deptId: number | null,
+): Promise<null | "not_found" | "forbidden" | "ok"> {
+  if (siteId == null) return null;
+  const site = await fetchClientSite(siteId, clientId);
+  if (!site) return "not_found";
+  if (deptId !== null && site.departmentId !== null && site.departmentId !== deptId) return "forbidden";
+  return "ok";
+}
+
+/** Build the subquery that limits checks to sites accessible to the user. */
+function allowedSitesSubquery(clientId: number, deptId: number) {
+  return db
+    .select({ id: sitesTable.id })
+    .from(sitesTable)
+    .where(and(
+      eq(sitesTable.clientId, clientId),
+      or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+    ));
 }
 
 // GET /api/fire-safety?checkType=&siteId=
@@ -53,6 +83,15 @@ router.get("/", requireAuth, async (req, res) => {
   }
   if (siteId && !isNaN(parseInt(siteId))) {
     conditions.push(eq(fireSafetyChecksTable.siteId, parseInt(siteId)));
+  }
+
+  // Department scoping: staff/viewers only see checks for sites in their dept
+  // (or for checks not linked to any site).
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fireSafetyChecksTable.siteId), inArray(fireSafetyChecksTable.siteId, allowedSitesSubquery(clientId, deptId))) as any,
+    );
   }
 
   const rows = await db
@@ -73,6 +112,14 @@ router.get("/status", requireAuth, async (req, res) => {
   const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
   if (siteId && !isNaN(parseInt(siteId))) {
     conditions.push(eq(fireSafetyChecksTable.siteId, parseInt(siteId)));
+  }
+
+  // Department scoping: status should only reflect checks visible to this user.
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fireSafetyChecksTable.siteId), inArray(fireSafetyChecksTable.siteId, allowedSitesSubquery(clientId, deptId))) as any,
+    );
   }
 
   const lastDates = await db
@@ -118,9 +165,10 @@ router.post("/", requireAuth, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
 
-  if (!(await siteBelongsToClient(data.siteId, clientId))) {
-    return res.status(400).json({ error: "Invalid site" });
-  }
+  const deptId = getActiveDepartmentId(req);
+  const siteAccess = await checkSiteAccess(data.siteId, clientId, deptId);
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
   const [inserted] = await db
     .insert(fireSafetyChecksTable)
@@ -151,8 +199,23 @@ router.put("/:id", requireAuth, async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
-  if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) {
-    return res.status(400).json({ error: "Invalid site" });
+  // Fetch the existing record to verify dept access before and after mutation.
+  const [existing] = await db
+    .select()
+    .from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
+    .limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const deptId = getActiveDepartmentId(req);
+  // Current record's site must be accessible to the user
+  const existingAccess = await checkSiteAccess(existing.siteId, clientId, deptId);
+  if (existingAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  // If updating siteId, the new site must also pass both checks
+  if ("siteId" in parsed.data) {
+    const newAccess = await checkSiteAccess(parsed.data.siteId, clientId, deptId);
+    if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
 
   const [updated] = await db
@@ -173,12 +236,21 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const deleted = await db
-    .delete(fireSafetyChecksTable)
+  const [existing] = await db
+    .select()
+    .from(fireSafetyChecksTable)
     .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)))
-    .returning({ id: fireSafetyChecksTable.id });
+    .limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
 
-  if (deleted.length === 0) return res.status(404).json({ error: "Not found" });
+  const deptId = getActiveDepartmentId(req);
+  const access = await checkSiteAccess(existing.siteId, clientId, deptId);
+  if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+
+  await db
+    .delete(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)));
+
   res.status(204).end();
 });
 

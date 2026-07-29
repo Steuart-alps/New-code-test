@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface DomainRecord {
   record?: string;
@@ -62,6 +63,363 @@ function StatusBadge({ status }: { status: string | null }) {
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
       <RefreshCw className="w-3.5 h-3.5" /> Pending verification
     </span>
+  );
+}
+
+// ── Local types used by DepartmentsCard ──────────────────────────────────────
+interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; }
+interface DeptUser { id: number; name: string; email: string; role: string; departmentId?: number | null; }
+interface DeptSite { id: number; name: string; departmentId?: number | null; }
+
+function DepartmentsCard() {
+  const { toast } = useToast();
+  const canAdmin = useCanAdmin();
+
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [users, setUsers] = useState<DeptUser[]>([]);
+  const [sites, setSites] = useState<DeptSite[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Expanded row, inline-editing state
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  // New department inline form
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const [depts, userList, siteList] = await Promise.all([
+        apiFetch<Department[]>("/departments"),
+        apiFetch<DeptUser[]>("/users"),
+        apiFetch<DeptSite[]>("/sites"),
+      ]);
+      setDepartments(depts);
+      setUsers(userList);
+      setSites(siteList);
+    } catch (err: any) {
+      toast({ title: "Couldn't load departments", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const toggleExpanded = (id: number) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const createDept = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await apiFetch("/departments", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      setNewName("");
+      setCreating(false);
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Failed to create department", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveName = async (id: number) => {
+    const name = editName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/departments/${id}`, { method: "PUT", body: JSON.stringify({ name }) });
+      setEditingId(null);
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Failed to rename", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteDept = async (id: number, name: string) => {
+    if (!confirm(`Delete "${name}"? Users and sites assigned to it will become unassigned.`)) return;
+    setBusy(true);
+    try {
+      await apiFetch(`/departments/${id}`, { method: "DELETE" });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const assignUser = async (userId: number, departmentId: number | null) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/users/${userId}`, { method: "PUT", body: JSON.stringify({ departmentId }) });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const assignSite = async (siteId: number, departmentId: number | null) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/sites/${siteId}`, { method: "PATCH", body: JSON.stringify({ departmentId }) });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-violet-500" />
+          <CardTitle className="font-display">Departments</CardTitle>
+        </div>
+        <CardDescription>
+          Organise your sites and staff into departments. Staff and viewer accounts assigned to a
+          department will only see data for sites in that department. Users or sites with no
+          department assignment can see everything.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="p-6 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : departments.length === 0 && !creating ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">
+            <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            No departments yet.
+            {canAdmin && (
+              <div className="mt-3">
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+                  <Plus className="w-4 h-4 mr-1.5" /> Create your first department
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {departments.map(dept => {
+              const members = users.filter(u => u.departmentId === dept.id);
+              const deptSites = sites.filter(s => s.departmentId === dept.id);
+              const isOpen = expanded.has(dept.id);
+              const isEditing = editingId === dept.id;
+
+              // Users and sites not assigned to this dept (for add dropdowns)
+              const unassignedUsers = users.filter(
+                u => u.departmentId !== dept.id && u.role !== "consultant",
+              );
+              const unassignedSites = sites.filter(s => s.departmentId !== dept.id);
+
+              return (
+                <div key={dept.id} className="rounded-xl border border-border/60 overflow-hidden">
+                  {/* Row header */}
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 bg-muted/10 cursor-pointer hover:bg-muted/20 transition-colors"
+                    onClick={() => !isEditing && toggleExpanded(dept.id)}
+                  >
+                    <span className="text-muted-foreground">
+                      {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </span>
+
+                    {isEditing ? (
+                      <div
+                        className="flex items-center gap-2 flex-1"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <Input
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") saveName(dept.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="h-7 text-sm py-0 w-48"
+                          autoFocus
+                        />
+                        <Button size="sm" className="h-7 px-2 text-xs" onClick={() => saveName(dept.id)} disabled={busy}>Save</Button>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditingId(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <span className="flex-1 font-medium text-sm">{dept.name}</span>
+                    )}
+
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {members.length} {members.length === 1 ? "member" : "members"} · {deptSites.length} {deptSites.length === 1 ? "site" : "sites"}
+                    </span>
+
+                    {canAdmin && !isEditing && (
+                      <div className="flex items-center gap-1 ml-1" onClick={e => e.stopPropagation()}>
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                          title="Rename"
+                          onClick={() => { setEditingId(dept.id); setEditName(dept.name); }}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          title="Delete"
+                          onClick={() => deleteDept(dept.id, dept.name)}
+                          disabled={busy}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isOpen && (
+                    <div className="px-4 py-3 space-y-4 bg-background border-t border-border/40">
+                      {/* Members */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Members</p>
+                        {members.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic">No members yet.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {members.map(u => (
+                              <span
+                                key={u.id}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-50 border border-violet-200 text-xs text-violet-800"
+                              >
+                                {u.name}
+                                {canAdmin && (
+                                  <button
+                                    className="hover:text-destructive ml-0.5"
+                                    title={`Remove ${u.name}`}
+                                    onClick={() => assignUser(u.id, null)}
+                                    disabled={busy}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {canAdmin && unassignedUsers.length > 0 && (
+                          <Select onValueChange={val => assignUser(Number(val), dept.id)} disabled={busy}>
+                            <SelectTrigger className="h-7 text-xs w-52">
+                              <SelectValue placeholder="+ Add member…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {unassignedUsers.map(u => (
+                                <SelectItem key={u.id} value={String(u.id)} className="text-xs">
+                                  {u.name} <span className="text-muted-foreground ml-1">({u.role.replace("client_", "")})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                      {/* Sites */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sites</p>
+                        {deptSites.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic">No sites assigned yet.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {deptSites.map(s => (
+                              <span
+                                key={s.id}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-800"
+                              >
+                                {s.name}
+                                {canAdmin && (
+                                  <button
+                                    className="hover:text-destructive ml-0.5"
+                                    title={`Remove ${s.name}`}
+                                    onClick={() => assignSite(s.id, null)}
+                                    disabled={busy}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {canAdmin && unassignedSites.length > 0 && (
+                          <Select onValueChange={val => assignSite(Number(val), dept.id)} disabled={busy}>
+                            <SelectTrigger className="h-7 text-xs w-52">
+                              <SelectValue placeholder="+ Assign site…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {unassignedSites.map(s => (
+                                <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+                                  {s.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* New department inline form */}
+            {canAdmin && (
+              creating ? (
+                <div className="flex items-center gap-2 pt-1">
+                  <Input
+                    placeholder="Department name"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") createDept();
+                      if (e.key === "Escape") { setCreating(false); setNewName(""); }
+                    }}
+                    className="h-8 text-sm w-52"
+                    autoFocus
+                  />
+                  <Button size="sm" onClick={createDept} disabled={busy || !newName.trim()}>Create</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-1"
+                  onClick={() => setCreating(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1.5" /> New Department
+                </Button>
+              )
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -625,6 +983,7 @@ export default function SettingsPage() {
       <div className="max-w-4xl space-y-6">
         <BillingCard />
         <InvoicesCard />
+        <DepartmentsCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">

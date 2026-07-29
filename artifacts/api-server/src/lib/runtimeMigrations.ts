@@ -254,6 +254,35 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "trial_reminder_sent_at" timestamp
     `);
 
+    // ---- Departments: organisational units for scoping staff data access ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "departments" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "name" text NOT NULL,
+        "description" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // ---- department_id on users (staff belong to one department) ----
+    await db.execute(sql`
+      ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL
+    `);
+
+    // ---- department_id on sites (sites tagged to one department) ----
+    await db.execute(sql`
+      ALTER TABLE "sites"
+      ADD COLUMN IF NOT EXISTS "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL
+    `);
+
+    // ---- department_id on compliance_items ----
+    await db.execute(sql`
+      ALTER TABLE "compliance_items"
+      ADD COLUMN IF NOT EXISTS "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

@@ -107,6 +107,21 @@ export function requireClientAdmin(req: Request, res: Response, next: NextFuncti
   return requireRole("consultant", "client_admin")(req, res, next);
 }
 
+/**
+ * Returns the department ID that should restrict what data this user can see,
+ * or null if the user is unrestricted (admin / consultant / unassigned staff).
+ *
+ * Only client_staff and client_viewer are subject to department scoping.
+ * A staff/viewer with no departmentId (null) is also unrestricted — they see
+ * everything, matching the pre-departments behaviour.
+ */
+export function getActiveDepartmentId(req: Request): number | null {
+  const user = req.currentUser;
+  if (!user) return null;
+  if (user.role === "client_admin" || user.role === "consultant") return null;
+  return (user as any).departmentId ?? null;
+}
+
 export function getClientId(req: Request): number | null {
   if (!req.currentUser) return null;
   if (req.currentUser.role === "consultant") {

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { complianceItemsTable, sitesTable, categoriesTable, contractorsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import {
   CreateComplianceItemBody,
   UpdateComplianceItemBody,
@@ -12,7 +12,7 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -67,9 +67,20 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   if (query.siteId) conditions.push(eq(complianceItemsTable.siteId, query.siteId));
   if (query.contractorId) conditions.push(eq(complianceItemsTable.contractorId, query.contractorId));
 
-  // Scope staff to their department
-  if (user.role === "client_staff" && user.departmentId) {
-    conditions.push(eq(complianceItemsTable.departmentId, user.departmentId));
+  // Department scoping: staff/viewers with a department only see items for
+  // sites in their department (or items not linked to any site).
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    const allowedSites = db
+      .select({ id: sitesTable.id })
+      .from(sitesTable)
+      .where(and(
+        eq(sitesTable.clientId, clientId),
+        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      ));
+    conditions.push(
+      or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
+    );
   }
 
   const items = await db
@@ -219,6 +230,20 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
+  // Department scope: if the user is scoped to a department and the item's site
+  // belongs to a different department, deny access.
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null && joined.item.siteId != null) {
+    const [itemSite] = await db
+      .select({ departmentId: sitesTable.departmentId })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, joined.item.siteId))
+      .limit(1);
+    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
   res.json(buildItemResponse(joined.item, joined.site, joined.category, joined.contractor));
 });
 
@@ -295,6 +320,20 @@ router.patch("/compliance-items/:id/status", requireAuth, async (req, res) => {
     return;
   }
 
+  // Department scope: staff must not mutate items belonging to a different dept's site.
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null && existing[0].siteId != null) {
+    const [itemSite] = await db
+      .select({ departmentId: sitesTable.departmentId })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, existing[0].siteId))
+      .limit(1);
+    if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+  }
+
   await db
     .update(complianceItemsTable)
     .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
@@ -317,12 +356,31 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   const itemConditions = [eq(complianceItemsTable.clientId, clientId)];
-  if (user.role === "client_staff" && user.departmentId) {
-    itemConditions.push(eq(complianceItemsTable.departmentId, user.departmentId));
+
+  // Department scoping: consistent with GET /compliance-items — filter by
+  // the site's department rather than the item's own departmentId column.
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    const allowedSites = db
+      .select({ id: sitesTable.id })
+      .from(sitesTable)
+      .where(and(
+        eq(sitesTable.clientId, clientId),
+        or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
+      ));
+    itemConditions.push(
+      or(isNull(complianceItemsTable.siteId), inArray(complianceItemsTable.siteId, allowedSites)) as any,
+    );
   }
 
   const { certificatesTable } = await import("@workspace/db/schema");
   const { or, sql: dsql } = await import("drizzle-orm");
+
+  // Also scope the site breakdown to the user's accessible sites
+  const siteConditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];
+  if (deptId !== null) {
+    siteConditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)) as any);
+  }
 
   const [items, contractors, certificates, sites] = await Promise.all([
     db.select().from(complianceItemsTable).where(and(...itemConditions)),
@@ -341,7 +399,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
           dsql`${certificatesTable.itemId} IN (SELECT id FROM ${complianceItemsTable} WHERE ${complianceItemsTable.clientId} = ${clientId})`,
         ),
       ),
-    db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.clientId, clientId)),
+    db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(and(...siteConditions)),
   ]);
 
   const total = items.length;
