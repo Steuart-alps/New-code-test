@@ -31,8 +31,9 @@ interface FormState {
   address: string;
   phone: string;
   seedStarterChecks: boolean;
+  departmentId: number | null;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true };
+const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true, departmentId: null };
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -86,6 +87,7 @@ export default function SitesPage() {
       address: s.address ?? "",
       phone: s.phone ?? "",
       seedStarterChecks: false,
+      departmentId: s.departmentId ?? null,
     });
     setIsOpen(true);
   };
@@ -98,6 +100,7 @@ export default function SitesPage() {
       responsiblePerson: form.responsiblePerson.trim() || null,
       address: form.address.trim() || null,
       phone: form.phone.trim() || null,
+      departmentId: form.departmentId,
     };
     if (editingId) {
       await updateSite.mutateAsync({ id: editingId, data: basePayload });
@@ -231,6 +234,26 @@ export default function SitesPage() {
               <Label>Site Telephone</Label>
               <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0161 496 1234" />
             </div>
+
+            {departments.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Department</Label>
+                <Select
+                  value={form.departmentId?.toString() ?? NO_DEPT}
+                  onValueChange={val => setForm({ ...form, departmentId: val === NO_DEPT ? null : Number(val) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All departments" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_DEPT}>All departments</SelectItem>
+                    {departments.map(d => (
+                      <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {!editingId && (
               <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 p-3 cursor-pointer">
