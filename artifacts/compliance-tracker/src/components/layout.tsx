@@ -42,19 +42,19 @@ function useNavGroups() {
     {
       title: "FIRETRACK",
       items: [
-        { href: "/fire-safety", label: "Fire Logbook", icon: Flame, serviceKey: "firetrack" },
+        { href: "/fire-safety", label: "FireTrack", icon: Flame, serviceKey: "firetrack" },
       ],
     },
     {
       title: "KITCHENTRACK",
       items: [
-        { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+        { href: "/kitchen", label: "KitchenTrack", icon: UtensilsCrossed, serviceKey: "kitchentrack" },
       ],
     },
     {
       title: "LEGIONELLATRACK",
       items: [
-        { href: "/legionella", label: "Water Safety Logbook", icon: Droplets, serviceKey: "legionellatrack" },
+        { href: "/legionella", label: "LegionellaTrack", icon: Droplets, serviceKey: "legionellatrack" },
       ],
     },
   ];
