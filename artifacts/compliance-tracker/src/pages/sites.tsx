@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { useListSites, type Site } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search } from "lucide-react";
+
+const NO_DEPT = "__none__";
 
 interface Department {
   id: number;
@@ -35,12 +38,14 @@ export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
   const { createSite, updateSite, deleteSite } = useAppMutations();
   const { activeClientId } = useAuth();
+  const canAdmin = useCanAdmin();
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(empty);
+  const [reassigning, setReassigning] = useState<number | null>(null);
 
   useEffect(() => {
     apiFetch(`/departments${activeClientId ? `?clientId=${activeClientId}` : ""}`)
@@ -56,6 +61,16 @@ export default function SitesPage() {
       [s.name, s.address, s.responsiblePerson, s.phone].some(v => v?.toLowerCase().includes(q))
     );
   }, [sites, search]);
+
+  async function reassignSiteDept(siteId: number, value: string) {
+    const departmentId = value === NO_DEPT ? null : Number(value);
+    setReassigning(siteId);
+    try {
+      await updateSite.mutateAsync({ id: siteId, data: { departmentId } });
+    } finally {
+      setReassigning(null);
+    }
+  }
 
   const openCreate = () => {
     setEditingId(null);
@@ -147,18 +162,43 @@ export default function SitesPage() {
               </div>
 
               <div className="space-y-1.5 text-sm text-muted-foreground flex-1">
-                {(() => {
-                  const dept = departments.find(d => d.id === (site as any).departmentId);
-                  return dept ? (
-                    <div className="mb-1">
-                      <Badge variant="secondary" className="text-xs font-normal">{dept.name}</Badge>
-                    </div>
-                  ) : null;
-                })()}
+                {/* Department indicator — quick-assign for admins, badge for everyone else */}
+                <div className="mb-1">
+                  {canAdmin ? (
+                    <Select
+                      value={(site as any).departmentId?.toString() ?? NO_DEPT}
+                      onValueChange={val => reassignSiteDept(site.id, val)}
+                      disabled={reassigning === site.id}
+                    >
+                      <SelectTrigger className="h-6 text-xs w-44 border-transparent hover:border-input bg-transparent hover:bg-muted/40 transition-colors px-2 gap-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_DEPT} className="text-xs text-muted-foreground">
+                          All departments
+                        </SelectItem>
+                        {departments.map(d => (
+                          <SelectItem key={d.id} value={d.id.toString()} className="text-xs">
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    (() => {
+                      const dept = departments.find(d => d.id === (site as any).departmentId);
+                      return (
+                        <Badge variant="secondary" className="text-xs font-normal">
+                          {dept?.name ?? "All departments"}
+                        </Badge>
+                      );
+                    })()
+                  )}
+                </div>
                 {site.responsiblePerson && <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 opacity-60" />{site.responsiblePerson}</div>}
                 {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
                 {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
-                {!site.responsiblePerson && !site.address && !site.phone && !((site as any).departmentId) && <p className="italic text-xs opacity-60">No site details set yet.</p>}
+                {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
               </div>
 
               <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
