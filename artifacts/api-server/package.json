@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:isolation": "node tests/tenant-isolation.mjs",
     "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
-    "test:trial-reminders": "node tests/trial-reminders.mjs"
+    "test:trial-reminders": "node tests/trial-reminders.mjs",
+    "test:modules": "node tests/module-routes.mjs",
+    "test:modules:ci": "bash tests/run-module-routes.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

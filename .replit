@@ -34,6 +34,10 @@ args = "test-trial-reminders"
 task = "workflow.run"
 args = "test-tenant-isolation"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "module-routes"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -63,6 +67,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:isolation:ci"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "module-routes"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:modules:ci"
 
 [workflows.workflow.metadata]
 isValidation = true
