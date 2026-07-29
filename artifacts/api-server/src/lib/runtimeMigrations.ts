@@ -78,6 +78,28 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- Legionella water safety logbook table ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "legionella_checks" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "check_type" text NOT NULL,
+        "check_date" date NOT NULL,
+        "result" text NOT NULL DEFAULT 'pass',
+        "temperature" numeric(5,2),
+        "location" text,
+        "notes" text,
+        "performed_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS "IDX_legionella_client_type_date" ON "legionella_checks" ("client_id", "check_type", "check_date")`
+    );
+
     // ---- Add site_id column to compliance_items ----
     await db.execute(sql`
       ALTER TABLE "compliance_items"

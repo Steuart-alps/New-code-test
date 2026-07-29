@@ -15,6 +15,7 @@ import {
   ArrowLeftRight,
   Flame,
   UtensilsCrossed,
+  Droplets,
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,12 @@ function useNavGroups() {
       title: "KITCHENTRACK",
       items: [
         { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+      ],
+    },
+    {
+      title: "LEGIONELLATRACK",
+      items: [
+        { href: "/legionella", label: "Water Safety Logbook", icon: Droplets, serviceKey: "legionellatrack" },
       ],
     },
   ];

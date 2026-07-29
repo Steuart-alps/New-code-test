@@ -28,6 +28,7 @@ import type {
   CreateContractorRequest,
   CreateFireSafetyCheckRequest,
   CreateFoodSafetyRecordRequest,
+  CreateLegionellaCheckRequest,
   CreateSiteRequest,
   DashboardStats,
   ErrorResponse,
@@ -37,9 +38,13 @@ import type {
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
   GetFireSafetyStatusParams,
+  GetLegionellaStatusParams,
   HealthStatus,
+  LegionellaCheck,
+  LegionellaStatus,
   ListComplianceItemsParams,
   ListFireSafetyChecksParams,
+  ListLegionellaChecksParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SendRemindersResponse,
@@ -51,6 +56,7 @@ import type {
   UpdateFireSafetyCheckRequest,
   UpdateFoodSafetyConfig200,
   UpdateFoodSafetyRecordRequest,
+  UpdateLegionellaCheckRequest,
   UpdateSiteRequest,
   UpdateStatusRequest,
 } from "./api.schemas";
@@ -4163,4 +4169,291 @@ export const useUpdateFoodSafetyRecord = <
   TContext
 > => {
   return useMutation(getUpdateFoodSafetyRecordMutationOptions(options));
+};
+
+// ---- LegionellaTrack ----
+
+export const getListLegionellaChecksUrl = (params?: ListLegionellaChecksParams) => {
+  const normalizedParams = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) normalizedParams.append(key, value === null ? "null" : value.toString());
+  });
+  const s = normalizedParams.toString();
+  return s.length > 0 ? `/api/legionella?${s}` : `/api/legionella`;
+};
+
+export const listLegionellaChecks = async (
+  params?: ListLegionellaChecksParams,
+  options?: RequestInit,
+): Promise<LegionellaCheck[]> => {
+  return customFetch<LegionellaCheck[]>(getListLegionellaChecksUrl(params), { ...options, method: "GET" });
+};
+
+export const getListLegionellaChecksQueryKey = (params?: ListLegionellaChecksParams) =>
+  [`/api/legionella`, ...(params ? [params] : [])] as const;
+
+export const getListLegionellaChecksQueryOptions = <
+  TData = Awaited<ReturnType<typeof listLegionellaChecks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListLegionellaChecksParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof listLegionellaChecks>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getListLegionellaChecksQueryKey(params);
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listLegionellaChecks>>> = ({ signal }) =>
+    listLegionellaChecks(params, { signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listLegionellaChecks>>, TError, TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListLegionellaChecksQueryResult = NonNullable<Awaited<ReturnType<typeof listLegionellaChecks>>>;
+export type ListLegionellaChecksQueryError = ErrorType<unknown>;
+
+export function useListLegionellaChecks<
+  TData = Awaited<ReturnType<typeof listLegionellaChecks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListLegionellaChecksParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof listLegionellaChecks>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListLegionellaChecksQueryOptions(params, options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetLegionellaStatusUrl = (params?: GetLegionellaStatusParams) => {
+  const normalizedParams = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) normalizedParams.append(key, value === null ? "null" : value.toString());
+  });
+  const s = normalizedParams.toString();
+  return s.length > 0 ? `/api/legionella/status?${s}` : `/api/legionella/status`;
+};
+
+export const getLegionellaStatus = async (
+  params?: GetLegionellaStatusParams,
+  options?: RequestInit,
+): Promise<LegionellaStatus[]> => {
+  return customFetch<LegionellaStatus[]>(getGetLegionellaStatusUrl(params), { ...options, method: "GET" });
+};
+
+export const getGetLegionellaStatusQueryKey = (params?: GetLegionellaStatusParams) =>
+  [`/api/legionella/status`, ...(params ? [params] : [])] as const;
+
+export const getGetLegionellaStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLegionellaStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetLegionellaStatusParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getLegionellaStatus>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetLegionellaStatusQueryKey(params);
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaStatus>>> = ({ signal }) =>
+    getLegionellaStatus(params, { signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLegionellaStatus>>, TError, TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLegionellaStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getLegionellaStatus>>>;
+export type GetLegionellaStatusQueryError = ErrorType<unknown>;
+
+export function useGetLegionellaStatus<
+  TData = Awaited<ReturnType<typeof getLegionellaStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetLegionellaStatusParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getLegionellaStatus>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLegionellaStatusQueryOptions(params, options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getCreateLegionellaCheckUrl = () => `/api/legionella`;
+
+export const createLegionellaCheck = async (
+  createLegionellaCheckRequest: CreateLegionellaCheckRequest,
+  options?: RequestInit,
+): Promise<LegionellaCheck> => {
+  return customFetch<LegionellaCheck>(getCreateLegionellaCheckUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createLegionellaCheckRequest),
+  });
+};
+
+export const getCreateLegionellaCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLegionellaCheck>>, TError,
+    { data: BodyType<CreateLegionellaCheckRequest> }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createLegionellaCheck>>, TError,
+  { data: BodyType<CreateLegionellaCheckRequest> }, TContext
+> => {
+  const mutationKey = ["createLegionellaCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createLegionellaCheck>>,
+    { data: BodyType<CreateLegionellaCheckRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+    return createLegionellaCheck(data, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateLegionellaCheckMutationResult = NonNullable<Awaited<ReturnType<typeof createLegionellaCheck>>>;
+export type CreateLegionellaCheckMutationBody = BodyType<CreateLegionellaCheckRequest>;
+export type CreateLegionellaCheckMutationError = ErrorType<unknown>;
+
+export const useCreateLegionellaCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createLegionellaCheck>>, TError,
+    { data: BodyType<CreateLegionellaCheckRequest> }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createLegionellaCheck>>, TError,
+  { data: BodyType<CreateLegionellaCheckRequest> }, TContext
+> => {
+  return useMutation(getCreateLegionellaCheckMutationOptions(options));
+};
+
+export const getUpdateLegionellaCheckUrl = (id: number) => `/api/legionella/${id}`;
+
+export const updateLegionellaCheck = async (
+  id: number,
+  updateLegionellaCheckRequest: UpdateLegionellaCheckRequest,
+  options?: RequestInit,
+): Promise<LegionellaCheck> => {
+  return customFetch<LegionellaCheck>(getUpdateLegionellaCheckUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateLegionellaCheckRequest),
+  });
+};
+
+export const getUpdateLegionellaCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateLegionellaCheck>>, TError,
+    { id: number; data: BodyType<UpdateLegionellaCheckRequest> }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateLegionellaCheck>>, TError,
+  { id: number; data: BodyType<UpdateLegionellaCheckRequest> }, TContext
+> => {
+  const mutationKey = ["updateLegionellaCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateLegionellaCheck>>,
+    { id: number; data: BodyType<UpdateLegionellaCheckRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+    return updateLegionellaCheck(id, data, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateLegionellaCheckMutationResult = NonNullable<Awaited<ReturnType<typeof updateLegionellaCheck>>>;
+export type UpdateLegionellaCheckMutationBody = BodyType<UpdateLegionellaCheckRequest>;
+export type UpdateLegionellaCheckMutationError = ErrorType<unknown>;
+
+export const useUpdateLegionellaCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateLegionellaCheck>>, TError,
+    { id: number; data: BodyType<UpdateLegionellaCheckRequest> }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateLegionellaCheck>>, TError,
+  { id: number; data: BodyType<UpdateLegionellaCheckRequest> }, TContext
+> => {
+  return useMutation(getUpdateLegionellaCheckMutationOptions(options));
+};
+
+export const getDeleteLegionellaCheckUrl = (id: number) => `/api/legionella/${id}`;
+
+export const deleteLegionellaCheck = async (id: number, options?: RequestInit): Promise<void> => {
+  return customFetch<void>(getDeleteLegionellaCheckUrl(id), { ...options, method: "DELETE" });
+};
+
+export const getDeleteLegionellaCheckMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteLegionellaCheck>>, TError, { id: number }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteLegionellaCheck>>, TError, { id: number }, TContext
+> => {
+  const mutationKey = ["deleteLegionellaCheck"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
+      ? options : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteLegionellaCheck>>, { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+    return deleteLegionellaCheck(id, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteLegionellaCheckMutationResult = NonNullable<Awaited<ReturnType<typeof deleteLegionellaCheck>>>;
+export type DeleteLegionellaCheckMutationError = ErrorType<unknown>;
+
+export const useDeleteLegionellaCheck = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteLegionellaCheck>>, TError, { id: number }, TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteLegionellaCheck>>, TError, { id: number }, TContext
+> => {
+  return useMutation(getDeleteLegionellaCheckMutationOptions(options));
 };

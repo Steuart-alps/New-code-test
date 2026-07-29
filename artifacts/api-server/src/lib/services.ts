@@ -15,10 +15,11 @@ export const SERVICES = {
   core: { label: "ComplyTrack", amountPence: 1000 },
   firetrack: { label: "FireTrack", amountPence: 1000 },
   kitchentrack: { label: "KitchenTrack", amountPence: 1000 },
+  legionellatrack: { label: "LegionellaTrack", amountPence: 1000 },
 } as const;
 
 export type ServiceKey = keyof typeof SERVICES;
-export const ADDON_KEYS = ["firetrack", "kitchentrack"] as const satisfies readonly ServiceKey[];
+export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack"] as const satisfies readonly ServiceKey[];
 
 export const BUNDLE_KEY = "bundle";
 export const BUNDLE_LABEL = "ComplyTrack Complete";

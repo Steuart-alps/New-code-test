@@ -29,6 +29,8 @@ tags:
     description: Fire safety logbook operations
   - name: food-safety
     description: Kitchen / food safety diary operations
+  - name: legionella
+    description: Legionella water safety logbook operations (L8/HSG274)
 paths:
   /healthz:
     get:
@@ -985,6 +987,105 @@ paths:
               schema:
                 $ref: "#/components/schemas/FoodSafetyRecord"
 
+  /legionella:
+    get:
+      operationId: listLegionellaChecks
+      tags: [legionella]
+      summary: List Legionella water safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/LegionellaCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of Legionella checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegionellaCheck"
+    post:
+      operationId: createLegionellaCheck
+      tags: [legionella]
+      summary: Record a Legionella water safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLegionellaCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaCheck"
+
+  /legionella/status:
+    get:
+      operationId: getLegionellaStatus
+      tags: [legionella]
+      summary: Per-check-type due status for Legionella (last done, next due, overdue)
+      parameters:
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Status per check type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegionellaStatus"
+
+  /legionella/{id}:
+    put:
+      operationId: updateLegionellaCheck
+      tags: [legionella]
+      summary: Update a Legionella check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLegionellaCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaCheck"
+    delete:
+      operationId: deleteLegionellaCheck
+      tags: [legionella]
+      summary: Delete a Legionella check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
 components:
   schemas:
     HealthStatus:
@@ -1783,3 +1884,126 @@ components:
         submittedAt:
           type: string
           nullable: true
+
+    LegionellaCheckType:
+      type: string
+      enum: [cold_water_temp, hot_water_temp, sentinel_flush, shower_clean, tank_inspection, risk_assessment]
+
+    LegionellaCheck:
+      type: object
+      properties:
+        id:
+          type: integer
+        clientId:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail, action_required]
+        temperature:
+          type: string
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - checkType
+        - checkDate
+        - result
+        - createdAt
+        - updatedAt
+
+    CreateLegionellaCheckRequest:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail, action_required]
+        temperature:
+          type: number
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+      required:
+        - checkType
+        - checkDate
+        - result
+
+    UpdateLegionellaCheckRequest:
+      type: object
+      properties:
+        checkDate:
+          type: string
+        result:
+          type: string
+          enum: [pass, fail, action_required]
+        temperature:
+          type: number
+          nullable: true
+        siteId:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+
+    LegionellaStatus:
+      type: object
+      properties:
+        checkType:
+          $ref: "#/components/schemas/LegionellaCheckType"
+        frequencyDays:
+          type: integer
+        lastDate:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ok, due_soon, overdue, never]
+      required:
+        - checkType
+        - frequencyDays
+        - status

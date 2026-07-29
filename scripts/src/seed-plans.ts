@@ -5,6 +5,7 @@ const CORE = { key: "core", name: "ComplyTrack", amount: 1000, description: "Hea
 const ADDONS = [
   { key: "firetrack", name: "FireTrack", amount: 1000, description: "Digital fire safety logbook — billed per site" },
   { key: "kitchentrack", name: "KitchenTrack", amount: 1000, description: "Daily kitchen food safety diary — billed per site" },
+  { key: "legionellatrack", name: "LegionellaTrack", amount: 1000, description: "Legionella water safety logbook (L8/HSG274 compliance) — billed per site" },
 ];
 const BUNDLE = { key: "bundle", name: "ComplyTrack Complete", amount: 5000, description: "Every ComplyTrack service, current and future — billed per site" };
 const LEGACY_TIERS = ["Starter", "Professional", "Enterprise"];

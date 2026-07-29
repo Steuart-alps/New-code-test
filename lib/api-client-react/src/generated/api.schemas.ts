@@ -474,6 +474,92 @@ export type GetFireSafetyStatusParams = {
   siteId?: number;
 };
 
+// ---- LegionellaTrack ----
+
+export type LegionellaCheckType =
+  (typeof LegionellaCheckType)[keyof typeof LegionellaCheckType];
+
+export const LegionellaCheckType = {
+  cold_water_temp: "cold_water_temp",
+  hot_water_temp: "hot_water_temp",
+  sentinel_flush: "sentinel_flush",
+  shower_clean: "shower_clean",
+  tank_inspection: "tank_inspection",
+  risk_assessment: "risk_assessment",
+} as const;
+
+export type LegionellaCheckResult =
+  (typeof LegionellaCheckResult)[keyof typeof LegionellaCheckResult];
+
+export const LegionellaCheckResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
+
+export interface LegionellaCheck {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  checkType: LegionellaCheckType;
+  checkDate: string;
+  result: LegionellaCheckResult;
+  temperature?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateLegionellaCheckRequest {
+  checkType: LegionellaCheckType;
+  checkDate: string;
+  result: LegionellaCheckResult;
+  temperature?: number | null;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export interface UpdateLegionellaCheckRequest {
+  checkDate?: string;
+  result?: LegionellaCheckResult;
+  temperature?: number | null;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type LegionellaStatusStatus =
+  (typeof LegionellaStatusStatus)[keyof typeof LegionellaStatusStatus];
+
+export const LegionellaStatusStatus = {
+  ok: "ok",
+  due_soon: "due_soon",
+  overdue: "overdue",
+  never: "never",
+} as const;
+
+export interface LegionellaStatus {
+  checkType: LegionellaCheckType;
+  frequencyDays: number;
+  lastDate?: string | null;
+  dueDate?: string | null;
+  status: LegionellaStatusStatus;
+}
+
+export type ListLegionellaChecksParams = {
+  checkType?: LegionellaCheckType;
+  siteId?: number;
+};
+
+export type GetLegionellaStatusParams = {
+  siteId?: number;
+};
+
 export type UpdateFoodSafetyConfig200 = {
   ok: boolean;
 };

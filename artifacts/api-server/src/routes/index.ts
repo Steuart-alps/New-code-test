@@ -17,6 +17,7 @@ import emailDomainRouter from "./emailDomain";
 import sitesRouter from "./sites";
 import foodSafetyRouter from "./food-safety";
 import fireSafetyRouter from "./fire-safety";
+import legionellaRouter from "./legionella";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService } from "../lib/services";
 
@@ -40,5 +41,6 @@ router.use(notificationsRouter);
 router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
+router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 
 export default router;
