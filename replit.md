@@ -12,7 +12,7 @@ consultants managing portfolios of clients.
 
 - **External Compliance**: Contractor-managed visits, certificates, email reminders
 - **Internal Compliance**: Internal staff compliance checks
-- **Fire Safety**: Digital fire logbook — 5 check types (alarm weekly, emergency lights & extinguishers monthly, fire doors quarterly, fire drill 6-monthly) with due/overdue status
+- **FireTrack** (fire safety branch): Digital fire logbook — 5 check types (alarm & extinguisher visual weekly, emergency lights monthly, fire doors quarterly, fire drill 6-monthly) with due/overdue status
 - **Kitchen Diary**: Daily food safety record — deliveries, fridge/freezer & hot food temps, corrective actions, manager sign-off; config-driven fridge counts and temperature limits
 
 ## Stack
@@ -48,7 +48,7 @@ consultants managing portfolios of clients.
   - External Checks — compliance items assigned to contractors, with lead time email reminders
 - **INTERNAL COMPLIANCE**
   - Internal Checks — staff-managed compliance tasks
-- **FIRE SAFETY**
+- **FIRETRACK** (fire safety branch)
   - Fire Logbook (`/fire-safety`) — status cards + check history, record/edit/delete checks
 - **KITCHEN**
   - Kitchen Diary (`/kitchen`) — daily record with draft save and manager sign-off (locks record)

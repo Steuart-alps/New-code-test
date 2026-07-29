@@ -379,7 +379,7 @@ export default function FireSafetyPage() {
   const dueSoonStatuses = status?.filter((s) => s.status === "due_soon") || [];
 
   return (
-    <AppLayout title="Fire Safety Logbook">
+    <AppLayout title="FireTrack — Fire Safety Logbook">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -38,7 +38,7 @@ function useNavGroups() {
       ],
     },
     {
-      title: "FIRE SAFETY",
+      title: "FIRETRACK",
       items: [
         { href: "/fire-safety", label: "Fire Logbook", icon: Flame },
       ],
