@@ -310,7 +310,7 @@ export default function KitchenPage() {
   const isSubmitted = !!record?.submittedAt;
 
   return (
-    <AppLayout title="Kitchen Diary">
+    <AppLayout title="KitchenTrack — Kitchen Diary">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

@@ -29,7 +29,7 @@ function useNavGroups() {
 
   const groups: { title: string; items: { href: string; label: string; icon: any }[] }[] = [
     {
-      title: "COMPLIANCE",
+      title: "COMPLYTRACK",
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
@@ -44,7 +44,7 @@ function useNavGroups() {
       ],
     },
     {
-      title: "KITCHEN",
+      title: "KITCHENTRACK",
       items: [
         { href: "/kitchen", label: "Kitchen Diary", icon: UtensilsCrossed },
       ],
