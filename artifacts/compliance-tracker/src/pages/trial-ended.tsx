@@ -1,11 +1,40 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
+
+const ADDONS = [
+  {
+    key: "firetrack",
+    label: "FireTrack",
+    desc: "Fire safety logbook",
+    icon: Flame,
+    iconColor: "text-orange-600",
+    activeBorder: "border-orange-400",
+    activeBg: "bg-orange-50/60",
+  },
+  {
+    key: "kitchentrack",
+    label: "KitchenTrack",
+    desc: "Food safety diary",
+    icon: UtensilsCrossed,
+    iconColor: "text-amber-600",
+    activeBorder: "border-amber-400",
+    activeBg: "bg-amber-50/60",
+  },
+  {
+    key: "legionellatrack",
+    label: "LegionellaTrack",
+    desc: "Water safety logbook (L8/HSG274)",
+    icon: Droplets,
+    iconColor: "text-sky-600",
+    activeBorder: "border-sky-400",
+    activeBg: "bg-sky-50/60",
+  },
+];
 
 export default function TrialEndedPage() {
   const { user, client, activeClientId, logout, refresh } = useAuth();
@@ -13,24 +42,40 @@ export default function TrialEndedPage() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [firetrack, setFiretrack] = useState(false);
-  const [kitchentrack, setKitchentrack] = useState(false);
+  const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
+  const total = bundle ? 50 : 10 + selectedAddons.size * 10;
 
-  // Force a fresh server-side check (drops the trial-lock cache and hits
-  // Stripe), then re-pull /auth/me so a new subscription unlocks instantly.
+  const toggleAddon = (key: string) => {
+    setBundle(false);
+    setSelectedAddons(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleBundle = () => {
+    if (bundle) {
+      setBundle(false);
+      setSelectedAddons(new Set());
+    } else {
+      setBundle(true);
+      setSelectedAddons(new Set(ADDONS.map(a => a.key)));
+    }
+  };
+
   async function recheckAccess() {
     try {
       await apiFetch("/billing/refresh-access", { method: "POST" });
     } catch {
-      // Best-effort: refresh() below still re-reads the lock state.
+      // best-effort
     }
     await refresh();
   }
 
-  // Returning from a successful Stripe checkout: re-check access right away.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") === "success") {
@@ -43,22 +88,18 @@ export default function TrialEndedPage() {
     setCheckingOut(true);
     try {
       const clientId = activeClientId ?? user?.clientId ?? undefined;
-      const services = [];
-      if (firetrack) services.push("firetrack");
-      if (kitchentrack) services.push("kitchentrack");
+      const services = Array.from(selectedAddons);
 
       const res = await apiFetch("/billing/checkout", {
         method: "POST",
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           ...(clientId ? { clientId } : {}),
           bundle,
-          services: services.length > 0 ? services : undefined
+          services: services.length > 0 ? services : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.url) {
-        throw new Error(data.error ?? "Could not start checkout");
-      }
+      if (!res.ok || !data.url) throw new Error(data.error ?? "Could not start checkout");
       window.location.href = data.url;
     } catch (err: any) {
       toast({ title: "Couldn't start checkout", description: err.message, variant: "destructive" });
@@ -68,69 +109,104 @@ export default function TrialEndedPage() {
 
   async function recheck() {
     setRefreshing(true);
-    try {
-      await recheckAccess();
-    } finally {
-      setRefreshing(false);
-    }
+    try { await recheckAccess(); } finally { setRefreshing(false); }
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#F7F2E4] p-4 font-sans">
-      <Card className="w-full max-w-md border-none shadow-xl rounded-none relative overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#F7F2E4] px-4 py-12 font-sans">
+      <div className="w-full max-w-md bg-white shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-[40px] pointer-events-none" />
-        <CardHeader className="text-center pt-10 pb-6 relative z-10">
-          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-none bg-[#162D42] text-white">
+
+        {/* Header */}
+        <div className="text-center pt-10 pb-6 px-8 relative z-10">
+          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center bg-[#162D42] text-white">
             <Lock className="h-6 w-6" />
           </div>
-          <CardTitle className="text-2xl font-display text-[#162D42]">Your free trial has ended</CardTitle>
-          <CardDescription className="text-base mt-3 leading-relaxed font-light text-[#1A1A1A]">
-            {client?.name ? `The free trial for ${client.name} has expired.` : "Your free trial has expired."}{" "}
+          <h1 className="text-2xl font-display text-[#162D42] mb-3">Your free trial has ended</h1>
+          <p className="text-base leading-relaxed font-light text-muted-foreground">
+            {client?.name ? `The trial for ${client.name} has expired. ` : "Your trial has expired. "}
             {canPay
-              ? "Set up billing to restore full access for your team — access is restored immediately after payment."
-              : "Ask your account owner or administrator to set up billing. Access is restored immediately after payment."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 px-6 sm:px-10 relative z-10">
-          {canPay && (
-            <div className="space-y-3 mb-6 bg-white/50 p-4 border border-border">
-              <h3 className="font-display text-sm text-[#162D42] font-semibold mb-2">Choose your services</h3>
-              <label className="flex items-center justify-between opacity-80 cursor-not-allowed text-sm">
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked disabled className="h-4 w-4 rounded accent-primary" />
-                  <span>ComplyTrack Core</span>
-                </div>
-                <span className="font-medium">£10/mo</span>
-              </label>
+              ? "Choose your modules below and set up billing to restore access immediately."
+              : "Ask your account admin to set up billing — access restores immediately after payment."}
+          </p>
+        </div>
 
-              <label className={`flex items-center justify-between text-sm cursor-pointer ${bundle ? "opacity-50 pointer-events-none" : ""}`}>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={firetrack || bundle} disabled={bundle} onChange={(e) => setFiretrack(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
-                  <span>FireTrack</span>
-                </div>
-                <span className="font-medium">£10/mo</span>
-              </label>
+        {/* Module picker */}
+        {canPay && (
+          <div className="px-6 pb-2 relative z-10 space-y-2">
+            {/* Core */}
+            <div className="flex items-center gap-3 p-3 border-2 border-[#162D42]/20 bg-[#162D42]/5">
+              <div className="w-5 h-5 bg-[#162D42] flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-3 h-3 text-white" />
+              </div>
+              <ShieldCheck className="w-4 h-4 text-[#162D42]" />
+              <div className="flex-1">
+                <span className="font-medium text-sm text-[#162D42]">ComplyTrack Core</span>
+                <span className="text-xs text-muted-foreground ml-1">(included)</span>
+              </div>
+              <span className="text-sm font-medium text-[#162D42]">£10/mo</span>
+            </div>
 
-              <label className={`flex items-center justify-between text-sm cursor-pointer ${bundle ? "opacity-50 pointer-events-none" : ""}`}>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={kitchentrack || bundle} disabled={bundle} onChange={(e) => setKitchentrack(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
-                  <span>KitchenTrack</span>
-                </div>
-                <span className="font-medium">£10/mo</span>
-              </label>
-
-              <div className="border-t border-border pt-3 mt-3">
-                <label className="flex items-center justify-between text-sm cursor-pointer text-emerald-800">
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" checked={bundle} onChange={(e) => setBundle(e.target.checked)} className="h-4 w-4 rounded accent-emerald-600" />
-                    <span className="font-semibold">Complete Bundle</span>
+            {/* Add-ons */}
+            {ADDONS.map(addon => {
+              const Icon = addon.icon;
+              const active = selectedAddons.has(addon.key) || bundle;
+              return (
+                <div
+                  key={addon.key}
+                  onClick={() => !bundle && toggleAddon(addon.key)}
+                  className={`flex items-center gap-3 p-3 border-2 cursor-pointer transition-all ${
+                    bundle ? "opacity-60 cursor-default border-border" :
+                    active ? `${addon.activeBorder} ${addon.activeBg}` : "border-border hover:border-primary/40"
+                  }`}
+                >
+                  <div className={`w-5 h-5 border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                    active ? `border-current bg-current ${addon.iconColor}` : "border-border bg-white"
+                  }`}>
+                    {active && <CheckCircle2 className="w-3 h-3 text-white" />}
                   </div>
-                  <span className="font-semibold">£50/mo</span>
-                </label>
+                  <Icon className={`w-4 h-4 flex-shrink-0 ${addon.iconColor}`} />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-sm text-[#162D42]">{addon.label}</span>
+                    <span className="text-xs text-muted-foreground ml-1.5 font-light">{addon.desc}</span>
+                  </div>
+                  <span className="text-sm font-medium text-muted-foreground flex-shrink-0">+ £10</span>
+                </div>
+              );
+            })}
+
+            {/* Bundle */}
+            <div
+              onClick={toggleBundle}
+              className={`flex items-center gap-3 p-3 border-2 cursor-pointer transition-all ${
+                bundle ? "border-emerald-500 bg-emerald-50/60" : "border-border hover:border-emerald-400"
+              }`}
+            >
+              <div className={`w-5 h-5 border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                bundle ? "border-emerald-600 bg-emerald-600" : "border-border bg-white"
+              }`}>
+                {bundle && <CheckCircle2 className="w-3 h-3 text-white" />}
+              </div>
+              <div className="flex-1">
+                <span className="font-semibold text-sm text-emerald-800">ComplyTrack Complete</span>
+                <span className="text-xs text-emerald-700/70 ml-1.5 font-light">All modules</span>
+              </div>
+              <span className="text-sm font-semibold text-emerald-800 flex-shrink-0">£50/mo cap</span>
+            </div>
+
+            {/* Total */}
+            <div className="bg-[#162D42] text-white px-4 py-3 flex items-center justify-between">
+              <span className="text-sm text-white/70">Per site per month</span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-display">£{total}</span>
+                <span className="text-xs text-white/50">+ VAT</span>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
+        {/* Actions */}
+        <div className="px-6 pb-4 pt-4 relative z-10 space-y-3">
           {canPay && (
             <Button className="w-full h-12 bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" onClick={startCheckout} disabled={checkingOut}>
               <CreditCard className="mr-2 h-4 w-4" />
@@ -141,17 +217,18 @@ export default function TrialEndedPage() {
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Checking…" : "I've subscribed — check again"}
           </Button>
-        </CardContent>
-        <CardFooter className="justify-center pt-6 pb-8 border-t border-border/50 mt-6 relative z-10">
+        </div>
+
+        <div className="px-6 pb-8 pt-2 border-t border-border/50 mt-2 flex justify-center relative z-10">
           <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
             <LogOut className="mr-2 h-4 w-4" /> Log out
           </Button>
-        </CardFooter>
-      </Card>
-      
+        </div>
+      </div>
+
       <div className="mt-8 flex items-center justify-center gap-2 opacity-50">
         <span className="text-sm font-display italic text-[#162D42]">by</span>
-        <img src={alpsLogo} alt="Alps Consultancy" className="h-5 grayscale invert-0 mix-blend-multiply" />
+        <img src={alpsLogo} alt="ALPS Consulting" className="h-5 grayscale mix-blend-multiply" />
       </div>
     </div>
   );
