@@ -4,6 +4,10 @@
 // neither can read or modify the other's data — via direct resource IDs and
 // via clientId spoofing in query strings and request bodies.
 //
+// Covers: core routes (sites, items, categories, contractors, certificates,
+// clients, users, settings, billing) and service module routes (fire-safety,
+// food-safety, legionella).
+//
 // Usage: node tests/tenant-isolation.mjs   (API must be running; default base
 // http://localhost:8080/api, override with API_BASE env var)
 // Exits 0 when every check passes, 1 otherwise.
@@ -53,6 +57,13 @@ function expectOk(name, status, allowed = [200, 201]) {
   check(name, allowed.includes(status), `expected ${allowed.join("/")}, got ${status}`);
 }
 
+// Unique date string to avoid food-safety recordDate collisions between tenants
+function uniqueDate(offset = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() - offset);
+  return d.toISOString().slice(0, 10);
+}
+
 async function setupTenant(label) {
   const req = makeSession();
   const email = `iso-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
@@ -86,6 +97,30 @@ async function setupTenant(label) {
   const contractorCert = await req("POST", `/contractors/${contractor.data?.id}/certificates`, { name: `${label} insurance cert` });
   expectOk(`${label}: create contractor certificate`, contractorCert.status, [201]);
 
+  // ── Fire-safety module ───────────────────────────────────────────────────────
+  // Trial accounts have "all" entitlements so module routes are always open.
+  const fireSafetyCheck = await req("POST", "/fire-safety", {
+    checkType: "alarm",
+    checkDate: uniqueDate(),
+    result: "pass",
+  });
+  expectOk(`${label}: create fire-safety check`, fireSafetyCheck.status, [201]);
+
+  // ── Legionella module ────────────────────────────────────────────────────────
+  const legionellaCheck = await req("POST", "/legionella", {
+    checkType: "cold_water_temp",
+    checkDate: uniqueDate(),
+    result: "pass",
+    temperature: 17.5,
+  });
+  expectOk(`${label}: create legionella check`, legionellaCheck.status, [201]);
+
+  // ── Food-safety (KitchenTrack) module ────────────────────────────────────────
+  const foodRecord = await req("POST", "/food-safety", {
+    recordDate: uniqueDate(1), // yesterday to avoid same-day conflicts
+  });
+  expectOk(`${label}: create food-safety record`, foodRecord.status, [201]);
+
   return {
     req,
     label,
@@ -97,6 +132,9 @@ async function setupTenant(label) {
     contractorId: contractor.data?.id,
     itemCertId: itemCert.data?.id,
     contractorCertId: contractorCert.data?.id,
+    fireSafetyCheckId: fireSafetyCheck.data?.id,
+    legionellaCheckId: legionellaCheck.data?.id,
+    foodRecordId: foodRecord.data?.id,
   };
 }
 
@@ -104,7 +142,7 @@ async function attack(attacker, victim) {
   const { req } = attacker;
   const tag = `${attacker.label}→${victim.label}`;
 
-  // --- Direct resource-ID access ---
+  // ── Direct resource-ID access: core routes ───────────────────────────────────
   expectBlocked(`${tag}: GET /sites/:id`, (await req("GET", `/sites/${victim.siteId}`)).status);
   expectBlocked(`${tag}: PATCH /sites/:id`, (await req("PATCH", `/sites/${victim.siteId}`, { name: "hacked" })).status);
   expectBlocked(`${tag}: DELETE /sites/:id`, (await req("DELETE", `/sites/${victim.siteId}`)).status);
@@ -139,7 +177,7 @@ async function attack(attacker, victim) {
   expectBlocked(`${tag}: PUT /users/:id (victim owner)`, (await req("PUT", `/users/${victim.userId}`, { name: "hacked" })).status);
   expectBlocked(`${tag}: DELETE /users/:id (victim owner)`, (await req("DELETE", `/users/${victim.userId}`)).status);
 
-  // --- clientId spoofing via query string ---
+  // ── clientId spoofing via query string: core ─────────────────────────────────
   for (const path of [
     `/sites?clientId=${victim.clientId}`,
     `/compliance-items?clientId=${victim.clientId}`,
@@ -152,24 +190,150 @@ async function attack(attacker, victim) {
     expectBlocked(`${tag}: GET ${path.split("?")[0]}?clientId=victim`, (await req("GET", path)).status);
   }
 
-  // --- clientId spoofing via request body ---
+  // ── clientId spoofing via request body: core ─────────────────────────────────
   expectBlocked(`${tag}: POST /sites body clientId`, (await req("POST", "/sites", { name: "sneaky", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: POST /compliance-items body clientId`, (await req("POST", "/compliance-items", { name: "sneaky", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: POST /categories body clientId`, (await req("POST", "/categories", { name: "sneaky", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: POST /users body clientId`, (await req("POST", "/users", { name: "sneaky", email: `sneak-${Date.now()}@test.local`, password: "password-123", role: "staff", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: PUT /settings body clientId`, (await req("PUT", `/settings?clientId=${victim.clientId}`, { companyName: "hacked" })).status);
 
-  // --- Billing: no cross-tenant checkout/portal/invoice access ---
+  // ── Billing: no cross-tenant checkout / portal / invoice access ───────────────
   expectBlocked(`${tag}: POST /billing/checkout victim clientId`, (await req("POST", "/billing/checkout", { clientId: victim.clientId })).status);
   expectBlocked(`${tag}: POST /billing/portal?clientId=victim`, (await req("POST", `/billing/portal?clientId=${victim.clientId}`)).status);
   expectBlocked(`${tag}: GET /billing/invoices?clientId=victim`, (await req("GET", `/billing/invoices?clientId=${victim.clientId}`)).status);
   expectBlocked(`${tag}: GET /contractors?clientId=victim`, (await req("GET", `/contractors?clientId=${victim.clientId}`)).status);
 
-  // --- Cross-tenant references inside own-tenant creates ---
+  // ── Cross-tenant references inside own-tenant creates ────────────────────────
   expectBlocked(`${tag}: POST /compliance-items with victim siteId`, (await req("POST", "/compliance-items", { name: "sneaky", siteId: victim.siteId })).status);
   expectBlocked(`${tag}: POST /compliance-items with victim categoryId`, (await req("POST", "/compliance-items", { name: "sneaky", categoryId: victim.categoryId })).status);
 
-  // --- List scoping: victim's records must never appear in attacker lists ---
+  // ── FireTrack: direct record access ─────────────────────────────────────────
+  expectBlocked(
+    `${tag}: PUT /fire-safety/:id`,
+    (await req("PUT", `/fire-safety/${victim.fireSafetyCheckId}`, { result: "fail" })).status,
+  );
+  expectBlocked(
+    `${tag}: DELETE /fire-safety/:id`,
+    (await req("DELETE", `/fire-safety/${victim.fireSafetyCheckId}`)).status,
+  );
+
+  // FireTrack: clientId spoofing via query string
+  expectBlocked(
+    `${tag}: GET /fire-safety?clientId=victim`,
+    (await req("GET", `/fire-safety?clientId=${victim.clientId}`)).status,
+  );
+  expectBlocked(
+    `${tag}: GET /fire-safety/status?clientId=victim`,
+    (await req("GET", `/fire-safety/status?clientId=${victim.clientId}`)).status,
+  );
+
+  // FireTrack: clientId spoofing via request body
+  expectBlocked(
+    `${tag}: POST /fire-safety body clientId`,
+    (await req("POST", "/fire-safety", {
+      checkType: "alarm",
+      checkDate: uniqueDate(2),
+      result: "pass",
+      clientId: victim.clientId,
+    })).status,
+  );
+
+  // FireTrack: list scoping — victim record must not appear
+  const fireSafetyList = await req("GET", "/fire-safety");
+  expectOk(`${tag}: GET /fire-safety own list`, fireSafetyList.status);
+  check(
+    `${tag}: /fire-safety excludes victim record`,
+    !((Array.isArray(fireSafetyList.data) ? fireSafetyList.data : []).some(
+      (r) => r.id === victim.fireSafetyCheckId,
+    )),
+    "victim fire-safety check visible in list",
+  );
+
+  // ── LegionellaTrack: direct record access ────────────────────────────────────
+  expectBlocked(
+    `${tag}: PUT /legionella/:id`,
+    (await req("PUT", `/legionella/${victim.legionellaCheckId}`, { result: "fail" })).status,
+  );
+  expectBlocked(
+    `${tag}: DELETE /legionella/:id`,
+    (await req("DELETE", `/legionella/${victim.legionellaCheckId}`)).status,
+  );
+
+  // LegionellaTrack: clientId spoofing via query string
+  expectBlocked(
+    `${tag}: GET /legionella?clientId=victim`,
+    (await req("GET", `/legionella?clientId=${victim.clientId}`)).status,
+  );
+  expectBlocked(
+    `${tag}: GET /legionella/status?clientId=victim`,
+    (await req("GET", `/legionella/status?clientId=${victim.clientId}`)).status,
+  );
+
+  // LegionellaTrack: clientId spoofing via request body
+  expectBlocked(
+    `${tag}: POST /legionella body clientId`,
+    (await req("POST", "/legionella", {
+      checkType: "sentinel_flush",
+      checkDate: uniqueDate(2),
+      result: "pass",
+      clientId: victim.clientId,
+    })).status,
+  );
+
+  // LegionellaTrack: list scoping — victim record must not appear
+  const legionellaList = await req("GET", "/legionella");
+  expectOk(`${tag}: GET /legionella own list`, legionellaList.status);
+  check(
+    `${tag}: /legionella excludes victim record`,
+    !((Array.isArray(legionellaList.data) ? legionellaList.data : []).some(
+      (r) => r.id === victim.legionellaCheckId,
+    )),
+    "victim legionella check visible in list",
+  );
+
+  // ── KitchenTrack (food-safety): direct record access ────────────────────────
+  expectBlocked(
+    `${tag}: PUT /food-safety/:id`,
+    (await req("PUT", `/food-safety/${victim.foodRecordId}`, { correctives: "hacked" })).status,
+  );
+
+  // KitchenTrack: clientId spoofing via query string
+  expectBlocked(
+    `${tag}: GET /food-safety?clientId=victim`,
+    (await req("GET", `/food-safety?clientId=${victim.clientId}`)).status,
+  );
+  expectBlocked(
+    `${tag}: GET /food-safety/config?clientId=victim`,
+    (await req("GET", `/food-safety/config?clientId=${victim.clientId}`)).status,
+  );
+
+  // KitchenTrack: clientId spoofing via request body
+  expectBlocked(
+    `${tag}: POST /food-safety body clientId`,
+    (await req("POST", "/food-safety", {
+      recordDate: uniqueDate(3),
+      clientId: victim.clientId,
+    })).status,
+  );
+  expectBlocked(
+    `${tag}: PUT /food-safety/config body clientId`,
+    (await req("PUT", `/food-safety/config?clientId=${victim.clientId}`, {
+      food_num_fridges: "99",
+    })).status,
+  );
+
+  // KitchenTrack: list scoping — victim record must not appear
+  const foodList = await req("GET", "/food-safety");
+  expectOk(`${tag}: GET /food-safety own list`, foodList.status);
+  check(
+    `${tag}: /food-safety excludes victim record`,
+    !((Array.isArray(foodList.data) ? foodList.data : []).some(
+      (r) => r.id === victim.foodRecordId,
+    )),
+    "victim food-safety record visible in list",
+  );
+
+  // ── List scoping: core routes ────────────────────────────────────────────────
   const clients = await req("GET", "/clients");
   expectOk(`${tag}: GET /clients`, clients.status);
   check(
@@ -207,7 +371,20 @@ async function attack(attacker, victim) {
 async function main() {
   // Unauthenticated requests must be rejected outright.
   const anon = makeSession();
-  for (const path of ["/sites", "/compliance-items", "/users", "/settings", "/clients", "/billing/invoices"]) {
+  for (const path of [
+    "/sites",
+    "/compliance-items",
+    "/users",
+    "/settings",
+    "/clients",
+    "/billing/invoices",
+    "/fire-safety",
+    "/fire-safety/status",
+    "/legionella",
+    "/legionella/status",
+    "/food-safety",
+    "/food-safety/config",
+  ]) {
     const { status } = await anon("GET", path);
     check(`anon: GET ${path}`, status === 401, `expected 401, got ${status}`);
   }
@@ -217,6 +394,8 @@ async function main() {
 
   check("setup: A ids resolved", a.siteId && a.itemId && a.categoryId && a.clientId, JSON.stringify({ siteId: a.siteId, itemId: a.itemId, categoryId: a.categoryId, clientId: a.clientId }));
   check("setup: B ids resolved", b.siteId && b.itemId && b.categoryId && b.clientId, JSON.stringify({ siteId: b.siteId, itemId: b.itemId, categoryId: b.categoryId, clientId: b.clientId }));
+  check("setup: A module records", a.fireSafetyCheckId && a.legionellaCheckId && a.foodRecordId, JSON.stringify({ fireSafetyCheckId: a.fireSafetyCheckId, legionellaCheckId: a.legionellaCheckId, foodRecordId: a.foodRecordId }));
+  check("setup: B module records", b.fireSafetyCheckId && b.legionellaCheckId && b.foodRecordId, JSON.stringify({ fireSafetyCheckId: b.fireSafetyCheckId, legionellaCheckId: b.legionellaCheckId, foodRecordId: b.foodRecordId }));
 
   await attack(b, a);
   await attack(a, b);
