@@ -105,7 +105,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   // compliance item or a contractor. Scope by joining to whichever owner
   // belongs to the current client.
   const { certificatesTable } = await import("@workspace/db/schema");
-  const { or, sql: dsql } = await import("drizzle-orm");
+  const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
   const certs = await db
     .select({
       itemId: certificatesTable.itemId,
@@ -114,7 +114,7 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
     })
     .from(certificatesTable)
     .where(
-      or(
+      orDynamic(
         dsql`${certificatesTable.contractorId} IN (SELECT id FROM ${contractorsTable} WHERE ${contractorsTable.clientId} = ${clientId})`,
         dsql`${certificatesTable.itemId} IN (SELECT id FROM ${complianceItemsTable} WHERE ${complianceItemsTable.clientId} = ${clientId})`,
       ),

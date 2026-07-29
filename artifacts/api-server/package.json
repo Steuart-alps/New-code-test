@@ -12,7 +12,9 @@
     "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
     "test:trial-reminders": "node tests/trial-reminders.mjs",
     "test:modules": "node tests/module-routes.mjs",
-    "test:modules:ci": "bash tests/run-module-routes.sh"
+    "test:modules:ci": "bash tests/run-module-routes.sh",
+    "test:dept-isolation": "node tests/dept-isolation.mjs",
+    "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

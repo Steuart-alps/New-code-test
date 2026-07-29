@@ -1,17 +1,26 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { useListSites, type Site } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { useAuth } from "@/context/auth-context";
+import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, Building2, MapPin, Phone, User, ChevronRight, Search } from "lucide-react";
+
+interface Department {
+  id: number;
+  name: string;
+  clientId: number;
+}
 
 interface FormState {
   name: string;
@@ -25,11 +34,20 @@ const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
   const { createSite, updateSite, deleteSite } = useAppMutations();
+  const { activeClientId } = useAuth();
 
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(empty);
+
+  useEffect(() => {
+    apiFetch(`/departments${activeClientId ? `?clientId=${activeClientId}` : ""}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setDepartments)
+      .catch(() => {});
+  }, [activeClientId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -129,10 +147,18 @@ export default function SitesPage() {
               </div>
 
               <div className="space-y-1.5 text-sm text-muted-foreground flex-1">
+                {(() => {
+                  const dept = departments.find(d => d.id === (site as any).departmentId);
+                  return dept ? (
+                    <div className="mb-1">
+                      <Badge variant="secondary" className="text-xs font-normal">{dept.name}</Badge>
+                    </div>
+                  ) : null;
+                })()}
                 {site.responsiblePerson && <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 opacity-60" />{site.responsiblePerson}</div>}
                 {site.address && <div className="flex items-start gap-2"><MapPin className="w-3.5 h-3.5 opacity-60 mt-0.5" /><span className="line-clamp-2">{site.address}</span></div>}
                 {site.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 opacity-60" />{site.phone}</div>}
-                {!site.responsiblePerson && !site.address && !site.phone && <p className="italic text-xs opacity-60">No site details set yet.</p>}
+                {!site.responsiblePerson && !site.address && !site.phone && !((site as any).departmentId) && <p className="italic text-xs opacity-60">No site details set yet.</p>}
               </div>
 
               <Link href={`/sites/${site.id}`} className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline font-medium">
