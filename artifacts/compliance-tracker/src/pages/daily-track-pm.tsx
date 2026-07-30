@@ -101,14 +101,48 @@ const KITCHEN_CLOSING_ITEMS: ChecklistItem[] = [
 ];
 
 const PREMISES_CLOSING_ITEMS: ChecklistItem[] = [
-  { label: "All windows and external doors locked", checked: false },
-  { label: "Alarm set", checked: false },
-  { label: "Fire exits checked and secured", checked: false },
-  { label: "All electrical equipment switched off (except fridges / freezers)", checked: false },
-  { label: "Lights off", checked: false },
-  { label: "Heating adjusted for overnight", checked: false },
-  { label: "Safe / cash register secured", checked: false },
-  { label: "Final walkthrough completed", checked: false },
+  // Compliance
+  { section: "Compliance", label: "Security walk round has been completed", checked: false },
+  { label: "Hot water available", checked: false },
+  { label: "All internal escape routes are free from obstructions", checked: false },
+  { label: "All internal fire doors open freely and are closed where required", checked: false },
+  { label: "Final fire exit doors are unlocked / unbolted and open freely — push bars / pads undamaged", checked: false },
+  { label: "External escape routes are clear", checked: false },
+  { label: "Fire extinguishers are unobstructed and clearly visible", checked: false },
+  { label: "Manual break glass call points are unobstructed and clearly visible", checked: false },
+  { label: "Emergency lights are in working order", checked: false },
+  { label: "All access to and egress from the premises are free from obstructions or hazards", checked: false },
+  { label: "Internal public areas are safe and well maintained", checked: false },
+  { label: "Chemicals are stored correctly and chemical storage area is locked", checked: false },
+  { label: "Staff and working areas are safe, well maintained and hazard free", checked: false },
+  { label: "Work and electrical equipment is in good working order — no trailing or exposed wiring", checked: false },
+  { label: "Sufficient means for hand drying — blue roll available in holders", checked: false },
+  { label: "Any other maintenance issues noted and reported", checked: false },
+  // Operational
+  { section: "Operational", label: "Daily banking completed", checked: false },
+  { label: "Heating, lighting and sound levels all set for shift", checked: false },
+  { label: "Start of day — all tills out", checked: false },
+  { label: "Front of house, bar and kitchen set-ups checked and OK", checked: false },
+  { label: "Pre-shift meeting held — special events, bookings and allergen requirements discussed", checked: false },
+  { label: "Pre-shift walk around completed", checked: false },
+  { label: "Toilets clean and sufficiently stocked (toilet paper, soap, hand towels)", checked: false },
+  { label: "Lighting levels sufficient", checked: false },
+  { label: "Car park clean and tidy", checked: false },
+  { label: "All bins emptied (internal and external)", checked: false },
+  { label: "External doors unlocked and working when required", checked: false },
+  { label: "Daily line counts completed", checked: false },
+  { label: "Booking systems checked", checked: false },
+  { label: "All customer feedback responded to", checked: false },
+  { label: "Defibrillator checked and operational", checked: false },
+  // Bar Fridges
+  { section: "Bar Fridges", label: "Bar fridge Unit 1 — temperature recorded (PM)", checked: false },
+  { label: "Bar fridge Unit 2 — temperature recorded (PM)", checked: false },
+  { label: "Bar fridge Unit 3 — temperature recorded (PM)", checked: false },
+  { label: "Bar fridge Unit 4 — temperature recorded (PM)", checked: false },
+  { label: "Bar fridge Unit 5 — temperature recorded (PM)", checked: false },
+  // Today's Tasks
+  { section: "Today's Tasks", label: "Duty First Aiders appointed", checked: false },
+  { label: "Duty Fire Marshals appointed", checked: false },
 ];
 
 const TEMPLATES: Record<string, ChecklistItem[]> = {
