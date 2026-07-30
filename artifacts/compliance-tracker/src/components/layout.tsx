@@ -44,35 +44,14 @@ function useNavGroups() {
       ],
     },
     {
-      title: "FIRETRACK",
+      title: "MODULES",
       items: [
-        { href: "/fire-safety", label: "FireTrack", icon: Flame, serviceKey: "firetrack" },
-      ],
-    },
-    {
-      title: "KITCHENTRACK",
-      items: [
-        { href: "/kitchen", label: "KitchenTrack", icon: UtensilsCrossed, serviceKey: "kitchentrack" },
-      ],
-    },
-    {
-      title: "LEGIONELLATRACK",
-      items: [
-        { href: "/legionella", label: "LegionellaTrack", icon: Droplets, serviceKey: "legionellatrack" },
-      ],
-    },
-    {
-      title: "SAFETRACK",
-      items: [
-        { href: "/safe-track", label: "SafeTrack", icon: GraduationCap, serviceKey: "safetrack" },
-      ],
-    },
-    {
-      title: "DAILYTRACK",
-      items: [
-        { href: "/daily-track-am", label: "DailyTrack AM", icon: Sunrise, serviceKey: "dailytrack_am" },
-        { href: "/daily-track-pm", label: "DailyTrack PM", icon: Sunset, serviceKey: "dailytrack_pm" },
-        { href: "/daily-track-status", label: "Daily Status", icon: LayoutGrid, serviceKey: "dailytrack_pm" },
+        { href: "/fire-safety",    label: "FireTrack",       icon: Flame,           serviceKey: "firetrack" },
+        { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+        { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
+        { href: "/safe-track",     label: "SafeTrack",       icon: GraduationCap,   serviceKey: "safetrack" },
+        { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKey: "dailytrack_am" },
+        { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKey: "dailytrack_pm" },
       ],
     },
   ];

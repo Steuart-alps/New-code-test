@@ -8,12 +8,260 @@ import {
 import {
   FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2,
   CheckCircle2, Circle, LayoutGrid, ArrowRight, Sunrise, Sunset,
+  Flame, UtensilsCrossed, Droplets, GraduationCap, AlertTriangle,
 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+// ── Module track summary cards ────────────────────────────────────────────────
+
+type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
+
+function statusPill(overdue: number, dueSoon: number, ok: number, never: number) {
+  if (overdue > 0) return { label: `${overdue} overdue`, cls: "bg-red-100 text-red-700" };
+  if (dueSoon > 0) return { label: `${dueSoon} due soon`, cls: "bg-amber-100 text-amber-700" };
+  if (ok > 0) return { label: "All checks OK", cls: "bg-emerald-100 text-emerald-700" };
+  return { label: "No records yet", cls: "bg-muted text-muted-foreground" };
+}
+
+function CheckStatusBar({ items }: { items: { status: CheckStatus }[] }) {
+  const counts = { ok: 0, due_soon: 0, overdue: 0, never: 0 };
+  items.forEach(i => { counts[i.status]++; });
+  const total = items.length || 1;
+  return (
+    <div className="space-y-2">
+      <div className="flex h-2 rounded-full overflow-hidden gap-px">
+        {counts.ok > 0 && <div className="bg-emerald-500" style={{ width: `${(counts.ok / total) * 100}%` }} />}
+        {counts.due_soon > 0 && <div className="bg-amber-400" style={{ width: `${(counts.due_soon / total) * 100}%` }} />}
+        {counts.overdue > 0 && <div className="bg-red-500" style={{ width: `${(counts.overdue / total) * 100}%` }} />}
+        {counts.never > 0 && <div className="bg-muted" style={{ width: `${(counts.never / total) * 100}%` }} />}
+      </div>
+      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+        {counts.ok > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />{counts.ok} ok</span>}
+        {counts.due_soon > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />{counts.due_soon} due soon</span>}
+        {counts.overdue > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{counts.overdue} overdue</span>}
+        {counts.never > 0 && <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-muted-foreground/30 inline-block" />{counts.never} never</span>}
+      </div>
+    </div>
+  );
+}
+
+function FireTrackCard() {
+  const [statuses, setStatuses] = useState<{ checkType: string; status: CheckStatus }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/fire-safety/status")
+      .then(r => r.ok ? r.json() : [])
+      .then(setStatuses)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const counts = { ok: 0, due_soon: 0, overdue: 0, never: 0 };
+  statuses.forEach(s => { counts[s.status]++; });
+  const pill = statusPill(counts.overdue, counts.due_soon, counts.ok, counts.never);
+
+  return (
+    <Link href="/fire-safety">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-orange-50 rounded-lg"><Flame className="w-4 h-4 text-orange-600" /></div>
+              <span className="text-sm font-semibold">FireTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? <div className="h-2 bg-muted rounded-full animate-pulse" /> : <CheckStatusBar items={statuses} />}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function LegionellaTrackCard() {
+  const [statuses, setStatuses] = useState<{ checkType: string; status: CheckStatus }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/legionella/status")
+      .then(r => r.ok ? r.json() : [])
+      .then(setStatuses)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const counts = { ok: 0, due_soon: 0, overdue: 0, never: 0 };
+  statuses.forEach(s => { counts[s.status]++; });
+  const pill = statusPill(counts.overdue, counts.due_soon, counts.ok, counts.never);
+
+  return (
+    <Link href="/legionella">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-sky-50 rounded-lg"><Droplets className="w-4 h-4 text-sky-600" /></div>
+              <span className="text-sm font-semibold">LegionellaTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? <div className="h-2 bg-muted rounded-full animate-pulse" /> : <CheckStatusBar items={statuses} />}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function KitchenTrackCard() {
+  const [records, setRecords] = useState<{ id: number; recordDate: string; submittedAt: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/food-safety/")
+      .then(r => r.ok ? r.json() : [])
+      .then(setRecords)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const today = new Date();
+  const sevenDaysAgo = new Date(today); sevenDaysAgo.setDate(today.getDate() - 6);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const recentSubmitted = records.filter(r => r.submittedAt && r.recordDate >= fmt(sevenDaysAgo)).length;
+  const lastRecord = records.filter(r => r.submittedAt).sort((a, b) => b.recordDate.localeCompare(a.recordDate))[0];
+  const todayRecord = records.find(r => r.recordDate === fmt(today));
+
+  const pill = !lastRecord
+    ? { label: "No records yet", cls: "bg-muted text-muted-foreground" }
+    : todayRecord?.submittedAt
+      ? { label: "Today submitted", cls: "bg-emerald-100 text-emerald-700" }
+      : { label: "Today pending", cls: "bg-amber-100 text-amber-700" };
+
+  return (
+    <Link href="/kitchen">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-amber-50 rounded-lg"><UtensilsCrossed className="w-4 h-4 text-amber-600" /></div>
+              <span className="text-sm font-semibold">KitchenTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Last 7 days submitted</span>
+                <span className="font-semibold tabular-nums">{recentSubmitted}/7</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-amber-400 rounded-full" style={{ width: `${(recentSubmitted / 7) * 100}%` }} />
+              </div>
+              {lastRecord && (
+                <p className="text-[11px] text-muted-foreground pt-0.5">
+                  Last submitted: {lastRecord.recordDate}
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function SafeTrackCard() {
+  const [records, setRecords] = useState<{ id: number; expiryDate?: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/safe-track/training-records")
+      .then(r => r.ok ? r.json() : [])
+      .then(setRecords)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+  const in30Iso = in30.toISOString().slice(0, 10);
+
+  const withExpiry = records.filter(r => r.expiryDate);
+  const expired = withExpiry.filter(r => r.expiryDate! < today).length;
+  const expiringSoon = withExpiry.filter(r => r.expiryDate! >= today && r.expiryDate! <= in30Iso).length;
+
+  const pill = expired > 0
+    ? { label: `${expired} expired`, cls: "bg-red-100 text-red-700" }
+    : expiringSoon > 0
+      ? { label: `${expiringSoon} expiring soon`, cls: "bg-amber-100 text-amber-700" }
+      : { label: records.length > 0 ? "All current" : "No records yet", cls: records.length > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground" };
+
+  return (
+    <Link href="/safe-track">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-violet-50 rounded-lg"><GraduationCap className="w-4 h-4 text-violet-600" /></div>
+              <span className="text-sm font-semibold">SafeTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", expired > 0 ? "text-red-600" : "text-foreground")}>{expired}</p>
+                <p className="text-muted-foreground">Expired</p>
+              </div>
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", expiringSoon > 0 ? "text-amber-600" : "text-foreground")}>{expiringSoon}</p>
+                <p className="text-muted-foreground">Due in 30d</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-display font-bold">{records.length}</p>
+                <p className="text-muted-foreground">Total records</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function ModuleTrackRow({ hasService }: { hasService: (key: string) => boolean }) {
+  const cards = [
+    { key: "firetrack",       node: <FireTrackCard /> },
+    { key: "kitchentrack",    node: <KitchenTrackCard /> },
+    { key: "legionellatrack", node: <LegionellaTrackCard /> },
+    { key: "safetrack",       node: <SafeTrackCard /> },
+  ].filter(c => hasService(c.key));
+
+  if (cards.length === 0) return null;
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+        <AlertTriangle className="w-3.5 h-3.5" /> Module Status
+      </h2>
+      <div className={cn(
+        "grid gap-4",
+        cards.length === 1 && "grid-cols-1 max-w-xs",
+        cards.length === 2 && "grid-cols-1 sm:grid-cols-2",
+        cards.length === 3 && "grid-cols-1 sm:grid-cols-3",
+        cards.length >= 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4",
+      )}>
+        {cards.map(c => <div key={c.key}>{c.node}</div>)}
+      </div>
+    </div>
+  );
+}
 
 // ── Daily checklist snapshot ──────────────────────────────────────────────────
 
@@ -312,6 +560,8 @@ export default function Dashboard() {
           </Card>
         </Link>
       </div>
+
+      <ModuleTrackRow hasService={hasService} />
 
       {hasService("dailytrack_pm") && (
         <DailyChecklistSnapshot activeClientId={activeClientId} />
