@@ -11,81 +11,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useListSites } from "@workspace/api-client-react";
-import { Plus, Pencil, Trash2, Search, GraduationCap, FileText, ClipboardList, Users, CheckSquare } from "lucide-react";
-
-// ── Induction checklist template (ALPS H&S Induction Form) ───────────────────
-
-const INDUCTION_SECTIONS = [
-  { key: "accident_hazard",       label: "Accident & Hazard Reporting" },
-  { key: "asbestos",              label: "Asbestos Log" },
-  { key: "coshh",                 label: "COSHH" },
-  { key: "communication_hs",      label: "Communication & Consultation on H&S" },
-  { key: "dse",                   label: "Display Screen Equipment (DSE)" },
-  { key: "fire_emergency",        label: "Fire & Emergency Procedures" },
-  { key: "first_aid",             label: "First Aid Provision" },
-  { key: "hs_policy",             label: "Health & Safety Policy Statement" },
-  { key: "housekeeping_fire",     label: "Housekeeping — Fire Safety" },
-  { key: "housekeeping_elec",     label: "Housekeeping — Electrical Safety" },
-  { key: "housekeeping_general",  label: "Housekeeping — General Workplace Safety" },
-  { key: "infection_control",     label: "Infection Control" },
-  { key: "manual_handling",       label: "Manual Handling" },
-  { key: "vehicle_movement",      label: "Vehicle Movement" },
-  { key: "falls_height",          label: "Falls from Height" },
-  { key: "work_equipment",        label: "Work Equipment" },
-  { key: "working_at_height",     label: "Working at Height" },
-  { key: "lone_working",          label: "Lone Working / Personal Safety" },
-  { key: "medicines",             label: "Medicines" },
-  { key: "mobile_phone",          label: "Mobile Phone Use" },
-  { key: "ppe",                   label: "Personal Protective Equipment (PPE)" },
-  { key: "risk_assessments",      label: "Risk Assessments" },
-  { key: "wellbeing",             label: "Wellbeing" },
-  { key: "workplace_facilities",  label: "Workplace Facilities" },
-] as const;
-
-type SectionKey = typeof INDUCTION_SECTIONS[number]["key"];
-
-interface ChecklistItem {
-  key: SectionKey;
-  status: "yes" | "no" | "na" | "";
-  comments: string;
-}
-
-interface InductionChecklist {
-  jobTitle: string;
-  department: string;
-  items: ChecklistItem[];
-}
-
-function defaultChecklist(): InductionChecklist {
-  return {
-    jobTitle: "",
-    department: "",
-    items: INDUCTION_SECTIONS.map(s => ({ key: s.key, status: "", comments: "" })),
-  };
-}
-
-function parseChecklist(raw?: string | null): InductionChecklist {
-  if (!raw) return defaultChecklist();
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed?.items?.length) return parsed as InductionChecklist;
-  } catch { /* fall through */ }
-  return defaultChecklist();
-}
-
-function checklistProgress(raw?: string | null): string {
-  const cl = parseChecklist(raw);
-  const answered = cl.items.filter(i => i.status !== "").length;
-  return `${answered}/${cl.items.length}`;
-}
+import { Plus, Pencil, Trash2, Search, FileText, ClipboardList } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface RiskAssessment { id: number; title: string; description?: string | null; assessedBy?: string | null; reviewDate?: string | null; status: string; version: string; siteId?: number | null; createdAt: string; }
 interface Sop { id: number; title: string; scope?: string | null; content?: string | null; version: string; publishedAt?: string | null; siteId?: number | null; createdAt: string; }
-interface TrainingRecord { id: number; staffName: string; trainingType: string; completedAt: string; expiryDate?: string | null; notes?: string | null; siteId?: number | null; createdAt: string; }
-interface Induction { id: number; staffName: string; startDate: string; completedAt?: string | null; checklist?: string | null; notes?: string | null; siteId?: number | null; createdAt: string; }
-interface CompetencySignoff { id: number; staffName: string; taskName: string; signedOffBy: string; signedOffAt: string; notes?: string | null; siteId?: number | null; createdAt: string; }
 
 const RA_STATUS_COLORS: Record<string, string> = {
   draft: "bg-amber-100 text-amber-800",
@@ -159,9 +90,6 @@ export default function SafeTrackPage() {
   // Data
   const [ras, setRas] = useState<RiskAssessment[]>([]);
   const [sops, setSops] = useState<Sop[]>([]);
-  const [training, setTraining] = useState<TrainingRecord[]>([]);
-  const [inductions, setInductions] = useState<Induction[]>([]);
-  const [competency, setCompetency] = useState<CompetencySignoff[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Dialog
@@ -175,14 +103,11 @@ export default function SafeTrackPage() {
   async function load() {
     setLoading(true);
     try {
-      const [r1, r2, r3, r4, r5] = await Promise.all([
+      const [r1, r2] = await Promise.all([
         apiFetch(`${base}/risk-assessments`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/sops`).then(r => r.ok ? r.json() : []),
-        apiFetch(`${base}/training-records`).then(r => r.ok ? r.json() : []),
-        apiFetch(`${base}/inductions`).then(r => r.ok ? r.json() : []),
-        apiFetch(`${base}/competency`).then(r => r.ok ? r.json() : []),
       ]);
-      setRas(r1); setSops(r2); setTraining(r3); setInductions(r4); setCompetency(r5);
+      setRas(r1); setSops(r2);
     } finally { setLoading(false); }
   }
 
@@ -247,70 +172,9 @@ export default function SafeTrackPage() {
       ],
     }));
 
-  // ── Training Records tab ──────────────────────────────────────────────────
-  const trRows = training
-    .filter(t => !q || [t.staffName, t.trainingType].some(v => v?.toLowerCase().includes(q)))
-    .map(t => ({
-      id: t.id,
-      cells: [
-        <span className="font-medium">{t.staffName}</span>,
-        <span>{t.trainingType}</span>,
-        <span className="text-muted-foreground">{t.completedAt}</span>,
-        t.expiryDate
-          ? <span className={new Date(t.expiryDate) < new Date() ? "text-destructive font-medium" : "text-muted-foreground"}>{t.expiryDate}</span>
-          : <span className="text-muted-foreground">—</span>,
-        <span className="text-muted-foreground">{siteName(t.siteId) ?? "All sites"}</span>,
-      ],
-    }));
-
-  // ── Inductions tab ────────────────────────────────────────────────────────
-  const indRows = inductions
-    .filter(i => !q || i.staffName.toLowerCase().includes(q))
-    .map(i => {
-      const cl = parseChecklist(i.checklist);
-      const answered = cl.items.filter(x => x.status !== "").length;
-      const total = cl.items.length;
-      const pct = total > 0 ? Math.round((answered / total) * 100) : 0;
-      return {
-        id: i.id,
-        cells: [
-          <span className="font-medium">{i.staffName}</span>,
-          <span className="text-muted-foreground text-xs">{cl.jobTitle || "—"}{cl.department ? ` · ${cl.department}` : ""}</span>,
-          <span className="text-muted-foreground">{i.startDate}</span>,
-          i.completedAt
-            ? <Badge className="bg-emerald-100 text-emerald-800 text-xs font-normal">Complete</Badge>
-            : <Badge variant="secondary" className="text-xs font-normal">In progress</Badge>,
-          <div className="flex items-center gap-2 min-w-[100px]">
-            <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
-              <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
-            </div>
-            <span className="text-xs text-muted-foreground whitespace-nowrap">{answered}/{total}</span>
-          </div>,
-          <span className="text-muted-foreground">{siteName(i.siteId) ?? "All sites"}</span>,
-        ],
-      };
-    });
-
-  // ── Competency tab ────────────────────────────────────────────────────────
-  const compRows = competency
-    .filter(c => !q || [c.staffName, c.taskName, c.signedOffBy].some(v => v?.toLowerCase().includes(q)))
-    .map(c => ({
-      id: c.id,
-      cells: [
-        <span className="font-medium">{c.staffName}</span>,
-        <span>{c.taskName}</span>,
-        <span className="text-muted-foreground">{c.signedOffBy}</span>,
-        <span className="text-muted-foreground">{c.signedOffAt}</span>,
-        <span className="text-muted-foreground">{siteName(c.siteId) ?? "All sites"}</span>,
-      ],
-    }));
-
   const tabConfig = {
     risk: { label: "Risk Assessments", icon: FileText, sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], rows: raRows },
     sops: { label: "SOPs", icon: ClipboardList, sub: "sops", headers: ["Title", "Status", "Version", "Scope", "Site"], rows: sopRows },
-    training: { label: "Training Records", icon: GraduationCap, sub: "training-records", headers: ["Staff", "Training Type", "Completed", "Expiry", "Site"], rows: trRows },
-    inductions: { label: "Inductions", icon: Users, sub: "inductions", headers: ["Staff", "Role / Dept", "Start Date", "Status", "Progress", "Site"], rows: indRows },
-    competency: { label: "Competency", icon: CheckSquare, sub: "competency", headers: ["Staff", "Task", "Signed Off By", "Date", "Site"], rows: compRows },
   } as const;
 
   type TabKey = keyof typeof tabConfig;
@@ -319,7 +183,7 @@ export default function SafeTrackPage() {
   return (
     <AppLayout title="SafeTrack">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-        <p className="text-muted-foreground hidden sm:block">Training records, risk assessments, SOPs, inductions and competency sign-offs.</p>
+        <p className="text-muted-foreground hidden sm:block">Risk assessments and standard operating procedures.</p>
         {canAdmin && (
           <Button onClick={openCreate} className="shadow-lg shadow-primary/20 w-full sm:w-auto">
             <Plus className="w-4 h-4 mr-2" /> Add Record
@@ -356,7 +220,7 @@ export default function SafeTrackPage() {
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
                   rows={cfg.rows}
-                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "training" ? training : tab === "inductions" ? inductions : competency).find((r: any) => r.id === id)) : undefined}
+                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : sops).find((r: any) => r.id === id)) : undefined}
                   onDelete={id => handleDelete(cfg.sub, id)}
                   canAdmin={canAdmin}
                 />
@@ -377,9 +241,6 @@ export default function SafeTrackPage() {
           <div className="space-y-4 py-2">
             {tab === "risk" && <RaForm form={form} setForm={setForm} />}
             {tab === "sops" && <SopForm form={form} setForm={setForm} />}
-            {tab === "training" && <TrainingForm form={form} setForm={setForm} />}
-            {tab === "inductions" && <InductionForm form={form} setForm={setForm} />}
-            {tab === "competency" && <CompetencyForm form={form} setForm={setForm} />}
             <div className="space-y-1.5">
               <Label>Site (optional)</Label>
               <SiteSelect value={form.siteId ?? "__none__"} onChange={v => setForm({ ...form, siteId: v })} />
@@ -440,121 +301,5 @@ function SopForm({ form, setForm }: { form: any; setForm: any }) {
         </Select>
       </F>
     </div>
-  </>;
-}
-
-function TrainingForm({ form, setForm }: { form: any; setForm: any }) {
-  return <>
-    <F label="Staff Name *"><Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Full name" autoFocus /></F>
-    <F label="Training Type *"><Input value={form.trainingType ?? ""} onChange={e => setForm({ ...form, trainingType: e.target.value })} placeholder="e.g. Food Hygiene Level 2, Manual Handling" /></F>
-    <div className="grid grid-cols-2 gap-4">
-      <F label="Completed *"><Input type="date" value={form.completedAt ?? ""} onChange={e => setForm({ ...form, completedAt: e.target.value })} /></F>
-      <F label="Expiry Date"><Input type="date" value={form.expiryDate ?? ""} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></F>
-    </div>
-    <F label="Notes"><Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} /></F>
-  </>;
-}
-
-function InductionForm({ form, setForm }: { form: any; setForm: any }) {
-  const cl = parseChecklist(form.checklist);
-
-  function updateMeta(field: "jobTitle" | "department", value: string) {
-    const next = { ...cl, [field]: value };
-    setForm({ ...form, checklist: JSON.stringify(next) });
-  }
-
-  function updateItem(key: SectionKey, field: "status" | "comments", value: string) {
-    const next = {
-      ...cl,
-      items: cl.items.map(i => i.key === key ? { ...i, [field]: value } : i),
-    };
-    setForm({ ...form, checklist: JSON.stringify(next) });
-  }
-
-  const STATUS_OPTS: { value: "yes" | "no" | "na" | ""; label: string; active: string }[] = [
-    { value: "yes", label: "Yes", active: "bg-emerald-600 text-white border-emerald-600" },
-    { value: "no",  label: "No",  active: "bg-red-500 text-white border-red-500" },
-    { value: "na",  label: "N/A", active: "bg-slate-400 text-white border-slate-400" },
-  ];
-
-  return <>
-    <F label="Staff Name *">
-      <Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Full name" autoFocus />
-    </F>
-    <div className="grid grid-cols-2 gap-4">
-      <F label="Job Title">
-        <Input value={cl.jobTitle} onChange={e => updateMeta("jobTitle", e.target.value)} placeholder="e.g. Kitchen Assistant" />
-      </F>
-      <F label="Department">
-        <Input value={cl.department} onChange={e => updateMeta("department", e.target.value)} placeholder="e.g. Kitchen" />
-      </F>
-    </div>
-    <div className="grid grid-cols-2 gap-4">
-      <F label="Start Date *">
-        <Input type="date" value={form.startDate ?? ""} onChange={e => setForm({ ...form, startDate: e.target.value })} />
-      </F>
-      <F label="Completed Date">
-        <Input type="date" value={form.completedAt ?? ""} onChange={e => setForm({ ...form, completedAt: e.target.value })} />
-      </F>
-    </div>
-
-    {/* Induction checklist */}
-    <div className="space-y-1.5">
-      <Label>H&S Induction Checklist</Label>
-      <p className="text-xs text-muted-foreground">Mark each item as covered (Yes), not applicable (N/A), or not yet covered (No). Add comments where needed.</p>
-      <div className="border border-border rounded-lg overflow-hidden divide-y divide-border mt-2">
-        {/* Header row */}
-        <div className="grid grid-cols-[1fr_auto] gap-2 bg-muted/50 px-3 py-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Topic</span>
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Covered?</span>
-        </div>
-        {cl.items.map(item => {
-          const section = INDUCTION_SECTIONS.find(s => s.key === item.key);
-          return (
-            <div key={item.key} className="px-3 py-3 space-y-2 bg-card">
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-sm font-medium text-foreground leading-snug pt-0.5">{section?.label}</span>
-                <div className="flex gap-1 flex-shrink-0">
-                  {STATUS_OPTS.map(opt => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => updateItem(item.key, "status", item.status === opt.value ? "" : opt.value)}
-                      className={`px-2.5 py-1 text-xs border rounded transition-colors ${
-                        item.status === opt.value ? opt.active : "border-border text-muted-foreground hover:border-foreground/40"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <Input
-                value={item.comments}
-                onChange={e => updateItem(item.key, "comments", e.target.value)}
-                placeholder="Comments…"
-                className="h-7 text-xs bg-background"
-              />
-            </div>
-          );
-        })}
-      </div>
-    </div>
-
-    <F label="Notes / Sign-off Comments">
-      <Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Manager sign-off notes…" />
-    </F>
-  </>;
-}
-
-function CompetencyForm({ form, setForm }: { form: any; setForm: any }) {
-  return <>
-    <F label="Staff Name *"><Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Full name" autoFocus /></F>
-    <F label="Task / Skill *"><Input value={form.taskName ?? ""} onChange={e => setForm({ ...form, taskName: e.target.value })} placeholder="e.g. Safe use of industrial oven" /></F>
-    <div className="grid grid-cols-2 gap-4">
-      <F label="Signed Off By *"><Input value={form.signedOffBy ?? ""} onChange={e => setForm({ ...form, signedOffBy: e.target.value })} /></F>
-      <F label="Date *"><Input type="date" value={form.signedOffAt ?? ""} onChange={e => setForm({ ...form, signedOffAt: e.target.value })} /></F>
-    </div>
-    <F label="Notes"><Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} /></F>
   </>;
 }

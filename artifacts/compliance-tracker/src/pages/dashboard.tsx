@@ -8,7 +8,7 @@ import {
 import {
   FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2,
   CheckCircle2, Circle, LayoutGrid, ArrowRight, Sunrise, Sunset,
-  Flame, UtensilsCrossed, Droplets, GraduationCap, AlertTriangle,
+  Flame, UtensilsCrossed, Droplets, FileText, AlertTriangle,
 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link, useLocation } from "wouter";
@@ -176,29 +176,30 @@ function KitchenTrackCard() {
 }
 
 function SafeTrackCard() {
-  const [records, setRecords] = useState<{ id: number; expiryDate?: string | null }[]>([]);
+  const [ras, setRas] = useState<{ id: number; status: string; reviewDate?: string | null }[]>([]);
+  const [sops, setSops] = useState<{ id: number; publishedAt?: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch("/safe-track/training-records")
-      .then(r => r.ok ? r.json() : [])
-      .then(setRecords)
-      .finally(() => setLoading(false));
+    Promise.all([
+      apiFetch("/safe-track/risk-assessments").then(r => r.ok ? r.json() : []),
+      apiFetch("/safe-track/sops").then(r => r.ok ? r.json() : []),
+    ]).then(([r, s]) => { setRas(r); setSops(s); }).finally(() => setLoading(false));
   }, []);
 
   const today = new Date().toISOString().slice(0, 10);
   const in30 = new Date(); in30.setDate(in30.getDate() + 30);
   const in30Iso = in30.toISOString().slice(0, 10);
 
-  const withExpiry = records.filter(r => r.expiryDate);
-  const expired = withExpiry.filter(r => r.expiryDate! < today).length;
-  const expiringSoon = withExpiry.filter(r => r.expiryDate! >= today && r.expiryDate! <= in30Iso).length;
+  const overdueRas = ras.filter(r => r.reviewDate && r.reviewDate < today).length;
+  const dueSoonRas = ras.filter(r => r.reviewDate && r.reviewDate >= today && r.reviewDate <= in30Iso).length;
+  const publishedSops = sops.filter(s => s.publishedAt).length;
 
-  const pill = expired > 0
-    ? { label: `${expired} expired`, cls: "bg-red-100 text-red-700" }
-    : expiringSoon > 0
-      ? { label: `${expiringSoon} expiring soon`, cls: "bg-amber-100 text-amber-700" }
-      : { label: records.length > 0 ? "All current" : "No records yet", cls: records.length > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground" };
+  const pill = overdueRas > 0
+    ? { label: `${overdueRas} review overdue`, cls: "bg-red-100 text-red-700" }
+    : dueSoonRas > 0
+      ? { label: `${dueSoonRas} review due soon`, cls: "bg-amber-100 text-amber-700" }
+      : { label: ras.length > 0 ? "All current" : "No records yet", cls: ras.length > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground" };
 
   return (
     <Link href="/safe-track">
@@ -206,7 +207,7 @@ function SafeTrackCard() {
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <div className="p-2 bg-violet-50 rounded-lg"><GraduationCap className="w-4 h-4 text-violet-600" /></div>
+              <div className="p-2 bg-violet-50 rounded-lg"><FileText className="w-4 h-4 text-violet-600" /></div>
               <span className="text-sm font-semibold">SafeTrack</span>
             </div>
             <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
@@ -216,16 +217,16 @@ function SafeTrackCard() {
           ) : (
             <div className="flex items-center gap-4 text-xs">
               <div className="text-center">
-                <p className={cn("text-lg font-display font-bold", expired > 0 ? "text-red-600" : "text-foreground")}>{expired}</p>
-                <p className="text-muted-foreground">Expired</p>
+                <p className={cn("text-lg font-display font-bold", overdueRas > 0 ? "text-red-600" : "text-foreground")}>{ras.length}</p>
+                <p className="text-muted-foreground">Risk Assessments</p>
               </div>
               <div className="text-center">
-                <p className={cn("text-lg font-display font-bold", expiringSoon > 0 ? "text-amber-600" : "text-foreground")}>{expiringSoon}</p>
-                <p className="text-muted-foreground">Due in 30d</p>
+                <p className="text-lg font-display font-bold">{publishedSops}</p>
+                <p className="text-muted-foreground">SOPs live</p>
               </div>
               <div className="text-center">
-                <p className="text-lg font-display font-bold">{records.length}</p>
-                <p className="text-muted-foreground">Total records</p>
+                <p className={cn("text-lg font-display font-bold", sops.length - publishedSops > 0 ? "text-amber-600" : "text-foreground")}>{sops.length - publishedSops}</p>
+                <p className="text-muted-foreground">SOPs draft</p>
               </div>
             </div>
           )}
