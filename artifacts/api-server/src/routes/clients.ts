@@ -126,6 +126,20 @@ router.post("/starter-pack/load", requireAuth, async (req, res) => {
     }
   }
 
+  // Guard: skip re-seeding if the client already has compliance items so the
+  // starter pack cannot be loaded more than once per account.
+  const { complianceItemsTable } = await import("@workspace/db/schema");
+  const { eq: eqItems } = await import("drizzle-orm");
+  const existing = await db
+    .select({ id: complianceItemsTable.id })
+    .from(complianceItemsTable)
+    .where(eqItems(complianceItemsTable.clientId, clientId))
+    .limit(1);
+  if (existing.length > 0) {
+    res.status(409).json({ error: "Starter pack has already been loaded for this account." });
+    return;
+  }
+
   await seedStarterContent(clientId);
   res.json({ ok: true });
 });

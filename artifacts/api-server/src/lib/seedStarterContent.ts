@@ -133,6 +133,18 @@ export async function seedStarterContent(clientId: number) {
  */
 export async function seedSiteStarterChecks(clientId: number, siteId: number) {
   try {
+    // Guard: if this site already has compliance items, skip seeding so the
+    // starter pack cannot be loaded more than once per site.
+    const alreadySeeded = await db
+      .select({ id: complianceItemsTable.id })
+      .from(complianceItemsTable)
+      .where(eq(complianceItemsTable.siteId, siteId))
+      .limit(1);
+    if (alreadySeeded.length > 0) {
+      logger.info({ clientId, siteId }, "Skipping site starter seed — items already exist for this site");
+      return;
+    }
+
     // Look up existing categories for this client so we can reuse them.
     const existing = await db
       .select()
