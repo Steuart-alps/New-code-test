@@ -64,6 +64,7 @@ const MODULES = [
     required: false,
     description: "Digital food safety diary — daily temperature logs, delivery checks, and HACCP records for food businesses.",
     features: [
+      "Kitchen open & close checks",
       "Daily cooking, cooling & hot-holding temps",
       "Delivery & cold food checks",
       "Corrective action logging",
@@ -89,6 +90,26 @@ const MODULES = [
       "Tank inspection & risk assessment logging",
       "Temperature recording with °C field",
       "Overdue check alerts by type",
+    ],
+  },
+  {
+    key: "premisestrack",
+    label: "PremisesTrack",
+    price: 10,
+    icon: Building2,
+    color: "text-violet-700",
+    bg: "bg-violet-50",
+    border: "border-violet-200",
+    activeBorder: "border-violet-500",
+    activeBg: "bg-violet-50",
+    required: false,
+    description: "Digital premises safety logbook — routine workplace inspections, fault reporting, and housekeeping records.",
+    features: [
+      "Routine premises inspection checklists",
+      "Slip, trip & fall hazard records",
+      "Maintenance fault & repair logging",
+      "Signage & housekeeping audits",
+      "Timestamped inspection history",
     ],
   },
 ];
@@ -374,11 +395,12 @@ export default function LandingPage() {
           </div>
 
           {/* Legislation callout strip */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { icon: Flame, label: "FireTrack", legislation: "Regulatory Reform (Fire Safety) Order 2005" },
               { icon: UtensilsCrossed, label: "KitchenTrack", legislation: "Food Safety Act 1990 + HACCP Regulation (EC) 852/2004" },
               { icon: Droplets, label: "LegionellaTrack", legislation: "HSG274 / L8 ACOP — Legionella bacteria control" },
+              { icon: Building2, label: "PremisesTrack", legislation: "Workplace (Health, Safety and Welfare) Regulations 1992" },
             ].map(({ icon: Icon, label, legislation }) => (
               <div key={label} className="bg-white/60 border border-border/40 p-5 flex items-start gap-4">
                 <Icon className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
