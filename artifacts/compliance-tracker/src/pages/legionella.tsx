@@ -34,7 +34,7 @@ const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
   cold_water_temp: "Cold water temperature check",
   hot_water_temp: "Hot water temperature check",
   sentinel_flush: "Sentinel outlet flush",
-  shower_clean: "Shower head / hose clean",
+  shower_clean: "Shower head / hose disinfection",
   tank_inspection: "Cold water storage tank inspection",
   risk_assessment: "Legionella risk assessment review",
 };

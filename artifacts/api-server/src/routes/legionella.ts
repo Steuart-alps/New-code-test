@@ -21,7 +21,7 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   cold_water_temp: 7,       // Weekly: cold outlets should be ≤20°C
   hot_water_temp: 7,        // Weekly: hot outlets should be ≥50°C
   sentinel_flush: 30,       // Monthly: flush little-used sentinel outlets
-  shower_clean: 30,         // Monthly: shower head/hose descale & disinfect
+  shower_clean: 90,         // Quarterly: shower head/hose descale & disinfect
   tank_inspection: 30,      // Monthly: cold water storage tank inspection
   risk_assessment: 365,     // Annual: Legionella risk assessment review
 };
