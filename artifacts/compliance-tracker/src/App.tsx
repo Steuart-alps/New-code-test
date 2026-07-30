@@ -31,6 +31,7 @@ import LegionellaPage from "@/pages/legionella";
 import SafeTrackPage from "@/pages/safe-track";
 import DailyTrackAmPage from "@/pages/daily-track-am";
 import DailyTrackPmPage from "@/pages/daily-track-pm";
+import DailyTrackStatusPage from "@/pages/daily-track-status";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -104,6 +105,7 @@ function ProtectedRoutes() {
       <Route path="/safe-track" component={SafeTrackPage} />
       <Route path="/daily-track-am" component={DailyTrackAmPage} />
       <Route path="/daily-track-pm" component={DailyTrackPmPage} />
+      <Route path="/daily-track-status" component={DailyTrackStatusPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}

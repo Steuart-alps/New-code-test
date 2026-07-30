@@ -20,6 +20,7 @@ import {
   GraduationCap,
   Sunrise,
   Sunset,
+  LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -71,6 +72,7 @@ function useNavGroups() {
       items: [
         { href: "/daily-track-am", label: "DailyTrack AM", icon: Sunrise, serviceKey: "dailytrack_am" },
         { href: "/daily-track-pm", label: "DailyTrack PM", icon: Sunset, serviceKey: "dailytrack_pm" },
+        { href: "/daily-track-status", label: "Daily Status", icon: LayoutGrid, serviceKey: "dailytrack_pm" },
       ],
     },
   ];

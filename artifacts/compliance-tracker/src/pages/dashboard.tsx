@@ -1,17 +1,188 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { useGetDashboardStats } from "@workspace/api-client-react";
+import { useGetDashboardStats, useListSites } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
-import { FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2 } from "lucide-react";
+import {
+  FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2,
+  CheckCircle2, Circle, LayoutGrid, ArrowRight, Sunrise, Sunset,
+} from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+// ── Daily checklist snapshot ──────────────────────────────────────────────────
+
+type RecordStatus = "submitted" | "draft" | "none";
+
+const CHECKLIST_COLS = [
+  { key: "kitchen_opening",  source: "am", label: "Kitchen Open",   Icon: Sunrise },
+  { key: "premises_opening", source: "am", label: "Premises Open",  Icon: Building },
+  { key: "kitchen_closing",  source: "pm", label: "Kitchen Close",  Icon: Sunset },
+  { key: "premises_closing", source: "pm", label: "Premises Close", Icon: Building },
+  { key: "signoff",          source: "so", label: "Sign-off",       Icon: CheckCircle2 },
+] as const;
+
+type ColKey = typeof CHECKLIST_COLS[number]["key"];
+
+function miniStatus(rows: any[], type: string, siteId: number, isSignoff = false): RecordStatus {
+  const r = isSignoff
+    ? rows.find((s: any) => s.siteId === siteId)
+    : rows.find((c: any) => c.checklistType === type && c.siteId === siteId);
+  if (!r) return "none";
+  return r.submittedAt ? "submitted" : "draft";
+}
+
+function MiniDot({ status }: { status: RecordStatus }) {
+  if (status === "submitted")
+    return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
+  if (status === "draft")
+    return <Clock className="w-3.5 h-3.5 text-amber-500" />;
+  return <Circle className="w-3.5 h-3.5 text-muted-foreground/25" />;
+}
+
+function DailyChecklistSnapshot({ activeClientId }: { activeClientId: number | null }) {
+  const { data: sites = [] } = useListSites();
+  const [amRows, setAmRows] = useState<any[]>([]);
+  const [pmRows, setPmRows] = useState<any[]>([]);
+  const [signoffs, setSignoffs] = useState<any[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const load = useCallback(async () => {
+    const params = new URLSearchParams({ date: today });
+    const [amRes, pmRes, soRes] = await Promise.all([
+      apiFetch(`/daily-track-am?${params}`),
+      apiFetch(`/daily-track-pm?${params}`),
+      apiFetch(`/daily-track-pm/signoffs?${params}`),
+    ]);
+    if (amRes.ok) setAmRows(await amRes.json());
+    if (pmRes.ok) setPmRows(await pmRes.json());
+    if (soRes.ok) setSignoffs(await soRes.json());
+    setLastUpdated(new Date());
+  }, [activeClientId, today]);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  if (!sites.length) return null;
+
+  // Per-site status
+  const siteRows = sites.map(site => {
+    const statuses: Record<ColKey, RecordStatus> = {
+      kitchen_opening:  miniStatus(amRows, "kitchen_opening",  site.id),
+      premises_opening: miniStatus(amRows, "premises_opening", site.id),
+      kitchen_closing:  miniStatus(pmRows, "kitchen_closing",  site.id),
+      premises_closing: miniStatus(pmRows, "premises_closing", site.id),
+      signoff:          miniStatus(signoffs, "signoff",        site.id, true),
+    };
+    const submitted = Object.values(statuses).filter(s => s === "submitted").length;
+    return { site, statuses, submitted };
+  });
+
+  const fullyDone  = siteRows.filter(r => r.submitted === 5).length;
+  const inProgress = siteRows.filter(r => r.submitted > 0 && r.submitted < 5).length;
+  const notStarted = siteRows.filter(r => r.submitted === 0).length;
+
+  return (
+    <Card className="mb-8 shadow-lg shadow-black/5 border-border/50 overflow-hidden">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <LayoutGrid className="w-4 h-4 text-primary" />
+          <CardTitle className="text-base font-display">Today's Daily Checklists</CardTitle>
+          <span className="text-xs text-muted-foreground ml-1">
+            {new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+          </span>
+          {lastUpdated && (
+            <span className="text-[10px] text-muted-foreground/60 hidden sm:inline">
+              · updated {lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        <Link href="/daily-track-status">
+          <span className="flex items-center gap-1 text-xs text-primary hover:underline cursor-pointer font-medium">
+            Full status <ArrowRight className="w-3 h-3" />
+          </span>
+        </Link>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {/* Summary pills */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          <span className={cn(
+            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+            fullyDone > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground",
+          )}>
+            <CheckCircle2 className="w-3 h-3" />
+            {fullyDone} complete
+          </span>
+          <span className={cn(
+            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+            inProgress > 0 ? "bg-amber-100 text-amber-700" : "bg-muted text-muted-foreground",
+          )}>
+            <Clock className="w-3 h-3" />
+            {inProgress} in progress
+          </span>
+          <span className={cn(
+            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+            notStarted > 0 && fullyDone < sites.length ? "bg-red-50 text-red-600" : "bg-muted text-muted-foreground",
+          )}>
+            <Circle className="w-3 h-3" />
+            {notStarted} not started
+          </span>
+        </div>
+
+        {/* Column headers */}
+        <div className="mb-1 pl-[140px] sm:pl-[200px] flex items-center gap-1">
+          {CHECKLIST_COLS.map(col => (
+            <div key={col.key} className="w-9 flex justify-center" title={col.label}>
+              <col.Icon className="w-3 h-3 text-muted-foreground/50" />
+            </div>
+          ))}
+          <div className="w-10 text-right text-[10px] text-muted-foreground/50 pr-1">Done</div>
+        </div>
+
+        {/* Site rows */}
+        <div className="space-y-1">
+          {siteRows.map(({ site, statuses, submitted }) => (
+            <Link key={site.id} href={`/daily-track-status?date=${today}`}>
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/40 transition-colors cursor-pointer group">
+                <span className="w-[124px] sm:w-[184px] text-sm truncate font-medium text-foreground/80 group-hover:text-foreground flex-shrink-0">
+                  {site.name}
+                </span>
+                <div className="flex items-center gap-1">
+                  {CHECKLIST_COLS.map(col => (
+                    <div key={col.key} className="w-9 flex justify-center">
+                      <MiniDot status={statuses[col.key]} />
+                    </div>
+                  ))}
+                </div>
+                <div className="w-10 text-right flex-shrink-0">
+                  <span className={cn(
+                    "text-xs font-medium tabular-nums",
+                    submitted === 5 ? "text-emerald-600" : submitted > 0 ? "text-amber-600" : "text-muted-foreground/40",
+                  )}>
+                    {submitted}/5
+                  </span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function Dashboard() {
-  const { activeClientId } = useAuth();
+  const { activeClientId, hasService } = useAuth();
   const isConsultant = useIsConsultant();
   const { toast } = useToast();
   const [, navigate] = useLocation();
@@ -141,6 +312,10 @@ export default function Dashboard() {
           </Card>
         </Link>
       </div>
+
+      {hasService("dailytrack_pm") && (
+        <DailyChecklistSnapshot activeClientId={activeClientId} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 shadow-lg shadow-black/5 border-border/50">

@@ -314,8 +314,9 @@ export default function DailyTrackPmPage() {
   const { data: sites = [] } = useListSites();
 
   const today = new Date().toISOString().slice(0, 10);
-  const [date, setDate] = useState(today);
-  const [siteId, setSiteId] = useState<string>("__none__");
+  const _qs = new URLSearchParams(window.location.search);
+  const [date, setDate] = useState(_qs.get("date") ?? today);
+  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [signoff, setSignoff] = useState<ManagerSignoff | undefined>(undefined);
   const [loading, setLoading] = useState(false);
