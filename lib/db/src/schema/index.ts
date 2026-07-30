@@ -14,3 +14,4 @@ export * from "./password-reset-tokens";
 export * from "./consultant-clients";
 export * from "./safe-track";
 export * from "./daily-checklists";
+export * from "./fix-track";

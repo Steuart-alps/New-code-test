@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Plus, Minus
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -90,6 +90,27 @@ const MODULES = [
       "Tank inspection & risk assessment logging",
       "Temperature recording with °C field",
       "Overdue check alerts by type",
+    ],
+  },
+  {
+    key: "fixtrack",
+    label: "FixTrack",
+    price: 10,
+    icon: Wrench,
+    color: "text-orange-700",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    activeBorder: "border-orange-500",
+    activeBg: "bg-orange-50",
+    required: false,
+    description: "Staff maintenance issue reporting — log faults, assign responsibility, attach photos, and track resolution to close.",
+    features: [
+      "Report issues by type (electrical, plumbing, HVAC…)",
+      "Attach photos and videos as evidence",
+      "Set priority: low, medium, high, urgent",
+      "Track status from reported → in progress → resolved",
+      "Assign issues and set target resolution dates",
+      "Solution notes and resolution log",
     ],
   },
   {

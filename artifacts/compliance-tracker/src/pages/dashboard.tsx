@@ -8,7 +8,7 @@ import {
 import {
   FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2,
   CheckCircle2, Circle, LayoutGrid, ArrowRight, Sunrise, Sunset,
-  Flame, UtensilsCrossed, Droplets, FileText, AlertTriangle,
+  Flame, UtensilsCrossed, Droplets, FileText, AlertTriangle, Wrench,
 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link, useLocation } from "wouter";
@@ -236,12 +236,67 @@ function SafeTrackCard() {
   );
 }
 
+function FixTrackCard() {
+  const [summary, setSummary] = useState<{ open: number; urgent: number; total: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/fix-track/summary")
+      .then(r => r.ok ? r.json() : null)
+      .then(setSummary)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pill = !summary
+    ? { label: "No data", cls: "bg-muted text-muted-foreground" }
+    : summary.urgent > 0
+      ? { label: `${summary.urgent} urgent`, cls: "bg-red-100 text-red-700" }
+      : summary.open > 0
+        ? { label: `${summary.open} open`, cls: "bg-amber-100 text-amber-700" }
+        : { label: summary.total > 0 ? "All resolved" : "No issues", cls: summary.total > 0 ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground" };
+
+  return (
+    <Link href="/fix-track">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-orange-50 rounded-lg"><Wrench className="w-4 h-4 text-orange-600" /></div>
+              <span className="text-sm font-semibold">FixTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (summary?.urgent ?? 0) > 0 ? "text-red-600" : "text-foreground")}>{summary?.urgent ?? 0}</p>
+                <p className="text-muted-foreground">Urgent</p>
+              </div>
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (summary?.open ?? 0) > 0 ? "text-amber-600" : "text-foreground")}>{summary?.open ?? 0}</p>
+                <p className="text-muted-foreground">Open</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-display font-bold">{summary?.total ?? 0}</p>
+                <p className="text-muted-foreground">Total</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
 function ModuleTrackRow({ hasService }: { hasService: (key: string) => boolean }) {
   const cards = [
     { key: "firetrack",       node: <FireTrackCard /> },
     { key: "kitchentrack",    node: <KitchenTrackCard /> },
     { key: "legionellatrack", node: <LegionellaTrackCard /> },
     { key: "safetrack",       node: <SafeTrackCard /> },
+    { key: "fixtrack",        node: <FixTrackCard /> },
   ].filter(c => hasService(c.key));
 
   if (cards.length === 0) return null;

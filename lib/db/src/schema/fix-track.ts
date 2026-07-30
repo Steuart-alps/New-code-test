@@ -1,0 +1,28 @@
+import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
+import { clientsTable } from "./clients";
+import { sitesTable } from "./sites";
+import { usersTable } from "./users";
+
+export const fixTrackIssuesTable = pgTable("fix_track_issues", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  issueType: text("issue_type").notNull().default("general"),
+  location: text("location").notNull(),
+  description: text("description"),
+  priority: text("priority").notNull().default("medium"),
+  status: text("status").notNull().default("reported"),
+  reportedBy: text("reported_by").notNull(),
+  reportedDate: date("reported_date").notNull(),
+  assignedTo: text("assigned_to"),
+  targetDate: date("target_date"),
+  resolvedDate: date("resolved_date"),
+  solutionNotes: text("solution_notes"),
+  mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
+  createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type FixTrackIssue = typeof fixTrackIssuesTable.$inferSelect;

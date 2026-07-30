@@ -407,6 +407,35 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- FixTrack: maintenance issue reports ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "fix_track_issues" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "title" text NOT NULL,
+        "issue_type" text NOT NULL DEFAULT 'general',
+        "location" text NOT NULL,
+        "description" text,
+        "priority" text NOT NULL DEFAULT 'medium',
+        "status" text NOT NULL DEFAULT 'reported',
+        "reported_by" text NOT NULL,
+        "reported_date" date NOT NULL,
+        "assigned_to" text,
+        "target_date" date,
+        "resolved_date" date,
+        "solution_notes" text,
+        "media_urls" jsonb NOT NULL DEFAULT '[]',
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_fix_track_issues_client_status"
+      ON "fix_track_issues" ("client_id", "status")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
