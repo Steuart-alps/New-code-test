@@ -375,10 +375,10 @@ export default function LandingPage() {
               <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-80 brightness-0 invert" />
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
             <a href="#pricing" className="text-sm text-white/70 hover:text-white transition-colors hidden sm:block">Pricing</a>
             <button className="text-sm font-medium text-white/80 hover:text-white transition-colors" onClick={() => navigate("/login")}>Sign in</button>
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-none rounded-[2px]" onClick={() => navigate("/signup")}>Start free trial</Button>
+            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-none rounded-[2px] hidden sm:inline-flex" onClick={() => navigate("/signup")}>Start free trial</Button>
           </div>
         </div>
       </nav>
