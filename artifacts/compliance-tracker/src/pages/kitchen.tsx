@@ -23,14 +23,18 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import WeeklyReviewTab from "./kitchen-weekly";
+import ProbeCheckTab from "./kitchen-probe";
 
 type DeliveryRow = { supplier: string; item: string; temp: string; ok: boolean };
 type ColdFoodRow = { unit: string; temp: string; ok: boolean };
 type HotTemperatureRow = { item: string; temp: string };
 type HotHoldingRow = { item: string; temp: string };
+
+type ActiveTab = "diary" | "weekly" | "probe";
 
 function ConfigDialog() {
   const [open, setOpen] = useState(false);
@@ -147,21 +151,16 @@ function ConfigDialog() {
   );
 }
 
-export default function KitchenPage() {
-  const { hasService } = useAuth();
-  const canAdmin = useCanAdmin();
-  const hasKitchentrack = hasService("kitchentrack");
+// ── Daily Diary tab ───────────────────────────────────────────────────────────
 
+function DailyDiaryTab() {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
-  const { data: config, error: configError } = useGetFoodSafetyConfig({ query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3 } });
-  // Trust the server over the cached session: a 403 means this tenant isn't
-  // entitled (e.g. consultant viewing a client without the add-on).
-  const serverLocked = (configError as any)?.status === 403;
-  const { data: records } = useListFoodSafetyRecords({ query: { enabled: hasKitchentrack } });
-  const { data: record, isLoading: recordLoading, error: recordError } = useGetFoodSafetyRecordByDate(selectedDate, {
+  const { data: config } = useGetFoodSafetyConfig();
+  const { data: records } = useListFoodSafetyRecords();
+  const { data: record, isLoading: recordLoading } = useGetFoodSafetyRecordByDate(selectedDate, {
     query: {
-      enabled: !!selectedDate && hasKitchentrack,
+      enabled: !!selectedDate,
       queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate),
       retry: false,
     },
@@ -187,9 +186,7 @@ export default function KitchenPage() {
   const reheatingLimit = config?.food_reheating_limit || "75°C";
   const hotHoldingLimit = config?.food_hot_holding_limit || "63°C";
 
-  // Initialize form when record loads or date changes
   useEffect(() => {
-    if (!hasKitchentrack) return;
     if (record) {
       setDeliveries((record.deliveries || []) as DeliveryRow[]);
       setColdFood((record.coldFood || []) as ColdFoodRow[]);
@@ -198,7 +195,6 @@ export default function KitchenPage() {
       setCorrectives(record.correctives || "");
       setManagerSignature(record.managerSignature || "");
     } else {
-      // New record — pre-generate cold food rows
       const fridgeRows: ColdFoodRow[] = Array.from({ length: numFridges }, (_, i) => ({
         unit: `Fridge ${i + 1}`,
         temp: "",
@@ -216,7 +212,7 @@ export default function KitchenPage() {
       setCorrectives("");
       setManagerSignature("");
     }
-  }, [record, selectedDate, numFridges, numFreezers, hasKitchentrack]);
+  }, [record, selectedDate, numFridges, numFreezers]);
 
   const handleSaveDraft = async () => {
     const data = {
@@ -319,6 +315,453 @@ export default function KitchenPage() {
 
   const isSubmitted = !!record?.submittedAt;
 
+  return (
+    <div className="space-y-6">
+      {/* Date Picker */}
+      <Card>
+        <CardHeader className="border-b border-border/50 pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-display">Select Date</CardTitle>
+            {isSubmitted && (
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                Submitted
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-4">
+            <Label className="text-sm">Date:</Label>
+            <Input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="max-w-xs"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {recordLoading ? (
+        <Card>
+          <CardContent className="p-12 flex justify-center">
+            <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Deliveries */}
+          <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Deliveries</CardTitle>
+                  <CardDescription className="text-xs mt-1">Record supplier deliveries received today</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDeliveries([...deliveries, { supplier: "", item: "", temp: "", ok: true }])}
+                  disabled={isSubmitted}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  Add
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 space-y-2">
+              {deliveries.length === 0 ? (
+                <p className="text-sm text-muted-foreground italic">No deliveries recorded.</p>
+              ) : (
+                deliveries.map((row, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <Input
+                      placeholder="Supplier"
+                      value={row.supplier}
+                      onChange={(e) => {
+                        const updated = [...deliveries];
+                        updated[i].supplier = e.target.value;
+                        setDeliveries(updated);
+                      }}
+                      disabled={isSubmitted}
+                      className="col-span-3"
+                    />
+                    <Input
+                      placeholder="Item"
+                      value={row.item}
+                      onChange={(e) => {
+                        const updated = [...deliveries];
+                        updated[i].item = e.target.value;
+                        setDeliveries(updated);
+                      }}
+                      disabled={isSubmitted}
+                      className="col-span-4"
+                    />
+                    <Input
+                      placeholder="Temp (°C)"
+                      value={row.temp}
+                      onChange={(e) => {
+                        const updated = [...deliveries];
+                        updated[i].temp = e.target.value;
+                        setDeliveries(updated);
+                      }}
+                      disabled={isSubmitted}
+                      className="col-span-2"
+                    />
+                    <label className="flex items-center gap-2 col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={row.ok}
+                        onChange={(e) => {
+                          const updated = [...deliveries];
+                          updated[i].ok = e.target.checked;
+                          setDeliveries(updated);
+                        }}
+                        disabled={isSubmitted}
+                        className="h-4 w-4 rounded border-input accent-primary"
+                      />
+                      <span className="text-xs">OK</span>
+                    </label>
+                    {!isSubmitted && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeliveries(deliveries.filter((_, idx) => idx !== i))}
+                        className="col-span-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Cold Food */}
+          <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <CardTitle className="text-base font-display">Cold Food Temperatures</CardTitle>
+              <CardDescription className="text-xs mt-1">Check fridge and freezer temperatures</CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 space-y-2">
+              {coldFood.map((row, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                  <Input
+                    placeholder="Unit"
+                    value={row.unit}
+                    onChange={(e) => {
+                      const updated = [...coldFood];
+                      updated[i].unit = e.target.value;
+                      setColdFood(updated);
+                    }}
+                    disabled={isSubmitted}
+                    className="col-span-5"
+                  />
+                  <Input
+                    placeholder="Temp (°C)"
+                    value={row.temp}
+                    onChange={(e) => {
+                      const updated = [...coldFood];
+                      updated[i].temp = e.target.value;
+                      setColdFood(updated);
+                    }}
+                    disabled={isSubmitted}
+                    className="col-span-3"
+                  />
+                  <label className="flex items-center gap-2 col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={row.ok}
+                      onChange={(e) => {
+                        const updated = [...coldFood];
+                        updated[i].ok = e.target.checked;
+                        setColdFood(updated);
+                      }}
+                      disabled={isSubmitted}
+                      className="h-4 w-4 rounded border-input accent-primary"
+                    />
+                    <span className="text-xs">OK</span>
+                  </label>
+                  {!isSubmitted && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setColdFood(coldFood.filter((_, idx) => idx !== i))}
+                      className="col-span-2"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {!isSubmitted && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setColdFood([...coldFood, { unit: "", temp: "", ok: true }])}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  Add Row
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Hot Temperatures */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader className="border-b border-border/50 pb-4">
+                <CardTitle className="text-base font-display">Hot Food Temperatures</CardTitle>
+                <CardDescription className="text-xs mt-1">
+                  Cooking: {cookingLimit} | Cooling: {coolingLimit} | Reheating: {reheatingLimit}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-2">
+                {hotTemperature.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic">No hot food checks recorded.</p>
+                ) : (
+                  hotTemperature.map((row, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <Input
+                        placeholder="Item"
+                        value={row.item}
+                        onChange={(e) => {
+                          const updated = [...hotTemperature];
+                          updated[i].item = e.target.value;
+                          setHotTemperature(updated);
+                        }}
+                        disabled={isSubmitted}
+                        className="flex-1"
+                      />
+                      <Input
+                        placeholder="Temp (°C)"
+                        value={row.temp}
+                        onChange={(e) => {
+                          const updated = [...hotTemperature];
+                          updated[i].temp = e.target.value;
+                          setHotTemperature(updated);
+                        }}
+                        disabled={isSubmitted}
+                        className="w-32"
+                      />
+                      {!isSubmitted && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setHotTemperature(hotTemperature.filter((_, idx) => idx !== i))}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))
+                )}
+                {!isSubmitted && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setHotTemperature([...hotTemperature, { item: "", temp: "" }])}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    Add Row
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="border-b border-border/50 pb-4">
+                <CardTitle className="text-base font-display">Hot Holding</CardTitle>
+                <CardDescription className="text-xs mt-1">Minimum: {hotHoldingLimit}</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-2">
+                {hotHolding.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic">No hot holding checks recorded.</p>
+                ) : (
+                  hotHolding.map((row, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <Input
+                        placeholder="Item"
+                        value={row.item}
+                        onChange={(e) => {
+                          const updated = [...hotHolding];
+                          updated[i].item = e.target.value;
+                          setHotHolding(updated);
+                        }}
+                        disabled={isSubmitted}
+                        className="flex-1"
+                      />
+                      <Input
+                        placeholder="Temp (°C)"
+                        value={row.temp}
+                        onChange={(e) => {
+                          const updated = [...hotHolding];
+                          updated[i].temp = e.target.value;
+                          setHotHolding(updated);
+                        }}
+                        disabled={isSubmitted}
+                        className="w-32"
+                      />
+                      {!isSubmitted && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setHotHolding(hotHolding.filter((_, idx) => idx !== i))}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  ))
+                )}
+                {!isSubmitted && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setHotHolding([...hotHolding, { item: "", temp: "" }])}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    Add Row
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Correctives */}
+          <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <CardTitle className="text-base font-display">Corrective Actions Taken</CardTitle>
+              <CardDescription className="text-xs mt-1">
+                Note any issues found and what was done to fix them
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4">
+              <Textarea
+                value={correctives}
+                onChange={(e) => setCorrectives(e.target.value)}
+                rows={3}
+                placeholder="e.g. Fridge 2 running warm — engineer called, stock moved to Fridge 1"
+                disabled={isSubmitted}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Sign-off */}
+          <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <CardTitle className="text-base font-display">Manager Sign-off</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Manager Name (Signature)</Label>
+                  <Input
+                    value={managerSignature}
+                    onChange={(e) => setManagerSignature(e.target.value)}
+                    placeholder="Type your name to sign"
+                    disabled={isSubmitted}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  {!isSubmitted && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={handleSaveDraft}
+                        disabled={createRecord.isPending || updateRecord.isPending}
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <Button
+                        onClick={handleSubmit}
+                        disabled={createRecord.isPending || updateRecord.isPending}
+                        className="shadow-lg shadow-primary/20"
+                      >
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        {createRecord.isPending || updateRecord.isPending ? "Submitting..." : "Submit & Sign"}
+                      </Button>
+                    </>
+                  )}
+                  {isSubmitted && (
+                    <div className="flex items-center gap-2 text-sm text-emerald-700">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Submitted on {format(new Date(record.submittedAt!), "dd/MM/yyyy 'at' HH:mm")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* History */}
+      <Card>
+        <CardHeader className="border-b border-border/50 pb-4">
+          <CardTitle className="font-display">Recent Records</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {!records || records.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">
+              <Calendar className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p className="text-sm">No kitchen diary records yet.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {records.slice(0, 10).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedDate(r.recordDate)}
+                  className="w-full p-4 hover:bg-muted/20 transition-colors text-left flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <Calendar className="w-4 h-4 text-muted-foreground" />
+                    <span className="font-medium text-sm">{format(new Date(r.recordDate), "dd/MM/yyyy")}</span>
+                  </div>
+                  {r.submittedAt ? (
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      Submitted
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                      Draft
+                    </Badge>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Page shell ────────────────────────────────────────────────────────────────
+
+const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] = [
+  { id: "diary",  label: "Daily Diary",    icon: Calendar,       description: "Daily temperature records, deliveries and corrective actions" },
+  { id: "weekly", label: "Weekly Review",  icon: ClipboardList,  description: "Combined CookSafe house rules + management review" },
+  { id: "probe",  label: "Probe Check",    icon: Thermometer,    description: "Monthly probe thermometer calibration record" },
+];
+
+export default function KitchenPage() {
+  const { hasService } = useAuth();
+  const canAdmin = useCanAdmin();
+  const hasKitchentrack = hasService("kitchentrack");
+
+  const { error: configError } = useGetFoodSafetyConfig({
+    query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3 },
+  });
+  const serverLocked = (configError as any)?.status === 403;
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>("diary");
+
   if (!hasKitchentrack || serverLocked) {
     return (
       <AppLayout title="KitchenTrack — Kitchen Diary">
@@ -355,8 +798,10 @@ export default function KitchenPage() {
     );
   }
 
+  const activeTabMeta = TABS.find(t => t.id === activeTab)!;
+
   return (
-    <AppLayout title="KitchenTrack — Kitchen Diary">
+    <AppLayout title="KitchenTrack">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -364,438 +809,37 @@ export default function KitchenPage() {
             <div className="p-2.5 rounded-lg bg-primary/10">
               <UtensilsCrossed className="w-6 h-6 text-primary" />
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">
-                Daily food safety record — deliveries, temperatures, corrective actions
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <ConfigDialog />
-          </div>
+          {activeTab === "diary" && <ConfigDialog />}
         </div>
 
-        {/* Date Picker */}
-        <Card>
-          <CardHeader className="border-b border-border/50 pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-display">Select Date</CardTitle>
-              {isSubmitted && (
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Submitted
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              <Label className="text-sm">Date:</Label>
-              <Input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="max-w-xs"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {recordLoading ? (
-          <Card>
-            <CardContent className="p-12 flex justify-center">
-              <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* Deliveries */}
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base font-display">Deliveries</CardTitle>
-                    <CardDescription className="text-xs mt-1">Record supplier deliveries received today</CardDescription>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDeliveries([...deliveries, { supplier: "", item: "", temp: "", ok: true }])}
-                    disabled={isSubmitted}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="p-4 space-y-2">
-                {deliveries.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic">No deliveries recorded.</p>
-                ) : (
-                  deliveries.map((row, i) => (
-                    <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                      <Input
-                        placeholder="Supplier"
-                        value={row.supplier}
-                        onChange={(e) => {
-                          const updated = [...deliveries];
-                          updated[i].supplier = e.target.value;
-                          setDeliveries(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="col-span-3"
-                      />
-                      <Input
-                        placeholder="Item"
-                        value={row.item}
-                        onChange={(e) => {
-                          const updated = [...deliveries];
-                          updated[i].item = e.target.value;
-                          setDeliveries(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="col-span-4"
-                      />
-                      <Input
-                        placeholder="Temp (°C)"
-                        value={row.temp}
-                        onChange={(e) => {
-                          const updated = [...deliveries];
-                          updated[i].temp = e.target.value;
-                          setDeliveries(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="col-span-2"
-                      />
-                      <label className="flex items-center gap-2 col-span-2">
-                        <input
-                          type="checkbox"
-                          checked={row.ok}
-                          onChange={(e) => {
-                            const updated = [...deliveries];
-                            updated[i].ok = e.target.checked;
-                            setDeliveries(updated);
-                          }}
-                          disabled={isSubmitted}
-                          className="h-4 w-4 rounded border-input accent-primary"
-                        />
-                        <span className="text-xs">OK</span>
-                      </label>
-                      {!isSubmitted && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeliveries(deliveries.filter((_, idx) => idx !== i))}
-                          className="col-span-1"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-                  ))
+        {/* Tab bar */}
+        <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
+          {TABS.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-1 sm:flex-none justify-center",
+                  activeTab === tab.id
+                    ? "bg-background shadow text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-background/60"
                 )}
-              </CardContent>
-            </Card>
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
-            {/* Cold Food */}
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <CardTitle className="text-base font-display">Cold Food Temperatures</CardTitle>
-                <CardDescription className="text-xs mt-1">Check fridge and freezer temperatures</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 space-y-2">
-                {coldFood.map((row, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                    <Input
-                      placeholder="Unit"
-                      value={row.unit}
-                      onChange={(e) => {
-                        const updated = [...coldFood];
-                        updated[i].unit = e.target.value;
-                        setColdFood(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="col-span-5"
-                    />
-                    <Input
-                      placeholder="Temp (°C)"
-                      value={row.temp}
-                      onChange={(e) => {
-                        const updated = [...coldFood];
-                        updated[i].temp = e.target.value;
-                        setColdFood(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="col-span-3"
-                    />
-                    <label className="flex items-center gap-2 col-span-2">
-                      <input
-                        type="checkbox"
-                        checked={row.ok}
-                        onChange={(e) => {
-                          const updated = [...coldFood];
-                          updated[i].ok = e.target.checked;
-                          setColdFood(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="h-4 w-4 rounded border-input accent-primary"
-                      />
-                      <span className="text-xs">OK</span>
-                    </label>
-                    {!isSubmitted && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setColdFood(coldFood.filter((_, idx) => idx !== i))}
-                        className="col-span-2"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                {!isSubmitted && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setColdFood([...coldFood, { unit: "", temp: "", ok: true }])}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add Row
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Hot Temperatures */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader className="border-b border-border/50 pb-4">
-                  <CardTitle className="text-base font-display">Hot Food Temperatures</CardTitle>
-                  <CardDescription className="text-xs mt-1">
-                    Cooking: {cookingLimit} | Cooling: {coolingLimit} | Reheating: {reheatingLimit}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-4 space-y-2">
-                  {hotTemperature.length === 0 ? (
-                    <p className="text-sm text-muted-foreground italic">No hot food checks recorded.</p>
-                  ) : (
-                    hotTemperature.map((row, i) => (
-                      <div key={i} className="flex gap-2 items-center">
-                        <Input
-                          placeholder="Item"
-                          value={row.item}
-                          onChange={(e) => {
-                            const updated = [...hotTemperature];
-                            updated[i].item = e.target.value;
-                            setHotTemperature(updated);
-                          }}
-                          disabled={isSubmitted}
-                          className="flex-1"
-                        />
-                        <Input
-                          placeholder="Temp (°C)"
-                          value={row.temp}
-                          onChange={(e) => {
-                            const updated = [...hotTemperature];
-                            updated[i].temp = e.target.value;
-                            setHotTemperature(updated);
-                          }}
-                          disabled={isSubmitted}
-                          className="w-32"
-                        />
-                        {!isSubmitted && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setHotTemperature(hotTemperature.filter((_, idx) => idx !== i))}
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  {!isSubmitted && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setHotTemperature([...hotTemperature, { item: "", temp: "" }])}
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1.5" />
-                      Add Row
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="border-b border-border/50 pb-4">
-                  <CardTitle className="text-base font-display">Hot Holding</CardTitle>
-                  <CardDescription className="text-xs mt-1">Minimum: {hotHoldingLimit}</CardDescription>
-                </CardHeader>
-                <CardContent className="p-4 space-y-2">
-                  {hotHolding.length === 0 ? (
-                    <p className="text-sm text-muted-foreground italic">No hot holding checks recorded.</p>
-                  ) : (
-                    hotHolding.map((row, i) => (
-                      <div key={i} className="flex gap-2 items-center">
-                        <Input
-                          placeholder="Item"
-                          value={row.item}
-                          onChange={(e) => {
-                            const updated = [...hotHolding];
-                            updated[i].item = e.target.value;
-                            setHotHolding(updated);
-                          }}
-                          disabled={isSubmitted}
-                          className="flex-1"
-                        />
-                        <Input
-                          placeholder="Temp (°C)"
-                          value={row.temp}
-                          onChange={(e) => {
-                            const updated = [...hotHolding];
-                            updated[i].temp = e.target.value;
-                            setHotHolding(updated);
-                          }}
-                          disabled={isSubmitted}
-                          className="w-32"
-                        />
-                        {!isSubmitted && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setHotHolding(hotHolding.filter((_, idx) => idx !== i))}
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  {!isSubmitted && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setHotHolding([...hotHolding, { item: "", temp: "" }])}
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1.5" />
-                      Add Row
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Correctives */}
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <CardTitle className="text-base font-display">Corrective Actions Taken</CardTitle>
-                <CardDescription className="text-xs mt-1">
-                  Note any issues found and what was done to fix them
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4">
-                <Textarea
-                  value={correctives}
-                  onChange={(e) => setCorrectives(e.target.value)}
-                  rows={3}
-                  placeholder="e.g. Fridge 2 running warm — engineer called, stock moved to Fridge 1"
-                  disabled={isSubmitted}
-                />
-              </CardContent>
-            </Card>
-
-            {/* Sign-off */}
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <CardTitle className="text-base font-display">Manager Sign-off</CardTitle>
-              </CardHeader>
-              <CardContent className="p-4">
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Manager Name (Signature)</Label>
-                    <Input
-                      value={managerSignature}
-                      onChange={(e) => setManagerSignature(e.target.value)}
-                      placeholder="Type your name to sign"
-                      disabled={isSubmitted}
-                    />
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {!isSubmitted && (
-                      <>
-                        <Button
-                          variant="outline"
-                          onClick={handleSaveDraft}
-                          disabled={createRecord.isPending || updateRecord.isPending}
-                        >
-                          <Save className="w-4 h-4 mr-2" />
-                          Save Draft
-                        </Button>
-                        <Button
-                          onClick={handleSubmit}
-                          disabled={createRecord.isPending || updateRecord.isPending}
-                          className="shadow-lg shadow-primary/20"
-                        >
-                          <CheckCircle2 className="w-4 h-4 mr-2" />
-                          {createRecord.isPending || updateRecord.isPending ? "Submitting..." : "Submit & Sign"}
-                        </Button>
-                      </>
-                    )}
-                    {isSubmitted && (
-                      <div className="flex items-center gap-2 text-sm text-emerald-700">
-                        <CheckCircle2 className="w-4 h-4" />
-                        Submitted on {format(new Date(record.submittedAt!), "dd/MM/yyyy 'at' HH:mm")}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-
-        {/* History */}
-        <Card>
-          <CardHeader className="border-b border-border/50 pb-4">
-            <CardTitle className="font-display">Recent Records</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {!records || records.length === 0 ? (
-              <div className="p-12 text-center text-muted-foreground">
-                <Calendar className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">No kitchen diary records yet.</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {records.slice(0, 10).map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => setSelectedDate(r.recordDate)}
-                    className="w-full p-4 hover:bg-muted/20 transition-colors text-left flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Calendar className="w-4 h-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">{format(new Date(r.recordDate), "dd/MM/yyyy")}</span>
-                    </div>
-                    {r.submittedAt ? (
-                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3 mr-1" />
-                        Submitted
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                        Draft
-                      </Badge>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Tab content */}
+        {activeTab === "diary"  && <DailyDiaryTab />}
+        {activeTab === "weekly" && <WeeklyReviewTab />}
+        {activeTab === "probe"  && <ProbeCheckTab />}
       </div>
     </AppLayout>
   );

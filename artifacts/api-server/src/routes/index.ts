@@ -20,6 +20,7 @@ import fireSafetyRouter from "./fire-safety";
 import legionellaRouter from "./legionella";
 import safeTrackRouter from "./safe-track";
 import fixTrackRouter from "./fix-track";
+import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
 import { requireAuth } from "../middleware/requireAuth";
@@ -48,6 +49,7 @@ router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyR
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
 router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
+router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
 router.use("/daily-track-am", requireAuth, requireService("dailytrack_am"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireService("dailytrack_pm"), dailyTrackPmRouter);
 

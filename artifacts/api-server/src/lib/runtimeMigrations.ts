@@ -407,6 +407,48 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- KitchenTrack: weekly management review records ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "kitchen_weekly_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "week_commencing" date NOT NULL,
+        "checks" jsonb NOT NULL DEFAULT '{}',
+        "deviations" jsonb NOT NULL DEFAULT '[]',
+        "additional" jsonb NOT NULL DEFAULT '{}',
+        "manager_signature" text,
+        "submitted_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        UNIQUE("client_id", "site_id", "week_commencing")
+      )
+    `);
+
+    // ---- KitchenTrack: monthly probe calibration checks ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "kitchen_probe_checks" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "check_date" date NOT NULL,
+        "probes" jsonb NOT NULL DEFAULT '[]',
+        "overall_result" text,
+        "checked_by" text,
+        "signature" text,
+        "notes" text,
+        "submitted_at" timestamp,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_kitchen_probe_checks_client_date"
+      ON "kitchen_probe_checks" ("client_id", "check_date" DESC)
+    `);
+
     // ---- FixTrack: maintenance issue reports ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "fix_track_issues" (
