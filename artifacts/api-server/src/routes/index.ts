@@ -26,7 +26,7 @@ import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
 import { requireAuth } from "../middleware/requireAuth";
-import { requireService } from "../lib/services";
+import { requireService, requireAnyService } from "../lib/services";
 
 const router: IRouter = Router();
 
@@ -54,7 +54,11 @@ router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter
 router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
-router.use("/daily-track-am", requireAuth, requireService("dailytrack_am"), dailyTrackAmRouter);
-router.use("/daily-track-pm", requireAuth, requireService("dailytrack_pm"), dailyTrackPmRouter);
+// The AM/PM checklists cover both kitchen (kitchentrack) and premises
+// (safetrack) opening/closing items, so the router-level gate only requires
+// SOME purchased branch; each handler additionally checks the specific
+// service that matches the checklistType being read/written.
+router.use("/daily-track-am", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackAmRouter);
+router.use("/daily-track-pm", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackPmRouter);
 
 export default router;

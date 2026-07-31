@@ -5,7 +5,6 @@ import { fixTrackIssuesTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
-import { randomUUID } from "crypto";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -158,17 +157,29 @@ router.post("/issues/:id/request-upload", requireAuth, async (req, res) => {
     .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId))).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const { name, contentType } = z.object({
+  z.object({
     name: z.string().min(1).max(200),
     contentType: z.string().min(1).max(100),
   }).parse(req.body);
 
-  const ext = name.split(".").pop() ?? "";
-  const objectPath = `fix-track/${clientId}/${id}/${randomUUID()}.${ext}`;
-
   try {
-    const result = await storage.getObjectEntityUploadURL(objectPath, name, contentType);
-    res.json({ uploadUrl: result.uploadURL, objectPath });
+    // getObjectEntityUploadURL takes no arguments — it always mints a fresh
+    // uploads/<uuid> path itself. normalizeObjectEntityPath() turns that
+    // signed URL back into the /objects/... path the frontend stores and
+    // later requests for download.
+    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
+    // Tag the object as owned by this tenant so GET /api/storage/objects/*
+    // (which fix-track.tsx uses to display the photo) can verify the
+    // requesting user's client actually owns it, not just that they're
+    // logged in. Owner is the clientId, not the uploading user's id, so any
+    // user of the same tenant can view issue photos, matching the rest of
+    // FixTrack's per-client (not per-user) data model.
+    await storage.trySetObjectEntityAclPolicy(uploadUrl, {
+      owner: String(clientId),
+      visibility: "private",
+    });
+    res.json({ uploadUrl, objectPath });
   } catch (err: any) {
     res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
   }

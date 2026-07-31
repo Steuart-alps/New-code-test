@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft,
-  Flame, UtensilsCrossed, Droplets,
+  Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,46 @@ const ADDONS = [
     iconBg: "bg-sky-50",
     activeBorder: "border-sky-500",
     activeBg: "bg-sky-50/60",
+  },
+  {
+    key: "fixtrack",
+    label: "FixTrack",
+    desc: "Staff maintenance issue reporting — log faults, attach photos, track to resolution.",
+    icon: Wrench,
+    iconColor: "text-orange-700",
+    iconBg: "bg-orange-50",
+    activeBorder: "border-orange-500",
+    activeBg: "bg-orange-50/60",
+  },
+  {
+    key: "safetrack",
+    label: "PremisesTrack",
+    desc: "Digital premises safety logbook — routine inspections, fault reporting, housekeeping.",
+    icon: Building2,
+    iconColor: "text-violet-700",
+    iconBg: "bg-violet-50",
+    activeBorder: "border-violet-500",
+    activeBg: "bg-violet-50/60",
+  },
+  {
+    key: "doctrack",
+    label: "DocTrack",
+    desc: "Centralised document library — risk assessments, SOPs, policies, procedures.",
+    icon: FolderOpen,
+    iconColor: "text-cyan-700",
+    iconBg: "bg-cyan-50",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50/60",
+  },
+  {
+    key: "traintrack",
+    label: "TrainTrack",
+    desc: "Staff training records and certificate expiry tracking.",
+    icon: BookOpen,
+    iconColor: "text-emerald-700",
+    iconBg: "bg-emerald-50",
+    activeBorder: "border-emerald-500",
+    activeBg: "bg-emerald-50/60",
   },
 ];
 

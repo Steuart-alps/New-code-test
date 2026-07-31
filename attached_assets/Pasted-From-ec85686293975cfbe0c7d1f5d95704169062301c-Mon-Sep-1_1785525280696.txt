@@ -1,0 +1,505 @@
+From ec85686293975cfbe0c7d1f5d95704169062301c Mon Sep 17 00:00:00 2001
+From: Steuart Fotheringham <steuart@alpsconsultancy.co.uk>
+Date: Fri, 31 Jul 2026 20:07:07 +0100
+Subject: [PATCH] Fix critical security/functionality issues from audit
+
+1. Require auth on /api/storage endpoints (were fully unauthenticated) and
+   enforce tenant-scoped ACL ownership on object downloads instead of the
+   previously-commented-out check.
+2. Block role self-escalation on PUT /api/users/:id - a client_admin could
+   promote themselves (or another same-client user) to consultant, which was
+   only blocked on user creation, not on edits.
+3. Fix daily-track-am/pm entitlement gating: the router-level guard referenced
+   service keys ("dailytrack_am"/"dailytrack_pm") that don't exist in the
+   SERVICES catalog, permanently 403'ing these checklists for every client
+   whose trial had ended. Replaced with requireAnyService(kitchentrack,
+   safetrack) at the router level plus a per-request check against the
+   specific service the checklistType belongs to.
+4. Fix FixTrack photo/video upload: request-upload called
+   getObjectEntityUploadURL() with arguments the real method doesn't accept,
+   so uploadURL was always undefined and every upload failed. Now matches
+   DocTrack's working pattern, plus tags each upload with its owning
+   clientId so the download route's new ACL check doesn't break it.
+5. Fix module-catalog drift between the marketing pricing builder and
+   signup/trial-ended: landing.tsx used the key "premisestrack" for that
+   module while the real backend key is "safetrack" (services.ts,
+   ADDON_KEYS) - fixed. signup.tsx and trial-ended.tsx only recognized 3 of
+   7 add-on modules and silently dropped the rest of a visitor's selection;
+   expanded both to the full set with keys matching ADDON_KEYS.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ artifacts/api-server/src/lib/services.ts      | 33 +++++++++++++
+ .../api-server/src/routes/daily-track-am.ts   | 24 ++++++++++
+ .../api-server/src/routes/daily-track-pm.ts   | 24 ++++++++++
+ artifacts/api-server/src/routes/fix-track.ts  | 25 +++++++---
+ artifacts/api-server/src/routes/index.ts      | 10 ++--
+ artifacts/api-server/src/routes/storage.ts    | 35 +++++++-------
+ artifacts/api-server/src/routes/users.ts      |  9 ++++
+ .../compliance-tracker/src/pages/landing.tsx  |  5 +-
+ .../compliance-tracker/src/pages/signup.tsx   | 47 ++++++++++++++++++-
+ .../src/pages/trial-ended.tsx                 | 42 ++++++++++++++++-
+ 10 files changed, 225 insertions(+), 29 deletions(-)
+
+diff --git a/artifacts/api-server/src/lib/services.ts b/artifacts/api-server/src/lib/services.ts
+index 4478817..9aacda0 100644
+--- a/artifacts/api-server/src/lib/services.ts
++++ b/artifacts/api-server/src/lib/services.ts
+@@ -122,3 +122,36 @@ export function requireService(key: ServiceKey): RequestHandler {
+     }
+   };
+ }
++
++/**
++ * Route guard variant for routes that serve more than one billed branch (e.g.
++ * the daily AM/PM checklists cover both kitchen and premises items). Passes
++ * if the client is entitled to ANY of the given keys; individual handlers are
++ * still responsible for checking the specific key that matches the record
++ * being read/written (see requireAnyEntitlement below).
++ */
++export function requireAnyService(...keys: ServiceKey[]): RequestHandler {
++  return async (req, res, next) => {
++    try {
++      const clientId = getClientId(req);
++      if (!clientId) return res.status(400).json({ error: "No client context" });
++      const services = await getEntitledServices(clientId);
++      if (!keys.some((key) => isEntitled(services, key))) {
++        return res.status(403).json({
++          error: `None of the required services (${keys.map((k) => SERVICES[k].label).join(", ")}) are enabled for this account`,
++          code: "SERVICE_NOT_ENABLED",
++          service: keys[0],
++        });
++      }
++      next();
++    } catch (err) {
++      next(err);
++    }
++  };
++}
++
++/** Non-middleware check for use inside a handler once req.currentUser/clientId is known. */
++export async function requireAnyEntitlement(clientId: number, ...keys: ServiceKey[]): Promise<boolean> {
++  const services = await getEntitledServices(clientId);
++  return keys.some((key) => isEntitled(services, key));
++}
+diff --git a/artifacts/api-server/src/routes/daily-track-am.ts b/artifacts/api-server/src/routes/daily-track-am.ts
+index 304ecfc..7fd268f 100644
+--- a/artifacts/api-server/src/routes/daily-track-am.ts
++++ b/artifacts/api-server/src/routes/daily-track-am.ts
+@@ -4,11 +4,19 @@ import { db } from "@workspace/db";
+ import { dailyChecklistsTable, sitesTable } from "@workspace/db/schema";
+ import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
+ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
++import { requireAnyEntitlement, SERVICES } from "../lib/services";
+ 
+ const router = Router();
+ 
+ const AM_TYPES = ["kitchen_opening", "premises_opening"] as const;
+ 
++// The router-level guard only requires SOME purchased branch (kitchentrack or
++// safetrack), since this router covers both. Individual writes are checked
++// against the specific branch the checklistType belongs to.
++function serviceForType(type: (typeof AM_TYPES)[number]): "kitchentrack" | "safetrack" {
++  return type === "kitchen_opening" ? "kitchentrack" : "safetrack";
++}
++
+ const itemSchema = z.object({
+   label: z.string(),
+   checked: z.boolean(),
+@@ -89,6 +97,14 @@ router.post("/", requireAuth, async (req, res) => {
+   const parsed = createSchema.safeParse(req.body);
+   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+   const data = parsed.data;
++  const requiredService = serviceForType(data.checklistType);
++  if (!(await requireAnyEntitlement(clientId, requiredService))) {
++    return res.status(403).json({
++      error: `${SERVICES[requiredService].label} is not enabled for this account`,
++      code: "SERVICE_NOT_ENABLED",
++      service: requiredService,
++    });
++  }
+   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+   const [row] = await db.insert(dailyChecklistsTable).values({
+     clientId,
+@@ -114,6 +130,14 @@ router.put("/:id", requireAuth, async (req, res) => {
+     .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId))).limit(1);
+   if (!existing || !(AM_TYPES as readonly string[]).includes(existing.checklistType)) return res.status(404).json({ error: "Not found" });
+   if (existing.submittedAt) return res.status(409).json({ error: "Checklist already submitted" });
++  const requiredService = serviceForType(existing.checklistType as (typeof AM_TYPES)[number]);
++  if (!(await requireAnyEntitlement(clientId, requiredService))) {
++    return res.status(403).json({
++      error: `${SERVICES[requiredService].label} is not enabled for this account`,
++      code: "SERVICE_NOT_ENABLED",
++      service: requiredService,
++    });
++  }
+   const parsed = updateSchema.safeParse(req.body);
+   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+   const data = parsed.data as any;
+diff --git a/artifacts/api-server/src/routes/daily-track-pm.ts b/artifacts/api-server/src/routes/daily-track-pm.ts
+index a064ce5..6ff4215 100644
+--- a/artifacts/api-server/src/routes/daily-track-pm.ts
++++ b/artifacts/api-server/src/routes/daily-track-pm.ts
+@@ -4,11 +4,19 @@ import { db } from "@workspace/db";
+ import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@workspace/db/schema";
+ import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
+ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
++import { requireAnyEntitlement, SERVICES } from "../lib/services";
+ 
+ const router = Router();
+ 
+ const PM_TYPES = ["kitchen_closing", "premises_closing"] as const;
+ 
++// The router-level guard only requires SOME purchased branch (kitchentrack or
++// safetrack), since this router covers both. Individual checklist writes are
++// checked against the specific branch the checklistType belongs to.
++function serviceForType(type: (typeof PM_TYPES)[number]): "kitchentrack" | "safetrack" {
++  return type === "kitchen_closing" ? "kitchentrack" : "safetrack";
++}
++
+ const itemSchema = z.object({
+   label: z.string(),
+   checked: z.boolean(),
+@@ -155,6 +163,14 @@ router.post("/", requireAuth, async (req, res) => {
+   const parsed = createSchema.safeParse(req.body);
+   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+   const data = parsed.data;
++  const requiredService = serviceForType(data.checklistType);
++  if (!(await requireAnyEntitlement(clientId, requiredService))) {
++    return res.status(403).json({
++      error: `${SERVICES[requiredService].label} is not enabled for this account`,
++      code: "SERVICE_NOT_ENABLED",
++      service: requiredService,
++    });
++  }
+   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+   const [row] = await db.insert(dailyChecklistsTable).values({
+     clientId, siteId: data.siteId ?? null, checklistType: data.checklistType,
+@@ -175,6 +191,14 @@ router.put("/:id", requireAuth, async (req, res) => {
+     .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId))).limit(1);
+   if (!existing || !(PM_TYPES as readonly string[]).includes(existing.checklistType)) return res.status(404).json({ error: "Not found" });
+   if (existing.submittedAt) return res.status(409).json({ error: "Checklist already submitted" });
++  const requiredService = serviceForType(existing.checklistType as (typeof PM_TYPES)[number]);
++  if (!(await requireAnyEntitlement(clientId, requiredService))) {
++    return res.status(403).json({
++      error: `${SERVICES[requiredService].label} is not enabled for this account`,
++      code: "SERVICE_NOT_ENABLED",
++      service: requiredService,
++    });
++  }
+   const parsed = updateSchema.safeParse(req.body);
+   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+   const data = parsed.data as any;
+diff --git a/artifacts/api-server/src/routes/fix-track.ts b/artifacts/api-server/src/routes/fix-track.ts
+index 975a789..d3850b4 100644
+--- a/artifacts/api-server/src/routes/fix-track.ts
++++ b/artifacts/api-server/src/routes/fix-track.ts
+@@ -5,7 +5,6 @@ import { fixTrackIssuesTable, sitesTable } from "@workspace/db/schema";
+ import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
+ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+ import { ObjectStorageService } from "../lib/objectStorage";
+-import { randomUUID } from "crypto";
+ 
+ const router = Router();
+ const storage = new ObjectStorageService();
+@@ -158,17 +157,29 @@ router.post("/issues/:id/request-upload", requireAuth, async (req, res) => {
+     .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId))).limit(1);
+   if (!existing) return res.status(404).json({ error: "Not found" });
+ 
+-  const { name, contentType } = z.object({
++  z.object({
+     name: z.string().min(1).max(200),
+     contentType: z.string().min(1).max(100),
+   }).parse(req.body);
+ 
+-  const ext = name.split(".").pop() ?? "";
+-  const objectPath = `fix-track/${clientId}/${id}/${randomUUID()}.${ext}`;
+-
+   try {
+-    const result = await storage.getObjectEntityUploadURL(objectPath, name, contentType);
+-    res.json({ uploadUrl: result.uploadURL, objectPath });
++    // getObjectEntityUploadURL takes no arguments — it always mints a fresh
++    // uploads/<uuid> path itself. normalizeObjectEntityPath() turns that
++    // signed URL back into the /objects/... path the frontend stores and
++    // later requests for download.
++    const uploadUrl = await storage.getObjectEntityUploadURL();
++    const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
++    // Tag the object as owned by this tenant so GET /api/storage/objects/*
++    // (which fix-track.tsx uses to display the photo) can verify the
++    // requesting user's client actually owns it, not just that they're
++    // logged in. Owner is the clientId, not the uploading user's id, so any
++    // user of the same tenant can view issue photos, matching the rest of
++    // FixTrack's per-client (not per-user) data model.
++    await storage.trySetObjectEntityAclPolicy(uploadUrl, {
++      owner: String(clientId),
++      visibility: "private",
++    });
++    res.json({ uploadUrl, objectPath });
+   } catch (err: any) {
+     res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+   }
+diff --git a/artifacts/api-server/src/routes/index.ts b/artifacts/api-server/src/routes/index.ts
+index ae887b7..f68027a 100644
+--- a/artifacts/api-server/src/routes/index.ts
++++ b/artifacts/api-server/src/routes/index.ts
+@@ -26,7 +26,7 @@ import kitchenWeeklyRouter from "./kitchen-weekly";
+ import dailyTrackAmRouter from "./daily-track-am";
+ import dailyTrackPmRouter from "./daily-track-pm";
+ import { requireAuth } from "../middleware/requireAuth";
+-import { requireService } from "../lib/services";
++import { requireService, requireAnyService } from "../lib/services";
+ 
+ const router: IRouter = Router();
+ 
+@@ -54,7 +54,11 @@ router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter
+ router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
+ router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
+ router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
+-router.use("/daily-track-am", requireAuth, requireService("dailytrack_am"), dailyTrackAmRouter);
+-router.use("/daily-track-pm", requireAuth, requireService("dailytrack_pm"), dailyTrackPmRouter);
++// The AM/PM checklists cover both kitchen (kitchentrack) and premises
++// (safetrack) opening/closing items, so the router-level gate only requires
++// SOME purchased branch; each handler additionally checks the specific
++// service that matches the checklistType being read/written.
++router.use("/daily-track-am", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackAmRouter);
++router.use("/daily-track-pm", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackPmRouter);
+ 
+ export default router;
+diff --git a/artifacts/api-server/src/routes/storage.ts b/artifacts/api-server/src/routes/storage.ts
+index a6a931e..f43a099 100644
+--- a/artifacts/api-server/src/routes/storage.ts
++++ b/artifacts/api-server/src/routes/storage.ts
+@@ -6,6 +6,7 @@ import {
+ } from "@workspace/api-zod";
+ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+ import { ObjectPermission } from "../lib/objectAcl";
++import { requireAuth, getClientId } from "../middleware/requireAuth";
+ 
+ const router: IRouter = Router();
+ const objectStorageService = new ObjectStorageService();
+@@ -17,7 +18,7 @@ const objectStorageService = new ObjectStorageService();
+  * The client sends JSON metadata (name, size, contentType) — NOT the file.
+  * Then uploads the file directly to the returned presigned URL.
+  */
+-router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
++router.post("/storage/uploads/request-url", requireAuth, async (req: Request, res: Response) => {
+   const parsed = RequestUploadUrlBody.safeParse(req.body);
+   if (!parsed.success) {
+     res.status(400).json({ error: "Missing or invalid required fields" });
+@@ -84,27 +85,29 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
+  * These are served from a separate path from /public-objects and can optionally
+  * be protected with authentication or ACL checks based on the use case.
+  */
+-router.get("/storage/objects/*path", async (req: Request, res: Response) => {
++router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Response) => {
+   try {
+     const raw = req.params.path;
+     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
+     const objectPath = `/objects/${wildcardPath}`;
+     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
+ 
+-    // --- Protected route example (uncomment when using replit-auth) ---
+-    // if (!req.isAuthenticated()) {
+-    //   res.status(401).json({ error: "Unauthorized" });
+-    //   return;
+-    // }
+-    // const canAccess = await objectStorageService.canAccessObjectEntity({
+-    //   userId: req.user.id,
+-    //   objectFile,
+-    //   requestedPermission: ObjectPermission.READ,
+-    // });
+-    // if (!canAccess) {
+-    //   res.status(403).json({ error: "Forbidden" });
+-    //   return;
+-    // }
++    // Ownership is tagged per-tenant (owner = clientId as a string), not
++    // per-user, since e.g. FixTrack photos should be visible to every user
++    // of the client that uploaded them, not just the uploader. See
++    // fix-track.ts's request-upload handler for where this gets set.
++    const clientId = getClientId(req);
++    const canAccess = clientId
++      ? await objectStorageService.canAccessObjectEntity({
++          userId: String(clientId),
++          objectFile,
++          requestedPermission: ObjectPermission.READ,
++        })
++      : false;
++    if (!canAccess) {
++      res.status(403).json({ error: "Forbidden" });
++      return;
++    }
+ 
+     const response = await objectStorageService.downloadObject(objectFile);
+ 
+diff --git a/artifacts/api-server/src/routes/users.ts b/artifacts/api-server/src/routes/users.ts
+index f3a7ef3..a8bc1ad 100644
+--- a/artifacts/api-server/src/routes/users.ts
++++ b/artifacts/api-server/src/routes/users.ts
+@@ -117,6 +117,15 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
+     return;
+   }
+ 
++  // Mirrors the same restriction on POST /users: only a consultant may grant
++  // the consultant role. Checked unconditionally (including self-edits, which
++  // skip the canAccessClient check above) so a client_admin can't promote
++  // themselves or another same-client user to consultant.
++  if (actor.role !== "consultant" && body.role === "consultant") {
++    res.status(403).json({ error: "Cannot assign consultant role" });
++    return;
++  }
++
+   const updates: Partial<typeof usersTable.$inferInsert> = {
+     updatedAt: new Date(),
+   };
+diff --git a/artifacts/compliance-tracker/src/pages/landing.tsx b/artifacts/compliance-tracker/src/pages/landing.tsx
+index 9745d52..b3e76b6 100644
+--- a/artifacts/compliance-tracker/src/pages/landing.tsx
++++ b/artifacts/compliance-tracker/src/pages/landing.tsx
+@@ -114,7 +114,10 @@ const MODULES = [
+     ],
+   },
+   {
+-    key: "premisestrack",
++    // Backend service key is "safetrack" (see api-server/src/lib/services.ts
++    // and ADDON_KEYS) even though the product is branded "PremisesTrack" —
++    // this key must match exactly or checkout/signup rejects the selection.
++    key: "safetrack",
+     label: "PremisesTrack",
+     price: 10,
+     icon: Building2,
+diff --git a/artifacts/compliance-tracker/src/pages/signup.tsx b/artifacts/compliance-tracker/src/pages/signup.tsx
+index 360abdb..c4b5935 100644
+--- a/artifacts/compliance-tracker/src/pages/signup.tsx
++++ b/artifacts/compliance-tracker/src/pages/signup.tsx
+@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
+ import { useLocation, useSearch } from "wouter";
+ import {
+   ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft,
+-  Flame, UtensilsCrossed, Droplets,
++  Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen,
+ } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+@@ -18,6 +18,11 @@ interface PerSitePrice {
+   interval: string | null;
+ }
+ 
++// IMPORTANT: keys here must exactly match ADDON_KEYS in
++// api-server/src/lib/services.ts (and stay in sync with the module list in
++// landing.tsx / trial-ended.tsx). A key present here but missing there — or
++// vice versa — either gets silently dropped at signup or rejected by the
++// register endpoint's Zod validation.
+ const ADDONS = [
+   {
+     key: "firetrack",
+@@ -49,6 +54,46 @@ const ADDONS = [
+     activeBorder: "border-sky-500",
+     activeBg: "bg-sky-50/60",
+   },
++  {
++    key: "fixtrack",
++    label: "FixTrack",
++    desc: "Staff maintenance issue reporting — log faults, attach photos, track to resolution.",
++    icon: Wrench,
++    iconColor: "text-orange-700",
++    iconBg: "bg-orange-50",
++    activeBorder: "border-orange-500",
++    activeBg: "bg-orange-50/60",
++  },
++  {
++    key: "safetrack",
++    label: "PremisesTrack",
++    desc: "Digital premises safety logbook — routine inspections, fault reporting, housekeeping.",
++    icon: Building2,
++    iconColor: "text-violet-700",
++    iconBg: "bg-violet-50",
++    activeBorder: "border-violet-500",
++    activeBg: "bg-violet-50/60",
++  },
++  {
++    key: "doctrack",
++    label: "DocTrack",
++    desc: "Centralised document library — risk assessments, SOPs, policies, procedures.",
++    icon: FolderOpen,
++    iconColor: "text-cyan-700",
++    iconBg: "bg-cyan-50",
++    activeBorder: "border-cyan-500",
++    activeBg: "bg-cyan-50/60",
++  },
++  {
++    key: "traintrack",
++    label: "TrainTrack",
++    desc: "Staff training records and certificate expiry tracking.",
++    icon: BookOpen,
++    iconColor: "text-emerald-700",
++    iconBg: "bg-emerald-50",
++    activeBorder: "border-emerald-500",
++    activeBg: "bg-emerald-50/60",
++  },
+ ];
+ 
+ export default function SignupPage() {
+diff --git a/artifacts/compliance-tracker/src/pages/trial-ended.tsx b/artifacts/compliance-tracker/src/pages/trial-ended.tsx
+index ff30e03..cb892a8 100644
+--- a/artifacts/compliance-tracker/src/pages/trial-ended.tsx
++++ b/artifacts/compliance-tracker/src/pages/trial-ended.tsx
+@@ -3,9 +3,13 @@ import { useAuth } from "@/context/auth-context";
+ import { Button } from "@/components/ui/button";
+ import { useToast } from "@/hooks/use-toast";
+ import { apiFetch } from "@/lib/api";
+-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets } from "lucide-react";
++import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen } from "lucide-react";
+ import alpsLogo from "@/assets/alps-logo.png";
+ 
++// IMPORTANT: keys here must exactly match ADDON_KEYS in
++// api-server/src/lib/services.ts (and stay in sync with the module list in
++// landing.tsx / signup.tsx). A key present here but missing there — or vice
++// versa — either gets silently dropped or rejected by the backend.
+ const ADDONS = [
+   {
+     key: "firetrack",
+@@ -34,6 +38,42 @@ const ADDONS = [
+     activeBorder: "border-sky-400",
+     activeBg: "bg-sky-50/60",
+   },
++  {
++    key: "fixtrack",
++    label: "FixTrack",
++    desc: "Maintenance issue reporting",
++    icon: Wrench,
++    iconColor: "text-orange-700",
++    activeBorder: "border-orange-500",
++    activeBg: "bg-orange-50/60",
++  },
++  {
++    key: "safetrack",
++    label: "PremisesTrack",
++    desc: "Premises safety logbook",
++    icon: Building2,
++    iconColor: "text-violet-700",
++    activeBorder: "border-violet-500",
++    activeBg: "bg-violet-50/60",
++  },
++  {
++    key: "doctrack",
++    label: "DocTrack",
++    desc: "Document library",
++    icon: FolderOpen,
++    iconColor: "text-cyan-700",
++    activeBorder: "border-cyan-500",
++    activeBg: "bg-cyan-50/60",
++  },
++  {
++    key: "traintrack",
++    label: "TrainTrack",
++    desc: "Staff training & cert expiry",
++    icon: BookOpen,
++    iconColor: "text-emerald-700",
++    activeBorder: "border-emerald-500",
++    activeBg: "bg-emerald-50/60",
++  },
+ ];
+ 
+ export default function TrialEndedPage() {
+-- 
+2.50.1 (Apple Git-155)

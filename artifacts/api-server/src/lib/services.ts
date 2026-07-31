@@ -122,3 +122,36 @@ export function requireService(key: ServiceKey): RequestHandler {
     }
   };
 }
+
+/**
+ * Route guard variant for routes that serve more than one billed branch (e.g.
+ * the daily AM/PM checklists cover both kitchen and premises items). Passes
+ * if the client is entitled to ANY of the given keys; individual handlers are
+ * still responsible for checking the specific key that matches the record
+ * being read/written (see requireAnyEntitlement below).
+ */
+export function requireAnyService(...keys: ServiceKey[]): RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const clientId = getClientId(req);
+      if (!clientId) return res.status(400).json({ error: "No client context" });
+      const services = await getEntitledServices(clientId);
+      if (!keys.some((key) => isEntitled(services, key))) {
+        return res.status(403).json({
+          error: `None of the required services (${keys.map((k) => SERVICES[k].label).join(", ")}) are enabled for this account`,
+          code: "SERVICE_NOT_ENABLED",
+          service: keys[0],
+        });
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+/** Non-middleware check for use inside a handler once req.currentUser/clientId is known. */
+export async function requireAnyEntitlement(clientId: number, ...keys: ServiceKey[]): Promise<boolean> {
+  const services = await getEntitledServices(clientId);
+  return keys.some((key) => isEntitled(services, key));
+}

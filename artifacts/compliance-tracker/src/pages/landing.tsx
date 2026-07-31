@@ -114,7 +114,10 @@ const MODULES = [
     ],
   },
   {
-    key: "premisestrack",
+    // Backend service key is "safetrack" (see api-server/src/lib/services.ts
+    // and ADDON_KEYS) even though the product is branded "PremisesTrack" —
+    // this key must match exactly or checkout/signup rejects the selection.
+    key: "safetrack",
     label: "PremisesTrack",
     price: 10,
     icon: Building2,

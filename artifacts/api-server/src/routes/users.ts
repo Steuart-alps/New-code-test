@@ -117,6 +117,15 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     return;
   }
 
+  // Mirrors the same restriction on POST /users: only a consultant may grant
+  // the consultant role. Checked unconditionally (including self-edits, which
+  // skip the canAccessClient check above) so a client_admin can't promote
+  // themselves or another same-client user to consultant.
+  if (actor.role !== "consultant" && body.role === "consultant") {
+    res.status(403).json({ error: "Cannot assign consultant role" });
+    return;
+  }
+
   const updates: Partial<typeof usersTable.$inferInsert> = {
     updatedAt: new Date(),
   };

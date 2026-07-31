@@ -4,10 +4,18 @@ import { db } from "@workspace/db";
 import { dailyChecklistsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAnyEntitlement, SERVICES } from "../lib/services";
 
 const router = Router();
 
 const AM_TYPES = ["kitchen_opening", "premises_opening"] as const;
+
+// The router-level guard only requires SOME purchased branch (kitchentrack or
+// safetrack), since this router covers both. Individual writes are checked
+// against the specific branch the checklistType belongs to.
+function serviceForType(type: (typeof AM_TYPES)[number]): "kitchentrack" | "safetrack" {
+  return type === "kitchen_opening" ? "kitchentrack" : "safetrack";
+}
 
 const itemSchema = z.object({
   label: z.string(),
@@ -89,6 +97,14 @@ router.post("/", requireAuth, async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  const requiredService = serviceForType(data.checklistType);
+  if (!(await requireAnyEntitlement(clientId, requiredService))) {
+    return res.status(403).json({
+      error: `${SERVICES[requiredService].label} is not enabled for this account`,
+      code: "SERVICE_NOT_ENABLED",
+      service: requiredService,
+    });
+  }
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const [row] = await db.insert(dailyChecklistsTable).values({
     clientId,
@@ -114,6 +130,14 @@ router.put("/:id", requireAuth, async (req, res) => {
     .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId))).limit(1);
   if (!existing || !(AM_TYPES as readonly string[]).includes(existing.checklistType)) return res.status(404).json({ error: "Not found" });
   if (existing.submittedAt) return res.status(409).json({ error: "Checklist already submitted" });
+  const requiredService = serviceForType(existing.checklistType as (typeof AM_TYPES)[number]);
+  if (!(await requireAnyEntitlement(clientId, requiredService))) {
+    return res.status(403).json({
+      error: `${SERVICES[requiredService].label} is not enabled for this account`,
+      code: "SERVICE_NOT_ENABLED",
+      service: requiredService,
+    });
+  }
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data as any;

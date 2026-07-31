@@ -3,7 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -33,6 +33,42 @@ const ADDONS = [
     iconColor: "text-sky-600",
     activeBorder: "border-sky-400",
     activeBg: "bg-sky-50/60",
+  },
+  {
+    key: "fixtrack",
+    label: "FixTrack",
+    desc: "Maintenance issue reporting",
+    icon: Wrench,
+    iconColor: "text-orange-700",
+    activeBorder: "border-orange-500",
+    activeBg: "bg-orange-50/60",
+  },
+  {
+    key: "safetrack",
+    label: "PremisesTrack",
+    desc: "Premises safety logbook",
+    icon: Building2,
+    iconColor: "text-violet-700",
+    activeBorder: "border-violet-500",
+    activeBg: "bg-violet-50/60",
+  },
+  {
+    key: "doctrack",
+    label: "DocTrack",
+    desc: "Document library",
+    icon: FolderOpen,
+    iconColor: "text-cyan-700",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50/60",
+  },
+  {
+    key: "traintrack",
+    label: "TrainTrack",
+    desc: "Staff training & cert expiry",
+    icon: BookOpen,
+    iconColor: "text-emerald-700",
+    activeBorder: "border-emerald-500",
+    activeBg: "bg-emerald-50/60",
   },
 ];
 
