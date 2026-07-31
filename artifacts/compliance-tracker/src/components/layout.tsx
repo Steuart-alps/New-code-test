@@ -21,6 +21,7 @@ import {
   Sunrise,
   Sunset,
   LayoutGrid,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
