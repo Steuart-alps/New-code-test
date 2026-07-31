@@ -466,6 +466,7 @@ export async function processPendingCharges(clientId: number): Promise<void> {
             auto_advance: true,
             pending_invoice_items_behavior: "exclude",
             description: itemDescription,
+            automatic_tax: { enabled: true },
             metadata: { pending_charge_id: String(row.id), client_id: String(clientId) },
           },
           { idempotencyKey: `pending-charge-invoice-${row.id}` },

@@ -341,6 +341,8 @@ router.post("/auth/register", async (req, res) => {
         cancel_url: `${baseUrl}/signup?cancelled=1`,
         client_reference_id: String(user.id),
         metadata: { userId: String(user.id) },
+        automatic_tax: { enabled: true },
+        customer_update: { address: "auto" },
         ...(discounts ? { discounts } : { allow_promotion_codes: true }),
       };
 

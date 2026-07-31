@@ -247,6 +247,8 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
       cancel_url: `${baseUrl}/?billing=cancel`,
       metadata: { clientId: String(clientId) },
+      automatic_tax: { enabled: true },
+      customer_update: { address: "auto" },
     });
 
     res.json({ url: session.url });
@@ -321,6 +323,7 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
             auto_advance: true,
             pending_invoice_items_behavior: "exclude",
             description,
+            automatic_tax: { enabled: true },
             metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
           },
           { idempotencyKey: `svc-add-inv-${sub.id}-${service}-${periodStart}` },
