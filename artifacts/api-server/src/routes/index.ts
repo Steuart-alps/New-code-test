@@ -21,6 +21,7 @@ import legionellaRouter from "./legionella";
 import safeTrackRouter from "./safe-track";
 import fixTrackRouter from "./fix-track";
 import docTrackRouter from "./doc-track";
+import trainTrackRouter from "./train-track";
 import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
@@ -51,6 +52,7 @@ router.use("/legionella", requireAuth, requireService("legionellatrack"), legion
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
 router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
 router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
+router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
 router.use("/daily-track-am", requireAuth, requireService("dailytrack_am"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireService("dailytrack_pm"), dailyTrackPmRouter);

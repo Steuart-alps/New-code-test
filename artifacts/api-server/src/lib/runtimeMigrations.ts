@@ -502,6 +502,8 @@ export async function runRuntimeMigrations() {
       ON "doc_track_documents" ("client_id", "category")
     `);
 
+    await migrateTrainTrack();
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
@@ -602,4 +604,56 @@ async function migrateLegacyCategories() {
       await db.execute(sql`DELETE FROM categories WHERE id IN (${idList})`);
     }
   }
+}
+
+// ---- TrainTrack: staff training records ----
+async function migrateTrainTrack() {
+  // Create table (initial shape — additive columns follow)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "train_track_records" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name" text NOT NULL,
+      "training_type" text,
+      "completed_date" date NOT NULL,
+      "expiry_date" date,
+      "notes" text,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_train_track_client_expiry"
+    ON "train_track_records" ("client_id", "expiry_date")
+  `);
+  // record_type distinguishes: signoff | certificate | internal
+  await db.execute(sql`
+    ALTER TABLE "train_track_records"
+    ADD COLUMN IF NOT EXISTS "record_type" text NOT NULL DEFAULT 'certificate'
+  `);
+  // document_title: used for signoffs (the RA / SOP / policy title being acknowledged)
+  await db.execute(sql`
+    ALTER TABLE "train_track_records"
+    ADD COLUMN IF NOT EXISTS "document_title" text
+  `);
+  // document_type: risk_assessment | sop | policy | procedure | other (for signoffs)
+  await db.execute(sql`
+    ALTER TABLE "train_track_records"
+    ADD COLUMN IF NOT EXISTS "document_type" text
+  `);
+  // provider: name of the external training provider (for certificates)
+  await db.execute(sql`
+    ALTER TABLE "train_track_records"
+    ADD COLUMN IF NOT EXISTS "provider" text
+  `);
+  // trainer: who delivered the internal session / demo (for internal training)
+  await db.execute(sql`
+    ALTER TABLE "train_track_records"
+    ADD COLUMN IF NOT EXISTS "trainer" text
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_train_track_client_type"
+    ON "train_track_records" ("client_id", "record_type")
+  `);
 }

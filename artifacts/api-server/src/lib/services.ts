@@ -19,10 +19,11 @@ export const SERVICES = {
   safetrack: { label: "SafeTrack", amountPence: 1000 },
   fixtrack: { label: "FixTrack", amountPence: 1000 },
   doctrack: { label: "DocTrack", amountPence: 1000 },
+  traintrack: { label: "TrainTrack", amountPence: 1000 },
 } as const;
 
 export type ServiceKey = keyof typeof SERVICES;
-export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack"] as const satisfies readonly ServiceKey[];
+export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack"] as const satisfies readonly ServiceKey[];
 
 export const BUNDLE_KEY = "bundle";
 export const BUNDLE_LABEL = "ComplyTrack Complete";

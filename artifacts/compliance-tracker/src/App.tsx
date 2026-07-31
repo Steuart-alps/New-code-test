@@ -31,6 +31,7 @@ import LegionellaPage from "@/pages/legionella";
 import SafeTrackPage from "@/pages/safe-track";
 import FixTrackPage from "@/pages/fix-track";
 import DocTrackPage from "@/pages/doc-track";
+import TrainTrackPage from "@/pages/train-track";
 import DailyTrackAmPage from "@/pages/daily-track-am";
 import DailyTrackPmPage from "@/pages/daily-track-pm";
 import DailyTrackStatusPage from "@/pages/daily-track-status";
@@ -107,6 +108,7 @@ function ProtectedRoutes() {
       <Route path="/safe-track" component={SafeTrackPage} />
       <Route path="/fix-track" component={FixTrackPage} />
       <Route path="/doc-track" component={DocTrackPage} />
+      <Route path="/train-track" component={TrainTrackPage} />
       <Route path="/daily-track-am" component={DailyTrackAmPage} />
       <Route path="/daily-track-pm" component={DailyTrackPmPage} />
       <Route path="/daily-track-status" component={DailyTrackStatusPage} />

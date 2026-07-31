@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen,
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -151,6 +151,27 @@ const MODULES = [
       "Assign documents to specific sites",
       "Instant download with short-lived secure links",
       "Searchable document library",
+    ],
+  },
+  {
+    key: "traintrack",
+    label: "TrainTrack",
+    price: 10,
+    icon: BookOpen,
+    color: "text-emerald-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    activeBorder: "border-emerald-500",
+    activeBg: "bg-emerald-50",
+    required: false,
+    description: "Staff training records and certificate expiry tracking — know who is trained, in what, and when it expires.",
+    features: [
+      "Log training completions per staff member",
+      "Track certificate expiry dates",
+      "Amber alerts when certificates expire within 30 days",
+      "Red alerts for any expired certificates",
+      "Filter by site, status, or staff name",
+      "Covers fire safety, food hygiene, manual handling & more",
     ],
   },
 ];
