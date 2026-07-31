@@ -189,6 +189,27 @@ export class ObjectStorageService {
     return normalizedPath;
   }
 
+  /**
+   * Generate a short-lived signed GET URL for an object stored via
+   * getObjectEntityUploadURL / normalizeObjectEntityPath.
+   * objectPath must start with /objects/  (e.g. /objects/uploads/<uuid>).
+   */
+  async getSignedDownloadURL(objectPath: string, ttlSec = 900): Promise<string> {
+    if (!objectPath.startsWith("/objects/")) {
+      throw new ObjectNotFoundError();
+    }
+    // e.g.  objectPath = /objects/uploads/uuid
+    // parts = ["", "objects", "uploads", "uuid"]  → slice(1) → ["objects","uploads","uuid"] → slice(1) → ["uploads","uuid"]
+    const parts = objectPath.slice(1).split("/");
+    if (parts.length < 2) throw new ObjectNotFoundError();
+    const entityId = parts.slice(1).join("/"); // "uploads/uuid"
+    let entityDir = this.getPrivateObjectDir();
+    if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
+    const fullPath = `${entityDir}${entityId}`; // "/my-bucket/uploads/uuid"
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    return signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+  }
+
   async canAccessObjectEntity({
     userId,
     objectFile,

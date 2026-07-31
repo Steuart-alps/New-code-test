@@ -478,6 +478,30 @@ export async function runRuntimeMigrations() {
       ON "fix_track_issues" ("client_id", "status")
     `);
 
+    // ---- DocTrack: document library (risk assessments, SOPs, policies, etc.) ----
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "doc_track_documents" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "title" text NOT NULL,
+        "category" text NOT NULL DEFAULT 'other',
+        "description" text,
+        "file_name" text NOT NULL,
+        "file_size" bigint,
+        "mime_type" text NOT NULL DEFAULT 'application/octet-stream',
+        "object_path" text NOT NULL,
+        "uploaded_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_doc_track_documents_client_category"
+      ON "doc_track_documents" ("client_id", "category")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

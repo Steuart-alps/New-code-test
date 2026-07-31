@@ -22,6 +22,7 @@ import {
   Sunset,
   LayoutGrid,
   Wrench,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -52,6 +53,7 @@ function useNavGroups() {
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: GraduationCap,   serviceKey: "safetrack" },
         { href: "/fix-track",      label: "FixTrack",        icon: Wrench,          serviceKey: "fixtrack" },
+        { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
         { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKey: "dailytrack_am" },
         { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKey: "dailytrack_pm" },
       ],
