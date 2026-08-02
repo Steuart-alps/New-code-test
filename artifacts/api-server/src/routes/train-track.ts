@@ -33,6 +33,8 @@ export const DOCUMENT_TYPES = [
   "other",
 ] as const;
 
+const signatureField = z.string().max(500000).nullable().optional(); // base64 PNG
+
 const recordCreate = z.discriminatedUnion("recordType", [
   // External training certificate
   z.object({
@@ -44,6 +46,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
     expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
     siteId: z.number().int().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
+    signature: signatureField,
   }),
   // Document sign-off
   z.object({
@@ -54,6 +57,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
     completedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     siteId: z.number().int().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
+    signature: signatureField,
   }),
   // Internal training / equipment demo
   z.object({
@@ -64,6 +68,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
     completedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     siteId: z.number().int().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
+    signature: signatureField,
   }),
 ]);
 
@@ -78,6 +83,7 @@ const recordUpdate = z.object({
   expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
+  signature: signatureField,
 });
 
 // ── List records ──────────────────────────────────────────────────────────────

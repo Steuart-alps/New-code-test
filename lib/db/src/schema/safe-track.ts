@@ -13,6 +13,7 @@ export const safeRiskAssessmentsTable = pgTable("safe_risk_assessments", {
   reviewDate: date("review_date"),
   status: text("status").notNull().default("draft"),
   version: text("version").notNull().default("1.0"),
+  signature: text("signature"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -27,6 +28,7 @@ export const safeSopsTable = pgTable("safe_sops", {
   content: text("content"),
   version: text("version").notNull().default("1.0"),
   publishedAt: timestamp("published_at"),
+  signature: text("signature"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -74,8 +76,24 @@ export const safeCompetencySignoffsTable = pgTable("safe_competency_signoffs", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const safeHandbookTable = pgTable("safe_handbook", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  section: text("section"),
+  content: text("content"),
+  version: text("version").notNull().default("1.0"),
+  publishedAt: timestamp("published_at"),
+  signature: text("signature"),
+  createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type SafeRiskAssessment = typeof safeRiskAssessmentsTable.$inferSelect;
 export type SafeSop = typeof safeSopsTable.$inferSelect;
 export type SafeTrainingRecord = typeof safeTrainingRecordsTable.$inferSelect;
 export type SafeInduction = typeof safeInductionsTable.$inferSelect;
 export type SafeCompetencySignoff = typeof safeCompetencySignoffsTable.$inferSelect;
+export type SafeHandbook = typeof safeHandbookTable.$inferSelect;

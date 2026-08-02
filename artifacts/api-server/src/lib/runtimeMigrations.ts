@@ -503,6 +503,8 @@ export async function runRuntimeMigrations() {
     `);
 
     await migrateTrainTrack();
+    await migrateSafeHandbook();
+    await migrateSignatures();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -656,4 +658,37 @@ async function migrateTrainTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_train_track_client_type"
     ON "train_track_records" ("client_id", "record_type")
   `);
+}
+
+// ---- SafeTrack: Staff Handbook ----
+async function migrateSafeHandbook() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_handbook" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "title" text NOT NULL,
+      "section" text,
+      "content" text,
+      "version" text NOT NULL DEFAULT '1.0',
+      "published_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_safe_handbook_client"
+    ON "safe_handbook" ("client_id")
+  `);
+}
+
+// ---- Signature columns across SafeTrack + TrainTrack ----
+async function migrateSignatures() {
+  // TrainTrack records
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "signature" text`);
+  // SafeTrack: risk assessments, SOPs, handbook
+  await db.execute(sql`ALTER TABLE "safe_risk_assessments" ADD COLUMN IF NOT EXISTS "signature" text`);
+  await db.execute(sql`ALTER TABLE "safe_sops" ADD COLUMN IF NOT EXISTS "signature" text`);
+  await db.execute(sql`ALTER TABLE "safe_handbook" ADD COLUMN IF NOT EXISTS "signature" text`);
 }

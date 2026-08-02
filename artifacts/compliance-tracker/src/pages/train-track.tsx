@@ -52,6 +52,7 @@ import {
   FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SignaturePad } from "@/components/signature-pad";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,9 +153,9 @@ async function apiFetch(path: string, opts?: RequestInit) {
 
 // ─── Empty forms ──────────────────────────────────────────────────────────────
 
-const emptyCert     = () => ({ staffName: "", trainingType: "", customType: "", provider: "", completedDate: "", expiryDate: "", siteId: "", notes: "" });
-const emptySignoff  = () => ({ staffName: "", documentTitle: "", documentType: "", completedDate: "", siteId: "", notes: "" });
-const emptyInternal = () => ({ staffName: "", trainingType: "", customType: "", trainer: "", completedDate: "", siteId: "", notes: "" });
+const emptyCert     = () => ({ staffName: "", trainingType: "", customType: "", provider: "", completedDate: "", expiryDate: "", siteId: "", notes: "", signature: null as string | null });
+const emptySignoff  = () => ({ staffName: "", documentTitle: "", documentType: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
+const emptyInternal = () => ({ staffName: "", trainingType: "", customType: "", trainer: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -288,6 +289,7 @@ export default function TrainTrackPage() {
         expiryDate: r.expiry_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
+        signature: (r as any).signature ?? null,
       });
     } else if (r.record_type === "signoff") {
       setSignoffForm({
@@ -297,6 +299,7 @@ export default function TrainTrackPage() {
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
+        signature: (r as any).signature ?? null,
       });
     } else {
       const isCustom = r.training_type ? !TRAINING_TYPES.slice(0, -1).includes(r.training_type) : false;
@@ -308,6 +311,7 @@ export default function TrainTrackPage() {
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
+        signature: (r as any).signature ?? null,
       });
     }
     setShowDialog(true);
@@ -334,6 +338,7 @@ export default function TrainTrackPage() {
           expiryDate: f.expiryDate || null,
           siteId: f.siteId ? Number(f.siteId) : null,
           notes: f.notes.trim() || null,
+          signature: f.signature || null,
         };
       } else if (tab === "signoff") {
         const f = signoffForm;
@@ -348,6 +353,7 @@ export default function TrainTrackPage() {
           completedDate: f.completedDate,
           siteId: f.siteId ? Number(f.siteId) : null,
           notes: f.notes.trim() || null,
+          signature: f.signature || null,
         };
       } else {
         const f = internalForm;
@@ -364,6 +370,7 @@ export default function TrainTrackPage() {
           completedDate: f.completedDate,
           siteId: f.siteId ? Number(f.siteId) : null,
           notes: f.notes.trim() || null,
+          signature: f.signature || null,
         };
       }
 
@@ -792,6 +799,11 @@ export default function TrainTrackPage() {
                     onChange={e => setCertForm(f => ({ ...f, notes: e.target.value }))}
                     className="mt-1 rounded-sm" rows={2} />
                 </div>
+                <SignaturePad
+                  label="Staff Signature"
+                  value={certForm.signature}
+                  onChange={sig => setCertForm(f => ({ ...f, signature: sig }))}
+                />
               </>
             )}
 
@@ -840,6 +852,11 @@ export default function TrainTrackPage() {
                     onChange={e => setSignoffForm(f => ({ ...f, notes: e.target.value }))}
                     className="mt-1 rounded-sm" rows={2} />
                 </div>
+                <SignaturePad
+                  label="Staff Signature"
+                  value={signoffForm.signature}
+                  onChange={sig => setSignoffForm(f => ({ ...f, signature: sig }))}
+                />
               </>
             )}
 
@@ -893,6 +910,11 @@ export default function TrainTrackPage() {
                     onChange={e => setInternalForm(f => ({ ...f, notes: e.target.value }))}
                     className="mt-1 rounded-sm" rows={2} />
                 </div>
+                <SignaturePad
+                  label="Staff Signature"
+                  value={internalForm.signature}
+                  onChange={sig => setInternalForm(f => ({ ...f, signature: sig }))}
+                />
               </>
             )}
           </div>

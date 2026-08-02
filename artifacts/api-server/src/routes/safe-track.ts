@@ -7,6 +7,7 @@ import {
   safeTrainingRecordsTable,
   safeInductionsTable,
   safeCompetencySignoffsTable,
+  safeHandbookTable,
   sitesTable,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
@@ -95,6 +96,8 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
 
 // ── Risk Assessments ─────────────────────────────────────────────────────────
 
+const signatureField = z.string().max(500000).nullable().optional(); // base64 PNG
+
 const raCreate = z.object({
   title: z.string().min(1).max(500),
   description: z.string().max(5000).nullable().optional(),
@@ -103,6 +106,7 @@ const raCreate = z.object({
   status: z.enum(["draft", "published", "under_review"]).optional(),
   version: z.string().max(20).optional(),
   siteId: z.number().int().nullable().optional(),
+  signature: signatureField,
 });
 
 router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, raCreate.partial()));
@@ -116,6 +120,7 @@ const sopCreate = z.object({
   version: z.string().max(20).optional(),
   publishedAt: z.string().datetime().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
+  signature: signatureField,
 });
 
 router.use("/sops", crudFor(safeSopsTable, sopCreate, sopCreate.partial()));
@@ -158,5 +163,19 @@ const compCreate = z.object({
 });
 
 router.use("/competency", crudFor(safeCompetencySignoffsTable, compCreate, compCreate.partial()));
+
+// ── Staff Handbook ────────────────────────────────────────────────────────────
+
+const handbookCreate = z.object({
+  title: z.string().min(1).max(500),
+  section: z.string().max(300).nullable().optional(),
+  content: z.string().max(50000).nullable().optional(),
+  version: z.string().max(20).optional(),
+  publishedAt: z.string().datetime().nullable().optional(),
+  siteId: z.number().int().nullable().optional(),
+  signature: signatureField,
+});
+
+router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, handbookCreate.partial()));
 
 export default router;

@@ -11,12 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useListSites } from "@workspace/api-client-react";
-import { Plus, Pencil, Trash2, Search, FileText, ClipboardList } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, FileText, ClipboardList, BookMarked } from "lucide-react";
+import { SignaturePad } from "@/components/signature-pad";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface RiskAssessment { id: number; title: string; description?: string | null; assessedBy?: string | null; reviewDate?: string | null; status: string; version: string; siteId?: number | null; createdAt: string; }
 interface Sop { id: number; title: string; scope?: string | null; content?: string | null; version: string; publishedAt?: string | null; siteId?: number | null; createdAt: string; }
+interface Handbook { id: number; title: string; section?: string | null; content?: string | null; version: string; publishedAt?: string | null; siteId?: number | null; createdAt: string; }
 
 const RA_STATUS_COLORS: Record<string, string> = {
   draft: "bg-amber-100 text-amber-800",
@@ -90,6 +92,7 @@ export default function SafeTrackPage() {
   // Data
   const [ras, setRas] = useState<RiskAssessment[]>([]);
   const [sops, setSops] = useState<Sop[]>([]);
+  const [handbook, setHandbook] = useState<Handbook[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Dialog
@@ -103,11 +106,12 @@ export default function SafeTrackPage() {
   async function load() {
     setLoading(true);
     try {
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3] = await Promise.all([
         apiFetch(`${base}/risk-assessments`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/sops`).then(r => r.ok ? r.json() : []),
+        apiFetch(`${base}/handbook`).then(r => r.ok ? r.json() : []),
       ]);
-      setRas(r1); setSops(r2);
+      setRas(r1); setSops(r2); setHandbook(r3);
     } finally { setLoading(false); }
   }
 
@@ -172,9 +176,24 @@ export default function SafeTrackPage() {
       ],
     }));
 
+  // ── Staff Handbook tab ────────────────────────────────────────────────────
+  const handbookRows = handbook
+    .filter(h => !q || [h.title, h.section].some(v => v?.toLowerCase().includes(q)))
+    .map(h => ({
+      id: h.id,
+      cells: [
+        <span className="font-medium">{h.title}</span>,
+        h.publishedAt ? <Badge className="bg-emerald-100 text-emerald-800 text-xs font-normal">Published</Badge> : <Badge variant="secondary" className="text-xs font-normal">Draft</Badge>,
+        <span className="text-muted-foreground">v{h.version}</span>,
+        <span className="text-muted-foreground">{h.section ?? "—"}</span>,
+        <span className="text-muted-foreground">{siteName(h.siteId) ?? "All sites"}</span>,
+      ],
+    }));
+
   const tabConfig = {
     risk: { label: "Risk Assessments", icon: FileText, sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], rows: raRows },
     sops: { label: "SOPs", icon: ClipboardList, sub: "sops", headers: ["Title", "Status", "Version", "Scope", "Site"], rows: sopRows },
+    handbook: { label: "Staff Handbook", icon: BookMarked, sub: "handbook", headers: ["Title", "Status", "Version", "Section", "Site"], rows: handbookRows },
   } as const;
 
   type TabKey = keyof typeof tabConfig;
@@ -220,7 +239,7 @@ export default function SafeTrackPage() {
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
                   rows={cfg.rows}
-                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : sops).find((r: any) => r.id === id)) : undefined}
+                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : handbook).find((r: any) => r.id === id)) : undefined}
                   onDelete={id => handleDelete(cfg.sub, id)}
                   canAdmin={canAdmin}
                 />
@@ -241,6 +260,7 @@ export default function SafeTrackPage() {
           <div className="space-y-4 py-2">
             {tab === "risk" && <RaForm form={form} setForm={setForm} />}
             {tab === "sops" && <SopForm form={form} setForm={setForm} />}
+            {tab === "handbook" && <HandbookForm form={form} setForm={setForm} />}
             <div className="space-y-1.5">
               <Label>Site (optional)</Label>
               <SiteSelect value={form.siteId ?? "__none__"} onChange={v => setForm({ ...form, siteId: v })} />
@@ -281,6 +301,7 @@ function RaForm({ form, setForm }: { form: any; setForm: any }) {
         </SelectContent>
       </Select>
     </F>
+    <SignaturePad label="Assessor Signature" value={form.signature ?? null} onChange={sig => setForm({ ...form, signature: sig })} />
   </>;
 }
 
@@ -301,5 +322,27 @@ function SopForm({ form, setForm }: { form: any; setForm: any }) {
         </Select>
       </F>
     </div>
+    <SignaturePad label="Manager Signature" value={form.signature ?? null} onChange={sig => setForm({ ...form, signature: sig })} />
+  </>;
+}
+
+function HandbookForm({ form, setForm }: { form: any; setForm: any }) {
+  return <>
+    <F label="Title *"><Input value={form.title ?? ""} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Health & Safety Policy" autoFocus /></F>
+    <F label="Section"><Input value={form.section ?? ""} onChange={e => setForm({ ...form, section: e.target.value })} placeholder="e.g. Chapter 3 — Fire Safety" /></F>
+    <F label="Content"><Textarea value={form.content ?? ""} onChange={e => setForm({ ...form, content: e.target.value })} rows={8} placeholder="Handbook content…" /></F>
+    <div className="grid grid-cols-2 gap-4">
+      <F label="Version"><Input value={form.version ?? "1.0"} onChange={e => setForm({ ...form, version: e.target.value })} /></F>
+      <F label="Status">
+        <Select value={form.publishedAt ? "yes" : "no"} onValueChange={v => setForm({ ...form, publishedAt: v === "yes" ? new Date().toISOString() : null })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="no">Draft</SelectItem>
+            <SelectItem value="yes">Published</SelectItem>
+          </SelectContent>
+        </Select>
+      </F>
+    </div>
+    <SignaturePad label="Staff Signature" value={form.signature ?? null} onChange={sig => setForm({ ...form, signature: sig })} />
   </>;
 }
