@@ -20,6 +20,7 @@ import {
   TreePine,
   Lock,
   GraduationCap,
+  ClipboardList,
   Sunrise,
   Sunset,
   LayoutGrid,
@@ -70,6 +71,7 @@ function useNavGroups() {
   if (canAdmin) {
     systemItems.push({ href: "/sites", label: "Sites", icon: Building2 });
     systemItems.push({ href: "/users", label: "Users", icon: Users });
+    systemItems.push({ href: "/staff-roster", label: "Staff Roster", icon: ClipboardList });
   }
   if (isConsultant) {
     systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });

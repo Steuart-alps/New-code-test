@@ -14,9 +14,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload, FolderOpen, FileText, FileSpreadsheet, FileImage, FileVideo, File,
-  Download, Trash2, Search, Plus, Loader2, Presentation,
+  Download, Trash2, Search, Plus, Loader2, Presentation, CheckSquare, Users,
+  CheckCircle2, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,9 +37,26 @@ interface Doc {
   mime_type: string;
   object_path: string;
   uploaded_by: string | null;
+  requires_acknowledgement: boolean;
   site_name: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface StaffMember {
+  id: number;
+  name: string;
+  job_title: string | null;
+  department: string | null;
+  active: boolean;
+}
+
+interface Acknowledgement {
+  id: number;
+  staff_roster_id: number;
+  staff_name: string;
+  signature: string | null;
+  acknowledged_at: string;
 }
 
 interface Site {
@@ -102,14 +122,234 @@ function titleFromFileName(name: string): string {
   return name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// ─── Acknowledgements Dialog ──────────────────────────────────────────────────
+
+function AcknowledgementsDialog({ doc, open, onClose }: { doc: Doc; open: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [acks, setAcks] = useState<Acknowledgement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [checked, setChecked] = useState<Record<number, boolean>>({});
+  const [sigs, setSigs] = useState<Record<number, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [deptFilter, setDeptFilter] = useState("all");
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setDeptFilter("all");
+    Promise.all([
+      apiFetch("/staff-roster").then(r => r.ok ? r.json() : []),
+      apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`).then(r => r.ok ? r.json() : []),
+    ]).then(([s, a]) => {
+      setStaff(s);
+      setAcks(a);
+      setChecked({});
+      setSigs({});
+    }).finally(() => setLoading(false));
+  }, [open, doc.id]);
+
+  const ackedIds = new Set(acks.map((a: Acknowledgement) => a.staff_roster_id));
+  const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
+
+  // Department filter
+  const departments = ["all", ...Array.from(new Set(staff.map(s => s.department).filter(Boolean) as string[])).sort()];
+  const visibleStaff = deptFilter === "all" ? staff : staff.filter(s => s.department === deptFilter);
+  const unacked = visibleStaff.filter(s => !ackedIds.has(s.id));
+  const acked   = visibleStaff.filter(s => ackedIds.has(s.id));
+
+  // Counts across ALL staff (for the footer summary)
+  const totalAcked = staff.filter(s => ackedIds.has(s.id)).length;
+
+  const anyChecked = Object.values(checked).some(Boolean);
+
+  async function handleSave() {
+    const toSave = staff.filter(s => checked[s.id] && !ackedIds.has(s.id));
+    if (!toSave.length) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/doc-track/documents/${doc.id}/acknowledge`, {
+        method: "POST",
+        body: JSON.stringify({
+          acknowledgements: toSave.map(s => ({
+            staffRosterId: s.id,
+            staffName: s.name,
+            signature: sigs[s.id]?.trim() || null,
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      toast({ title: `${data.created} acknowledgement${data.created === 1 ? "" : "s"} recorded`, description: "TrainTrack sign-off records created automatically." });
+      const fresh = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements`);
+      if (fresh.ok) setAcks(await fresh.json());
+      setChecked({});
+      setSigs({});
+    } catch {
+      toast({ title: "Save failed", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleAll() {
+    if (unacked.every(s => checked[s.id])) {
+      const cleared = { ...checked };
+      unacked.forEach(s => { delete cleared[s.id]; });
+      setChecked(cleared);
+    } else {
+      setChecked(prev => ({ ...prev, ...Object.fromEntries(unacked.map(s => [s.id, true])) }));
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4" /> Acknowledgements — {doc.title}
+          </DialogTitle>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+        ) : staff.length === 0 ? (
+          <div className="py-8 text-center text-muted-foreground">
+            <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">No staff in roster</p>
+            <p className="text-sm mt-1">Add staff members in <strong>Staff Roster</strong> before recording acknowledgements.</p>
+          </div>
+        ) : (
+          <>
+            {/* Department filter */}
+            {departments.length > 2 && (
+              <div className="flex flex-wrap gap-1.5 pb-1">
+                {departments.map(d => (
+                  <button
+                    key={d}
+                    onClick={() => { setDeptFilter(d); setChecked({}); }}
+                    className={cn(
+                      "px-3 py-1 rounded-full text-xs font-medium transition-colors border",
+                      deptFilter === d
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted/40 text-muted-foreground border-border hover:bg-muted",
+                    )}
+                  >
+                    {d === "all" ? "All departments" : d}
+                    {d !== "all" && (
+                      <span className="ml-1.5 opacity-60">
+                        {staff.filter(s => s.department === d && ackedIds.has(s.id)).length}/
+                        {staff.filter(s => s.department === d).length}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {/* Pending */}
+              {unacked.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-muted-foreground">Pending ({unacked.length})</p>
+                    <button onClick={toggleAll} className="text-xs text-primary hover:underline">
+                      {unacked.every(s => checked[s.id]) ? "Deselect all" : "Select all"}
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {unacked.map(s => (
+                      <div key={s.id} className={cn("border rounded-lg p-3 transition-colors", checked[s.id] ? "bg-primary/5 border-primary/30" : "")}>
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            checked={!!checked[s.id]}
+                            onCheckedChange={v => setChecked(prev => ({ ...prev, [s.id]: !!v }))}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm">{s.name}</p>
+                            {(s.job_title || s.department) && (
+                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
+                            )}
+                          </div>
+                        </div>
+                        {checked[s.id] && (
+                          <div className="mt-2 ml-7">
+                            <Input
+                              placeholder="Signature (typed name) — optional"
+                              value={sigs[s.id] ?? ""}
+                              onChange={e => setSigs(prev => ({ ...prev, [s.id]: e.target.value }))}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Acknowledged */}
+              {acked.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Acknowledged ({acked.length})</p>
+                  <div className="space-y-1.5">
+                    {acked.map(s => {
+                      const a = ackedMap[s.id];
+                      return (
+                        <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-green-50 border border-green-100">
+                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm">{s.name}</p>
+                            {(s.job_title || s.department) && (
+                              <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
+                            )}
+                            {a?.signature && <p className="text-xs text-muted-foreground">Signed: {a.signature}</p>}
+                          </div>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {new Date(a.acknowledged_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {unacked.length === 0 && acked.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">No staff in this department.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        <DialogFooter className="pt-3 border-t mt-2 gap-2 sm:gap-0">
+          <span className="text-xs text-muted-foreground mr-auto">
+            {totalAcked}/{staff.length} acknowledged overall · TrainTrack records created automatically
+          </span>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
+          {unacked.length > 0 && (
+            <Button onClick={handleSave} disabled={!anyChecked || saving}>
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+              Record Acknowledgements
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Document card ────────────────────────────────────────────────────────────
 
 function DocCard({
   doc,
   onDelete,
+  onAcknowledge,
 }: {
   doc: Doc;
   onDelete: (doc: Doc) => void;
+  onAcknowledge: (doc: Doc) => void;
 }) {
   const { Icon, color, bg } = fileIcon(doc.mime_type);
   const cat = CATEGORY_META[doc.category] ?? CATEGORY_META.other;
@@ -151,6 +391,11 @@ function DocCard({
           )}>
             {cat.label}
           </span>
+          {doc.requires_acknowledgement && (
+            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-medium border bg-amber-50 text-amber-700 border-amber-200">
+              <CheckSquare className="w-2.5 h-2.5" /> Ack. required
+            </span>
+          )}
           {doc.site_name && (
             <span className="text-[11px] text-muted-foreground truncate">{doc.site_name}</span>
           )}
@@ -174,6 +419,16 @@ function DocCard({
             {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
             Download
           </Button>
+          {doc.requires_acknowledgement && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-2.5 text-xs gap-1 text-amber-700 border-amber-200 hover:bg-amber-50"
+              onClick={() => onAcknowledge(doc)}
+            >
+              <Users className="w-3 h-3" /> Acknowledge
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -210,6 +465,7 @@ function UploadDialog({
   const [category, setCategory] = useState<Category>("risk_assessment");
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
+  const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<"idle" | "requesting" | "uploading" | "saving">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -220,6 +476,7 @@ function UploadDialog({
     setCategory("risk_assessment");
     setDescription("");
     setSiteId("none");
+    setRequiresAcknowledgement(false);
     setUploading(false);
     setProgress("idle");
   }
@@ -273,6 +530,7 @@ function UploadDialog({
           objectPath,
           siteId: siteId !== "none" ? Number(siteId) : null,
           uploadedBy: user?.name ?? user?.email ?? null,
+          requiresAcknowledgement,
         }),
       });
       if (!saveRes.ok) throw new Error("Could not save document");
@@ -378,6 +636,19 @@ function UploadDialog({
               rows={2}
             />
           </div>
+
+          {/* Requires acknowledgement */}
+          <div className="flex items-center gap-3 pt-1">
+            <Checkbox
+              id="requires-ack"
+              checked={requiresAcknowledgement}
+              onCheckedChange={v => setRequiresAcknowledgement(!!v)}
+            />
+            <div>
+              <Label htmlFor="requires-ack" className="cursor-pointer">Requires staff acknowledgement</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">Staff must sign off that they have read this document. Creates TrainTrack records automatically.</p>
+            </div>
+          </div>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
@@ -413,6 +684,7 @@ export default function DocTrackPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [ackDoc, setAckDoc] = useState<Doc | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -551,7 +823,7 @@ export default function DocTrackPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {visible.map(doc => (
-            <DocCard key={doc.id} doc={doc} onDelete={setDeleteTarget} />
+            <DocCard key={doc.id} doc={doc} onDelete={setDeleteTarget} onAcknowledge={setAckDoc} />
           ))}
         </div>
       )}
@@ -563,6 +835,11 @@ export default function DocTrackPage() {
         onUploaded={load}
         sites={sites}
       />
+
+      {/* Acknowledgements dialog */}
+      {ackDoc && (
+        <AcknowledgementsDialog doc={ackDoc} open={!!ackDoc} onClose={() => setAckDoc(null)} />
+      )}
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>

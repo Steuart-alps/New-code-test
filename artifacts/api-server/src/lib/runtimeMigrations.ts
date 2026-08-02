@@ -507,6 +507,8 @@ export async function runRuntimeMigrations() {
     await migrateHotTub();
     await migrateTreeTrack();
     await migrateTwoFactor();
+    await migrateStaffRoster();
+    await migrateDocAcknowledgements();
     await migrateSignatures();
 
     logger.info("Runtime migrations complete");
@@ -745,6 +747,59 @@ async function migrateTwoFactor() {
     ALTER TABLE "users"
     ADD COLUMN IF NOT EXISTS "totp_secret"  text,
     ADD COLUMN IF NOT EXISTS "totp_enabled" boolean NOT NULL DEFAULT false
+  `);
+}
+
+// ---- Staff roster ----
+async function migrateStaffRoster() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staff_roster" (
+      "id"          serial PRIMARY KEY,
+      "client_id"   integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"     integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "name"        text NOT NULL,
+      "job_title"   text,
+      "department"  text,
+      "email"       text,
+      "active"      boolean NOT NULL DEFAULT true,
+      "created_at"  timestamp NOT NULL DEFAULT now(),
+      "updated_at"  timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_staff_roster_client"
+    ON "staff_roster" ("client_id")
+  `);
+  // requires_acknowledgement flag on documents
+  await db.execute(sql`
+    ALTER TABLE "doc_track_documents"
+    ADD COLUMN IF NOT EXISTS "requires_acknowledgement" boolean NOT NULL DEFAULT false
+  `);
+}
+
+// ---- Document acknowledgements ----
+async function migrateDocAcknowledgements() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "doc_acknowledgements" (
+      "id"                   serial PRIMARY KEY,
+      "document_id"          integer NOT NULL REFERENCES "doc_track_documents"("id") ON DELETE CASCADE,
+      "client_id"            integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "staff_roster_id"      integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name"           text NOT NULL,
+      "signature"            text,
+      "acknowledged_at"      timestamp NOT NULL DEFAULT now(),
+      "acknowledged_by"      integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "train_track_record_id" integer,
+      "created_at"           timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_doc_ack_document"
+    ON "doc_acknowledgements" ("document_id")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_doc_ack_client"
+    ON "doc_acknowledgements" ("client_id")
   `);
 }
 

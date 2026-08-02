@@ -37,6 +37,7 @@ import TreeTrackPage from "@/pages/tree-track";
 import DailyTrackAmPage from "@/pages/daily-track-am";
 import DailyTrackPmPage from "@/pages/daily-track-pm";
 import DailyTrackStatusPage from "@/pages/daily-track-status";
+import StaffRosterPage from "@/pages/staff-roster";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -121,6 +122,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canAdmin && <Route path="/users" component={UsersPage} />}
+      {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
       <Route component={NotFound} />
