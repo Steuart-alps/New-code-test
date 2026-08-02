@@ -1,21 +1,24 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { useLocation } from "wouter";
-import { ShieldCheck, ArrowLeft } from "lucide-react";
+import { ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import alpsLogo from "@/assets/alps-logo.png";
 
-type View = "login" | "forgot" | "forgot-sent";
+type View = "login" | "totp" | "forgot" | "forgot-sent";
+
+const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, refresh } = useAuth();
   const [, navigate] = useLocation();
   const [view, setView] = useState<View>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,9 +28,35 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      if (result.requires2fa) {
+        setView("totp");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleTotp(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch(`${baseUrl}/auth/2fa/verify`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: totpCode.replace(/\s/g, "") }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Verification failed");
+      // Session is now fully established — reload auth state
+      await refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Verification failed");
+      setTotpCode("");
     } finally {
       setLoading(false);
     }
@@ -38,7 +67,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}api/auth/forgot-password`, {
+      const res = await fetch(`${baseUrl}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail }),
@@ -134,6 +163,62 @@ export default function LoginPage() {
                     <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading}>
                       {loading ? "Signing in..." : "Sign in"}
                     </Button>
+                  </form>
+                </motion.div>
+              )}
+
+              {view === "totp" && (
+                <motion.div
+                  key="totp"
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -16 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="flex justify-center mb-6">
+                    <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                      <KeyRound className="w-7 h-7 text-primary" />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-display text-[#162D42] mb-2 text-center">Two-factor authentication</h2>
+                  <p className="text-sm text-muted-foreground mb-8 text-center font-light">
+                    Open your authenticator app and enter the 6-digit code.
+                  </p>
+                  <form onSubmit={handleTotp} className="space-y-5">
+                    <div className="space-y-2">
+                      <Label htmlFor="totp-code" className="text-[#1A1A1A]">Authentication code</Label>
+                      <Input
+                        id="totp-code"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="000 000"
+                        value={totpCode}
+                        onChange={e => setTotpCode(e.target.value.replace(/[^0-9\s]/g, "").slice(0, 7))}
+                        required
+                        autoComplete="one-time-code"
+                        autoFocus
+                        className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary text-center text-xl tracking-[0.3em] font-mono"
+                      />
+                    </div>
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-destructive/10 border-l-2 border-destructive text-destructive text-sm px-4 py-3"
+                      >
+                        {error}
+                      </motion.div>
+                    )}
+                    <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading || totpCode.replace(/\s/g, "").length < 6}>
+                      {loading ? "Verifying..." : "Verify"}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => { setError(""); setTotpCode(""); setView("login"); }}
+                      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-[#162D42] transition-colors mx-auto"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
+                    </button>
                   </form>
                 </motion.div>
               )}

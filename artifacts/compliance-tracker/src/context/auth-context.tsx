@@ -12,6 +12,7 @@ export interface AuthUser {
   clientId: number | null;
   departmentId: number | null;
   active: boolean;
+  totpEnabled?: boolean;
 }
 
 export interface AuthClient {
@@ -28,7 +29,7 @@ interface AuthContextValue {
   client: AuthClient | null;
   billingLocked: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ requires2fa: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   activeClientId: number | null;
@@ -173,7 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setIsLoading(false));
   }, []);
 
-  async function login(email: string, password: string) {
+  async function login(email: string, password: string): Promise<{ requires2fa: boolean }> {
     const res = await apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -183,11 +184,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.error ?? "Login failed");
     }
     const data = await res.json();
+    if (data.requires2fa) return { requires2fa: true };
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);
     setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
+    return { requires2fa: false };
   }
 
   async function logout() {

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
+import QRCode from "qrcode";
+import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp";
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
@@ -42,9 +44,17 @@ router.post("/auth/login", async (req, res) => {
     return;
   }
 
+  // If 2FA is enabled, hold the session in a pending state and ask the client
+  // to supply a TOTP code before completing the login.
+  if (result.user.totpEnabled && result.user.totpSecret) {
+    (req.session as any).pending2faUserId = result.user.id;
+    res.json({ requires2fa: true });
+    return;
+  }
+
   req.session.userId = result.user.id;
 
-  const { passwordHash: _, ...safeUser } = result.user;
+  const { passwordHash: _, totpSecret: __, ...safeUser } = result.user;
   let billingLocked = false;
   let services: "all" | string[] = "all";
   if (safeUser.clientId != null) {
@@ -61,6 +71,89 @@ router.post("/auth/login", async (req, res) => {
     billingLocked,
     services,
   });
+});
+
+// POST /auth/2fa/verify — complete a pending 2FA login by supplying a TOTP code
+router.post("/auth/2fa/verify", async (req, res) => {
+  const pendingUserId = (req.session as any).pending2faUserId;
+  if (!pendingUserId) { res.status(400).json({ error: "No pending 2FA session" }); return; }
+
+  const { code } = req.body as { code?: string };
+  if (!code || !/^\d{6}$/.test(code.trim())) {
+    res.status(400).json({ error: "Please enter a 6-digit code" }); return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, pendingUserId)).limit(1);
+  if (!user || !user.totpEnabled || !user.totpSecret) {
+    res.status(400).json({ error: "Invalid session" }); return;
+  }
+
+  if (!verifyToken(code.trim(), user.totpSecret)) {
+    res.status(401).json({ error: "Incorrect code. Please try again." }); return;
+  }
+
+  delete (req.session as any).pending2faUserId;
+  req.session.userId = user.id;
+
+  const withClient = await getUserWithClientByEmail(user.email);
+  const { passwordHash: _p, totpSecret: _t, ...safeUser } = user;
+  let billingLocked = false;
+  let services: "all" | string[] = "all";
+  if (user.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(user.clientId);
+      services = await getEntitledServices(user.clientId);
+    } catch {}
+  }
+  res.json({ user: { ...safeUser, totpEnabled: true }, client: withClient?.client ?? null, billingLocked, services });
+});
+
+// GET /auth/2fa/setup — generate a fresh TOTP secret + QR code for the signed-in user
+router.get("/auth/2fa/setup", requireAuth, async (req, res) => {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  const secret = generateSecret();
+  const otpauth = keyUri(user.email, "ComplyTrack", secret);
+  const qrDataUrl = await QRCode.toDataURL(otpauth);
+  (req.session as any).pendingTotpSecret = secret;
+
+  res.json({ secret, qrDataUrl });
+});
+
+// POST /auth/2fa/enable — verify a TOTP code against the pending secret and save it
+router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
+  const pendingSecret = (req.session as any).pendingTotpSecret as string | undefined;
+  if (!pendingSecret) {
+    res.status(400).json({ error: "No setup in progress. Start setup first." }); return;
+  }
+  const { code } = req.body as { code?: string };
+  if (!code || !/^\d{6}$/.test(code.trim())) {
+    res.status(400).json({ error: "Please enter a 6-digit code" }); return;
+  }
+  if (!verifyToken(code.trim(), pendingSecret)) {
+    res.status(401).json({ error: "Incorrect code — please check your authenticator app." }); return;
+  }
+  await db.update(usersTable)
+    .set({ totpSecret: pendingSecret, totpEnabled: true, updatedAt: new Date() })
+    .where(eq(usersTable.id, req.currentUser!.id));
+  delete (req.session as any).pendingTotpSecret;
+  res.json({ ok: true });
+});
+
+// POST /auth/2fa/disable — verify the user's password then clear TOTP
+router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
+  const { password } = req.body as { password?: string };
+  if (!password) { res.status(400).json({ error: "Password required" }); return; }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (!await verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Incorrect password" }); return;
+  }
+  await db.update(usersTable)
+    .set({ totpSecret: null, totpEnabled: false, updatedAt: new Date() })
+    .where(eq(usersTable.id, user.id));
+  res.json({ ok: true });
 });
 
 router.post("/auth/logout", (req, res) => {
@@ -96,7 +189,8 @@ router.get("/auth/me", requireAuth, async (req, res) => {
     }
   }
 
-  res.json({ user, client, billingLocked, services });
+  const { totpSecret: _s, ...safeUser } = user;
+  res.json({ user: safeUser, client, billingLocked, services });
 });
 
 const ForgotPasswordBody = z.object({

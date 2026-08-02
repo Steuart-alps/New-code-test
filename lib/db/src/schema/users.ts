@@ -21,6 +21,8 @@ export const usersTable = pgTable("users", {
   gcMandateId: text("gc_mandate_id"),
   gcSubscriptionId: text("gc_subscription_id"),
   gcCustomerId: text("gc_customer_id"),
+  totpSecret: text("totp_secret"),
+  totpEnabled: boolean("totp_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

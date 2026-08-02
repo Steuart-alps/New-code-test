@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface DomainRecord {
@@ -1131,7 +1131,178 @@ export default function SettingsPage() {
             </CardFooter>
           </Card>
         </form>
+
+        {/* Two-Factor Authentication */}
+        <TwoFactorCard />
       </div>
     </AppLayout>
+  );
+}
+
+// ── Two-Factor Authentication card ───────────────────────────────────────────
+function TwoFactorCard() {
+  const { user, refresh } = useAuth();
+  const { toast } = useToast();
+
+  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "disabling";
+  const [step, setStep] = useState<SetupStep>("idle");
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [disablePassword, setDisablePassword] = useState("");
+  const [error, setError] = useState("");
+
+  const enabled = user?.totpEnabled ?? false;
+
+  async function startSetup() {
+    setError("");
+    setStep("loading-qr");
+    try {
+      const data = await apiFetch<{ qrDataUrl: string; secret: string }>("/auth/2fa/setup");
+      setQrDataUrl(data.qrDataUrl);
+      setSecret(data.secret);
+      setStep("scanning");
+    } catch (e: any) {
+      setError(e.message ?? "Failed to start setup");
+      setStep("idle");
+    }
+  }
+
+  async function handleEnable(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setStep("verifying");
+    try {
+      await apiFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
+      await refresh();
+      toast({ title: "Two-factor authentication enabled" });
+      setStep("idle");
+      setCode("");
+      setQrDataUrl(null);
+      setSecret(null);
+    } catch (e: any) {
+      setError(e.message ?? "Verification failed");
+      setCode("");
+      setStep("scanning");
+    }
+  }
+
+  async function handleDisable(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setStep("disabling");
+    try {
+      await apiFetch("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password: disablePassword }) });
+      await refresh();
+      toast({ title: "Two-factor authentication disabled" });
+      setStep("idle");
+      setDisablePassword("");
+    } catch (e: any) {
+      setError(e.message ?? "Failed to disable 2FA");
+      setStep("idle");
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <KeyRound className="w-4 h-4" /> Two-Factor Authentication
+        </CardTitle>
+        <CardDescription>
+          Add an extra layer of security to your account. Once enabled, you'll need a code from your authenticator app every time you sign in.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6">
+        {enabled ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+              <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+              <span>Two-factor authentication is <strong>active</strong> on your account.</span>
+            </div>
+            {step === "idle" && (
+              <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }}>
+                <ShieldOff className="w-4 h-4" /> Disable two-factor authentication
+              </Button>
+            )}
+            {step === "disabling" && (
+              <form onSubmit={handleDisable} className="space-y-3 max-w-sm">
+                <p className="text-sm text-muted-foreground">Enter your password to confirm.</p>
+                <Input
+                  type="password"
+                  placeholder="Your password"
+                  value={disablePassword}
+                  onChange={e => setDisablePassword(e.target.value)}
+                  autoFocus
+                  className="rounded-sm"
+                />
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" variant="destructive" className="rounded-sm" disabled={!disablePassword}>Disable 2FA</Button>
+                  <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setError(""); setDisablePassword(""); }}>Cancel</Button>
+                </div>
+              </form>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+              <ShieldOff className="w-4 h-4 flex-shrink-0" />
+              <span>Two-factor authentication is <strong>not enabled</strong>.</span>
+            </div>
+
+            {step === "idle" && (
+              <Button className="rounded-sm gap-2" onClick={startSetup}>
+                <ShieldCheck className="w-4 h-4" /> Enable two-factor authentication
+              </Button>
+            )}
+
+            {step === "loading-qr" && (
+              <p className="text-sm text-muted-foreground animate-pulse">Generating QR code…</p>
+            )}
+
+            {(step === "scanning" || step === "verifying") && qrDataUrl && (
+              <div className="space-y-5 max-w-sm">
+                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                  <li>Install an authenticator app (Google Authenticator, Authy, 1Password, etc.)</li>
+                  <li>Scan the QR code below or enter the key manually</li>
+                  <li>Enter the 6-digit code shown in the app to confirm</li>
+                </ol>
+                <div className="flex flex-col items-center gap-3 p-4 bg-white border border-border rounded-sm">
+                  <img src={qrDataUrl} alt="2FA QR code" className="w-48 h-48" />
+                  {secret && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      Manual key: <code className="font-mono bg-muted px-1 py-0.5 rounded text-foreground tracking-wider">{secret}</code>
+                    </p>
+                  )}
+                </div>
+                <form onSubmit={handleEnable} className="space-y-3">
+                  <Label>Authentication code</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="000 000"
+                    value={code}
+                    onChange={e => setCode(e.target.value.replace(/[^0-9\s]/g, "").slice(0, 7))}
+                    autoFocus
+                    autoComplete="one-time-code"
+                    className="rounded-sm text-center text-lg tracking-[0.3em] font-mono"
+                  />
+                  {error && <p className="text-sm text-destructive">{error}</p>}
+                  <div className="flex gap-2">
+                    <Button type="submit" className="rounded-sm" disabled={code.replace(/\s/g, "").length < 6 || step === "verifying"}>
+                      {step === "verifying" ? "Verifying…" : "Confirm & Enable"}
+                    </Button>
+                    <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setCode(""); setError(""); setQrDataUrl(null); setSecret(null); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

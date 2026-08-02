@@ -506,6 +506,7 @@ export async function runRuntimeMigrations() {
     await migrateSafeHandbook();
     await migrateHotTub();
     await migrateTreeTrack();
+    await migrateTwoFactor();
     await migrateSignatures();
 
     logger.info("Runtime migrations complete");
@@ -735,6 +736,15 @@ async function migrateTreeTrack() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client"
     ON "tree_inspections" ("client_id")
+  `);
+}
+
+// ---- TOTP 2FA columns on users ----
+async function migrateTwoFactor() {
+  await db.execute(sql`
+    ALTER TABLE "users"
+    ADD COLUMN IF NOT EXISTS "totp_secret"  text,
+    ADD COLUMN IF NOT EXISTS "totp_enabled" boolean NOT NULL DEFAULT false
   `);
 }
 
