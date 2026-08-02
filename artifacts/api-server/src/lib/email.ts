@@ -104,6 +104,7 @@ export async function sendSystemEmail(opts: {
   const rawFrom = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const email = extractEmail(rawFrom);
   const from = `ComplyTrack <${email}>`;
+  console.log("[sendSystemEmail] from repr:", JSON.stringify(from));
   const result = await resend.emails.send({
     from,
     to: opts.to,
