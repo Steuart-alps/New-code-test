@@ -87,6 +87,13 @@ export async function sendEmail(opts: {
   }
 }
 
+/** Extract a bare email address from a value that may include a display name,
+ *  e.g. "Name <email@example.com>" → "email@example.com". */
+function extractEmail(raw: string): string {
+  const match = raw.match(/<([^>]+)>/);
+  return match ? match[1].trim() : raw.trim();
+}
+
 export async function sendSystemEmail(opts: {
   to: string;
   subject: string;
@@ -94,7 +101,8 @@ export async function sendSystemEmail(opts: {
   text?: string;
 }) {
   const resend = getResend();
-  const email = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const rawFrom = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const email = extractEmail(rawFrom);
   const from = `ComplyTrack <${email}>`;
   const result = await resend.emails.send({
     from,

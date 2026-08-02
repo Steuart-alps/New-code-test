@@ -239,7 +239,8 @@ router.post("/auth/forgot-password", async (req, res) => {
         `,
         text: `Hi ${result.user.name},\n\nWe received a request to reset your password. Use the link below (expires in 1 hour):\n\n${resetUrl}\n\nIf you did not request this, you can safely ignore this email.\n\nBest regards,\nComplyTrack`,
       });
-    } catch {
+    } catch (err) {
+      req.log.error({ err }, "Failed to send password reset email");
     }
   }
 
