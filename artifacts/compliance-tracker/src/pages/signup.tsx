@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft,
-  Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen,
+  Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +88,26 @@ const ADDONS = [
     iconBg: "bg-emerald-50",
     activeBorder: "border-emerald-500",
     activeBg: "bg-emerald-50/60",
+  },
+  {
+    key: "hottubtrack",
+    label: "TubTrack",
+    desc: "Hot tub & spa pool maintenance logbook — water chemistry, temperature and HSG282/PWTAG checks.",
+    icon: Waves,
+    iconColor: "text-cyan-600",
+    iconBg: "bg-cyan-50",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50/60",
+  },
+  {
+    key: "treetrack",
+    label: "TreeTrack",
+    desc: "Tree inspection logbook — visual assessments, post-storm checks and remedial works (BS 3998).",
+    icon: TreePine,
+    iconColor: "text-green-700",
+    iconBg: "bg-green-50",
+    activeBorder: "border-green-500",
+    activeBg: "bg-green-50/60",
   },
 ];
 

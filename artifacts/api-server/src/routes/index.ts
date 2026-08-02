@@ -22,6 +22,8 @@ import safeTrackRouter from "./safe-track";
 import fixTrackRouter from "./fix-track";
 import docTrackRouter from "./doc-track";
 import trainTrackRouter from "./train-track";
+import hotTubRouter from "./hot-tub";
+import treeTrackRouter from "./tree-track";
 import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
@@ -53,6 +55,8 @@ router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRou
 router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
 router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
+router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
+router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
 // The AM/PM checklists cover both kitchen (kitchentrack) and premises
 // (safetrack) opening/closing items, so the router-level gate only requires

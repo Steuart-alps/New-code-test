@@ -3,7 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -69,6 +69,24 @@ const ADDONS = [
     iconColor: "text-emerald-700",
     activeBorder: "border-emerald-500",
     activeBg: "bg-emerald-50/60",
+  },
+  {
+    key: "hottubtrack",
+    label: "TubTrack",
+    desc: "Hot tub & spa pool maintenance (HSG282)",
+    icon: Waves,
+    iconColor: "text-cyan-600",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50/60",
+  },
+  {
+    key: "treetrack",
+    label: "TreeTrack",
+    desc: "Tree inspection logbook (BS 3998)",
+    icon: TreePine,
+    iconColor: "text-green-700",
+    activeBorder: "border-green-500",
+    activeBg: "bg-green-50/60",
   },
 ];
 

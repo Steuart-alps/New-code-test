@@ -504,6 +504,8 @@ export async function runRuntimeMigrations() {
 
     await migrateTrainTrack();
     await migrateSafeHandbook();
+    await migrateHotTub();
+    await migrateTreeTrack();
     await migrateSignatures();
 
     logger.info("Runtime migrations complete");
@@ -680,6 +682,59 @@ async function migrateSafeHandbook() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_safe_handbook_client"
     ON "safe_handbook" ("client_id")
+  `);
+}
+
+// ---- Hot Tub checks ----
+async function migrateHotTub() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "hot_tub_checks" (
+      "id"               serial PRIMARY KEY,
+      "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"          integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "check_type"       text NOT NULL,
+      "check_date"       date NOT NULL,
+      "result"           text NOT NULL DEFAULT 'pass',
+      "ph_value"         numeric(4,2),
+      "sanitiser_level"  numeric(6,2),
+      "temperature"      numeric(5,2),
+      "location"         text,
+      "performed_by"     text,
+      "notes"            text,
+      "created_by"       integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"       timestamp NOT NULL DEFAULT now(),
+      "updated_at"       timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_hot_tub_checks_client"
+    ON "hot_tub_checks" ("client_id")
+  `);
+}
+
+// ---- Tree inspections ----
+async function migrateTreeTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "tree_inspections" (
+      "id"              serial PRIMARY KEY,
+      "client_id"       integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"         integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "check_type"      text NOT NULL,
+      "check_date"      date NOT NULL,
+      "result"          text NOT NULL DEFAULT 'pass',
+      "tree_ref"        text,
+      "location"        text,
+      "inspector"       text,
+      "follow_up_date"  date,
+      "notes"           text,
+      "created_by"      integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"      timestamp NOT NULL DEFAULT now(),
+      "updated_at"      timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client"
+    ON "tree_inspections" ("client_id")
   `);
 }
 

@@ -15,3 +15,5 @@ export * from "./consultant-clients";
 export * from "./safe-track";
 export * from "./daily-checklists";
 export * from "./fix-track";
+export * from "./hot-tub-checks";
+export * from "./tree-inspections";

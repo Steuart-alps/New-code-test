@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen,
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen, Waves, TreePine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -175,6 +175,48 @@ const MODULES = [
       "Red alerts for any expired certificates",
       "Filter by site, status, or staff name",
       "Covers fire safety, food hygiene, manual handling & more",
+    ],
+  },
+  {
+    key: "hottubtrack",
+    label: "TubTrack",
+    price: 10,
+    icon: Waves,
+    color: "text-cyan-700",
+    bg: "bg-cyan-50",
+    border: "border-cyan-200",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50",
+    required: false,
+    description: "Hot tub & spa pool maintenance logbook — daily water chemistry, temperature checks and records based on HSG282 and PWTAG guidance.",
+    features: [
+      "Daily pH and sanitiser level (chlorine/bromine) logging",
+      "Water temperature checks — max 40°C enforcement reminder",
+      "Filter clean and cover inspection records",
+      "Quarterly drain, clean and refill scheduling",
+      "Microbiological test tracking",
+      "Overdue check alerts per check type",
+    ],
+  },
+  {
+    key: "treetrack",
+    label: "TreeTrack",
+    price: 10,
+    icon: TreePine,
+    color: "text-green-700",
+    bg: "bg-green-50",
+    border: "border-green-200",
+    activeBorder: "border-green-500",
+    activeBg: "bg-green-50",
+    required: false,
+    description: "Tree inspection logbook — record visual assessments, detailed surveys, post-storm checks and remedial works in line with BS 3998:2010 and NTSG guidance.",
+    features: [
+      "Annual visual tree assessment (VTA) records",
+      "Detailed / close inspection logging",
+      "Post-storm and adverse weather check records",
+      "Remedial works documentation",
+      "Tree reference, location and inspector fields",
+      "Follow-up / re-inspection date tracking",
     ],
   },
 ];
