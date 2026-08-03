@@ -148,8 +148,14 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     setForm({ ...form, issueType: v, priority: autoPri });
   }
 
+  // Gas is one issue type but three distinct trades — match all gas sub-trades
+  // plus the legacy "gas" value for backward compatibility.
+  const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
+  const matchingTrades: string[] =
+    form.issueType === "gas" ? GAS_SUBTRADES : [form.issueType];
+
   const matchingContractors = contractors.filter(c =>
-    Array.isArray(c.trades) && c.trades.includes(form.issueType),
+    Array.isArray(c.trades) && c.trades.some(t => matchingTrades.includes(t)),
   );
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -274,7 +280,8 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         {form.issueType && matchingContractors.length === 0 && contractors.length > 0 && (
           <p className="text-xs text-amber-600 flex items-center gap-1 mt-1">
             <AlertTriangle className="w-3 h-3" />
-            No contractor set up for {ISSUE_TYPES[form.issueType]?.label ?? "this type"} — add trades in Contractors
+            No contractor covers {ISSUE_TYPES[form.issueType]?.label ?? "this type"} yet
+            {form.issueType === "gas" ? " — add gas kitchen, fireplace, or heating plant trades in Contractors" : " — add the relevant trade in Contractors"}
           </p>
         )}
       </F>

@@ -19,10 +19,14 @@ import { Contractor } from "@workspace/api-client-react";
 const TRADE_OPTIONS = [
   { value: "electrical",    label: "Electrical" },
   { value: "plumbing",      label: "Plumbing" },
-  { value: "gas",           label: "Gas" },
+  // Gas is a single issue type but we record which kind of gas work
+  // the contractor covers so managers can pick the right specialist.
+  { value: "gas_kitchen",   label: "Gas — Kitchen (hobs, ovens, ranges)" },
+  { value: "gas_fireplace", label: "Gas — Fireplace / Fires" },
+  { value: "gas_heating",   label: "Gas — Heating Plant (boilers)" },
   { value: "structural",    label: "Structural" },
   { value: "equipment",     label: "Equipment" },
-  { value: "hvac",          label: "HVAC" },
+  { value: "hvac",          label: "HVAC (ventilation, air handling)" },
   { value: "it_comms",      label: "IT / Comms" },
   { value: "safety_hazard", label: "Safety Hazard" },
   { value: "cleaning",      label: "Cleaning" },

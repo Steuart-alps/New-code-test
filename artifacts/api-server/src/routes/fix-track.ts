@@ -231,7 +231,15 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
     trades:  Array.isArray(c.trades) ? c.trades as string[] : [],
   }));
 
-  const matches = issueType ? all.filter(c => c.trades.includes(issueType)) : all;
+  // Gas is one issue type but three distinct trades
+  const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
+  const matchTrades = issueType === "gas"
+    ? GAS_SUBTRADES
+    : issueType ? [issueType] : null;
+
+  const matches = matchTrades
+    ? all.filter(c => c.trades.some((t: string) => matchTrades.includes(t)))
+    : all;
 
   res.json({ matches, all });
 });
