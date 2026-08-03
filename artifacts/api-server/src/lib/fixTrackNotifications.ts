@@ -69,13 +69,14 @@ export interface ContractorAssignmentOpts {
   completedToken:   string;
   baseUrl:          string;
   clientId:         number;
+  siteDocuments?:   { name: string; url: string }[];
 }
 
 export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<void> {
   const {
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
-    bookedToken, completedToken, baseUrl, clientId,
+    bookedToken, completedToken, baseUrl, clientId, siteDocuments,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -130,6 +131,20 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     </tr>
   </table>
 
+  ${siteDocuments?.length ? `
+  <div style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+    <p style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px">
+      📎 Site Documents
+    </p>
+    ${siteDocuments.map(d => `
+    <div style="margin-bottom:6px">
+      <a href="${d.url}" style="font-size:13px;color:#2563eb;text-decoration:none">
+        ${escapeHtml(d.name)}
+      </a>
+    </div>`).join("")}
+    <p style="font-size:11px;color:#94a3b8;margin:10px 0 0">Links expire in 30 days.</p>
+  </div>` : ""}
+
   <p style="font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:16px">
     This job was assigned by ${safeCompany}. These links are valid for 30 days and can only be used once.
     If this email was sent in error, please ignore it.
@@ -138,8 +153,8 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
 
   const priorityPrefix = issuePriority === "urgent" ? "[URGENT] " : "";
   await sendEmail({
-    to:       contractorEmail,
-    subject:  `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
+    to:      contractorEmail,
+    subject: `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
     html,
     clientId,
   });

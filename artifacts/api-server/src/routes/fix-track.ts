@@ -309,6 +309,30 @@ router.post("/issues/:id/send-to-contractor", requireAuth, async (req, res) => {
 
   const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
 
+  // Generate 30-day signed download links for site documents (best-effort).
+  const siteDocuments: { name: string; url: string }[] = [];
+  const siteDocResult = await db.execute(sql`
+    SELECT sd.name, sd.object_path
+    FROM   fix_track_issues fi
+    JOIN   site_documents   sd ON sd.site_id = fi.site_id AND sd.client_id = fi.client_id
+    WHERE  fi.id        = ${id}
+      AND  fi.client_id = ${clientId}
+      AND  fi.site_id   IS NOT NULL
+    LIMIT  10
+  `);
+
+  for (const doc of (siteDocResult.rows as any[])) {
+    try {
+      const url = await storage.getSignedDownloadURL(
+        doc.object_path as string,
+        30 * 24 * 60 * 60,   // 30 days
+      );
+      siteDocuments.push({ name: doc.name as string, url });
+    } catch {
+      // Skip any document that fails — don't block the email
+    }
+  }
+
   await sendContractorAssignmentEmail({
     contractorName:   issue.contractor_name   ?? "Contractor",
     contractorEmail:  issue.contractor_email,
@@ -323,6 +347,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, async (req, res) => {
     completedToken:   tokens.completedToken,
     baseUrl,
     clientId,
+    siteDocuments:    siteDocuments.length ? siteDocuments : undefined,
   });
 
   res.json({ ok: true, message: "Email sent to contractor" });

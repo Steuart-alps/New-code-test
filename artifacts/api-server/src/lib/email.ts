@@ -43,6 +43,11 @@ export function parseEmailList(raw: string | null | undefined): string[] {
   return Array.from(new Set(parts.map((s) => s.toLowerCase())));
 }
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+}
+
 export async function sendEmail(opts: {
   to: string | string[];
   subject: string;
@@ -51,20 +56,21 @@ export async function sendEmail(opts: {
   cc?: string | string[];
   icsAttachment?: string;
   icsFilename?: string;
+  attachments?: EmailAttachment[];
   clientId?: number | null;
 }) {
   const settings = await getEmailSettings(opts.clientId ?? null);
   const resend = getResend(settings["resendApiKey"]);
   const from = buildFrom(settings);
 
-  const attachments = opts.icsAttachment
-    ? [
-        {
-          filename: opts.icsFilename ?? "invite.ics",
-          content: Buffer.from(opts.icsAttachment),
-        },
-      ]
+  const icsEntry: EmailAttachment | undefined = opts.icsAttachment
+    ? { filename: opts.icsFilename ?? "invite.ics", content: Buffer.from(opts.icsAttachment) }
     : undefined;
+
+  const attachments =
+    icsEntry || opts.attachments?.length
+      ? [...(icsEntry ? [icsEntry] : []), ...(opts.attachments ?? [])]
+      : undefined;
 
   const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
   const ccList = opts.cc
