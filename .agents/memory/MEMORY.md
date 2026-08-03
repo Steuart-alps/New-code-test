@@ -9,3 +9,4 @@
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
 - [API route middleware](api-route-middleware.md) — admin guard in routes is `requireClientAdmin` from `requireAuth.ts`; no separate middleware file; `requireCanAdmin` does not exist.
 - [Mobile app planned](mobile-app-plan.md) — user confirmed a React Native/Expo mobile app is planned; primary drivers are Bluetooth device support (temperature probes, PAT testers) and field use on iOS.
+- [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.

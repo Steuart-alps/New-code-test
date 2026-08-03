@@ -89,6 +89,7 @@ interface Issue {
   targetDate?: string | null;
   resolvedDate?: string | null;
   solutionNotes?: string | null;
+  completionDocumentPath?: string | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -376,7 +377,8 @@ export default function FixTrackPage() {
   const [editing, setEditing]       = useState<Issue | null>(null);
   const [form, setForm]             = useState<Record<string, any>>({});
   const [saving, setSaving]         = useState(false);
-  const [notifying, setNotifying]   = useState<Record<number, boolean>>({});
+  const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
+  const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
 
   async function load() {
     setLoading(true);
@@ -468,11 +470,17 @@ export default function FixTrackPage() {
     await load();
   }
 
-  async function handleNotify(issue: Issue) {
+  async function handleNotify(issue: Issue, force = false) {
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
+      const url = `/fix-track/issues/${issue.id}/send-to-contractor${force ? "?force=true" : ""}`;
+      const res = await apiFetch(url, { method: "POST" });
       const body = await res.json();
+      if (res.status === 409 && body.alreadySent) {
+        // Ask the manager to confirm before resending
+        setRenotifyIssue(issue);
+        return;
+      }
       if (!res.ok) throw new Error(body.error ?? "Failed to send");
       toast({ title: "Email sent", description: `Contractor notified for "${issue.title}"` });
     } catch (err: any) {
@@ -639,6 +647,16 @@ export default function FixTrackPage() {
                             <span className="font-medium">Resolution: </span>{issue.solutionNotes}
                           </div>
                         )}
+                        {issue.completionDocumentPath && (
+                          <a
+                            href={`/api/storage/objects/${issue.completionDocumentPath}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 mt-1 text-xs text-blue-700 hover:underline"
+                          >
+                            📎 Completion document
+                          </a>
+                        )}
                       </div>
 
                       {issue.mediaUrls?.length > 0 && (
@@ -697,6 +715,29 @@ export default function FixTrackPage() {
           </div>
         )}
       </div>
+
+      {/* Re-notify confirmation dialog */}
+      <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Already sent — send again?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">
+            An email has already been sent to <span className="font-medium">{renotifyIssue?.contractorName}</span> for this job.
+            Sending again will invalidate the previous email links and issue new ones.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenotifyIssue(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              const issue = renotifyIssue!;
+              setRenotifyIssue(null);
+              await handleNotify(issue, true);
+            }}>
+              Send again
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create / Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

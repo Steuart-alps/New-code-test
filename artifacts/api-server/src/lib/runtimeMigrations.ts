@@ -957,6 +957,12 @@ async function migrateFixTrackV2() {
     CREATE INDEX IF NOT EXISTS "IDX_fix_track_action_tokens_token"
     ON "fix_track_action_tokens" ("token")
   `);
+
+  // Completion document path stored on the issue so managers can download it
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issues"
+      ADD COLUMN IF NOT EXISTS "completion_document_path" text
+  `);
 }
 
 // ---- Site documents ----

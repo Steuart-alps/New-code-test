@@ -254,10 +254,11 @@ router.post("/:token", async (req, res) => {
   `);
   await db.execute(sql`
     UPDATE fix_track_issues
-    SET    status        = 'resolved',
-           resolved_date = ${today},
-           solution_notes = COALESCE(${notes}, solution_notes),
-           updated_at    = now()
+    SET    status                   = 'resolved',
+           resolved_date            = ${today},
+           solution_notes           = COALESCE(${notes}, solution_notes),
+           completion_document_path = COALESCE(${completionObjectPath}, completion_document_path),
+           updated_at               = now()
     WHERE  id = ${t.issue_id}
   `);
 

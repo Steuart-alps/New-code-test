@@ -274,6 +274,35 @@ router.post("/issues/:id/send-to-contractor", requireAuth, async (req, res) => {
   if (!issue.contractor_id)   return res.status(400).json({ error: "No contractor assigned to this issue" });
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
 
+  // Check for existing active (unused, non-expired) tokens for this issue.
+  // Return 409 so the frontend can warn the manager before resending.
+  const force = req.query.force === "true";
+  if (!force) {
+    const existing = await db.execute(sql`
+      SELECT id FROM fix_track_action_tokens
+      WHERE  issue_id   = ${id}
+        AND  client_id  = ${clientId}
+        AND  used_at    IS NULL
+        AND  expires_at  > now()
+      LIMIT 1
+    `);
+    if ((existing.rows as any[]).length > 0) {
+      return res.status(409).json({
+        alreadySent: true,
+        message: "An email has already been sent for this issue. Send again?",
+      });
+    }
+  }
+
+  // ?force=true: expire all previous tokens before minting fresh ones
+  await db.execute(sql`
+    UPDATE fix_track_action_tokens
+    SET    expires_at = now()
+    WHERE  issue_id   = ${id}
+      AND  client_id  = ${clientId}
+      AND  used_at    IS NULL
+  `);
+
   const proto   = (req.headers["x-forwarded-proto"] as string) ?? req.protocol;
   const host    = (req.headers["x-forwarded-host"]  as string) ?? req.get("host") ?? "";
   const baseUrl = `${proto}://${host}`;
