@@ -23,7 +23,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   TreePine, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, Search, Building2, Filter, CalendarDays,
-  UserCheck,
+  UserCheck, MapPin, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -181,6 +181,43 @@ export default function TreeTrackPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [w3wLoading, setW3wLoading] = useState(false);
+
+  async function handleUseLocation() {
+    if (!navigator.geolocation) {
+      toast({ title: "Location unavailable", description: "Your browser does not support geolocation.", variant: "destructive" });
+      return;
+    }
+    setW3wLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude: lat, longitude: lng } = pos.coords;
+          const res = await fetch(
+            `/api/w3w/convert?lat=${lat}&lng=${lng}`,
+            { credentials: "include" },
+          );
+          if (!res.ok) {
+            const b = await res.json().catch(() => ({}));
+            throw new Error(b?.error ?? `${res.status}`);
+          }
+          const { words } = await res.json() as { words: string };
+          setForm(f => ({ ...f, location: `///\u200b${words}` }));
+          toast({ title: "Location captured", description: `///\u200b${words}` });
+        } catch (err: any) {
+          toast({ title: "Could not get W3W address", description: err?.message ?? "Unknown error", variant: "destructive" });
+        } finally {
+          setW3wLoading(false);
+        }
+      },
+      (err) => {
+        setW3wLoading(false);
+        const msg = err.code === 1 ? "Location permission denied." : err.code === 2 ? "Location unavailable." : "Location timed out.";
+        toast({ title: "Geolocation failed", description: msg, variant: "destructive" });
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -614,11 +651,35 @@ export default function TreeTrackPage() {
 
             {/* Location */}
             <div>
-              <Label htmlFor="location">Location on Site</Label>
-              <Input id="location" placeholder="e.g. Car park perimeter, East boundary, Front garden…"
+              <div className="flex items-center justify-between mb-1">
+                <Label htmlFor="location">Location on Site</Label>
+                <button
+                  type="button"
+                  onClick={handleUseLocation}
+                  disabled={w3wLoading}
+                  className="flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {w3wLoading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <MapPin className="w-3 h-3" />}
+                  {w3wLoading ? "Getting location…" : "Use my location"}
+                </button>
+              </div>
+              <Input id="location" placeholder="e.g. Car park perimeter, East boundary, or ///word.word.word"
                 value={form.location}
                 onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                className="mt-1 rounded-sm" />
+                className="rounded-sm" />
+              {form.location.startsWith("///") && (
+                <a
+                  href={`https://what3words.com/${form.location.replace(/^\/\/\/\u200b?/, "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 mt-1 text-xs text-emerald-700 hover:underline"
+                >
+                  <MapPin className="w-3 h-3" />
+                  View on what3words.com
+                </a>
+              )}
             </div>
 
             {/* Inspector */}

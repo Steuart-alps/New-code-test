@@ -36,6 +36,7 @@ import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
 import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
+import w3wRouter from "./w3w";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -82,5 +83,6 @@ router.use("/daily-track-am", requireAuth, requireAnyService("kitchentrack", "sa
 router.use("/daily-track-pm", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackPmRouter);
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
+router.use(w3wRouter);
 
 export default router;
