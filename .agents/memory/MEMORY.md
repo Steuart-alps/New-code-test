@@ -8,3 +8,4 @@
 - [Validation steps setup](validation-steps.md) — test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
 - [API route middleware](api-route-middleware.md) — admin guard in routes is `requireClientAdmin` from `requireAuth.ts`; no separate middleware file; `requireCanAdmin` does not exist.
+- [Mobile app planned](mobile-app-plan.md) — user confirmed a React Native/Expo mobile app is planned; primary drivers are Bluetooth device support (temperature probes, PAT testers) and field use on iOS.
