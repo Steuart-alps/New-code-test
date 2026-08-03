@@ -2,6 +2,7 @@ import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { contractorsTable } from "./contractors";
 
 export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   id: serial("id").primaryKey(),
@@ -16,6 +17,7 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   reportedBy: text("reported_by").notNull(),
   reportedDate: date("reported_date").notNull(),
   assignedTo: text("assigned_to"),
+  contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
   solutionNotes: text("solution_notes"),

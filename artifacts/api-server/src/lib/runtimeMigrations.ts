@@ -263,6 +263,7 @@ export async function runRuntimeMigrations() {
     await migrateGreenTrack();
     await migrateSwimTrack();
     await migrateSiteDocuments();
+    await migrateFixTrackV2();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -919,6 +920,42 @@ async function migrateCheckPhotos() {
       "sent_at"    timestamp NOT NULL DEFAULT now(),
       UNIQUE ("client_id", "log_date")
     )
+  `);
+}
+
+// ---- FixTrack v2: contractor trades, contractorId on issues, action tokens ----
+async function migrateFixTrackV2() {
+  // Contractor trade specialisms (JSONB array matching fix-track issue types)
+  await db.execute(sql`
+    ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "trades" jsonb NOT NULL DEFAULT '[]'
+  `);
+
+  // Link a contractor directly to a maintenance issue
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issues"
+      ADD COLUMN IF NOT EXISTS "contractor_id" integer
+        REFERENCES "contractors"("id") ON DELETE SET NULL
+  `);
+
+  // One-time action tokens for contractor email buttons (Booked / Completed)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fix_track_action_tokens" (
+      "id"                     serial PRIMARY KEY,
+      "token"                  text NOT NULL UNIQUE,
+      "issue_id"               integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+      "client_id"              integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "contractor_id"          integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+      "action"                 text NOT NULL,
+      "expires_at"             timestamp NOT NULL,
+      "used_at"                timestamp,
+      "completion_notes"       text,
+      "completion_object_path" text,
+      "created_at"             timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_fix_track_action_tokens_token"
+    ON "fix_track_action_tokens" ("token")
   `);
 }
 

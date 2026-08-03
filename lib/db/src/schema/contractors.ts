@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -14,6 +14,7 @@ export const contractorsTable = pgTable("contractors", {
   phone: text("phone"),
   address: text("address"),
   notes: text("notes"),
+  trades: jsonb("trades").default([]).$type<string[]>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
