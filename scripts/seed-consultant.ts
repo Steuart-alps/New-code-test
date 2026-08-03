@@ -10,7 +10,7 @@ const CONSULTANT_NAME = process.env.CONSULTANT_NAME ?? "H&S Consultant";
 async function seed() {
   const existing = await db.select().from(usersTable).where(eq(usersTable.email, CONSULTANT_EMAIL));
   if (existing.length > 0) {
-    console.log(`Consultant account already exists: ${CONSULTANT_EMAIL}`);
+    console.log(`Consultant account already exists: ${CONSULTANT_EMAIL.replace(/(?<=.).(?=[^@]*@)/g, "*")}`);
     process.exit(0);
   }
 
@@ -26,7 +26,7 @@ async function seed() {
   });
 
   console.log("✅ Consultant account created:");
-  console.log(`   Email:    ${CONSULTANT_EMAIL}`);
+  console.log(`   Email:    ${CONSULTANT_EMAIL.replace(/(?<=.).(?=[^@]*@)/g, "*")}`);
   console.log("\n⚠️  Change the password after first login!");
 }
 

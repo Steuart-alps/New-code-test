@@ -21,6 +21,7 @@
     }
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
     "stripe": "20.0.0",
     "stripe-replit-sync": "1.0.0"
   }

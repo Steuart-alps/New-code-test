@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "@e965/xlsx";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
