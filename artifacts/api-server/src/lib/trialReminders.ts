@@ -5,8 +5,11 @@ import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { countClientSites, getPerSitePrice, quantityForSiteCount } from "./billing";
 
-/** How many days before the trial ends the reminder is sent. */
-export const TRIAL_REMINDER_LEAD_DAYS = 3;
+/**
+ * How many days before trial end the reminder fires.
+ * 14-day trial → reminder sent on day 10 (≤4 days remaining).
+ */
+export const TRIAL_REMINDER_LEAD_DAYS = 4;
 
 function daysUntil(date: Date): number {
   return Math.max(1, Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));

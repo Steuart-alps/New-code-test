@@ -345,9 +345,10 @@ router.post("/auth/register", async (req, res) => {
 
   let clientId: number | null = null;
   try {
+    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [client] = await db
       .insert(clientsTable)
-      .values({ name, slug, primaryColor: "#6366f1", active: true, ...(businessType ? { businessType } : {}) } as any)
+      .values({ name, slug, primaryColor: "#6366f1", active: true, trialEndsAt, ...(businessType ? { businessType } : {}) } as any)
       .returning();
     clientId = client.id;
   } catch (err) {
@@ -375,95 +376,31 @@ router.post("/auth/register", async (req, res) => {
     await seedStarterContent(clientId);
   }
 
-  // Log the user in immediately
+  // Log the user in immediately — trial has started, no card needed.
   (req.session as any).userId = user.id;
 
-  let checkoutUrl: string | null = null;
-
-  // Pricing is always the server-resolved per-site price — never a client-
-  // supplied priceId — so checkout can't be steered onto a different plan.
-  const perSite = await getPerSitePrice();
-
-  if (perSite) {
-    try {
-      const stripe = await getUncachableStripeClient();
-      const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
-
-      const customer = await stripe.customers.create({
+  // Create a Stripe customer in the background so billing setup later is
+  // seamless. Failure here never blocks account creation.
+  if (clientId !== null) {
+    getUncachableStripeClient()
+      .then(stripe => stripe.customers.create({
         name,
         email,
-        metadata: { userId: String(user.id), ...(clientId !== null ? { clientId: String(clientId) } : {}) },
-      });
-
-      await db.update(usersTable)
-        .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
-        .where(eq(usersTable.id, user.id));
-
-      // Per-site billing is scoped to the account (client), so store the customer
-      // on the client too — that's where the billing routes and site-count sync
-      // look it up.
-      if (clientId !== null) {
+        metadata: { userId: String(user.id), clientId: String(clientId) },
+      }))
+      .then(async customer => {
+        await db.update(usersTable)
+          .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
+          .where(eq(usersTable.id, user.id));
         await db.update(clientsTable)
           .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
-          .where(eq(clientsTable.id, clientId));
-      }
-
-      // Resolve promo code if provided
-      let discounts: { promotion_code: string }[] | undefined;
-      if (promoCode) {
-        const codes = await stripe.promotionCodes.list({ code: promoCode, active: true, limit: 1 });
-        if (codes.data.length > 0) {
-          discounts = [{ promotion_code: codes.data[0].id }];
-        }
-      }
-
-      // Quantity follows the account's site count (floored at 1); at signup the
-      // account has no sites yet, so this is 1.
-      const quantity = clientId !== null
-        ? quantityForSiteCount(await countClientSites(clientId))
-        : 1;
-
-      // Service selection: client picks WHICH services (add-ons or the
-      // Complete bundle); every price is resolved server-side.
-      const lineItems: { price: string; quantity: number }[] = [];
-      if (bundle) {
-        const bundlePrice = await getServicePrice(BUNDLE_KEY);
-        if (bundlePrice) lineItems.push({ price: bundlePrice.priceId, quantity });
-      }
-      if (lineItems.length === 0) {
-        lineItems.push({ price: perSite.priceId, quantity });
-        const addons = Array.from(
-          new Set((requestedServices ?? []).filter((s) => (ADDON_KEYS as readonly string[]).includes(s))),
-        );
-        for (const addon of addons) {
-          const price = await getServicePrice(addon);
-          if (price) lineItems.push({ price: price.priceId, quantity });
-        }
-      }
-
-      const sessionParams: Parameters<typeof stripe.checkout.sessions.create>[0] = {
-        customer: customer.id,
-        payment_method_types: ["card"],
-        line_items: lineItems,
-        mode: "subscription",
-        success_url: `${baseUrl}/dashboard?billing=success`,
-        cancel_url: `${baseUrl}/signup?cancelled=1`,
-        client_reference_id: String(user.id),
-        metadata: { userId: String(user.id) },
-        automatic_tax: { enabled: true },
-        customer_update: { address: "auto" },
-        ...(discounts ? { discounts } : { allow_promotion_codes: true }),
-      };
-
-      const session = await stripe.checkout.sessions.create(sessionParams);
-      checkoutUrl = session.url;
-    } catch (err) {
-      console.error("Stripe checkout creation failed:", err);
-    }
+          .where(eq(clientsTable.id, clientId!));
+      })
+      .catch(err => logger.warn({ err }, "Background Stripe customer creation failed — will retry at billing setup"));
   }
 
   const safeUser = { id: user.id, email: user.email, name: user.name, role: user.role };
-  res.json({ user: safeUser, checkoutUrl });
+  res.json({ user: safeUser });
 });
 
 export default router;
