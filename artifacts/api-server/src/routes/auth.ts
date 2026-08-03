@@ -291,10 +291,23 @@ router.post("/auth/reset-password", async (req, res) => {
   res.json({ ok: true });
 });
 
+const BUSINESS_TYPES = [
+  "hotel_accommodation",
+  "holiday_park_campsite",
+  "leisure_sports_centre",
+  "restaurant_cafe_pub",
+  "care_home_healthcare",
+  "nursery_school",
+  "offices_commercial",
+  "retail",
+  "other",
+] as const;
+
 const RegisterBody = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(8),
+  businessType: z.enum(BUSINESS_TYPES).optional(),
   priceId: z.string().optional(),
   promoCode: z.string().optional(),
   services: z.array(z.enum(ADDON_KEYS)).optional(),
@@ -308,7 +321,7 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  const { name, email, password, promoCode, services: requestedServices, bundle } = body.data;
+  const { name, email, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
 
   const existing = await getUserWithClientByEmail(email);
   if (existing) {
@@ -333,7 +346,7 @@ router.post("/auth/register", async (req, res) => {
   try {
     const [client] = await db
       .insert(clientsTable)
-      .values({ name, slug, primaryColor: "#6366f1", active: true })
+      .values({ name, slug, primaryColor: "#6366f1", active: true, ...(businessType ? { businessType } : {}) } as any)
       .returning();
     clientId = client.id;
   } catch (err) {

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { db } from "../lib/db";
+import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 

@@ -3,6 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Tag, Eye, EyeOff, ArrowLeft,
   Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,6 +122,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [businessType, setBusinessType] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [showPromo, setShowPromo] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -176,6 +178,7 @@ export default function SignupPage() {
         password,
         bundle,
         services: services.length > 0 ? services : undefined,
+        ...(businessType ? { businessType } : {}),
       };
       if (perSite) {
         registerBody.priceId = perSite.priceId;
@@ -255,6 +258,30 @@ export default function SignupPage() {
                 <Label htmlFor="email" className="text-[#1A1A1A]">Email address</Label>
                 <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@yourcompany.com" required
                   className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary" />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="business-type" className="text-[#1A1A1A]">Type of business</Label>
+                <div className="relative">
+                  <select
+                    id="business-type"
+                    value={businessType}
+                    onChange={e => setBusinessType(e.target.value)}
+                    className="w-full h-12 pl-4 pr-10 bg-[#F7F2E4]/50 border border-border/50 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary rounded-none text-[#1A1A1A]"
+                  >
+                    <option value="">Select your business type…</option>
+                    <option value="hotel_accommodation">Hotel / Accommodation</option>
+                    <option value="holiday_park_campsite">Holiday Park / Campsite</option>
+                    <option value="leisure_sports_centre">Leisure / Sports Centre</option>
+                    <option value="restaurant_cafe_pub">Restaurant / Café / Pub</option>
+                    <option value="care_home_healthcare">Care Home / Healthcare</option>
+                    <option value="nursery_school">Nursery / School</option>
+                    <option value="offices_commercial">Offices / Commercial</option>
+                    <option value="retail">Retail</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                </div>
               </div>
 
               <div className="space-y-2">

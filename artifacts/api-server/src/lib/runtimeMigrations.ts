@@ -904,6 +904,11 @@ async function migrateCheckPhotos() {
     WHERE "site_id" IS NOT NULL
   `);
 
+  // Business type on clients (for segmentation and onboarding personalisation)
+  await db.execute(sql`
+    ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "business_type" text
+  `);
+
   // Deduplication log for daily check-reminder emails (one digest per client per day)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "check_reminder_log" (

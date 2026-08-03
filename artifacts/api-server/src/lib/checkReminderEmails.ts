@@ -9,6 +9,7 @@
 
 import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
