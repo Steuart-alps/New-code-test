@@ -17,8 +17,9 @@ export default function SignupPage() {
   const [name, setName]                 = useState("");
   const [orgName, setOrgName]           = useState("");
   const [email, setEmail]               = useState("");
-  const [password, setPassword]         = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [password, setPassword]               = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword]       = useState(false);
   const [businessType, setBusinessType] = useState("");
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState("");
@@ -32,6 +33,11 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch(`${import.meta.env.BASE_URL}api/auth/register`, {
         method: "POST",
@@ -183,6 +189,25 @@ export default function SignupPage() {
                       passwordStrength === "good"   ? "text-amber-500" : "text-green-600"
                     }`}>{passwordStrength}</span>
                   </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirm-password" className="text-[#1A1A1A]">Confirm password</Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat your password"
+                  required
+                  autoComplete="new-password"
+                  className={`h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary ${
+                    confirmPassword && confirmPassword !== password ? "border-red-400 focus-visible:ring-red-400" : ""
+                  }`}
+                />
+                {confirmPassword && confirmPassword !== password && (
+                  <p className="text-xs text-red-500">Passwords do not match</p>
                 )}
               </div>
 
