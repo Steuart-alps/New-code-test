@@ -262,6 +262,7 @@ export async function runRuntimeMigrations() {
     await migrateCheckPhotos();
     await migrateGreenTrack();
     await migrateSwimTrack();
+    await migrateSiteDocuments();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -918,5 +919,24 @@ async function migrateCheckPhotos() {
       "sent_at"    timestamp NOT NULL DEFAULT now(),
       UNIQUE ("client_id", "log_date")
     )
+  `);
+}
+
+// ---- Site documents ----
+async function migrateSiteDocuments() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "site_documents" (
+      "id"          serial PRIMARY KEY,
+      "client_id"   integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"     integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+      "name"        text NOT NULL,
+      "object_path" text NOT NULL,
+      "uploaded_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"  timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_site_documents_site"
+    ON "site_documents" ("client_id", "site_id")
   `);
 }
