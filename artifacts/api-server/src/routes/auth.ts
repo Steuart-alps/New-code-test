@@ -306,6 +306,7 @@ const BUSINESS_TYPES = [
 
 const RegisterBody = z.object({
   name: z.string().min(2).refine(nameIsClean, { message: "Please use an appropriate name." }),
+  orgName: z.string().min(1).max(200).optional(),
   email: z.string().email(),
   password: z.string().min(8),
   businessType: z.enum(BUSINESS_TYPES).optional(),
@@ -322,7 +323,10 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  const { name, email, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  const { name, orgName, email, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  // Use the explicitly provided organisation name for the client record; fall
+  // back to the user's own name if omitted (e.g. API callers / older clients).
+  const clientName = (orgName ?? "").trim() || name;
 
   const existing = await getUserWithClientByEmail(email);
   if (existing) {
@@ -348,7 +352,7 @@ router.post("/auth/register", async (req, res) => {
     const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [client] = await db
       .insert(clientsTable)
-      .values({ name, slug, primaryColor: "#6366f1", active: true, trialEndsAt, ...(businessType ? { businessType } : {}) } as any)
+      .values({ name: clientName, slug, primaryColor: "#6366f1", active: true, trialEndsAt, ...(businessType ? { businessType } : {}) } as any)
       .returning();
     clientId = client.id;
   } catch (err) {

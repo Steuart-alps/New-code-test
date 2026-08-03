@@ -15,6 +15,7 @@ export default function SignupPage() {
   const { toast } = useToast();
 
   const [name, setName]                 = useState("");
+  const [orgName, setOrgName]           = useState("");
   const [email, setEmail]               = useState("");
   const [password, setPassword]         = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -38,6 +39,7 @@ export default function SignupPage() {
         credentials: "include",
         body: JSON.stringify({
           name,
+          orgName: orgName.trim() || name,
           email,
           password,
           ...(businessType ? { businessType } : {}),
@@ -102,6 +104,15 @@ export default function SignupPage() {
                 <Input
                   id="name" value={name} onChange={e => setName(e.target.value)}
                   placeholder="Jane Smith" required
+                  className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="org-name" className="text-[#1A1A1A]">Organisation name</Label>
+                <Input
+                  id="org-name" value={orgName} onChange={e => setOrgName(e.target.value)}
+                  placeholder="Your company or organisation"
                   className="h-12 bg-[#F7F2E4]/50 border-border/50 rounded-none focus-visible:ring-primary focus-visible:border-primary"
                 />
               </div>
