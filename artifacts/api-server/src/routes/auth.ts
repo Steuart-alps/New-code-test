@@ -17,6 +17,7 @@ import { ADDON_KEYS, BUNDLE_KEY, getEntitledServices } from "../lib/services";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { isClientBillingLocked } from "../lib/trialLock";
 import { logger } from "../lib/logger";
+import { nameIsClean } from "../lib/contentFilter";
 
 const router = Router();
 
@@ -304,7 +305,7 @@ const BUSINESS_TYPES = [
 ] as const;
 
 const RegisterBody = z.object({
-  name: z.string().min(2),
+  name: z.string().min(2).refine(nameIsClean, { message: "Please use an appropriate name." }),
   email: z.string().email(),
   password: z.string().min(8),
   businessType: z.enum(BUSINESS_TYPES).optional(),

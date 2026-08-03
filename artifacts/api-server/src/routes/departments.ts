@@ -4,11 +4,12 @@ import { db } from "@workspace/db";
 import { departmentsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { nameIsClean } from "../lib/contentFilter";
 
 const router = Router();
 
 const UpsertDepartmentBody = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).refine(nameIsClean, { message: "Please use an appropriate name." }),
   description: z.string().nullable().optional(),
   clientId: z.number().optional(),
 });

@@ -87,6 +87,19 @@ export async function sendEmail(opts: {
   }
 }
 
+/**
+ * Escapes user-supplied text before embedding it in an HTML email.
+ * Without this, a name like `<script>…</script>` becomes executable HTML.
+ */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 /** Extract a bare email address from a value that may include a display name,
  *  e.g. "Name <email@example.com>" → "email@example.com". */
 function extractEmail(raw: string): string {
@@ -194,27 +207,38 @@ export function buildReminderEmail(opts: {
     day: "numeric",
   });
 
+  // Escape all user-supplied values before embedding in HTML to prevent injection
+  const safeContractorName = escapeHtml(opts.contractorName);
+  const safeItemTitle      = escapeHtml(opts.itemTitle);
+  const safeCompanyName    = escapeHtml(opts.companyName);
+  const safeNotes          = opts.notes ? escapeHtml(opts.notes) : null;
+  // scheduleLink and ccMaintenanceEmail are system/admin-controlled, not end-user input,
+  // but we validate scheduleLink is a real URL and ccMaintenanceEmail is an email address
+  const safeScheduleLink   = opts.scheduleLink && /^https?:\/\//.test(opts.scheduleLink) ? opts.scheduleLink : null;
+  const safeCcEmail        = opts.ccMaintenanceEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(opts.ccMaintenanceEmail)
+    ? opts.ccMaintenanceEmail : null;
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #1e293b;">Compliance Check Reminder</h2>
-      <p>Dear ${opts.contractorName},</p>
+      <p>Dear ${safeContractorName},</p>
       <p>This is a reminder that the following compliance check is due in <strong>${opts.leadTimeDays} days</strong> on <strong>${dueDateStr}</strong>:</p>
       <div style="background: #f1f5f9; border-left: 4px solid #3b82f6; padding: 16px; margin: 16px 0;">
-        <h3 style="margin: 0 0 8px; color: #1e293b;">${opts.itemTitle}</h3>
-        ${opts.notes ? `<p style="color: #64748b; margin: 0;">${opts.notes}</p>` : ""}
+        <h3 style="margin: 0 0 8px; color: #1e293b;">${safeItemTitle}</h3>
+        ${safeNotes ? `<p style="color: #64748b; margin: 0;">${safeNotes}</p>` : ""}
       </div>
-      ${opts.scheduleLink ? `
+      ${safeScheduleLink ? `
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 12px; color: #1e293b; font-weight: 600;">Pick a suitable visit date</p>
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Click below to choose the day that works best for you. Once you confirm, a calendar invite will be sent to everyone.</p>
-        <a href="${opts.scheduleLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Propose a Visit Date</a>
+        <a href="${safeScheduleLink}" style="display: inline-block; background: #4f46e5; color: white; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600;">Propose a Visit Date</a>
       </div>
       ` : `
       <p>Please contact us to arrange your visit or inspection at your earliest convenience.</p>
       <p style="color: #475569;">A calendar appointment has been attached to this email — click it to add the due date directly to your calendar.</p>
       `}
-      <p>Best regards,<br><strong>${opts.companyName}</strong></p>
-      ${opts.ccMaintenanceEmail ? `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 12px;">This email has been copied to ${opts.ccMaintenanceEmail} for your records.</p>` : ""}
+      <p>Best regards,<br><strong>${safeCompanyName}</strong></p>
+      ${safeCcEmail ? `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 12px;">This email has been copied to ${safeCcEmail} for your records.</p>` : ""}
     </div>
   `;
 

@@ -11,6 +11,7 @@ import {
 } from "../middleware/requireAuth";
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
+import { filterName } from "../lib/contentFilter";
 
 const router: IRouter = Router();
 
@@ -68,6 +69,11 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
   const name = String(req.body?.name ?? "").trim();
   if (!name) {
     res.status(400).json({ error: "Site name is required" });
+    return;
+  }
+  const nameCheck = filterName(name);
+  if (!nameCheck.ok) {
+    res.status(400).json({ error: nameCheck.message });
     return;
   }
   // The site row and its billing charge intent are created atomically: a

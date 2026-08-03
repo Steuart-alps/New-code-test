@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendSystemEmail, getPublicAppUrl } from "./email";
+import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { countClientSites, getPerSitePrice, quantityForSiteCount } from "./billing";
 
 /** How many days before the trial ends the reminder is sent. */
@@ -35,11 +35,14 @@ function buildTrialReminderEmail(opts: {
     ? `Based on your current ${opts.siteCount} site${opts.siteCount === 1 ? "" : "s"}, your subscription would be £${opts.monthlyTotal} per month.`
     : "Pricing is per site, per month.";
 
+  const safeRecipientName = escapeHtml(opts.recipientName);
+  const safeCompanyName   = escapeHtml(opts.companyName);
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #1e293b;">Your free trial is ending soon</h2>
-      <p>Hi ${opts.recipientName},</p>
-      <p>The free trial for <strong>${opts.companyName}</strong> ends in <strong>${daysPhrase}</strong>, on <strong>${endDateStr}</strong>.</p>
+      <p>Hi ${safeRecipientName},</p>
+      <p>The free trial for <strong>${safeCompanyName}</strong> ends in <strong>${daysPhrase}</strong>, on <strong>${endDateStr}</strong>.</p>
       <p>${priceLine}</p>
       <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center;">
         <p style="margin: 0 0 16px; color: #475569; font-size: 14px;">Subscribe now to keep your compliance tracking, reminders and certificates running without interruption.</p>
