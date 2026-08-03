@@ -28,9 +28,94 @@ const createSchema = z.object({
   sanitiserLevel: z.number().min(0).nullable().optional(),
   temperature: z.number().min(0).max(50).nullable().optional(),
   siteId: z.number().int().nullable().optional(),
+  hotTubId: z.number().int().nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   performedBy: z.string().max(200).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
+});
+
+// ── Hot Tub Registry CRUD ─────────────────────────────────────────────────────
+
+const tubSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(1000).nullable().optional(),
+  siteId: z.number().int().nullable().optional(),
+  active: z.boolean().optional(),
+});
+
+// GET /api/hot-tub/tubs
+router.get("/tubs", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const rows = await db.execute(sql`
+    SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
+           ht.created_at, ht.updated_at,
+           s.name AS site_name
+    FROM hot_tubs ht
+    LEFT JOIN sites s ON s.id = ht.site_id
+    WHERE ht.client_id = ${clientId}
+    ORDER BY ht.active DESC, ht.name
+  `);
+  res.json(rows.rows ?? rows);
+});
+
+// POST /api/hot-tub/tubs
+router.post("/tubs", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = tubSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const d = parsed.data;
+  if (d.siteId) {
+    const [site] = await db.execute(sql`SELECT id FROM sites WHERE id = ${d.siteId} AND client_id = ${clientId} LIMIT 1`);
+    if (!(site as any)?.rows?.length && !(site as any)?.id) return res.status(400).json({ error: "Invalid site" });
+  }
+  const result = await db.execute(sql`
+    INSERT INTO hot_tubs (client_id, site_id, name, description, active)
+    VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.description ?? null}, true)
+    RETURNING *
+  `);
+  res.status(201).json((result.rows ?? [result])[0]);
+});
+
+// PUT /api/hot-tub/tubs/:id
+router.put("/tubs/:id", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const parsed = tubSchema.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const d = parsed.data;
+  const result = await db.execute(sql`
+    UPDATE hot_tubs
+    SET name        = COALESCE(${d.name ?? null}, name),
+        description = CASE WHEN ${d.description !== undefined} THEN ${d.description ?? null} ELSE description END,
+        site_id     = CASE WHEN ${d.siteId !== undefined} THEN ${d.siteId ?? null} ELSE site_id END,
+        active      = COALESCE(${d.active ?? null}, active),
+        updated_at  = now()
+    WHERE id = ${id} AND client_id = ${clientId}
+    RETURNING *
+  `);
+  const row = (result.rows ?? [])[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json(row);
+});
+
+// DELETE /api/hot-tub/tubs/:id
+router.delete("/tubs/:id", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  // Block deletion if records reference this tub
+  const usageResult = await db.execute(sql`
+    SELECT COUNT(*) AS cnt FROM hot_tub_checks WHERE hot_tub_id = ${id} AND client_id = ${clientId}
+  `);
+  const cnt = parseInt((usageResult.rows ?? [])[0]?.cnt ?? "0");
+  if (cnt > 0) return res.status(409).json({ error: `Cannot delete — ${cnt} record${cnt !== 1 ? "s" : ""} reference this tub. Mark it inactive instead.` });
+  await db.execute(sql`DELETE FROM hot_tubs WHERE id = ${id} AND client_id = ${clientId}`);
+  res.status(204).end();
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -162,6 +247,12 @@ router.post("/", requireAuth, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
+  // Validate hotTubId belongs to client
+  if (data.hotTubId) {
+    const tubCheck = await db.execute(sql`SELECT id FROM hot_tubs WHERE id = ${data.hotTubId} AND client_id = ${clientId} LIMIT 1`);
+    if (!(tubCheck.rows ?? [])[0]) return res.status(400).json({ error: "Invalid tub" });
+  }
+
   const [inserted] = await db
     .insert(hotTubChecksTable)
     .values({
@@ -173,6 +264,7 @@ router.post("/", requireAuth, async (req, res) => {
       sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
       temperature: data.temperature != null ? String(data.temperature) : null,
       siteId: data.siteId ?? null,
+      hotTubId: data.hotTubId ?? null,
       location: data.location ?? null,
       performedBy: data.performedBy ?? null,
       notes: data.notes ?? null,

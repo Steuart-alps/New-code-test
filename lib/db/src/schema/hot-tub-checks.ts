@@ -2,6 +2,7 @@ import { pgTable, serial, integer, text, date, timestamp, numeric } from "drizzl
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { hotTubsTable } from "./hot-tubs";
 
 export const HOT_TUB_CHECK_TYPES = [
   "water_chemistry",
@@ -25,7 +26,8 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   phValue: numeric("ph_value", { precision: 4, scale: 2 }),          // target 7.2–7.8
   sanitiserLevel: numeric("sanitiser_level", { precision: 6, scale: 2 }), // ppm (Cl/Br)
   temperature: numeric("temperature", { precision: 5, scale: 2 }),    // °C (max 40)
-  location: text("location"),      // which tub/pool name
+  hotTubId: integer("hot_tub_id").references(() => hotTubsTable.id, { onDelete: "set null" }),
+  location: text("location"),      // specific area / supplementary name
   performedBy: text("performed_by"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),

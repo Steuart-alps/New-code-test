@@ -23,9 +23,10 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   Waves, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, ThermometerSun, Beaker, Search, Building2,
-  Filter,
+  Filter, Settings2, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,10 +44,22 @@ type CheckType = (typeof CHECK_TYPES)[number];
 type CheckResult = "pass" | "fail" | "action_required";
 type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
 
+interface HotTub {
+  id: number;
+  clientId: number;
+  siteId: number | null;
+  siteName: string | null;
+  name: string;
+  description: string | null;
+  active: boolean;
+  createdAt: string;
+}
+
 interface HotTubCheck {
   id: number;
   clientId: number;
   siteId: number | null;
+  hotTubId: number | null;
   checkType: string;
   checkDate: string;
   result: string;
@@ -177,6 +190,7 @@ const emptyForm = () => ({
   sanitiserLevel: "",
   temperature: "",
   siteId: "",
+  hotTubId: "",
   location: "",
   performedBy: "",
   notes: "",
@@ -193,8 +207,10 @@ export default function HotTubPage() {
 
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
   const [filterSite, setFilterSite] = useState("all");
+  const [filterTub, setFilterTub] = useState("all");
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
+  const [showManageTubs, setShowManageTubs] = useState(false);
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -221,7 +237,16 @@ export default function HotTubPage() {
     enabled: !!activeClientId,
   });
 
+  const { data: hotTubs = [], refetch: refetchTubs } = useQuery<HotTub[]>({
+    queryKey: ["hot-tubs", activeClientId],
+    queryFn: () => apiFetch("/hot-tub/tubs"),
+    enabled: !!activeClientId && hasHotTub,
+  });
+
   // ── Derived ────────────────────────────────────────────────────────────────
+
+  const activeTubs = useMemo(() => hotTubs.filter(t => t.active), [hotTubs]);
+  const tubMap = useMemo(() => new Map(hotTubs.map(t => [t.id, t])), [hotTubs]);
 
   const overdue = useMemo(() => statuses.filter(s => s.status === "overdue").length, [statuses]);
   const dueSoon = useMemo(() => statuses.filter(s => s.status === "due_soon").length, [statuses]);
@@ -230,17 +255,19 @@ export default function HotTubPage() {
     let rows = checks;
     if (filterType !== "all") rows = rows.filter(r => r.checkType === filterType);
     if (filterSite !== "all") rows = rows.filter(r => String(r.siteId) === filterSite);
+    if (filterTub !== "all") rows = rows.filter(r => String(r.hotTubId) === filterTub);
     if (search.trim()) {
       const q = search.toLowerCase();
       rows = rows.filter(r =>
         CHECK_TYPE_LABELS[r.checkType as CheckType]?.toLowerCase().includes(q) ||
+        (tubMap.get(r.hotTubId!)?.name ?? "").toLowerCase().includes(q) ||
         (r.location ?? "").toLowerCase().includes(q) ||
         (r.performedBy ?? "").toLowerCase().includes(q) ||
         (r.notes ?? "").toLowerCase().includes(q)
       );
     }
     return rows;
-  }, [checks, filterType, filterSite, search]);
+  }, [checks, filterType, filterSite, filterTub, search, tubMap]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -273,6 +300,7 @@ export default function HotTubPage() {
       sanitiserLevel: r.sanitiserLevel ?? "",
       temperature: r.temperature ?? "",
       siteId: r.siteId ? String(r.siteId) : "",
+      hotTubId: r.hotTubId ? String(r.hotTubId) : "",
       location: r.location ?? "",
       performedBy: r.performedBy ?? "",
       notes: r.notes ?? "",
@@ -292,6 +320,7 @@ export default function HotTubPage() {
         sanitiserLevel: form.sanitiserLevel !== "" ? parseFloat(form.sanitiserLevel) : null,
         temperature: form.temperature !== "" ? parseFloat(form.temperature) : null,
         siteId: form.siteId ? Number(form.siteId) : null,
+        hotTubId: form.hotTubId ? Number(form.hotTubId) : null,
         location: form.location.trim() || null,
         performedBy: form.performedBy.trim() || null,
         notes: form.notes.trim() || null,
@@ -361,10 +390,57 @@ export default function HotTubPage() {
             Hot tub & spa maintenance logbook — water chemistry, temperature checks and HSG282 compliance
           </p>
         </div>
-        <Button onClick={openAdd} className="gap-2 rounded-sm flex-shrink-0">
-          <Plus className="w-4 h-4" /> Record Check
-        </Button>
+        <div className="flex gap-2 flex-shrink-0">
+          {canAdmin && (
+            <Button variant="outline" onClick={() => setShowManageTubs(true)} className="gap-2 rounded-sm">
+              <Settings2 className="w-4 h-4" /> Manage Tubs
+            </Button>
+          )}
+          <Button onClick={openAdd} className="gap-2 rounded-sm">
+            <Plus className="w-4 h-4" /> Record Check
+          </Button>
+        </div>
       </div>
+
+      {/* Tubs quick-select (when tubs exist) */}
+      {activeTubs.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setFilterTub("all")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-sm border transition-colors",
+              filterTub === "all"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted-foreground border-border hover:border-primary/50"
+            )}
+          >
+            All tubs
+          </button>
+          {activeTubs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setFilterTub(filterTub === String(t.id) ? "all" : String(t.id))}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-sm border transition-colors",
+                filterTub === String(t.id)
+                  ? "bg-cyan-600 text-white border-cyan-600"
+                  : "bg-cyan-50 text-cyan-800 border-cyan-200 hover:border-cyan-400"
+              )}
+            >
+              <Waves className="w-3 h-3 inline mr-1 opacity-70" />
+              {t.name}
+            </button>
+          ))}
+          {hotTubs.length === 0 && canAdmin && (
+            <button
+              onClick={() => setShowManageTubs(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded-sm border border-dashed border-border text-muted-foreground hover:border-primary/50 transition-colors"
+            >
+              <Plus className="w-3 h-3 inline mr-1" /> Add tub
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Status overview */}
       {statuses.length > 0 && (
@@ -453,7 +529,7 @@ export default function HotTubPage() {
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search…"
+            placeholder="Search tubs, checks, staff…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9 rounded-sm"
@@ -483,58 +559,69 @@ export default function HotTubPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
-                {["Check Type", "Date", "Result", "pH", "Sanitiser (ppm)", "Temp (°C)", "Location", "Performed By", ""].map(h => (
-                  <th key={h} className={cn(
-                    "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
-                    ["pH", "Sanitiser (ppm)", "Temp (°C)"].includes(h) && "hidden lg:table-cell",
-                    h === "Location" && "hidden md:table-cell",
-                    h === "Performed By" && "hidden sm:table-cell",
-                  )}>{h}</th>
-                ))}
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Check Type</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden sm:table-cell">Tub</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Date</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">Result</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">pH</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">Sanitiser (ppm)</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden lg:table-cell">Temp (°C)</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden md:table-cell">Performed By</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider hidden sm:table-cell">Photos</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map(r => (
-                <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-sm bg-cyan-100 flex items-center justify-center flex-shrink-0">
-                        <Waves className="w-3.5 h-3.5 text-cyan-600" />
+              {filtered.map(r => {
+                const tub = r.hotTubId ? tubMap.get(r.hotTubId) : null;
+                return (
+                  <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-sm bg-cyan-100 flex items-center justify-center flex-shrink-0">
+                          <Waves className="w-3.5 h-3.5 text-cyan-600" />
+                        </div>
+                        <div>
+                          <span className="font-medium">{CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType}</span>
+                          {r.location && <div className="text-xs text-muted-foreground">{r.location}</div>}
+                        </div>
                       </div>
-                      <span className="font-medium">{CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(r.checkDate)}</td>
-                  <td className="px-4 py-3"><ResultBadge result={r.result} /></td>
-                  <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.phValue ?? <span className="opacity-40">—</span>}</td>
-                  <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.sanitiserLevel ?? <span className="opacity-40">—</span>}</td>
-                  <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
-                    {r.temperature ? (
-                      <span className="flex items-center gap-1">
-                        <ThermometerSun className="w-3 h-3" />{r.temperature}°C
-                      </span>
-                    ) : <span className="opacity-40">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                    {r.location ? (
-                      <span className="flex items-center gap-1">
-                        <Building2 className="w-3 h-3 opacity-50" />{r.location}
-                      </span>
-                    ) : <span className="opacity-40">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{r.performedBy ?? <span className="opacity-40">—</span>}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(r.id)}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      {tub ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-sm bg-cyan-50 text-cyan-800 border border-cyan-200">
+                          <Waves className="w-3 h-3" />{tub.name}
+                        </span>
+                      ) : <span className="opacity-30 text-sm">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(r.checkDate)}</td>
+                    <td className="px-4 py-3"><ResultBadge result={r.result} /></td>
+                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.phValue ?? <span className="opacity-40">—</span>}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.sanitiserLevel ?? <span className="opacity-40">—</span>}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                      {r.temperature ? (
+                        <span className="flex items-center gap-1">
+                          <ThermometerSun className="w-3 h-3" />{r.temperature}°C
+                        </span>
+                      ) : <span className="opacity-40">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.performedBy ?? <span className="opacity-40">—</span>}</td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <CheckPhotoUploader entityType="hot_tub_check" entityId={r.id} compact />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(r.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="border-t border-border px-4 py-2 bg-muted/20 text-xs text-muted-foreground">
@@ -652,13 +739,46 @@ export default function HotTubPage() {
               </div>
             )}
 
-            {/* Location */}
+            {/* Hot Tub selector */}
             <div>
-              <Label htmlFor="location">Tub / Pool Name</Label>
-              <Input id="location" placeholder="e.g. Spa 1, Outdoor Tub, Main Pool…"
-                value={form.location}
-                onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                className="mt-1 rounded-sm" />
+              <Label>Hot Tub / Spa</Label>
+              {activeTubs.length > 0 ? (
+                <Select value={form.hotTubId} onValueChange={v => setForm(f => ({ ...f, hotTubId: v }))}>
+                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select tub (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Not tub-specific</SelectItem>
+                    {activeTubs.map(t => (
+                      <SelectItem key={t.id} value={String(t.id)}>
+                        <span className="flex items-center gap-2">
+                          <Waves className="w-3.5 h-3.5 text-cyan-600" />{t.name}
+                          {t.siteName && <span className="text-muted-foreground text-xs">({t.siteName})</span>}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="mt-1 flex items-center gap-2">
+                  <Input placeholder="e.g. Spa 1, Outdoor Tub…"
+                    value={form.location}
+                    onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                    className="rounded-sm flex-1" />
+                  {canAdmin && (
+                    <Button type="button" variant="outline" size="sm" className="rounded-sm whitespace-nowrap" onClick={() => { setShowDialog(false); setShowManageTubs(true); }}>
+                      + Add tubs
+                    </Button>
+                  )}
+                </div>
+              )}
+              {activeTubs.length > 0 && (
+                <div className="mt-2">
+                  <Label htmlFor="location" className="text-xs text-muted-foreground">Specific area / notes (optional)</Label>
+                  <Input id="location" placeholder="e.g. poolside, indoors…"
+                    value={form.location}
+                    onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                    className="mt-1 rounded-sm" />
+                </div>
+              )}
             </div>
 
             {/* Performed by */}
@@ -705,6 +825,184 @@ export default function HotTubPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Manage Tubs dialog */}
+      <ManageTubsDialog
+        open={showManageTubs}
+        onClose={() => setShowManageTubs(false)}
+        onChanged={refetchTubs}
+        sites={sites}
+      />
     </AppLayout>
+  );
+}
+
+// ─── Manage Tubs Dialog ───────────────────────────────────────────────────────
+
+function ManageTubsDialog({
+  open,
+  onClose,
+  onChanged,
+  sites,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+  sites: Site[];
+}) {
+  const { toast } = useToast();
+  const { activeClientId } = useAuth();
+
+  const { data: tubs = [], refetch } = useQuery<HotTub[]>({
+    queryKey: ["hot-tubs-mgmt", activeClientId],
+    queryFn: () => apiFetch("/hot-tub/tubs"),
+    enabled: open && !!activeClientId,
+  });
+
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newSiteId, setNewSiteId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  async function handleAdd() {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      await apiFetch("/hot-tub/tubs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newName.trim(),
+          description: newDesc.trim() || null,
+          siteId: newSiteId ? Number(newSiteId) : null,
+        }),
+      });
+      setNewName(""); setNewDesc(""); setNewSiteId(""); setAdding(false);
+      toast({ title: "Tub added" });
+      refetch(); onChanged();
+    } catch (e: any) {
+      toast({ title: "Failed to add tub", description: e.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  }
+
+  async function handleToggle(tub: HotTub) {
+    setTogglingId(tub.id);
+    try {
+      await apiFetch(`/hot-tub/tubs/${tub.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ active: !tub.active }),
+      });
+      refetch(); onChanged();
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    } finally { setTogglingId(null); }
+  }
+
+  async function handleDelete(id: number) {
+    setDeletingId(id);
+    try {
+      await apiFetch(`/hot-tub/tubs/${id}`, { method: "DELETE" });
+      toast({ title: "Tub removed" });
+      refetch(); onChanged();
+    } catch (e: any) {
+      toast({ title: "Cannot delete", description: e.message, variant: "destructive" });
+    } finally { setDeletingId(null); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) { setAdding(false); onClose(); } }}>
+      <DialogContent className="max-w-lg rounded-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Waves className="w-4 h-4 text-cyan-600" /> Manage Hot Tubs & Spas
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          {tubs.length === 0 && !adding && (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No tubs registered yet. Add your first one below.
+            </p>
+          )}
+
+          {tubs.map(t => (
+            <div key={t.id} className={cn(
+              "flex items-center gap-3 p-3 rounded-sm border",
+              t.active ? "bg-cyan-50 border-cyan-200" : "bg-muted/40 border-border opacity-60"
+            )}>
+              <Waves className="w-4 h-4 text-cyan-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm">{t.name}</p>
+                {t.description && <p className="text-xs text-muted-foreground truncate">{t.description}</p>}
+                {t.siteName && <p className="text-xs text-muted-foreground">{t.siteName}</p>}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  title={t.active ? "Mark inactive" : "Mark active"}
+                  onClick={() => handleToggle(t)}
+                  disabled={togglingId === t.id}
+                  className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                >
+                  {t.active
+                    ? <ToggleRight className="w-5 h-5 text-cyan-600" />
+                    : <ToggleLeft className="w-5 h-5" />}
+                </button>
+                <Button
+                  variant="ghost" size="icon"
+                  className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10"
+                  disabled={deletingId === t.id}
+                  onClick={() => handleDelete(t.id)}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {adding && (
+            <div className="border border-dashed border-primary/40 rounded-sm p-3 space-y-2 bg-primary/5">
+              <Input
+                autoFocus
+                placeholder="Tub name, e.g. Main Spa, Outdoor Hot Tub…"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAdd()}
+                className="rounded-sm"
+              />
+              <Input
+                placeholder="Description (optional)"
+                value={newDesc}
+                onChange={e => setNewDesc(e.target.value)}
+                className="rounded-sm"
+              />
+              {sites.length > 0 && (
+                <Select value={newSiteId} onValueChange={setNewSiteId}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Link to a site (optional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No specific site</SelectItem>
+                    {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <div className="flex gap-2 justify-end">
+                <Button variant="ghost" size="sm" className="rounded-sm" onClick={() => setAdding(false)}>Cancel</Button>
+                <Button size="sm" className="rounded-sm" disabled={!newName.trim() || saving} onClick={handleAdd}>
+                  {saving ? "Adding…" : "Add Tub"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="flex-row gap-2 sm:justify-between">
+          <Button variant="outline" className="rounded-sm gap-1.5" onClick={() => setAdding(true)} disabled={adding}>
+            <Plus className="w-3.5 h-3.5" /> Add Tub
+          </Button>
+          <Button className="rounded-sm" onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

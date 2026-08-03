@@ -26,6 +26,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -466,13 +467,14 @@ export default function TreeTrackPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
-                {["Inspection Type", "Date", "Result", "Tree Ref", "Location", "Inspector", "Follow-up", ""].map(h => (
+                {["Inspection Type", "Date", "Result", "Tree Ref", "Location", "Inspector", "Follow-up", "Photos", ""].map(h => (
                   <th key={h} className={cn(
                     "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
                     h === "Tree Ref" && "hidden sm:table-cell",
                     h === "Location" && "hidden md:table-cell",
                     h === "Inspector" && "hidden lg:table-cell",
                     h === "Follow-up" && "hidden lg:table-cell",
+                    h === "Photos" && "hidden sm:table-cell",
                     h === "" && "w-20",
                   )}>{h}</th>
                 ))}
@@ -522,6 +524,9 @@ export default function TreeTrackPage() {
                           {days !== null && days <= 0 && <span className="text-rose-600 text-xs">(overdue)</span>}
                         </span>
                       ) : <span className="text-muted-foreground opacity-40">—</span>}
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <CheckPhotoUploader entityType="tree_inspection" entityId={r.id} compact />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

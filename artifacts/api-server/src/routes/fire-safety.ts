@@ -7,7 +7,7 @@ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/r
 
 const router = Router();
 
-const CHECK_TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill"] as const;
+const CHECK_TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill", "fire_walk", "alarm_panel"] as const;
 
 // Default check frequencies, in days
 const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
@@ -16,6 +16,8 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   extinguishers: 7,
   fire_doors: 90,
   fire_drill: 180,
+  fire_walk: 7,
+  alarm_panel: 7,
 };
 
 const createSchema = z.object({

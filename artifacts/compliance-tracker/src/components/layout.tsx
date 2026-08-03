@@ -27,6 +27,10 @@ import {
   Wrench,
   FolderOpen,
   BookOpen,
+  Bike,
+  Waves as WavesIcon,
+  Tractor,
+  Anchor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -61,6 +65,10 @@ function useNavGroups() {
         { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },
         { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
         { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
+        { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
+        { href: "/pool-track",     label: "PoolTrack",       icon: WavesIcon,       serviceKey: "pooltrack" },
+        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
+        { href: "/swim-track",     label: "SwimTrack",       icon: Anchor,          serviceKey: "swimtrack" },
         { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKey: "dailytrack_am" },
         { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKey: "dailytrack_pm" },
       ],

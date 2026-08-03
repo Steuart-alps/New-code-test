@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface DomainRecord {
@@ -930,6 +930,115 @@ function InvoicesCard() {
   );
 }
 
+
+// ── Photo requirement labels ─────────────────────────────────────────────────
+const PHOTO_ENTITY_LABELS: Record<string, string> = {
+  fire_safety_check: "FireTrack — fire safety checks",
+  pool_check:        "PoolTrack — pool water tests",
+  hot_tub_check:     "TubTrack — hot tub checks",
+  legionella_check:  "LegionellaTrack — water safety checks",
+  tree_inspection:   "TreeTrack — tree inspections",
+  bike_check:        "BikeTrack — pre/post hire checks",
+  bike_hire:         "BikeTrack — hire records",
+  bike_service:      "BikeTrack — service records",
+  daily_check_am:    "DailyTrack — AM opening checks",
+  daily_check_pm:    "DailyTrack — PM closing checks",
+  safe_track_record: "SafeTrack — safety records",
+  food_safety_check: "KitchenTrack — food safety records",
+};
+
+function PhotoRequirementsCard() {
+  const canAdmin = useCanAdmin();
+  const { toast } = useToast();
+  const [requirements, setRequirements] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ entity_type: string; required: boolean }[]>("/photos/requirements")
+      .then(rows => {
+        const map: Record<string, boolean> = {};
+        rows.forEach((r: { entity_type: string; required: boolean }) => { map[r.entity_type] = r.required; });
+        setRequirements(map);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = (entityType: string) => {
+    setRequirements(prev => ({ ...prev, [entityType]: !prev[entityType] }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const items = Object.keys(PHOTO_ENTITY_LABELS).map(k => ({
+        entityType: k,
+        required: requirements[k] ?? false,
+        minPhotos: 1,
+      }));
+      await apiFetch("/photos/requirements", { method: "PUT", body: JSON.stringify(items) });
+      toast({ title: "Photo requirements saved" });
+    } catch (err: any) {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canAdmin) return null;
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Camera className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display">Photo Requirements</CardTitle>
+        </div>
+        <CardDescription>
+          Choose which record types must include at least one photo. Staff will see a <strong>Required</strong> badge on those records.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {loading ? (
+          <div className="p-6 flex justify-center">
+            <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : (
+          <>
+            <div className="divide-y divide-border">
+              {Object.entries(PHOTO_ENTITY_LABELS).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between gap-4 px-6 py-3">
+                  <span className="text-sm">{label}</span>
+                  <button
+                    type="button"
+                    onClick={() => toggle(k)}
+                    aria-label={requirements[k] ? "Required — click to disable" : "Optional — click to require"}
+                    className={[
+                      "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                      requirements[k] ? "bg-primary" : "bg-border",
+                    ].join(" ")}
+                  >
+                    <span className={[
+                      "inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform",
+                      requirements[k] ? "translate-x-4" : "translate-x-1",
+                    ].join(" ")} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 pb-4 pt-3 border-t border-border/50">
+              <Button onClick={handleSave} disabled={saving} size="sm">
+                {saving ? "Saving…" : "Save Requirements"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
@@ -984,6 +1093,7 @@ export default function SettingsPage() {
         <BillingCard />
         <InvoicesCard />
         <DepartmentsCard />
+        <PhotoRequirementsCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">

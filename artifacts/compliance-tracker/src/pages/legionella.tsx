@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun } from "lucide-react";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 
@@ -658,6 +659,7 @@ export default function LegionellaPage() {
                               <div><span className="font-medium">Notes:</span> {check.notes}</div>
                             )}
                           </div>
+                          <CheckPhotoUploader entityType="legionella_check" entityId={check.id} compact />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <EditCheckDialog check={check} />
