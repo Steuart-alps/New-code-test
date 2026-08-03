@@ -8,7 +8,7 @@ import { ObjectStorageService } from "../lib/objectStorage";
 const router = Router();
 const storage = new ObjectStorageService();
 
-export const CATEGORIES = ["risk_assessment", "sop", "policy", "procedure", "other"] as const;
+export const CATEGORIES = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other"] as const;
 
 const docCreate = z.object({
   title: z.string().min(1).max(500),
@@ -21,6 +21,7 @@ const docCreate = z.object({
   siteId: z.number().int().nullable().optional(),
   uploadedBy: z.string().max(200).nullable().optional(),
   requiresAcknowledgement: z.boolean().optional(),
+  department: z.string().max(200).nullable().optional(),
 });
 
 const docUpdate = z.object({
@@ -29,6 +30,7 @@ const docUpdate = z.object({
   description: z.string().max(5000).nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   requiresAcknowledgement: z.boolean().optional(),
+  department: z.string().max(200).nullable().optional(),
 });
 
 // ── List documents ────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ router.get("/documents", requireAuth, async (req, res) => {
   const result = await db.execute(sql`
     SELECT d.id, d.client_id, d.site_id, d.title, d.category, d.description,
            d.file_name, d.file_size, d.mime_type, d.object_path, d.uploaded_by,
-           d.requires_acknowledgement, d.created_at, d.updated_at,
+           d.requires_acknowledgement, d.department, d.created_at, d.updated_at,
            s.name AS site_name
     FROM doc_track_documents d
     LEFT JOIN sites s ON d.site_id = s.id
@@ -70,17 +72,18 @@ router.post("/documents", requireAuth, async (req, res) => {
   const parsed = docCreate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement } = parsed.data;
+  const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, department } = parsed.data;
   const createdBy = (req.session as any).userId ?? null;
 
   const result = await db.execute(sql`
     INSERT INTO doc_track_documents
       (client_id, site_id, title, category, description, file_name, file_size,
-       mime_type, object_path, uploaded_by, created_by, requires_acknowledgement)
+       mime_type, object_path, uploaded_by, created_by, requires_acknowledgement, department)
     VALUES
       (${clientId}, ${siteId ?? null}, ${title}, ${category}, ${description ?? null},
        ${fileName}, ${fileSize ?? null}, ${mimeType}, ${objectPath},
-       ${uploadedBy ?? null}, ${createdBy}, ${requiresAcknowledgement ?? false})
+       ${uploadedBy ?? null}, ${createdBy}, ${requiresAcknowledgement ?? false},
+       ${department ?? null})
     RETURNING *
   `);
 
@@ -99,10 +102,11 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
   const parsed = docUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { title, category, description, siteId, requiresAcknowledgement } = parsed.data;
+  const { title, category, description, siteId, requiresAcknowledgement, department } = parsed.data;
   const hasDesc = description !== undefined;
   const hasSite = siteId !== undefined;
   const hasAck  = requiresAcknowledgement !== undefined;
+  const hasDept = department !== undefined;
 
   await db.execute(sql`
     UPDATE doc_track_documents
@@ -111,6 +115,7 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
         description              = CASE WHEN ${hasDesc}::boolean THEN ${description ?? null} ELSE description END,
         site_id                  = CASE WHEN ${hasSite}::boolean THEN ${siteId ?? null} ELSE site_id END,
         requires_acknowledgement = CASE WHEN ${hasAck}::boolean  THEN ${requiresAcknowledgement ?? false} ELSE requires_acknowledgement END,
+        department               = CASE WHEN ${hasDept}::boolean THEN ${department ?? null} ELSE department END,
         updated_at               = now()
     WHERE id = ${id} AND client_id = ${clientId}
   `);
@@ -241,6 +246,21 @@ router.post("/documents/:id/acknowledge", requireAuth, async (req, res) => {
   }
 
   res.status(201).json({ created: created.length, records: created });
+});
+
+// ── Get sign-off link token ───────────────────────────────────────────────────
+
+router.get("/sign-off-info", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const result = await db.execute(sql`
+    SELECT sign_off_token FROM clients WHERE id = ${clientId} LIMIT 1
+  `);
+  const row = (result.rows ?? [])[0] as any;
+  if (!row?.sign_off_token) return res.status(404).json({ error: "No sign-off token found" });
+
+  res.json({ token: row.sign_off_token });
 });
 
 // ── Request presigned upload URL ──────────────────────────────────────────────

@@ -38,6 +38,7 @@ import DailyTrackAmPage from "@/pages/daily-track-am";
 import DailyTrackPmPage from "@/pages/daily-track-pm";
 import DailyTrackStatusPage from "@/pages/daily-track-status";
 import StaffRosterPage from "@/pages/staff-roster";
+import SignOffPage from "@/pages/sign-off";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -66,6 +67,7 @@ function ProtectedRoutes() {
   if (location === "/terms") return <TermsPage />;
   if (location === "/privacy") return <PrivacyPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
+  if (location.startsWith("/sign-off/")) return <SignOffPage />;
 
   if (isLoading) {
     return (

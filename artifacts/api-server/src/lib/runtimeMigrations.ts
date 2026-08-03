@@ -510,6 +510,7 @@ export async function runRuntimeMigrations() {
     await migrateStaffRoster();
     await migrateDocAcknowledgements();
     await migrateSignatures();
+    await migrateDocDepartment();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -811,4 +812,38 @@ async function migrateSignatures() {
   await db.execute(sql`ALTER TABLE "safe_risk_assessments" ADD COLUMN IF NOT EXISTS "signature" text`);
   await db.execute(sql`ALTER TABLE "safe_sops" ADD COLUMN IF NOT EXISTS "signature" text`);
   await db.execute(sql`ALTER TABLE "safe_handbook" ADD COLUMN IF NOT EXISTS "signature" text`);
+}
+
+// ---- Department field on documents + sign-off token on clients ----
+async function migrateDocDepartment() {
+  // Add department tag to doc_track_documents
+  await db.execute(sql`
+    ALTER TABLE "doc_track_documents"
+    ADD COLUMN IF NOT EXISTS "department" text
+  `);
+
+  // Add sign_off_token to clients table
+  await db.execute(sql`
+    ALTER TABLE "clients"
+    ADD COLUMN IF NOT EXISTS "sign_off_token" text
+  `);
+
+  // Generate tokens for any clients that don't have one yet
+  // Uses md5 of id+random to avoid needing pgcrypto extension
+  await db.execute(sql`
+    UPDATE "clients"
+    SET "sign_off_token" = md5(concat(id::text, '-', random()::text, '-', now()::text))
+    WHERE "sign_off_token" IS NULL
+  `);
+
+  // Add unique constraint (safe to run multiple times via DO block)
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'uq_clients_sign_off_token'
+      ) THEN
+        ALTER TABLE "clients" ADD CONSTRAINT "uq_clients_sign_off_token" UNIQUE ("sign_off_token");
+      END IF;
+    END $$
+  `);
 }

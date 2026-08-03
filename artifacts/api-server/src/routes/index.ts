@@ -25,6 +25,7 @@ import trainTrackRouter from "./train-track";
 import hotTubRouter from "./hot-tub";
 import treeTrackRouter from "./tree-track";
 import staffRosterRouter from "./staff-roster";
+import signOffRouter from "./sign-off";
 import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
@@ -55,6 +56,7 @@ router.use("/legionella", requireAuth, requireService("legionellatrack"), legion
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
 router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
 router.use(staffRosterRouter);
+router.use("/sign-off", signOffRouter); // public — no auth
 router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);

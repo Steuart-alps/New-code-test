@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload, FolderOpen, FileText, FileSpreadsheet, FileImage, FileVideo, File,
   Download, Trash2, Search, Plus, Loader2, Presentation, CheckSquare, Users,
-  CheckCircle2, Clock,
+  CheckCircle2, Clock, Link2, Copy, Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +38,7 @@ interface Doc {
   object_path: string;
   uploaded_by: string | null;
   requires_acknowledgement: boolean;
+  department: string | null;
   site_name: string | null;
   created_at: string;
   updated_at: string;
@@ -64,7 +65,7 @@ interface Site {
   name: string;
 }
 
-type Category = "risk_assessment" | "sop" | "policy" | "procedure" | "other";
+type Category = "risk_assessment" | "sop" | "handbook" | "policy" | "procedure" | "other";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ const CATEGORY_TABS = [
   { key: "all",             label: "All" },
   { key: "risk_assessment", label: "Risk Assessments" },
   { key: "sop",             label: "SOPs" },
+  { key: "handbook",        label: "Handbooks" },
   { key: "policy",          label: "Policies" },
   { key: "procedure",       label: "Procedures" },
   { key: "other",           label: "Other" },
@@ -80,6 +82,7 @@ const CATEGORY_TABS = [
 const CATEGORY_META: Record<string, { label: string; color: string; bg: string }> = {
   risk_assessment: { label: "Risk Assessment", color: "text-red-700",    bg: "bg-red-50 border-red-200" },
   sop:             { label: "SOP",             color: "text-blue-700",   bg: "bg-blue-50 border-blue-200" },
+  handbook:        { label: "Handbook",        color: "text-orange-700", bg: "bg-orange-50 border-orange-200" },
   policy:          { label: "Policy",          color: "text-purple-700", bg: "bg-purple-50 border-purple-200" },
   procedure:       { label: "Procedure",       color: "text-teal-700",   bg: "bg-teal-50 border-teal-200" },
   other:           { label: "Other",           color: "text-gray-600",   bg: "bg-gray-100 border-gray-200" },
@@ -450,11 +453,13 @@ function UploadDialog({
   onClose,
   onUploaded,
   sites,
+  existingDepts,
 }: {
   open: boolean;
   onClose: () => void;
   onUploaded: () => void;
   sites: Site[];
+  existingDepts: string[];
 }) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -465,6 +470,7 @@ function UploadDialog({
   const [category, setCategory] = useState<Category>("risk_assessment");
   const [description, setDescription] = useState("");
   const [siteId, setSiteId] = useState<string>("none");
+  const [department, setDepartment] = useState("");
   const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<"idle" | "requesting" | "uploading" | "saving">("idle");
@@ -476,6 +482,7 @@ function UploadDialog({
     setCategory("risk_assessment");
     setDescription("");
     setSiteId("none");
+    setDepartment("");
     setRequiresAcknowledgement(false);
     setUploading(false);
     setProgress("idle");
@@ -531,6 +538,7 @@ function UploadDialog({
           siteId: siteId !== "none" ? Number(siteId) : null,
           uploadedBy: user?.name ?? user?.email ?? null,
           requiresAcknowledgement,
+          department: department.trim() || null,
         }),
       });
       if (!saveRes.ok) throw new Error("Could not save document");
@@ -605,11 +613,26 @@ function UploadDialog({
               <SelectContent>
                 <SelectItem value="risk_assessment">Risk Assessment</SelectItem>
                 <SelectItem value="sop">SOP (Standard Operating Procedure)</SelectItem>
+                <SelectItem value="handbook">Staff Handbook</SelectItem>
                 <SelectItem value="policy">Policy</SelectItem>
                 <SelectItem value="procedure">Procedure</SelectItem>
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Department */}
+          <div className="space-y-1.5">
+            <Label>Department <span className="text-muted-foreground text-xs">(optional — leave blank for all staff)</span></Label>
+            <Input
+              value={department}
+              onChange={e => setDepartment(e.target.value)}
+              placeholder="e.g. Kitchen, Front of House, All Staff"
+              list="upload-dept-list"
+            />
+            <datalist id="upload-dept-list">
+              {existingDepts.map(d => <option key={d} value={d} />)}
+            </datalist>
           </div>
 
           {/* Site */}
@@ -685,6 +708,8 @@ export default function DocTrackPage() {
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [ackDoc, setAckDoc] = useState<Doc | null>(null);
+  const [signOffToken, setSignOffToken] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -700,7 +725,25 @@ export default function DocTrackPage() {
     if (!activeClientId) return;
     load();
     apiFetch("/sites").then(r => r.ok ? r.json() : []).then(setSites);
+    apiFetch("/doc-track/sign-off-info").then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.token) setSignOffToken(d.token);
+    });
   }, [activeClientId, load]);
+
+  const signOffUrl = signOffToken
+    ? `${window.location.origin}${import.meta.env.BASE_URL}sign-off/${signOffToken}`.replace(/\/+$/, "")
+    : null;
+
+  function copySignOffLink() {
+    if (!signOffUrl) return;
+    navigator.clipboard.writeText(signOffUrl).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    });
+  }
+
+  // Unique departments from existing docs (for autocomplete in upload dialog)
+  const existingDepts = Array.from(new Set(docs.map(d => d.department).filter(Boolean) as string[])).sort();
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -753,6 +796,26 @@ export default function DocTrackPage() {
           <Plus className="w-4 h-4" /> Upload Document
         </Button>
       </div>
+
+      {/* Staff self-sign link */}
+      {signOffUrl && (
+        <div className="flex items-center gap-3 mb-6 p-3.5 rounded-xl border bg-amber-50 border-amber-200">
+          <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-900">Staff self-sign link</p>
+            <p className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
+            onClick={copySignOffLink}
+          >
+            {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {linkCopied ? "Copied!" : "Copy link"}
+          </Button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
@@ -834,6 +897,7 @@ export default function DocTrackPage() {
         onClose={() => setUploadOpen(false)}
         onUploaded={load}
         sites={sites}
+        existingDepts={existingDepts}
       />
 
       {/* Acknowledgements dialog */}
