@@ -879,4 +879,39 @@ async function migrateCheckPhotos() {
       UNIQUE ("client_id", "entity_type")
     )
   `);
+
+  // Manager-customisable checklist templates (per client + optional site + checklist type)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "checklist_templates" (
+      "id"              serial PRIMARY KEY,
+      "client_id"       integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"         integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "checklist_type"  text NOT NULL,
+      "items"           jsonb NOT NULL DEFAULT '[]',
+      "updated_by"      integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_at"      timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  // Partial unique indexes to handle nullable site_id correctly
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_checklist_templates_client_type"
+    ON "checklist_templates" ("client_id", "checklist_type")
+    WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_checklist_templates_client_site_type"
+    ON "checklist_templates" ("client_id", "site_id", "checklist_type")
+    WHERE "site_id" IS NOT NULL
+  `);
+
+  // Deduplication log for daily check-reminder emails (one digest per client per day)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "check_reminder_log" (
+      "id"         serial PRIMARY KEY,
+      "client_id"  integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_date"   date NOT NULL DEFAULT CURRENT_DATE,
+      "sent_at"    timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("client_id", "log_date")
+    )
+  `);
 }

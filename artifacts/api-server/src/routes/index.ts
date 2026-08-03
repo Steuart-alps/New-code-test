@@ -34,6 +34,8 @@ import signOffRouter from "./sign-off";
 import kitchenWeeklyRouter from "./kitchen-weekly";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
+import checklistTemplatesRouter from "./checklist-templates";
+import checkRemindersRouter from "./check-reminders";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -78,5 +80,7 @@ router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitch
 // service that matches the checklistType being read/written.
 router.use("/daily-track-am", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackAmRouter);
 router.use("/daily-track-pm", requireAuth, requireAnyService("kitchentrack", "safetrack"), dailyTrackPmRouter);
+router.use(checklistTemplatesRouter);
+router.use(checkRemindersRouter);
 
 export default router;

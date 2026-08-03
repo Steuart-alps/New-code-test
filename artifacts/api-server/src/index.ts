@@ -8,6 +8,7 @@ import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
 import { sendSystemEmail } from "./lib/email";
 import { runTrialReminderJob } from "./lib/trialReminders";
+import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 
 const rawPort = process.env["PORT"];
 
@@ -68,6 +69,18 @@ function startScheduler() {
   // Remind clients whose free trial is about to end (daily at 08:15)
   cron.schedule("15 8 * * *", runTrialReminders);
   logger.info("Trial reminder scheduler started (daily at 08:15)");
+
+  // Email safety check reminders for overdue/due-soon checks (daily at 08:45)
+  cron.schedule("45 8 * * *", async () => {
+    logger.info("Running daily check reminder email job...");
+    try {
+      const result = await runCheckReminderEmailJob();
+      logger.info({ result }, "Check reminder email job complete");
+    } catch (err) {
+      logger.error({ err }, "Check reminder email job failed");
+    }
+  });
+  logger.info("Check reminder scheduler started (daily at 08:45)");
 }
 
 async function runTrialReminders() {

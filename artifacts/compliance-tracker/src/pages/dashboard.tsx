@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useGetDashboardStats, useListSites } from "@workspace/api-client-react";
+import { ChecksAlertPanel } from "@/components/checks-alert-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
@@ -616,6 +617,8 @@ export default function Dashboard() {
           </Card>
         </Link>
       </div>
+
+      <ChecksAlertPanel />
 
       <ModuleTrackRow hasService={hasService} />
 

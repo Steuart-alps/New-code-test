@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Square, Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw } from "lucide-react";
+import { CheckSquare, Square, Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
+import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,26 +144,51 @@ const CHECKLIST_LABELS: Record<string, string> = {
 // ── Checklist card ────────────────────────────────────────────────────────────
 
 function ChecklistCard({
-  type, siteId, date, existing, onSaved, canAdmin,
+  type, siteId, siteName, date, existing, onSaved, canAdmin,
 }: {
   type: string;
   siteId: number | null;
+  siteName?: string;
   date: string;
   existing?: Checklist;
   onSaved: () => void;
   canAdmin: boolean;
 }) {
-  const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? TEMPLATES[type] ?? []);
+  const [templateItems, setTemplateItems] = useState<ChecklistItem[] | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(true);
+  const [showEditor, setShowEditor] = useState(false);
+
+  // Fetch custom template on mount / when type or siteId changes
+  useEffect(() => {
+    if (existing) { setTemplateLoading(false); return; }
+    (async () => {
+      setTemplateLoading(true);
+      const params = new URLSearchParams({ type });
+      if (siteId) params.set("siteId", String(siteId));
+      const r = await apiFetch(`/checklist-templates?${params}`);
+      if (r.ok) {
+        const data = await r.json();
+        setTemplateItems(data.items ?? null);
+      }
+      setTemplateLoading(false);
+    })();
+  }, [type, siteId, existing]);
+
+  const effectiveDefault = templateItems
+    ? templateItems.map(i => ({ ...i, checked: false }))
+    : (TEMPLATES[type] ?? []);
+
+  const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? "");
   const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
   const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
 
   useEffect(() => {
-    setItems(existing?.items ?? TEMPLATES[type] ?? []);
+    setItems(existing?.items ?? effectiveDefault);
     setCompletedBy(existing?.completedBy ?? "");
     setManagerNote(existing?.managerNote ?? "");
-  }, [existing, type]);
+  }, [existing, type, templateItems]);
 
   const toggle = (i: number) => {
     if (submitted) return;
@@ -195,86 +221,116 @@ function ChecklistCard({
   const Icon = type === "kitchen_opening" ? UtensilsCrossed : Building2;
 
   return (
-    <Card className="p-5 bg-card shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4 text-primary opacity-80" />
-          <h3 className="font-semibold font-display">{CHECKLIST_LABELS[type]}</h3>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
-          {submitted
-            ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
-            : checkedCount === items.length && items.length > 0
-            ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
-            : <Badge variant="secondary" className="text-xs">In progress</Badge>}
-        </div>
-      </div>
-
-      <div className="space-y-1 mb-4">
-        {items.map((item, i) => (
-          <div key={i}>
-            {item.section && (item.section !== items[i - 1]?.section) && (
-              <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>
-                {item.section}
-              </p>
+    <>
+      <Card className="p-5 bg-card shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icon className="w-4 h-4 text-primary opacity-80" />
+            <h3 className="font-semibold font-display">{CHECKLIST_LABELS[type]}</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {canAdmin && !submitted && (
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setShowEditor(true)} title="Customise checklist">
+                <Settings2 className="w-3.5 h-3.5" />
+              </Button>
             )}
-            <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-              <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                {item.checked
-                  ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-                  : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
+            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            {submitted
+              ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
+              : checkedCount === items.length && items.length > 0
+              ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
+              : <Badge variant="secondary" className="text-xs">In progress</Badge>}
+          </div>
+        </div>
+
+        {templateLoading && !existing ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="space-y-1 mb-4">
+            {items.map((item, i) => (
+              <div key={i}>
+                {item.section && (item.section !== items[i - 1]?.section) && (
+                  <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>
+                    {item.section}
+                  </p>
+                )}
+                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
+                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
+                    {item.checked
+                      ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                      : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
+                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
+                  </div>
+                  {!submitted && item.checked && (
+                    <div className="mt-2 ml-7">
+                      <Input
+                        value={item.notes ?? ""}
+                        onChange={e => setNote(i, e.target.value)}
+                        placeholder="Optional note…"
+                        className="h-7 text-xs bg-white"
+                        onClick={e => e.stopPropagation()}
+                      />
+                    </div>
+                  )}
+                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
+                </div>
               </div>
-              {!submitted && item.checked && (
-                <div className="mt-2 ml-7">
-                  <Input
-                    value={item.notes ?? ""}
-                    onChange={e => setNote(i, e.target.value)}
-                    placeholder="Optional note…"
-                    className="h-7 text-xs bg-white"
-                    onClick={e => e.stopPropagation()}
-                  />
+            ))}
+          </div>
+        )}
+
+        {!submitted && (
+          <div className="space-y-3 border-t pt-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Completed by</Label>
+                <Input value={completedBy} onChange={e => setCompletedBy(e.target.value)} placeholder="Name" className="h-8 text-sm" />
+              </div>
+              {canAdmin && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Manager note</Label>
+                  <Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" />
                 </div>
               )}
-              {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}
+              </Button>
+              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">
+                Submit checklist
+              </Button>
             </div>
           </div>
-        ))}
-      </div>
+        )}
 
-      {!submitted && (
-        <div className="space-y-3 border-t pt-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Completed by</Label>
-              <Input value={completedBy} onChange={e => setCompletedBy(e.target.value)} placeholder="Name" className="h-8 text-sm" />
-            </div>
-            {canAdmin && (
-              <div className="space-y-1">
-                <Label className="text-xs">Manager note</Label>
-                <Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" />
-              </div>
-            )}
+        {submitted && (
+          <div className="border-t pt-3 space-y-1">
+            {existing?.completedBy && <p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p>}
+            {existing?.managerNote && <p className="text-xs text-muted-foreground">Manager note: <span className="italic">{existing.managerNote}</span></p>}
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}
-            </Button>
-            <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">
-              Submit checklist
-            </Button>
-          </div>
-        </div>
-      )}
+        )}
+      </Card>
 
-      {submitted && (
-        <div className="border-t pt-3 space-y-1">
-          {existing?.completedBy && <p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p>}
-          {existing?.managerNote && <p className="text-xs text-muted-foreground">Manager note: <span className="italic">{existing.managerNote}</span></p>}
-        </div>
+      {canAdmin && (
+        <ChecklistTemplateEditor
+          open={showEditor}
+          onOpenChange={setShowEditor}
+          type={type}
+          typeLabel={CHECKLIST_LABELS[type] ?? type}
+          siteId={siteId}
+          siteName={siteName}
+          defaultItems={TEMPLATES[type] ?? []}
+          onSaved={(newItems: TemplateItem[]) => {
+            const ci = newItems.map(i => ({ ...i, checked: false })) as ChecklistItem[];
+            setTemplateItems(ci);
+            if (!existing) setItems(ci);
+          }}
+        />
       )}
-    </Card>
+    </>
   );
 }
 
@@ -293,6 +349,7 @@ export default function DailyTrackAmPage() {
   const [loading, setLoading] = useState(false);
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
+  const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -349,6 +406,7 @@ export default function DailyTrackAmPage() {
               key={type}
               type={type}
               siteId={selectedSiteId}
+              siteName={selectedSiteName}
               date={date}
               existing={getChecklist(type)}
               onSaved={load}
