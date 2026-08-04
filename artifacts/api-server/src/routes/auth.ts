@@ -9,7 +9,7 @@ import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
-import { eq, and, gt, isNull } from "drizzle-orm";
+import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { sendSystemEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { getPerSitePrice, getServicePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
@@ -405,6 +405,69 @@ router.post("/auth/register", async (req, res) => {
 
   const safeUser = { id: user.id, email: user.email, name: user.name, role: user.role };
   res.json({ user: safeUser });
+});
+
+// ─── Mobile auth ─────────────────────────────────────────────────────────────
+
+const MobileLoginBody = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+/**
+ * POST /api/auth/mobile-login
+ * Authenticates with email + password and returns a long-lived bearer token.
+ * Tokens are stored in mobile_sessions (created by runRuntimeMigrations).
+ */
+router.post("/auth/mobile-login", async (req, res) => {
+  const body = MobileLoginBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Invalid email or password" });
+    return;
+  }
+
+  const result = await getUserWithClientByEmail(body.data.email);
+  if (!result || !result.user.active) {
+    res.status(401).json({ error: "Invalid email or password" });
+    return;
+  }
+
+  const valid = await verifyPassword(body.data.password, result.user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Invalid email or password" });
+    return;
+  }
+
+  const token = randomBytes(32).toString("hex");
+  // 90-day expiry — long enough for regular field use, refreshed on each login
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  await db.execute(sql`
+    INSERT INTO mobile_sessions (user_id, token, expires_at)
+    VALUES (${result.user.id}, ${token}, ${expiresAt})
+  `);
+
+  const safeUser = {
+    id: result.user.id,
+    email: result.user.email,
+    name: result.user.name,
+    role: result.user.role,
+    clientId: result.user.clientId ?? null,
+  };
+  res.json({ token, user: safeUser });
+});
+
+/**
+ * POST /api/auth/mobile-logout
+ * Invalidates the current bearer token.
+ */
+router.post("/auth/mobile-logout", requireAuth, async (req, res) => {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith("Bearer ")) {
+    const token = auth.slice(7);
+    await db.execute(sql`DELETE FROM mobile_sessions WHERE token = ${token}`).catch(() => {});
+  }
+  res.status(204).send();
 });
 
 export default router;

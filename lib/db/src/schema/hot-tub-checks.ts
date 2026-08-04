@@ -27,6 +27,7 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   sanitiserLevel: numeric("sanitiser_level", { precision: 6, scale: 2 }), // ppm (Cl/Br)
   temperature: numeric("temperature", { precision: 5, scale: 2 }),    // °C (max 40)
   hotTubId: integer("hot_tub_id").references(() => hotTubsTable.id, { onDelete: "set null" }),
+  session: text("session"),        // morning | midday | evening (3× daily checks)
   location: text("location"),      // specific area / supplementary name
   performedBy: text("performed_by"),
   notes: text("notes"),

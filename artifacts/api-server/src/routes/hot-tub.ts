@@ -24,6 +24,7 @@ const createSchema = z.object({
   checkType: z.enum(HOT_TUB_CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   result: z.enum(["pass", "fail", "action_required"]),
+  session: z.enum(["morning", "midday", "evening"]).nullable().optional(),
   phValue: z.number().min(0).max(14).nullable().optional(),
   sanitiserLevel: z.number().min(0).nullable().optional(),
   temperature: z.number().min(0).max(50).nullable().optional(),
@@ -230,7 +231,35 @@ router.get("/status", requireAuth, async (req, res) => {
     return { checkType, frequencyDays, lastDate, dueDate, status };
   });
 
-  res.json(statuses);
+  // Session completion for 3× daily check types
+  const DAILY_SESSION_TYPES = ["water_chemistry", "temperature"];
+  const sessionRows = await db.execute(sql`
+    SELECT check_type, session
+    FROM hot_tub_checks
+    WHERE client_id = ${clientId}
+      AND check_date = ${todayIso}
+      AND check_type IN ('water_chemistry', 'temperature')
+      AND session IS NOT NULL
+  `);
+  const sessionsByType = new Map<string, Set<string>>();
+  for (const row of (sessionRows.rows ?? []) as { check_type: string; session: string }[]) {
+    if (!sessionsByType.has(row.check_type)) sessionsByType.set(row.check_type, new Set());
+    sessionsByType.get(row.check_type)!.add(row.session);
+  }
+  const enriched = statuses.map((s) => {
+    if (!DAILY_SESSION_TYPES.includes(s.checkType)) return s;
+    const done = sessionsByType.get(s.checkType) ?? new Set<string>();
+    return {
+      ...s,
+      sessionsToday: {
+        morning: done.has("morning"),
+        midday:  done.has("midday"),
+        evening: done.has("evening"),
+      },
+    };
+  });
+
+  res.json(enriched);
 });
 
 // POST /api/hot-tub
@@ -260,6 +289,7 @@ router.post("/", requireAuth, async (req, res) => {
       checkType: data.checkType,
       checkDate: data.checkDate,
       result: data.result,
+      session: data.session ?? null,
       phValue: data.phValue != null ? String(data.phValue) : null,
       sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
       temperature: data.temperature != null ? String(data.temperature) : null,
@@ -303,11 +333,12 @@ router.put("/:id", requireAuth, async (req, res) => {
     if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
 
-  const { phValue, sanitiserLevel, temperature, ...rest } = parsed.data;
+  const { phValue, sanitiserLevel, temperature, session, ...rest } = parsed.data;
   const updateData: any = { ...rest, updatedAt: new Date() };
   if (phValue !== undefined) updateData.phValue = phValue != null ? String(phValue) : null;
   if (sanitiserLevel !== undefined) updateData.sanitiserLevel = sanitiserLevel != null ? String(sanitiserLevel) : null;
   if (temperature !== undefined) updateData.temperature = temperature != null ? String(temperature) : null;
+  if (session !== undefined) updateData.session = session ?? null;
 
   const [updated] = await db
     .update(hotTubChecksTable)

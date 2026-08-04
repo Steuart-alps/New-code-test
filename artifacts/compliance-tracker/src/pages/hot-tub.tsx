@@ -63,6 +63,7 @@ interface HotTubCheck {
   checkType: string;
   checkDate: string;
   result: string;
+  session: string | null;
   phValue: string | null;
   sanitiserLevel: string | null;
   temperature: string | null;
@@ -78,6 +79,7 @@ interface StatusRow {
   lastDate: string | null;
   dueDate: string | null;
   status: CheckStatus;
+  sessionsToday?: { morning: boolean; midday: boolean; evening: boolean };
 }
 
 interface Site { id: number; name: string; }
@@ -105,14 +107,22 @@ const CHECK_TYPE_HINTS: Record<CheckType, string> = {
 };
 
 const FREQ_LABELS: Record<CheckType, string> = {
-  water_chemistry:       "Daily",
-  temperature:           "Daily",
+  water_chemistry:       "3× daily",
+  temperature:           "3× daily",
   filter_clean:          "Weekly",
   cover_inspection:      "Weekly",
   drain_refill:          "Quarterly",
   microbiological_test:  "Quarterly",
   risk_assessment:       "Annual",
 };
+
+const SESSION_LABELS: Record<string, string> = {
+  morning: "Morning",
+  midday:  "Midday",
+  evening: "Evening",
+};
+
+const DAILY_SESSION_TYPES: CheckType[] = ["water_chemistry", "temperature"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -186,6 +196,7 @@ const emptyForm = () => ({
   checkType: "water_chemistry" as CheckType,
   checkDate: new Date().toISOString().slice(0, 10),
   result: "pass" as CheckResult,
+  session: "",
   phValue: "",
   sanitiserLevel: "",
   temperature: "",
@@ -296,6 +307,7 @@ export default function HotTubPage() {
       checkType: r.checkType as CheckType,
       checkDate: r.checkDate?.slice(0, 10) ?? "",
       result: r.result as CheckResult,
+      session: r.session ?? "",
       phValue: r.phValue ?? "",
       sanitiserLevel: r.sanitiserLevel ?? "",
       temperature: r.temperature ?? "",
@@ -316,6 +328,7 @@ export default function HotTubPage() {
         checkType: form.checkType,
         checkDate: form.checkDate,
         result: form.result,
+        session: DAILY_SESSION_TYPES.includes(form.checkType) ? (form.session || null) : null,
         phValue: form.phValue !== "" ? parseFloat(form.phValue) : null,
         sanitiserLevel: form.sanitiserLevel !== "" ? parseFloat(form.sanitiserLevel) : null,
         temperature: form.temperature !== "" ? parseFloat(form.temperature) : null,
@@ -446,12 +459,20 @@ export default function HotTubPage() {
       {statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {statuses.map(s => {
+            const isDaily = DAILY_SESSION_TYPES.includes(s.checkType as CheckType);
+            const sessions = s.sessionsToday;
+            // For daily types, derive status from session completion too
+            const allDone = isDaily && sessions && sessions.morning && sessions.midday && sessions.evening;
+            const someDone = isDaily && sessions && (sessions.morning || sessions.midday || sessions.evening);
+            const effectiveStatus = isDaily
+              ? (allDone ? "ok" : someDone ? "due_soon" : s.status)
+              : s.status;
             const statusCfg = {
               ok:        { bg: "bg-emerald-50 border-emerald-200", text: "text-emerald-700", icon: CheckCircle2 },
               due_soon:  { bg: "bg-amber-50 border-amber-200",   text: "text-amber-700",   icon: Clock },
               overdue:   { bg: "bg-rose-50 border-rose-200",     text: "text-rose-700",    icon: AlertTriangle },
               never:     { bg: "bg-slate-50 border-slate-200",   text: "text-slate-500",   icon: CalendarX },
-            }[s.status];
+            }[effectiveStatus];
             const Icon = statusCfg.icon;
             return (
               <button
@@ -471,16 +492,38 @@ export default function HotTubPage() {
                 </div>
                 <div className={cn("text-xs mt-1", statusCfg.text)}>
                   {FREQ_LABELS[s.checkType as CheckType]}
-                  {s.dueDate && (
-                    <span className="block">
-                      {s.status === "overdue"
-                        ? `${Math.abs(daysUntil(s.dueDate) ?? 0)}d overdue`
-                        : s.status === "due_soon"
-                        ? `Due in ${daysUntil(s.dueDate)}d`
-                        : `Next ${fmt(s.dueDate)}`}
-                    </span>
-                  )}
                 </div>
+                {/* Session dots for 3× daily checks */}
+                {isDaily && sessions && (
+                  <div className="flex items-center gap-1.5 mt-2">
+                    {(["morning", "midday", "evening"] as const).map(sess => (
+                      <span
+                        key={sess}
+                        title={SESSION_LABELS[sess]}
+                        className={cn(
+                          "flex flex-col items-center gap-0.5",
+                        )}
+                      >
+                        <span className={cn(
+                          "w-2 h-2 rounded-full",
+                          sessions[sess] ? "bg-emerald-500" : "bg-slate-300"
+                        )} />
+                        <span className="text-[8px] leading-none text-muted-foreground font-medium uppercase tracking-wide">
+                          {sess === "morning" ? "AM" : sess === "midday" ? "MD" : "PM"}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {!isDaily && s.dueDate && (
+                  <div className={cn("text-xs mt-1", statusCfg.text)}>
+                    {s.status === "overdue"
+                      ? `${Math.abs(daysUntil(s.dueDate) ?? 0)}d overdue`
+                      : s.status === "due_soon"
+                      ? `Due in ${daysUntil(s.dueDate)}d`
+                      : `Next ${fmt(s.dueDate)}`}
+                  </div>
+                )}
               </button>
             );
           })}
@@ -594,7 +637,14 @@ export default function HotTubPage() {
                         </span>
                       ) : <span className="opacity-30 text-sm">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(r.checkDate)}</td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      <span>{fmt(r.checkDate)}</span>
+                      {r.session && (
+                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-medium bg-cyan-50 text-cyan-700 border border-cyan-200">
+                          {SESSION_LABELS[r.session] ?? r.session}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3"><ResultBadge result={r.result} /></td>
                     <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.phValue ?? <span className="opacity-40">—</span>}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.sanitiserLevel ?? <span className="opacity-40">—</span>}</td>
@@ -673,6 +723,30 @@ export default function HotTubPage() {
                 onChange={e => setForm(f => ({ ...f, checkDate: e.target.value }))}
                 className="mt-1 rounded-sm" />
             </div>
+
+            {/* Session — 3× daily checks only */}
+            {DAILY_SESSION_TYPES.includes(form.checkType) && (
+              <div>
+                <Label>Check Session</Label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {(["morning", "midday", "evening"] as const).map(sess => (
+                    <button
+                      key={sess}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, session: f.session === sess ? "" : sess }))}
+                      className={cn(
+                        "py-2 text-sm rounded-sm border font-medium transition-colors",
+                        form.session === sess
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-foreground border-border hover:border-primary/50"
+                      )}
+                    >
+                      {SESSION_LABELS[sess]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Result */}
             <div>

@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
@@ -16,23 +16,54 @@ declare global {
   }
 }
 
+async function loadConsultantClients(req: Request, userId: number) {
+  const user = req.currentUser;
+  if (!user || user.role !== "consultant") return;
+  const allowed = new Set<number>();
+  if (user.clientId != null) allowed.add(user.clientId);
+  const memberships = await db
+    .select({ clientId: consultantClientsTable.clientId })
+    .from(consultantClientsTable)
+    .where(eq(consultantClientsTable.userId, userId));
+  for (const m of memberships) allowed.add(m.clientId);
+  req.allowedClientIds = allowed;
+}
+
 export async function loadUser(req: Request, _res: Response, next: NextFunction) {
+  let userId: number | undefined;
+
+  // 1. Web session auth
   if (req.session.userId) {
-    const user = await getUserById(req.session.userId);
-    if (user && user.active) {
-      req.currentUser = user;
-      if (user.role === "consultant") {
-        const allowed = new Set<number>();
-        if (user.clientId != null) allowed.add(user.clientId);
-        const memberships = await db
-          .select({ clientId: consultantClientsTable.clientId })
-          .from(consultantClientsTable)
-          .where(eq(consultantClientsTable.userId, user.id));
-        for (const m of memberships) allowed.add(m.clientId);
-        req.allowedClientIds = allowed;
+    userId = req.session.userId;
+  }
+
+  // 2. Bearer token auth (mobile app)
+  if (!userId) {
+    const auth = req.headers.authorization;
+    if (auth?.startsWith("Bearer ")) {
+      const token = auth.slice(7);
+      try {
+        const result = await db.execute(sql`
+          SELECT user_id FROM mobile_sessions
+          WHERE token = ${token} AND expires_at > now()
+          LIMIT 1
+        `);
+        const row = (result as any).rows?.[0] as { user_id: number } | undefined;
+        if (row) userId = row.user_id;
+      } catch {
+        // mobile_sessions may not exist yet (pre-migration) — skip silently
       }
     }
   }
+
+  if (userId) {
+    const user = await getUserById(userId);
+    if (user && user.active) {
+      req.currentUser = user;
+      await loadConsultantClients(req, userId);
+    }
+  }
+
   next();
 }
 

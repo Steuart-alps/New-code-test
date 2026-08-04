@@ -264,6 +264,7 @@ export async function runRuntimeMigrations() {
     await migrateSwimTrack();
     await migrateSiteDocuments();
     await migrateFixTrackV2();
+    await migrateMobileSessions();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -320,6 +321,7 @@ async function migrateSafeHandbook() {
 // ---- Hot tub registry ----
 async function migrateHotTub() {
   await db.execute(sql`ALTER TABLE "hot_tub_checks" ADD COLUMN IF NOT EXISTS "hot_tub_id" integer`);
+  await db.execute(sql`ALTER TABLE "hot_tub_checks" ADD COLUMN IF NOT EXISTS "session" text CHECK ("session" IN ('morning', 'midday', 'evening'))`);
 }
 
 async function migrateHotTubRegistry() {
@@ -981,5 +983,21 @@ async function migrateSiteDocuments() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_site_documents_site"
     ON "site_documents" ("client_id", "site_id")
+  `);
+}
+
+async function migrateMobileSessions() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "mobile_sessions" (
+      "id"         serial PRIMARY KEY,
+      "user_id"    integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "token"      text    NOT NULL,
+      "expires_at" timestamp NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_mobile_sessions_token"
+    ON "mobile_sessions" ("token")
   `);
 }
