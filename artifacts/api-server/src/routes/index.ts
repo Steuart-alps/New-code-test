@@ -38,6 +38,7 @@ import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
 import fixTrackPublicRouter from "./fix-track-public";
+import incidentsRouter from "./incidents";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -85,6 +86,7 @@ router.use("/daily-track-pm", requireAuth, requireAnyService("kitchentrack", "sa
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);
+router.use("/incidents", requireAuth, requireService("incidenttrack"), incidentsRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);
 

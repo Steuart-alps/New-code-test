@@ -3,7 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine, AlertOctagon } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -87,6 +87,15 @@ const ADDONS = [
     iconColor: "text-green-700",
     activeBorder: "border-green-500",
     activeBg: "bg-green-50/60",
+  },
+  {
+    key: "incidenttrack",
+    label: "IncidentTrack",
+    desc: "Accident & incident log with RIDDOR reporting",
+    icon: AlertOctagon,
+    iconColor: "text-rose-700",
+    activeBorder: "border-rose-500",
+    activeBg: "bg-rose-50/60",
   },
 ];
 

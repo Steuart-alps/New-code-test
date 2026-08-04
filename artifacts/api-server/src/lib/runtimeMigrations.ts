@@ -265,6 +265,7 @@ export async function runRuntimeMigrations() {
     await migrateSiteDocuments();
     await migrateFixTrackV2();
     await migrateMobileSessions();
+    await migrateIncidents();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -984,6 +985,42 @@ async function migrateSiteDocuments() {
     CREATE INDEX IF NOT EXISTS "IDX_site_documents_site"
     ON "site_documents" ("client_id", "site_id")
   `);
+}
+
+async function migrateIncidents() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "incidents" (
+      "id"                       serial PRIMARY KEY,
+      "client_id"                integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"                  integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "incident_type"            text NOT NULL DEFAULT 'accident',
+      "severity"                 text NOT NULL DEFAULT 'minor',
+      "status"                   text NOT NULL DEFAULT 'open',
+      "incident_date"            date NOT NULL,
+      "incident_time"            text,
+      "location"                 text NOT NULL,
+      "description"              text NOT NULL,
+      "involved_name"            text NOT NULL,
+      "involved_job_title"       text,
+      "involved_employment_type" text DEFAULT 'employee',
+      "injuries_sustained"       text,
+      "first_aid_given"          boolean NOT NULL DEFAULT false,
+      "first_aider_name"         text,
+      "witnesses"                text,
+      "riddor_reportable"        boolean NOT NULL DEFAULT false,
+      "reported_to_hse"          boolean NOT NULL DEFAULT false,
+      "hse_reference"            text,
+      "hse_report_date"          date,
+      "immediate_actions"        text,
+      "corrective_actions"       text,
+      "reported_by"              text NOT NULL,
+      "created_by"               integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"               timestamp NOT NULL DEFAULT now(),
+      "updated_at"               timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_client" ON "incidents" ("client_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_date" ON "incidents" ("client_id", "incident_date" DESC)`);
 }
 
 async function migrateMobileSessions() {
