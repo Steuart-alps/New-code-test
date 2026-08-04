@@ -45,6 +45,7 @@ const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
   calorifier_clean:      "Calorifier — clean & disinfect",
   shower_clean:          "Shower head / hose — descale & disinfect",
   tmv_service:           "Thermostatic mixing valve (TMV) — service & verify",
+  outlet_flush:          "Little-used outlet — 5-minute flush",
 };
 
 // Legacy labels for records created before the HSG274 update
@@ -73,6 +74,7 @@ const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
   calorifier_clean:      "HSG274 Table 2.1: Full calorifier clean, disinfect and recommission — annually",
   shower_clean:          "HSG274 Table 2.1: Descale, clean and disinfect heads and flexible hoses — quarterly",
   tmv_service:           "HSG274 Table 2.1: Service, test and verify blending temperature — annually",
+  outlet_flush:          "L8/HSG274: Run infrequently used outlets for at least 5 minutes — weekly",
 };
 
 const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([

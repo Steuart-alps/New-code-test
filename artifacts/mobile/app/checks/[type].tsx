@@ -40,6 +40,7 @@ const WATER_TYPES = [
   { value: 'calorifier_clean',      label: 'Calorifier clean & disinfect' },
   { value: 'shower_clean',          label: 'Shower head / hose descale' },
   { value: 'tmv_service',           label: 'TMV service & verify' },
+  { value: 'outlet_flush',          label: 'Little-used outlet flush (5 min)' },
 ];
 
 interface Site {

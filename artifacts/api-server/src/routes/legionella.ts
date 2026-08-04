@@ -24,6 +24,7 @@ const CHECK_TYPES = [
   "calorifier_clean",      // Annually:   Calorifier clean & disinfect
   "shower_clean",          // Quarterly:  Shower head / hose descale & disinfect
   "tmv_service",           // Annually:   Thermostatic mixing valve service & verify
+  "outlet_flush",          // Weekly:     Little-used outlet 5-minute flush
 ] as const;
 
 // Frequencies per HSG274 Part 2 Table 2.1
@@ -40,6 +41,7 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   calorifier_clean:      365,  // Annually
   shower_clean:          90,   // Quarterly
   tmv_service:           365,  // Annually
+  outlet_flush:          7,    // Weekly
 };
 
 const createSchema = z.object({

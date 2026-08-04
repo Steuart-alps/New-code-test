@@ -516,6 +516,7 @@ export const LegionellaCheckType = {
   calorifier_clean:      "calorifier_clean",
   shower_clean:          "shower_clean",
   tmv_service:           "tmv_service",
+  outlet_flush:          "outlet_flush",
 } as const;
 
 export type LegionellaCheckResult =

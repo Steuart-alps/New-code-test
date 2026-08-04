@@ -62,7 +62,7 @@ const LEGIONELLA_CHECK_TYPES = [
   "cold_tank_temp", "cold_sentinel_temp", "cold_nonsent_temp",
   "cold_tank_inspection", "cold_tank_clean",
   "calorifier_inspection", "calorifier_clean",
-  "shower_clean", "tmv_service",
+  "shower_clean", "tmv_service", "outlet_flush",
 ] as const;
 
 const LEGIONELLA_FREQUENCY_DAYS: Record<string, number> = {
@@ -78,6 +78,7 @@ const LEGIONELLA_FREQUENCY_DAYS: Record<string, number> = {
   calorifier_clean:      365,
   shower_clean:          90,
   tmv_service:           365,
+  outlet_flush:          7,
 };
 
 const LEGIONELLA_LABELS: Record<string, string> = {
@@ -93,6 +94,7 @@ const LEGIONELLA_LABELS: Record<string, string> = {
   calorifier_clean:      "Calorifier clean & disinfect",
   shower_clean:          "Shower head / hose descale & disinfect",
   tmv_service:           "TMV service & verify",
+  outlet_flush:          "Little-used outlet flush (5 min)",
 };
 
 // ── Pool ──────────────────────────────────────────────────────────────────────
