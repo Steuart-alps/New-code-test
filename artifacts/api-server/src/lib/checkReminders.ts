@@ -56,27 +56,43 @@ function frequencyDaysLabel(days: number): string {
 
 // ── Legionella ────────────────────────────────────────────────────────────────
 
+// HSG274 Part 2 Table 2.1
 const LEGIONELLA_CHECK_TYPES = [
-  "cold_water_temp", "hot_water_temp", "sentinel_flush",
-  "shower_clean", "tank_inspection", "risk_assessment",
+  "calorifier_temp", "hot_sentinel_temp", "hot_nonsent_temp",
+  "cold_tank_temp", "cold_sentinel_temp", "cold_nonsent_temp",
+  "cold_tank_inspection", "cold_tank_clean",
+  "calorifier_inspection", "calorifier_clean",
+  "shower_clean", "tmv_service",
 ] as const;
 
 const LEGIONELLA_FREQUENCY_DAYS: Record<string, number> = {
-  cold_water_temp: 7,
-  hot_water_temp: 7,
-  sentinel_flush: 30,
-  shower_clean: 90,
-  tank_inspection: 30,
-  risk_assessment: 365,
+  calorifier_temp:       7,
+  hot_sentinel_temp:     30,
+  hot_nonsent_temp:      90,
+  cold_tank_temp:        30,
+  cold_sentinel_temp:    30,
+  cold_nonsent_temp:     90,
+  cold_tank_inspection:  183,
+  cold_tank_clean:       365,
+  calorifier_inspection: 365,
+  calorifier_clean:      365,
+  shower_clean:          90,
+  tmv_service:           365,
 };
 
 const LEGIONELLA_LABELS: Record<string, string> = {
-  cold_water_temp: "Cold water temperature",
-  hot_water_temp: "Hot water temperature",
-  sentinel_flush: "Sentinel outlet flush",
-  shower_clean: "Shower head descale & disinfect",
-  tank_inspection: "Cold water tank inspection",
-  risk_assessment: "Legionella risk assessment",
+  calorifier_temp:       "Calorifier temperature",
+  hot_sentinel_temp:     "Hot water sentinel outlet temperature",
+  hot_nonsent_temp:      "Hot water representative outlet temperature",
+  cold_tank_temp:        "Cold water storage temperature",
+  cold_sentinel_temp:    "Cold water sentinel outlet temperature",
+  cold_nonsent_temp:     "Cold water representative outlet temperature",
+  cold_tank_inspection:  "Cold water storage tank inspection",
+  cold_tank_clean:       "Cold water storage tank clean & disinfect",
+  calorifier_inspection: "Calorifier internal inspection",
+  calorifier_clean:      "Calorifier clean & disinfect",
+  shower_clean:          "Shower head / hose descale & disinfect",
+  tmv_service:           "TMV service & verify",
 };
 
 // ── Pool ──────────────────────────────────────────────────────────────────────

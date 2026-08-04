@@ -7,23 +7,39 @@ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/r
 
 const router = Router();
 
+// HSG274 Part 2 Table 2.1 — recommended monitoring, inspection and testing activities
 const CHECK_TYPES = [
-  "cold_water_temp",
-  "hot_water_temp",
-  "sentinel_flush",
-  "shower_clean",
-  "tank_inspection",
-  "risk_assessment",
+  // Temperature monitoring — hot water system
+  "calorifier_temp",       // Weekly:     Calorifier flow/return (≥60°C)
+  "hot_sentinel_temp",     // Monthly:    Hot water sentinel outlets (≥50°C after 1 min)
+  "hot_nonsent_temp",      // Quarterly:  Hot water representative outlets (≥50°C after 1 min)
+  // Temperature monitoring — cold water system
+  "cold_tank_temp",        // Monthly:    Cold water storage temperature (≤20°C)
+  "cold_sentinel_temp",    // Monthly:    Cold water sentinel outlets (≤20°C after 2 min)
+  "cold_nonsent_temp",     // Quarterly:  Cold water representative outlets (≤20°C after 2 min)
+  // Inspection & maintenance
+  "cold_tank_inspection",  // 6-monthly:  Cold water storage tank visual inspection
+  "cold_tank_clean",       // Annually:   Cold water storage tank clean & disinfect
+  "calorifier_inspection", // Annually:   Calorifier internal inspection
+  "calorifier_clean",      // Annually:   Calorifier clean & disinfect
+  "shower_clean",          // Quarterly:  Shower head / hose descale & disinfect
+  "tmv_service",           // Annually:   Thermostatic mixing valve service & verify
 ] as const;
 
-// Default check frequencies in days (UK HSG274 / L8 guidance)
+// Frequencies per HSG274 Part 2 Table 2.1
 const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
-  cold_water_temp: 7,       // Weekly: cold outlets should be ≤20°C
-  hot_water_temp: 7,        // Weekly: hot outlets should be ≥50°C
-  sentinel_flush: 30,       // Monthly: flush little-used sentinel outlets
-  shower_clean: 90,         // Quarterly: shower head/hose descale & disinfect
-  tank_inspection: 30,      // Monthly: cold water storage tank inspection
-  risk_assessment: 365,     // Annual: Legionella risk assessment review
+  calorifier_temp:       7,    // Weekly
+  hot_sentinel_temp:     30,   // Monthly
+  hot_nonsent_temp:      90,   // Quarterly
+  cold_tank_temp:        30,   // Monthly
+  cold_sentinel_temp:    30,   // Monthly
+  cold_nonsent_temp:     90,   // Quarterly
+  cold_tank_inspection:  183,  // 6-monthly
+  cold_tank_clean:       365,  // Annually
+  calorifier_inspection: 365,  // Annually
+  calorifier_clean:      365,  // Annually
+  shower_clean:          90,   // Quarterly
+  tmv_service:           365,  // Annually
 };
 
 const createSchema = z.object({

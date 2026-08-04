@@ -31,22 +31,62 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 
+// HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
-  cold_water_temp: "Cold water temperature check",
-  hot_water_temp: "Hot water temperature check",
-  sentinel_flush: "Sentinel outlet flush",
-  shower_clean: "Shower head / hose disinfection",
-  tank_inspection: "Cold water storage tank inspection",
-  risk_assessment: "Legionella risk assessment review",
+  calorifier_temp:       "Calorifier flow / return temperature",
+  hot_sentinel_temp:     "Hot water — sentinel outlet temperature",
+  hot_nonsent_temp:      "Hot water — representative outlet temperature",
+  cold_tank_temp:        "Cold water storage temperature",
+  cold_sentinel_temp:    "Cold water — sentinel outlet temperature",
+  cold_nonsent_temp:     "Cold water — representative outlet temperature",
+  cold_tank_inspection:  "Cold water storage tank — visual inspection",
+  cold_tank_clean:       "Cold water storage tank — clean & disinfect",
+  calorifier_inspection: "Calorifier — internal inspection",
+  calorifier_clean:      "Calorifier — clean & disinfect",
+  shower_clean:          "Shower head / hose — descale & disinfect",
+  tmv_service:           "Thermostatic mixing valve (TMV) — service & verify",
 };
 
+// Legacy labels for records created before the HSG274 update
+const LEGACY_LABELS: Record<string, string> = {
+  cold_water_temp:  "Cold water temperature check (legacy)",
+  hot_water_temp:   "Hot water temperature check (legacy)",
+  sentinel_flush:   "Sentinel outlet flush (legacy)",
+  tank_inspection:  "Cold water storage tank inspection (legacy)",
+  risk_assessment:  "Legionella risk assessment review (legacy)",
+};
+
+function checkTypeLabel(t: string): string {
+  return (CHECK_TYPE_LABELS as Record<string, string>)[t] ?? LEGACY_LABELS[t] ?? t;
+}
+
 const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
-  cold_water_temp: "Should be ≤20°C after running for 2 minutes",
-  hot_water_temp: "Should reach ≥50°C within 1 minute at sentinel outlets",
-  sentinel_flush: "Flush infrequently used outlets for 5+ minutes",
-  shower_clean: "Descale, clean and disinfect shower heads and hoses",
-  tank_inspection: "Check for debris, fouling, insulation and lid condition",
-  risk_assessment: "Annual review as required by L8 ACOP / HSG274",
+  calorifier_temp:       "HSG274 Table 2.1: ≥60°C at calorifier base/return — weekly",
+  hot_sentinel_temp:     "HSG274 Table 2.1: ≥50°C within 1 min at first/last hot outlets — monthly",
+  hot_nonsent_temp:      "HSG274 Table 2.1: ≥50°C within 1 min at representative hot outlets — quarterly",
+  cold_tank_temp:        "HSG274 Table 2.1: ≤20°C in cold water storage — monthly",
+  cold_sentinel_temp:    "HSG274 Table 2.1: ≤20°C after 2 min flow at first/last cold outlets — monthly",
+  cold_nonsent_temp:     "HSG274 Table 2.1: ≤20°C after 2 min flow at representative cold outlets — quarterly",
+  cold_tank_inspection:  "HSG274 Table 2.1: Check condition, debris, fouling, insulation and lid — 6-monthly",
+  cold_tank_clean:       "HSG274 Table 2.1: Full tank clean, disinfect and refill — annually",
+  calorifier_inspection: "HSG274 Table 2.1: Internal inspection, check scale, corrosion, components — annually",
+  calorifier_clean:      "HSG274 Table 2.1: Full calorifier clean, disinfect and recommission — annually",
+  shower_clean:          "HSG274 Table 2.1: Descale, clean and disinfect heads and flexible hoses — quarterly",
+  tmv_service:           "HSG274 Table 2.1: Service, test and verify blending temperature — annually",
+};
+
+const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([
+  "calorifier_temp", "hot_sentinel_temp", "hot_nonsent_temp",
+  "cold_tank_temp", "cold_sentinel_temp", "cold_nonsent_temp",
+]);
+
+const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
+  calorifier_temp:    "e.g. 62.0  (target ≥60°C)",
+  hot_sentinel_temp:  "e.g. 52.0  (target ≥50°C)",
+  hot_nonsent_temp:   "e.g. 51.5  (target ≥50°C)",
+  cold_tank_temp:     "e.g. 16.0  (target ≤20°C)",
+  cold_sentinel_temp: "e.g. 17.5  (target ≤20°C)",
+  cold_nonsent_temp:  "e.g. 18.0  (target ≤20°C)",
 };
 
 function ResultBadge({ result }: { result: string }) {
@@ -99,7 +139,7 @@ function StatusBadge({ status }: { status: "ok" | "due_soon" | "overdue" | "neve
 
 function RecordCheckDialog({ siteId }: { siteId?: number }) {
   const [open, setOpen] = useState(false);
-  const [checkType, setCheckType] = useState<LegionellaCheckType>("cold_water_temp");
+  const [checkType, setCheckType] = useState<LegionellaCheckType>("calorifier_temp");
   const [checkDate, setCheckDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
   const [temperature, setTemperature] = useState("");
@@ -113,7 +153,7 @@ function RecordCheckDialog({ siteId }: { siteId?: number }) {
   const createCheck = useCreateLegionellaCheck();
   const { data: sites } = useListSites();
 
-  const isTemperatureCheck = checkType === "cold_water_temp" || checkType === "hot_water_temp";
+  const isTemperatureCheck = TEMPERATURE_TYPES.has(checkType);
 
   const handleSubmit = async () => {
     const data: CreateLegionellaCheckRequest = {
@@ -203,7 +243,7 @@ function RecordCheckDialog({ siteId }: { siteId?: number }) {
                   step="0.1"
                   value={temperature}
                   onChange={(e) => setTemperature(e.target.value)}
-                  placeholder={checkType === "cold_water_temp" ? "e.g. 17.5" : "e.g. 52.0"}
+                  placeholder={TEMP_PLACEHOLDER[checkType] ?? "°C"}
                   className="pl-9"
                 />
               </div>
@@ -269,7 +309,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const updateCheck = useUpdateLegionellaCheck();
   const { data: sites } = useListSites();
 
-  const isTemperatureCheck = check.checkType === "cold_water_temp" || check.checkType === "hot_water_temp";
+  const isTemperatureCheck = TEMPERATURE_TYPES.has(check.checkType as LegionellaCheckType);
 
   const handleSubmit = async () => {
     updateCheck.mutate(
@@ -506,7 +546,7 @@ export default function LegionellaPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-sm font-medium leading-tight">
-                      {CHECK_TYPE_LABELS[item.checkType]}
+                      {checkTypeLabel(item.checkType)}
                     </CardTitle>
                     <StatusBadge status={item.status} />
                   </div>
@@ -544,7 +584,7 @@ export default function LegionellaPage() {
                   <AlertTriangle className="w-4 h-4" /> Overdue checks
                 </div>
                 <div className="text-xs">
-                  {overdueStatuses.map((s) => CHECK_TYPE_LABELS[s.checkType]).join(", ")} — action required.
+                  {overdueStatuses.map((s) => checkTypeLabel(s.checkType)).join(", ")} — action required.
                 </div>
               </div>
             )}
@@ -554,7 +594,7 @@ export default function LegionellaPage() {
                   <Clock className="w-4 h-4" /> Due soon
                 </div>
                 <div className="text-xs">
-                  {dueSoonStatuses.map((s) => CHECK_TYPE_LABELS[s.checkType]).join(", ")} — schedule soon.
+                  {dueSoonStatuses.map((s) => checkTypeLabel(s.checkType)).join(", ")} — schedule soon.
                 </div>
               </div>
             )}
@@ -632,7 +672,7 @@ export default function LegionellaPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0 space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-sm">{CHECK_TYPE_LABELS[check.checkType]}</span>
+                            <span className="font-medium text-sm">{checkTypeLabel(check.checkType)}</span>
                             <ResultBadge result={check.result} />
                             {check.temperature && (
                               <Badge variant="outline" className="text-xs bg-sky-50 text-sky-700 border-sky-200">

@@ -26,14 +26,20 @@ const FIRE_TYPES = [
   { value: 'fire_drill', label: 'Fire drill' },
 ];
 
-// ─── Water / Legionella check types ──────────────────────────────────────────
+// ─── Water / Legionella check types (HSG274 Part 2 Table 2.1) ────────────────
 const WATER_TYPES = [
-  { value: 'cold_water_temp', label: 'Cold water temperature' },
-  { value: 'hot_water_temp', label: 'Hot water temperature' },
-  { value: 'sentinel_flush', label: 'Sentinel outlet flush' },
-  { value: 'shower_clean', label: 'Shower head clean' },
-  { value: 'tank_inspection', label: 'Tank inspection' },
-  { value: 'risk_assessment', label: 'Risk assessment' },
+  { value: 'calorifier_temp',       label: 'Calorifier temperature' },
+  { value: 'hot_sentinel_temp',     label: 'Hot sentinel outlet temp' },
+  { value: 'hot_nonsent_temp',      label: 'Hot representative outlet temp' },
+  { value: 'cold_tank_temp',        label: 'Cold water storage temp' },
+  { value: 'cold_sentinel_temp',    label: 'Cold sentinel outlet temp' },
+  { value: 'cold_nonsent_temp',     label: 'Cold representative outlet temp' },
+  { value: 'cold_tank_inspection',  label: 'Cold water tank inspection' },
+  { value: 'cold_tank_clean',       label: 'Cold water tank clean & disinfect' },
+  { value: 'calorifier_inspection', label: 'Calorifier inspection' },
+  { value: 'calorifier_clean',      label: 'Calorifier clean & disinfect' },
+  { value: 'shower_clean',          label: 'Shower head / hose descale' },
+  { value: 'tmv_service',           label: 'TMV service & verify' },
 ];
 
 interface Site {

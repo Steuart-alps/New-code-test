@@ -502,13 +502,20 @@ export type GetFireSafetyStatusParams = {
 export type LegionellaCheckType =
   (typeof LegionellaCheckType)[keyof typeof LegionellaCheckType];
 
+// HSG274 Part 2 Table 2.1
 export const LegionellaCheckType = {
-  cold_water_temp: "cold_water_temp",
-  hot_water_temp: "hot_water_temp",
-  sentinel_flush: "sentinel_flush",
-  shower_clean: "shower_clean",
-  tank_inspection: "tank_inspection",
-  risk_assessment: "risk_assessment",
+  calorifier_temp:       "calorifier_temp",
+  hot_sentinel_temp:     "hot_sentinel_temp",
+  hot_nonsent_temp:      "hot_nonsent_temp",
+  cold_tank_temp:        "cold_tank_temp",
+  cold_sentinel_temp:    "cold_sentinel_temp",
+  cold_nonsent_temp:     "cold_nonsent_temp",
+  cold_tank_inspection:  "cold_tank_inspection",
+  cold_tank_clean:       "cold_tank_clean",
+  calorifier_inspection: "calorifier_inspection",
+  calorifier_clean:      "calorifier_clean",
+  shower_clean:          "shower_clean",
+  tmv_service:           "tmv_service",
 } as const;
 
 export type LegionellaCheckResult =
