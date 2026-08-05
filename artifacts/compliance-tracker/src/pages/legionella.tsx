@@ -31,7 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings } from "lucide-react";
+import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -168,7 +168,7 @@ function LegionellaConfigDialog() {
     if (!config || !open) return;
     setDefaultPerformer(config.water_default_performer ?? "");
     setSentinelOutlets(parseJsonArray<OutletEntry>(config.water_sentinel_outlets));
-    setNonSentinelOutlets(parseJsonArray<string>(config.water_nonsent_outlets));
+    setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
   }, [config, open]);
 
   const handleSave = () => {
@@ -177,7 +177,7 @@ function LegionellaConfigDialog() {
         data: {
           water_default_performer: defaultPerformer,
           water_sentinel_outlets: JSON.stringify(sentinelOutlets.filter(o => o.name)),
-          water_nonsent_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
+          water_non_sentinel_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
         },
       },
       {

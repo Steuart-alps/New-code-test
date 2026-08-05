@@ -417,8 +417,6 @@ export interface FoodSafetyConfig {
   food_show_hot_temperature?: string;
   food_show_hot_holding?: string;
   food_show_sous_vide?: string;
-  food_reheating_limit?: string;
-  food_hot_holding_limit?: string;
 }
 
 export interface FoodSafetyRecordSummary {

@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -27,7 +27,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
-  Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown,
+  Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -405,7 +405,7 @@ function MachineDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.name.trim()) return toast({ title: "Machine name is required", variant: "destructive" });
+    if (!form.name.trim()) { toast({ title: "Machine name is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -564,7 +564,7 @@ function PreUseDialog({
   }, [form.fluidLevelsOk, form.tyresOk, form.bladesOk, form.guardsOk, form.controlsOk, form.lightsOk, form.cleanlinessOk]);
 
   const handleSave = async () => {
-    if (!form.machineId) return toast({ title: "Select a machine", variant: "destructive" });
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const vals: Record<string, boolean | null> = {};
@@ -696,7 +696,7 @@ function ServiceDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.machineId) return toast({ title: "Select a machine", variant: "destructive" });
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -833,8 +833,8 @@ function DefectDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.machineId) return toast({ title: "Select a machine", variant: "destructive" });
-    if (!form.description.trim()) return toast({ title: "Description is required", variant: "destructive" });
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
+    if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -993,7 +993,7 @@ function PuwerDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.machineId) return toast({ title: "Select a machine", variant: "destructive" });
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -1132,7 +1132,7 @@ function FuelLogDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.machineId) return toast({ title: "Select a machine", variant: "destructive" });
+    if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {

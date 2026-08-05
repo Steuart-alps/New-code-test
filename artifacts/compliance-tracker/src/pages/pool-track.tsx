@@ -75,7 +75,7 @@ function PoolConfigDialog() {
     if (!config || !open) return;
     setPoolName(config.pool_name ?? "");
     setDefaultPerformer(config.pool_default_performer ?? "");
-    setShowAirTemp(config.pool_show_air_temp !== "false");
+    setShowAirTemp(config.pool_track_air_temp !== "false");
     setPhMin(config.pool_ph_min ?? "7.2");
     setPhMax(config.pool_ph_max ?? "7.6");
     setFreeChlorMin(config.pool_free_chlor_min ?? "1.0");
@@ -90,7 +90,7 @@ function PoolConfigDialog() {
         data: {
           pool_name: poolName,
           pool_default_performer: defaultPerformer,
-          pool_show_air_temp: showAirTemp ? "true" : "false",
+          pool_track_air_temp: showAirTemp ? "true" : "false",
           pool_ph_min: phMin,
           pool_ph_max: phMax,
           pool_free_chlor_min: freeChlorMin,

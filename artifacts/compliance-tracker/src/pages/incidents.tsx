@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -31,7 +31,7 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings,
+  ShieldAlert, UserX, Activity, Settings, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
