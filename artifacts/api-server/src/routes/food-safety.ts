@@ -16,6 +16,7 @@ const recordFieldsSchema = z.object({
   coldFood: rowsSchema.optional(),
   hotTemperature: rowsSchema.optional(),
   hotHolding: rowsSchema.optional(),
+  sousVide: rowsSchema.optional(),
   cookingLimit: z.string().max(200).optional(),
   coolingLimit: z.string().max(200).optional(),
   reheatingLimit: z.string().max(200).optional(),
@@ -37,6 +38,16 @@ const CONFIG_KEYS = [
   "food_cooling_limit",
   "food_reheating_limit",
   "food_hot_holding_limit",
+  // Template keys — stored as JSON strings
+  "food_cold_units",            // JSON: [{name, type:"fridge"|"freezer"}]
+  "food_default_hot_items",     // JSON: ["item1", "item2"]
+  "food_default_holding_items", // JSON: ["item1", "item2"]
+  "food_default_sv_items",      // JSON: ["item1", "item2"]
+  // Section visibility — "true"|"false", default true
+  "food_show_deliveries",
+  "food_show_hot_temperature",
+  "food_show_hot_holding",
+  "food_show_sous_vide",
 ] as const;
 
 const DEFAULT_CONFIG = {
@@ -46,6 +57,14 @@ const DEFAULT_CONFIG = {
   food_cooling_limit: "8°C within 90 minutes",
   food_reheating_limit: "Above 82°C",
   food_hot_holding_limit: "Above 63°C",
+  food_cold_units: "",
+  food_default_hot_items: "",
+  food_default_holding_items: "",
+  food_default_sv_items: "",
+  food_show_deliveries: "true",
+  food_show_hot_temperature: "true",
+  food_show_hot_holding: "true",
+  food_show_sous_vide: "true",
 };
 
 // GET /api/food-safety/config
@@ -174,6 +193,7 @@ router.post("/", requireAuth, async (req, res) => {
       coldFood: data.coldFood ?? [],
       hotTemperature: data.hotTemperature ?? [],
       hotHolding: data.hotHolding ?? [],
+      sousVide: data.sousVide ?? [],
       cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
       coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
       reheatingLimit: data.reheatingLimit ?? "Above 82°C",

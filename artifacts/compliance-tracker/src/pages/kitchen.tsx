@@ -21,21 +21,83 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
 
-type DeliveryRow = { supplier: string; item: string; temp: string; ok: boolean };
-type ColdFoodRow = { unit: string; temp: string; ok: boolean };
-type HotTemperatureRow = { item: string; temp: string };
-type HotHoldingRow = { item: string; temp: string };
+// CookSafe All-in-One Record field shapes
+type DeliveryRow = {
+  supplier: string;           // Supplier name
+  items: string;              // Details of food items
+  vanClean: string;           // Van cleanliness "yes"|"no"|""
+  rawCookedSep: string;       // Raw/cooked separated "yes"|"no"|""
+  tempChilled: string;        // Chilled delivery temp (°C) — limit 8°C
+  tempFrozen: string;         // Frozen delivery temp (°C) — limit -15°C
+  tempOk: string;             // Food temp within limits "yes"|"no"|""
+  conditionOk: string;        // Packaging/condition ok "yes"|"no"|""
+  dateCodesOk: string;        // Within use-by/best-before "yes"|"no"|""
+  allergyAware: string;       // Allergy awareness "yes"|"no"|""
+  correctiveActions: string;  // Actions taken if any failures
+};
+type ColdFoodRow = {
+  unit: string;               // "Fridge 1", "Freezer 1" etc
+  tempAm: string;             // AM temperature reading (°C)
+  tempPm: string;             // PM temperature reading (°C)
+  correctiveAction: string;   // Action if out of range
+};
+type HotTemperatureRow = {
+  item: string;
+  cookTimeStart: string;      // Time started cooking
+  cookTimeFinish: string;     // Time finished cooking
+  cookCoreTemp: string;       // Core temp at end of cooking (°C)
+  coolTimeStart: string;      // Time cooling started
+  coolTimeFinish: string;     // Time cooling finished
+  reheatCoreTemp: string;     // Core temp when reheated (°C)
+};
+type HotHoldingRow = {
+  item: string;
+  coreTemp: string;           // Core temperature (°C)
+  timeOfCheck: string;        // Time of check (HH:mm)
+};
+type SousVideRow = {
+  item: string;               // Food item
+  targetTemp: string;         // Target bath temperature (°C)
+  waterTemp: string;          // Actual bath temperature (°C)
+  timeStarted: string;        // Cooking start time
+  timeFinished: string;       // Cooking finish time
+  coreTemp: string;           // Core probe temp at end (°C)
+  result: string;             // "pass"|"fail"|""
+  notes: string;
+};
 
 type ActiveTab = "diary" | "weekly" | "probe";
 
+// ── helpers ────────────────────────────────────────────────────────────────────
+function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
+}
+function parseStringArray(raw: string | undefined | null): string[] {
+  return parseJsonArray<string>(raw);
+}
+type ColdUnit = { name: string; type: "fridge" | "freezer" };
+function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"]): ColdUnit[] {
+  if (config?.food_cold_units) return parseJsonArray<ColdUnit>(config.food_cold_units);
+  const nf = Number(config?.food_num_fridges || "2");
+  const nz = Number(config?.food_num_freezers || "1");
+  return [
+    ...Array.from({ length: nf }, (_, i) => ({ name: `Fridge ${i + 1}`, type: "fridge" as const })),
+    ...Array.from({ length: nz }, (_, i) => ({ name: `Freezer ${i + 1}`, type: "freezer" as const })),
+  ];
+}
+
+// ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
   const [open, setOpen] = useState(false);
   const { data: config } = useGetFoodSafetyConfig();
@@ -43,107 +105,244 @@ function ConfigDialog() {
   const queryClient = useQueryClient();
   const updateConfig = useUpdateFoodSafetyConfig();
 
-  const [numFridges, setNumFridges] = useState("");
-  const [numFreezers, setNumFreezers] = useState("");
-  const [cookingLimit, setCookingLimit] = useState("");
-  const [coolingLimit, setCoolingLimit] = useState("");
-  const [reheatingLimit, setReheatingLimit] = useState("");
-  const [hotHoldingLimit, setHotHoldingLimit] = useState("");
+  // Limits tab
+  const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
+  const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
+  const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
+  const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
+
+  // Sections tab
+  const [showDeliveries, setShowDeliveries] = useState(true);
+  const [showHotTemp, setShowHotTemp] = useState(true);
+  const [showHotHolding, setShowHotHolding] = useState(true);
+  const [showSousVide, setShowSousVide] = useState(true);
+
+  // Cold storage tab
+  const [coldUnits, setColdUnits] = useState<ColdUnit[]>([]);
+
+  // Default items tab
+  const [defaultHotItems, setDefaultHotItems] = useState<string[]>([]);
+  const [defaultHoldingItems, setDefaultHoldingItems] = useState<string[]>([]);
+  const [defaultSvItems, setDefaultSvItems] = useState<string[]>([]);
 
   useEffect(() => {
-    if (config) {
-      setNumFridges(config.food_num_fridges || "2");
-      setNumFreezers(config.food_num_freezers || "1");
-      setCookingLimit(config.food_cooking_limit || "75°C");
-      setCoolingLimit(config.food_cooling_limit || "8°C within 90 mins");
-      setReheatingLimit(config.food_reheating_limit || "75°C");
-      setHotHoldingLimit(config.food_hot_holding_limit || "63°C");
-    }
-  }, [config]);
+    if (!config) return;
+    setCookingLimit(config.food_cooking_limit || "Above 75°C (10 seconds)");
+    setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
+    setReheatingLimit(config.food_reheating_limit || "Above 82°C");
+    setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
+    setShowDeliveries(config.food_show_deliveries !== "false");
+    setShowHotTemp(config.food_show_hot_temperature !== "false");
+    setShowHotHolding(config.food_show_hot_holding !== "false");
+    setShowSousVide(config.food_show_sous_vide !== "false");
+    setColdUnits(parseColdUnits(config));
+    setDefaultHotItems(parseStringArray(config.food_default_hot_items));
+    setDefaultHoldingItems(parseStringArray(config.food_default_holding_items));
+    setDefaultSvItems(parseStringArray(config.food_default_sv_items));
+  }, [config, open]);
 
-  const handleSave = async () => {
+  const handleSave = () => {
     updateConfig.mutate(
       {
         data: {
-          food_num_fridges: numFridges,
-          food_num_freezers: numFreezers,
           food_cooking_limit: cookingLimit,
           food_cooling_limit: coolingLimit,
           food_reheating_limit: reheatingLimit,
           food_hot_holding_limit: hotHoldingLimit,
+          food_show_deliveries: showDeliveries ? "true" : "false",
+          food_show_hot_temperature: showHotTemp ? "true" : "false",
+          food_show_hot_holding: showHotHolding ? "true" : "false",
+          food_show_sous_vide: showSousVide ? "true" : "false",
+          food_cold_units: JSON.stringify(coldUnits),
+          food_default_hot_items: JSON.stringify(defaultHotItems.filter(Boolean)),
+          food_default_holding_items: JSON.stringify(defaultHoldingItems.filter(Boolean)),
+          food_default_sv_items: JSON.stringify(defaultSvItems.filter(Boolean)),
         },
       },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetFoodSafetyConfigQueryKey() });
-          toast({ title: "Configuration saved" });
+          toast({ title: "Template saved", description: "New diary days will use these defaults automatically." });
           setOpen(false);
         },
-        onError: (error: any) => {
-          toast({ title: "Failed to save", description: error.message, variant: "destructive" });
+        onError: (err: any) => {
+          toast({ title: "Failed to save", description: err.message, variant: "destructive" });
         },
       }
     );
   };
+
+  // Reusable string-list editor
+  const StringListEditor = ({
+    items, onChange, placeholder,
+  }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
+    <div className="space-y-2">
+      {items.map((item, i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
+            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+            onClick={() => onChange(items.filter((_, x) => x !== i))}>
+            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
+        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add item
+      </Button>
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Settings className="w-4 h-4 mr-2" />
-          Configure
+          Template
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="font-display">Kitchen Configuration</DialogTitle>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="font-display">Diary Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configure once — every new diary day will use these settings automatically.
+          </p>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="grid grid-cols-2 gap-4">
+
+        <Tabs defaultValue="sections" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 w-full grid grid-cols-4">
+            <TabsTrigger value="sections">Sections</TabsTrigger>
+            <TabsTrigger value="cold">Cold Storage</TabsTrigger>
+            <TabsTrigger value="items">Default Items</TabsTrigger>
+            <TabsTrigger value="limits">Limits</TabsTrigger>
+          </TabsList>
+
+          {/* ── Sections tab ── */}
+          <TabsContent value="sections" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground mb-3">
+              Hide sections your kitchen doesn't use — they'll disappear from every diary day.
+            </p>
+            {([
+              { label: "Deliveries", desc: "Supplier delivery checks", state: showDeliveries, set: setShowDeliveries },
+              { label: "Hot Temperature Record", desc: "Cooking / cooling / reheating", state: showHotTemp, set: setShowHotTemp },
+              { label: "Hot Holding / Off-Site", desc: "Food kept hot after cooking", state: showHotHolding, set: setShowHotHolding },
+              { label: "Sous Vide", desc: "Low-temperature precision cooking", state: showSousVide, set: setShowSousVide },
+            ] as const).map(({ label, desc, state, set }) => (
+              <div key={label} className="flex items-center justify-between rounded-sm border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium">{label}</p>
+                  <p className="text-xs text-muted-foreground">{desc}</p>
+                </div>
+                <Switch checked={state} onCheckedChange={set} />
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground pt-1">
+              Cold Food Record is always shown — it's required for daily food safety compliance.
+            </p>
+          </TabsContent>
+
+          {/* ── Cold storage tab ── */}
+          <TabsContent value="cold" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground mb-3">
+              Name each fridge and freezer. These rows will appear pre-filled on every new diary day.
+            </p>
+            <div className="space-y-2">
+              {coldUnits.map((unit, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  <GripVertical className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <select
+                    value={unit.type}
+                    onChange={e => { const n = [...coldUnits]; n[i] = { ...n[i], type: e.target.value as "fridge" | "freezer" }; setColdUnits(n); }}
+                    className="h-8 rounded-sm border border-input bg-background px-2 text-sm"
+                  >
+                    <option value="fridge">Fridge</option>
+                    <option value="freezer">Freezer</option>
+                  </select>
+                  <Input value={unit.name} placeholder="e.g. Walk-in Fridge"
+                    className="h-8 text-sm rounded-sm flex-1"
+                    onChange={e => { const n = [...coldUnits]; n[i] = { ...n[i], name: e.target.value }; setColdUnits(n); }} />
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+                    onClick={() => setColdUnits(coldUnits.filter((_, x) => x !== i))}>
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setColdUnits([...coldUnits, { name: "", type: "fridge" }])}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Fridge
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setColdUnits([...coldUnits, { name: "", type: "freezer" }])}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Freezer
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground pt-2">
+              Fridge limit: ≤5°C · Freezer limit: ≤-18°C
+            </p>
+          </TabsContent>
+
+          {/* ── Default items tab ── */}
+          <TabsContent value="items" className="flex-1 overflow-y-auto space-y-6 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              Pre-populate rows with your standard menu items so staff don't have to type them every day.
+            </p>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Hot Temperature items</Label>
+              <p className="text-xs text-muted-foreground">Dishes you cook fresh each day (e.g. Roast Chicken, Beef Stew)</p>
+              <StringListEditor items={defaultHotItems} onChange={setDefaultHotItems} placeholder="e.g. Roast Chicken" />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Hot Holding items</Label>
+              <p className="text-xs text-muted-foreground">Items kept hot for service (e.g. Chips, Gravy, Soup)</p>
+              <StringListEditor items={defaultHoldingItems} onChange={setDefaultHoldingItems} placeholder="e.g. Chips" />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Sous Vide items</Label>
+              <p className="text-xs text-muted-foreground">Items you regularly cook sous vide</p>
+              <StringListEditor items={defaultSvItems} onChange={setDefaultSvItems} placeholder="e.g. Duck Breast" />
+            </div>
+          </TabsContent>
+
+          {/* ── Limits tab ── */}
+          <TabsContent value="limits" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <p className="text-xs text-muted-foreground mb-3">
+              These limits appear as guidance text on every diary day. The defaults match UK food safety legislation.
+            </p>
             <div className="space-y-1.5">
-              <Label>Number of Fridges</Label>
-              <Input type="number" value={numFridges} onChange={(e) => setNumFridges(e.target.value)} />
+              <Label>Cooking temperature limit</Label>
+              <Input value={cookingLimit} placeholder="Above 75°C (10 seconds)"
+                onChange={e => setCookingLimit(e.target.value)} />
+              <p className="text-xs text-muted-foreground">UK default: Above 75°C for 10 seconds (Scotland: 82°C)</p>
             </div>
             <div className="space-y-1.5">
-              <Label>Number of Freezers</Label>
-              <Input type="number" value={numFreezers} onChange={(e) => setNumFreezers(e.target.value)} />
+              <Label>Cooling limit</Label>
+              <Input value={coolingLimit} placeholder="8°C within 90 minutes"
+                onChange={e => setCoolingLimit(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Cool to 8°C or below within 90 minutes</p>
             </div>
-          </div>
+            <div className="space-y-1.5">
+              <Label>Reheating limit</Label>
+              <Input value={reheatingLimit} placeholder="Above 82°C"
+                onChange={e => setReheatingLimit(e.target.value)} />
+              <p className="text-xs text-muted-foreground">Scotland: 82°C · England/Wales/NI: 75°C</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Hot holding minimum</Label>
+              <Input value={hotHoldingLimit} placeholder="Above 63°C"
+                onChange={e => setHotHoldingLimit(e.target.value)} />
+              <p className="text-xs text-muted-foreground">UK default: Above 63°C at all times</p>
+            </div>
+          </TabsContent>
+        </Tabs>
 
-          <div className="space-y-1.5">
-            <Label>Cooking Temperature Limit</Label>
-            <Input value={cookingLimit} onChange={(e) => setCookingLimit(e.target.value)} placeholder="75°C" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Cooling Limit</Label>
-            <Input
-              value={coolingLimit}
-              onChange={(e) => setCoolingLimit(e.target.value)}
-              placeholder="8°C within 90 mins"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Reheating Limit</Label>
-            <Input value={reheatingLimit} onChange={(e) => setReheatingLimit(e.target.value)} placeholder="75°C" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Hot Holding Limit</Label>
-            <Input
-              value={hotHoldingLimit}
-              onChange={(e) => setHotHoldingLimit(e.target.value)}
-              placeholder="63°C"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           <Button onClick={handleSave} disabled={updateConfig.isPending}>
-            {updateConfig.isPending ? "Saving..." : "Save"}
+            {updateConfig.isPending ? "Saving…" : "Save template"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -171,48 +370,67 @@ function DailyDiaryTab() {
   const createRecord = useCreateFoodSafetyRecord();
   const updateRecord = useUpdateFoodSafetyRecord();
 
-  const numFridges = Number(config?.food_num_fridges || "2");
-  const numFreezers = Number(config?.food_num_freezers || "1");
+  // ── Derived template values from config ─────────────────────────────────────
+  const cookingLimit = config?.food_cooking_limit || "Above 75°C (10 seconds)";
+  const coolingLimit = config?.food_cooling_limit || "8°C within 90 minutes";
+  const reheatingLimit = config?.food_reheating_limit || "Above 82°C";
+  const hotHoldingLimit = config?.food_hot_holding_limit || "Above 63°C";
+
+  // Section visibility — default true unless explicitly disabled
+  const showDeliveries = config?.food_show_deliveries !== "false";
+  const showHotTemp = config?.food_show_hot_temperature !== "false";
+  const showHotHolding = config?.food_show_hot_holding !== "false";
+  const showSousVide = config?.food_show_sous_vide !== "false";
+
+  // Default items for new records
+  const templateColdUnits = parseColdUnits(config);
+  const templateHotItems = parseStringArray(config?.food_default_hot_items);
+  const templateHoldingItems = parseStringArray(config?.food_default_holding_items);
+  const templateSvItems = parseStringArray(config?.food_default_sv_items);
 
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [coldFood, setColdFood] = useState<ColdFoodRow[]>([]);
   const [hotTemperature, setHotTemperature] = useState<HotTemperatureRow[]>([]);
   const [hotHolding, setHotHolding] = useState<HotHoldingRow[]>([]);
+  const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
   const [managerSignature, setManagerSignature] = useState("");
 
-  const cookingLimit = config?.food_cooking_limit || "75°C";
-  const coolingLimit = config?.food_cooling_limit || "8°C within 90 mins";
-  const reheatingLimit = config?.food_reheating_limit || "75°C";
-  const hotHoldingLimit = config?.food_hot_holding_limit || "63°C";
-
   useEffect(() => {
     if (record) {
+      // Load saved record — always use saved data, never overwrite with template
       setDeliveries((record.deliveries || []) as DeliveryRow[]);
       setColdFood((record.coldFood || []) as ColdFoodRow[]);
       setHotTemperature((record.hotTemperature || []) as HotTemperatureRow[]);
       setHotHolding((record.hotHolding || []) as HotHoldingRow[]);
+      setSousVide(((record as any).sousVide || []) as SousVideRow[]);
       setCorrectives(record.correctives || "");
       setManagerSignature(record.managerSignature || "");
     } else {
-      const fridgeRows: ColdFoodRow[] = Array.from({ length: numFridges }, (_, i) => ({
-        unit: `Fridge ${i + 1}`,
-        temp: "",
-        ok: true,
+      // New record — initialise from template
+      const coldRows: ColdFoodRow[] = templateColdUnits.map(u => ({
+        unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
       }));
-      const freezerRows: ColdFoodRow[] = Array.from({ length: numFreezers }, (_, i) => ({
-        unit: `Freezer ${i + 1}`,
-        temp: "",
-        ok: true,
+      const hotRows: HotTemperatureRow[] = templateHotItems.map(item => ({
+        item, cookTimeStart: "", cookTimeFinish: "", cookCoreTemp: "",
+        coolTimeStart: "", coolTimeFinish: "", reheatCoreTemp: "",
+      }));
+      const holdingRows: HotHoldingRow[] = templateHoldingItems.map(item => ({
+        item, coreTemp: "", timeOfCheck: "",
+      }));
+      const svRows: SousVideRow[] = templateSvItems.map(item => ({
+        item, targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
       }));
       setDeliveries([]);
-      setColdFood([...fridgeRows, ...freezerRows]);
-      setHotTemperature([]);
-      setHotHolding([]);
+      setColdFood(coldRows);
+      setHotTemperature(hotRows);
+      setHotHolding(holdingRows);
+      setSousVide(svRows);
       setCorrectives("");
       setManagerSignature("");
     }
-  }, [record, selectedDate, numFridges, numFreezers]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record, selectedDate]);
 
   const handleSaveDraft = async () => {
     const data = {
@@ -221,6 +439,7 @@ function DailyDiaryTab() {
       coldFood,
       hotTemperature,
       hotHolding,
+      sousVide,
       cookingLimit,
       coolingLimit,
       reheatingLimit,
@@ -273,6 +492,7 @@ function DailyDiaryTab() {
       coldFood,
       hotTemperature,
       hotHolding,
+      sousVide,
       cookingLimit,
       coolingLimit,
       reheatingLimit,
@@ -352,283 +572,405 @@ function DailyDiaryTab() {
       ) : (
         <>
           {/* Deliveries */}
-          <Card>
+          {showDeliveries && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display">Deliveries</CardTitle>
-                  <CardDescription className="text-xs mt-1">Record supplier deliveries received today</CardDescription>
+                  <CardDescription className="text-xs mt-1">
+                    Chilled limit: ≤8°C · Frozen limit: ≤-15°C
+                  </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDeliveries([...deliveries, { supplier: "", item: "", temp: "", ok: true }])}
-                  disabled={isSubmitted}
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Add
-                </Button>
+                {!isSubmitted && (
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => setDeliveries([...deliveries, {
+                      supplier: "", items: "", vanClean: "", rawCookedSep: "",
+                      tempChilled: "", tempFrozen: "", tempOk: "", conditionOk: "",
+                      dateCodesOk: "", allergyAware: "", correctiveActions: "",
+                    }])}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Delivery
+                  </Button>
+                )}
               </div>
             </CardHeader>
-            <CardContent className="p-4 space-y-2">
+            <CardContent className="p-4 space-y-4">
               {deliveries.length === 0 ? (
-                <p className="text-sm text-muted-foreground italic">No deliveries recorded.</p>
-              ) : (
-                deliveries.map((row, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                    <Input
-                      placeholder="Supplier"
-                      value={row.supplier}
-                      onChange={(e) => {
-                        const updated = [...deliveries];
-                        updated[i].supplier = e.target.value;
-                        setDeliveries(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="col-span-3"
-                    />
-                    <Input
-                      placeholder="Item"
-                      value={row.item}
-                      onChange={(e) => {
-                        const updated = [...deliveries];
-                        updated[i].item = e.target.value;
-                        setDeliveries(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="col-span-4"
-                    />
-                    <Input
-                      placeholder="Temp (°C)"
-                      value={row.temp}
-                      onChange={(e) => {
-                        const updated = [...deliveries];
-                        updated[i].temp = e.target.value;
-                        setDeliveries(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="col-span-2"
-                    />
-                    <label className="flex items-center gap-2 col-span-2">
-                      <input
-                        type="checkbox"
-                        checked={row.ok}
-                        onChange={(e) => {
-                          const updated = [...deliveries];
-                          updated[i].ok = e.target.checked;
-                          setDeliveries(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="h-4 w-4 rounded border-input accent-primary"
-                      />
-                      <span className="text-xs">OK</span>
-                    </label>
-                    {!isSubmitted && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDeliveries(deliveries.filter((_, idx) => idx !== i))}
-                        className="col-span-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                      </Button>
-                    )}
+                <p className="text-sm text-muted-foreground italic">No deliveries recorded today.</p>
+              ) : deliveries.map((row, i) => {
+                const upd = (field: keyof DeliveryRow, val: string) => {
+                  const next = [...deliveries]; next[i] = { ...next[i], [field]: val }; setDeliveries(next);
+                };
+                const YNBtn = ({ field, label }: { field: keyof DeliveryRow; label: string }) => (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <div className="flex gap-1">
+                      {["yes", "no"].map(v => (
+                        <button key={v} disabled={isSubmitted}
+                          onClick={() => upd(field, row[field] === v ? "" : v)}
+                          className={cn(
+                            "px-2 py-0.5 text-xs rounded-sm border transition-colors",
+                            row[field] === v
+                              ? v === "yes" ? "bg-emerald-500 text-white border-emerald-500" : "bg-rose-500 text-white border-rose-500"
+                              : "border-border text-muted-foreground hover:border-primary"
+                          )}>{v === "yes" ? "Yes" : "No"}</button>
+                      ))}
+                    </div>
                   </div>
-                ))
-              )}
+                );
+                return (
+                  <div key={i} className="border border-border rounded-sm p-3 space-y-3 bg-muted/10">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Delivery {i + 1}</span>
+                      {!isSubmitted && (
+                        <Button variant="ghost" size="sm" onClick={() => setDeliveries(deliveries.filter((_, x) => x !== i))}>
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Supplier's name</p>
+                        <Input placeholder="Supplier" value={row.supplier} disabled={isSubmitted}
+                          onChange={e => upd("supplier", e.target.value)} className="h-8 text-sm rounded-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Details of food items</p>
+                        <Input placeholder="Food items delivered" value={row.items} disabled={isSubmitted}
+                          onChange={e => upd("items", e.target.value)} className="h-8 text-sm rounded-sm" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <YNBtn field="vanClean" label="Van clean?" />
+                      <YNBtn field="rawCookedSep" label="Raw/cooked separated?" />
+                      <YNBtn field="conditionOk" label="Food condition / packaging?" />
+                      <YNBtn field="dateCodesOk" label="Within date codes?" />
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Chilled temp (°C)</p>
+                        <Input placeholder="e.g. 4" value={row.tempChilled} disabled={isSubmitted}
+                          onChange={e => upd("tempChilled", e.target.value)} className="h-8 text-sm rounded-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Frozen temp (°C)</p>
+                        <Input placeholder="e.g. -18" value={row.tempFrozen} disabled={isSubmitted}
+                          onChange={e => upd("tempFrozen", e.target.value)} className="h-8 text-sm rounded-sm" />
+                      </div>
+                      <YNBtn field="tempOk" label="Temp within limits?" />
+                      <YNBtn field="allergyAware" label="Allergy awareness?" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Corrective actions (if applicable)</p>
+                      <Input placeholder="e.g. Rejected — temp too high. Supplier notified." value={row.correctiveActions} disabled={isSubmitted}
+                        onChange={e => upd("correctiveActions", e.target.value)} className="h-8 text-sm rounded-sm" />
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* Cold Food */}
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Cold Food Temperatures</CardTitle>
-              <CardDescription className="text-xs mt-1">Check fridge and freezer temperatures</CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 space-y-2">
-              {coldFood.map((row, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <Input
-                    placeholder="Unit"
-                    value={row.unit}
-                    onChange={(e) => {
-                      const updated = [...coldFood];
-                      updated[i].unit = e.target.value;
-                      setColdFood(updated);
-                    }}
-                    disabled={isSubmitted}
-                    className="col-span-5"
-                  />
-                  <Input
-                    placeholder="Temp (°C)"
-                    value={row.temp}
-                    onChange={(e) => {
-                      const updated = [...coldFood];
-                      updated[i].temp = e.target.value;
-                      setColdFood(updated);
-                    }}
-                    disabled={isSubmitted}
-                    className="col-span-3"
-                  />
-                  <label className="flex items-center gap-2 col-span-2">
-                    <input
-                      type="checkbox"
-                      checked={row.ok}
-                      onChange={(e) => {
-                        const updated = [...coldFood];
-                        updated[i].ok = e.target.checked;
-                        setColdFood(updated);
-                      }}
-                      disabled={isSubmitted}
-                      className="h-4 w-4 rounded border-input accent-primary"
-                    />
-                    <span className="text-xs">OK</span>
-                  </label>
-                  {!isSubmitted && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setColdFood(coldFood.filter((_, idx) => idx !== i))}
-                      className="col-span-2"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                    </Button>
-                  )}
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Cold Food Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Fridge limit: ≤5°C · Freezer limit: ≤-18°C · Recommended twice daily (AM &amp; PM)</CardDescription>
                 </div>
-              ))}
-              {!isSubmitted && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setColdFood([...coldFood, { unit: "", temp: "", ok: true }])}
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Add Row
-                </Button>
-              )}
+                {!isSubmitted && (
+                  <Button variant="outline" size="sm"
+                    onClick={() => setColdFood([...coldFood, { unit: "", tempAm: "", tempPm: "", correctiveAction: "" }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Unit</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">AM temp (°C)</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">PM temp (°C)</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Corrective action</th>
+                    {!isSubmitted && <th className="w-8 px-2" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {coldFood.map((row, i) => {
+                    const upd = (f: keyof ColdFoodRow, v: string) => { const n = [...coldFood]; n[i] = { ...n[i], [f]: v }; setColdFood(n); };
+                    return (
+                      <tr key={i} className="hover:bg-muted/10">
+                        <td className="px-3 py-1.5">
+                          <Input value={row.unit} disabled={isSubmitted} onChange={e => upd("unit", e.target.value)}
+                            className="h-7 text-xs rounded-sm" placeholder="Fridge 1" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Input value={row.tempAm} disabled={isSubmitted} onChange={e => upd("tempAm", e.target.value)}
+                            className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 3" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Input value={row.tempPm} disabled={isSubmitted} onChange={e => upd("tempPm", e.target.value)}
+                            className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 4" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Input value={row.correctiveAction} disabled={isSubmitted} onChange={e => upd("correctiveAction", e.target.value)}
+                            className="h-7 text-xs rounded-sm" placeholder="Action taken if out of range" />
+                        </td>
+                        {!isSubmitted && (
+                          <td className="px-2 py-1.5">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                              onClick={() => setColdFood(coldFood.filter((_, x) => x !== i))}>
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </CardContent>
           </Card>
 
-          {/* Hot Temperatures */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <CardTitle className="text-base font-display">Hot Food Temperatures</CardTitle>
-                <CardDescription className="text-xs mt-1">
-                  Cooking: {cookingLimit} | Cooling: {coolingLimit} | Reheating: {reheatingLimit}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 space-y-2">
-                {hotTemperature.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic">No hot food checks recorded.</p>
-                ) : (
-                  hotTemperature.map((row, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <Input
-                        placeholder="Item"
-                        value={row.item}
-                        onChange={(e) => {
-                          const updated = [...hotTemperature];
-                          updated[i].item = e.target.value;
-                          setHotTemperature(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="flex-1"
-                      />
-                      <Input
-                        placeholder="Temp (°C)"
-                        value={row.temp}
-                        onChange={(e) => {
-                          const updated = [...hotTemperature];
-                          updated[i].temp = e.target.value;
-                          setHotTemperature(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="w-32"
-                      />
-                      {!isSubmitted && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setHotTemperature(hotTemperature.filter((_, idx) => idx !== i))}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-                  ))
-                )}
+          {/* Hot Temperature Record */}
+          {showHotTemp && <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Hot Temperature Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">
+                    Cooking: {cookingLimit} · Cooling: {coolingLimit} · Reheating: {reheatingLimit}
+                  </CardDescription>
+                </div>
                 {!isSubmitted && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setHotTemperature([...hotTemperature, { item: "", temp: "" }])}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add Row
+                  <Button variant="outline" size="sm" onClick={() => setHotTemperature([...hotTemperature, {
+                    item: "", cookTimeStart: "", cookTimeFinish: "", cookCoreTemp: "",
+                    coolTimeStart: "", coolTimeFinish: "", reheatCoreTemp: "",
+                  }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[700px]">
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground" rowSpan={2}>Food Item</th>
+                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={3}>COOKING</th>
+                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={2}>COOLING</th>
+                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={1}>REHEATING</th>
+                      {!isSubmitted && <th className="w-8" />}
+                    </tr>
+                    <tr className="border-t border-border/50">
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Time started</th>
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Core temp</th>
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Time started</th>
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
+                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Core temp</th>
+                      {!isSubmitted && <th />}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {hotTemperature.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No hot food records yet.</td></tr>
+                    ) : hotTemperature.map((row, i) => {
+                      const upd = (f: keyof HotTemperatureRow, v: string) => { const n = [...hotTemperature]; n[i] = { ...n[i], [f]: v }; setHotTemperature(n); };
+                      const inp = (f: keyof HotTemperatureRow, ph: string, cls = "") => (
+                        <Input value={row[f]} disabled={isSubmitted} onChange={e => upd(f, e.target.value)}
+                          className={cn("h-7 text-xs rounded-sm", cls)} placeholder={ph} />
+                      );
+                      return (
+                        <tr key={i} className="hover:bg-muted/10">
+                          <td className="px-3 py-1.5">{inp("item", "Food item", "min-w-[120px]")}</td>
+                          <td className="px-2 py-1.5 border-l border-border/40">{inp("cookTimeStart", "HH:mm", "w-20")}</td>
+                          <td className="px-2 py-1.5">{inp("cookTimeFinish", "HH:mm", "w-20")}</td>
+                          <td className="px-2 py-1.5">{inp("cookCoreTemp", "°C", "w-16")}</td>
+                          <td className="px-2 py-1.5 border-l border-border/40">{inp("coolTimeStart", "HH:mm", "w-20")}</td>
+                          <td className="px-2 py-1.5">{inp("coolTimeFinish", "HH:mm", "w-20")}</td>
+                          <td className="px-2 py-1.5 border-l border-border/40">{inp("reheatCoreTemp", "°C", "w-16")}</td>
+                          {!isSubmitted && (
+                            <td className="px-2 py-1.5">
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                                onClick={() => setHotTemperature(hotTemperature.filter((_, x) => x !== i))}>
+                                <Trash2 className="w-3 h-3 text-destructive" />
+                              </Button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>}
 
-            <Card>
-              <CardHeader className="border-b border-border/50 pb-4">
-                <CardTitle className="text-base font-display">Hot Holding</CardTitle>
-                <CardDescription className="text-xs mt-1">Minimum: {hotHoldingLimit}</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 space-y-2">
-                {hotHolding.length === 0 ? (
-                  <p className="text-sm text-muted-foreground italic">No hot holding checks recorded.</p>
-                ) : (
-                  hotHolding.map((row, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <Input
-                        placeholder="Item"
-                        value={row.item}
-                        onChange={(e) => {
-                          const updated = [...hotHolding];
-                          updated[i].item = e.target.value;
-                          setHotHolding(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="flex-1"
-                      />
-                      <Input
-                        placeholder="Temp (°C)"
-                        value={row.temp}
-                        onChange={(e) => {
-                          const updated = [...hotHolding];
-                          updated[i].temp = e.target.value;
-                          setHotHolding(updated);
-                        }}
-                        disabled={isSubmitted}
-                        className="w-32"
-                      />
-                      {!isSubmitted && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setHotHolding(hotHolding.filter((_, idx) => idx !== i))}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-                  ))
-                )}
+          {/* Hot Holding */}
+          {showHotHolding && <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Hot Holding / Off-Site Temperature Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Minimum: {hotHoldingLimit}</CardDescription>
+                </div>
                 {!isSubmitted && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setHotHolding([...hotHolding, { item: "", temp: "" }])}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Add Row
+                  <Button variant="outline" size="sm"
+                    onClick={() => setHotHolding([...hotHolding, { item: "", coreTemp: "", timeOfCheck: "" }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Food Item</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Core Temp (°C)</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Time of Check</th>
+                    {!isSubmitted && <th className="w-8 px-2" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {hotHolding.length === 0 ? (
+                    <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No hot holding checks recorded.</td></tr>
+                  ) : hotHolding.map((row, i) => {
+                    const upd = (f: keyof HotHoldingRow, v: string) => { const n = [...hotHolding]; n[i] = { ...n[i], [f]: v }; setHotHolding(n); };
+                    return (
+                      <tr key={i} className="hover:bg-muted/10">
+                        <td className="px-3 py-1.5">
+                          <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
+                            className="h-7 text-xs rounded-sm" placeholder="Food item" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
+                            className="h-7 text-xs rounded-sm w-24" placeholder="e.g. 65" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Input type="time" value={row.timeOfCheck} disabled={isSubmitted} onChange={e => upd("timeOfCheck", e.target.value)}
+                            className="h-7 text-xs rounded-sm w-28" />
+                        </td>
+                        {!isSubmitted && (
+                          <td className="px-2 py-1.5">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                              onClick={() => setHotHolding(hotHolding.filter((_, x) => x !== i))}>
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>}
+
+          {/* Sous Vide */}
+          {showSousVide && <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Sous Vide Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Log bath temperature, cooking duration and core probe temperature</CardDescription>
+                </div>
+                {!isSubmitted && (
+                  <Button variant="outline" size="sm" onClick={() => setSousVide([...sousVide, {
+                    item: "", targetTemp: "", waterTemp: "", timeStarted: "", timeFinished: "", coreTemp: "", result: "", notes: "",
+                  }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[700px]">
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Target bath (°C)</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Actual bath (°C)</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Time in</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Time out</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Core temp (°C)</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Result</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Notes</th>
+                      {!isSubmitted && <th className="w-8" />}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {sousVide.length === 0 ? (
+                      <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No sous vide records yet.</td></tr>
+                    ) : sousVide.map((row, i) => {
+                      const upd = (f: keyof SousVideRow, v: string) => { const n = [...sousVide]; n[i] = { ...n[i], [f]: v }; setSousVide(n); };
+                      return (
+                        <tr key={i} className="hover:bg-muted/10">
+                          <td className="px-3 py-1.5">
+                            <Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)}
+                              className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken breast" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input value={row.targetTemp} disabled={isSubmitted} onChange={e => upd("targetTemp", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-16" placeholder="63" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input value={row.waterTemp} disabled={isSubmitted} onChange={e => upd("waterTemp", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-16" placeholder="63.2" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input type="time" value={row.timeStarted} disabled={isSubmitted} onChange={e => upd("timeStarted", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-24" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input type="time" value={row.timeFinished} disabled={isSubmitted} onChange={e => upd("timeFinished", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-24" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-16" placeholder="°C" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex gap-1">
+                              {["pass", "fail"].map(v => (
+                                <button key={v} disabled={isSubmitted}
+                                  onClick={() => upd("result", row.result === v ? "" : v)}
+                                  className={cn(
+                                    "px-2 py-0.5 text-xs rounded-sm border transition-colors",
+                                    row.result === v
+                                      ? v === "pass" ? "bg-emerald-500 text-white border-emerald-500" : "bg-rose-500 text-white border-rose-500"
+                                      : "border-border text-muted-foreground"
+                                  )}>{v === "pass" ? "Pass" : "Fail"}</button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input value={row.notes} disabled={isSubmitted} onChange={e => upd("notes", e.target.value)}
+                              className="h-7 text-xs rounded-sm min-w-[100px]" placeholder="Notes" />
+                          </td>
+                          {!isSubmitted && (
+                            <td className="px-2 py-1.5">
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
+                                onClick={() => setSousVide(sousVide.filter((_, x) => x !== i))}>
+                                <Trash2 className="w-3 h-3 text-destructive" />
+                              </Button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>}
 
           {/* Correctives */}
           <Card>

@@ -405,6 +405,20 @@ export interface FoodSafetyConfig {
   food_cooling_limit?: string;
   food_reheating_limit?: string;
   food_hot_holding_limit?: string;
+  /** JSON-encoded [{name:string, type:"fridge"|"freezer"}] */
+  food_cold_units?: string;
+  /** JSON-encoded string[] — default items for hot temperature rows */
+  food_default_hot_items?: string;
+  /** JSON-encoded string[] — default items for hot holding rows */
+  food_default_holding_items?: string;
+  /** JSON-encoded string[] — default items for sous vide rows */
+  food_default_sv_items?: string;
+  food_show_deliveries?: string;
+  food_show_hot_temperature?: string;
+  food_show_hot_holding?: string;
+  food_show_sous_vide?: string;
+  food_reheating_limit?: string;
+  food_hot_holding_limit?: string;
 }
 
 export interface FoodSafetyRecordSummary {
@@ -421,6 +435,7 @@ export interface FoodSafetyRecord {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
+  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;
@@ -438,6 +453,7 @@ export interface CreateFoodSafetyRecordRequest {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
+  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;
@@ -452,6 +468,7 @@ export interface UpdateFoodSafetyRecordRequest {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
+  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;

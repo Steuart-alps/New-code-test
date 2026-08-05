@@ -266,6 +266,7 @@ export async function runRuntimeMigrations() {
     await migrateFixTrackV2();
     await migrateMobileSessions();
     await migrateIncidents();
+    await migrateSousVide();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1021,6 +1022,12 @@ async function migrateIncidents() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_client" ON "incidents" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_date" ON "incidents" ("client_id", "incident_date" DESC)`);
+}
+
+async function migrateSousVide() {
+  await db.execute(sql`
+    ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS sous_vide jsonb NOT NULL DEFAULT '[]'
+  `);
 }
 
 async function migrateMobileSessions() {
