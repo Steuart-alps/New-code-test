@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -19,12 +19,19 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
+  useGetIncidentConfig,
+  getGetIncidentConfigQueryKey,
+  useUpdateIncidentConfig,
+} from "@workspace/api-client-react";
+import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity,
+  ShieldAlert, UserX, Activity, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -148,6 +155,135 @@ function fmt(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// ─── Incident Config Dialog ───────────────────────────────────────────────────
+
+function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
+}
+
+function IncidentConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetIncidentConfig();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const updateConfig = useUpdateIncidentConfig();
+
+  const [defaultReporter, setDefaultReporter] = useState("");
+  const [locations, setLocations] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [showInvestigation, setShowInvestigation] = useState(true);
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setDefaultReporter(config.incident_default_reporter ?? "");
+    setLocations(parseJsonArray<string>(config.incident_locations));
+    setDepartments(parseJsonArray<string>(config.incident_departments));
+    setShowInvestigation(config.incident_show_investigation !== "false");
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          incident_default_reporter: defaultReporter,
+          incident_locations: JSON.stringify(locations.filter(Boolean)),
+          incident_departments: JSON.stringify(departments.filter(Boolean)),
+          incident_show_investigation: showInvestigation ? "true" : "false",
+        },
+      },
+      {
+        onSuccess: () => {
+          qc.invalidateQueries({ queryKey: getGetIncidentConfigQueryKey() });
+          toast({ title: "Template saved", description: "New incidents will use these defaults." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  const StringListEditor = ({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
+    <div className="space-y-2">
+      {items.map((item, i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
+            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+            onClick={() => onChange(items.filter((_, x) => x !== i))}>
+            <X className="w-3.5 h-3.5 text-destructive" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
+        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
+      </Button>
+    </div>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="rounded-sm">
+          <Settings className="w-4 h-4 mr-2" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>IncidentTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure defaults for new incident reports.</p>
+        </DialogHeader>
+
+        <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 w-full grid grid-cols-3">
+            <TabsTrigger value="defaults">Defaults</TabsTrigger>
+            <TabsTrigger value="locations">Locations</TabsTrigger>
+            <TabsTrigger value="depts">Departments</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <div className="space-y-1.5">
+              <Label>Default reported by</Label>
+              <Input value={defaultReporter} onChange={e => setDefaultReporter(e.target.value)}
+                placeholder="e.g. Health & Safety Manager" className="rounded-sm" />
+              <p className="text-xs text-muted-foreground">Pre-fills the "Reported by" field on every new incident.</p>
+            </div>
+            <div className="flex items-center justify-between rounded-sm border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">Investigation section</p>
+                <p className="text-xs text-muted-foreground">Show corrective actions / investigation fields</p>
+              </div>
+              <Switch checked={showInvestigation} onCheckedChange={setShowInvestigation} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="locations" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              Your site locations — these appear as suggestions when logging an incident location.
+            </p>
+            <StringListEditor items={locations} onChange={setLocations} placeholder='e.g. "Main kitchen"' />
+          </TabsContent>
+
+          <TabsContent value="depts" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              Your departments — these appear as suggestions on the department field.
+            </p>
+            <StringListEditor items={departments} onChange={setDepartments} placeholder='e.g. "Front of house"' />
+          </TabsContent>
+        </Tabs>
+
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Empty form ───────────────────────────────────────────────────────────────
 
 const emptyForm = () => ({
@@ -195,6 +331,8 @@ export default function IncidentsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
+
+  const { data: incidentConfig } = useGetIncidentConfig();
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -255,7 +393,9 @@ export default function IncidentsPage() {
 
   function openAdd() {
     setEditItem(null);
-    setForm(emptyForm());
+    const f = emptyForm();
+    if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
+    setForm(f);
     setFormSection("details");
     setShowDialog(true);
   }
@@ -382,9 +522,12 @@ export default function IncidentsPage() {
         <p className="text-sm text-muted-foreground mt-1">
           Accident & incident logbook — accidents, near misses, dangerous occurrences and RIDDOR reporting
         </p>
-        <Button onClick={openAdd} className="gap-2 rounded-sm flex-shrink-0">
-          <Plus className="w-4 h-4" /> Log Incident
-        </Button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {canAdmin && <IncidentConfigDialog />}
+          <Button onClick={openAdd} className="gap-2 rounded-sm">
+            <Plus className="w-4 h-4" /> Log Incident
+          </Button>
+        </div>
       </div>
 
       {/* RIDDOR outstanding alert */}
@@ -676,10 +819,19 @@ export default function IncidentsPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Location / Area *</Label>
-                    <Input placeholder="e.g. Kitchen, Car park, Reception"
-                      value={form.location}
-                      onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                      className="mt-1 rounded-sm" />
+                    {(() => {
+                      const locs = parseJsonArray<string>(incidentConfig?.incident_locations);
+                      return (
+                        <>
+                          {locs.length > 0 && <datalist id="incident-locations-list">{locs.map(l => <option key={l} value={l} />)}</datalist>}
+                          <Input placeholder="e.g. Kitchen, Car park, Reception"
+                            value={form.location}
+                            list={locs.length > 0 ? "incident-locations-list" : undefined}
+                            onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                            className="mt-1 rounded-sm" />
+                        </>
+                      );
+                    })()}
                   </div>
                   {sites.length > 0 && (
                     <div>

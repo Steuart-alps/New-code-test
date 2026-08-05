@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { bikesTable, bikeHireRecordsTable, bikeChecksTable } from "@workspace/db/schema";
+import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId } from "../middleware/requireAuth";
 
@@ -503,6 +503,51 @@ router.get("/summary", requireAuth, async (req, res) => {
   `);
 
   res.json({ bikes: (counts as any), hires: (hireCounts as any), services: (serviceCounts as any) });
+});
+
+// ── Template config ───────────────────────────────────────────────────────────
+const BIKE_CONFIG_KEYS = [
+  "bike_default_deposit_pence", // string (e.g. "2000" = £20)
+  "bike_hire_duration_hours",   // string (e.g. "4")
+  "bike_require_helmet",        // "true"|"false"
+] as const;
+
+const BIKE_DEFAULT_CONFIG = {
+  bike_default_deposit_pence: "",
+  bike_hire_duration_hours: "",
+  bike_require_helmet: "true",
+};
+
+router.get("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const config: Record<string, string> = { ...BIKE_DEFAULT_CONFIG };
+  for (const row of settingRows) {
+    if (BIKE_CONFIG_KEYS.includes(row.key as (typeof BIKE_CONFIG_KEYS)[number]) && row.value != null) {
+      config[row.key] = row.value;
+    }
+  }
+  res.json(config);
+});
+
+router.put("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const updates = req.body as Record<string, string>;
+  for (const key of BIKE_CONFIG_KEYS) {
+    if (key in updates) {
+      const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
+      if (existing.length > 0) {
+        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+      } else {
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+      }
+    }
+  }
+  res.json({ ok: true });
 });
 
 export default router;

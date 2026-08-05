@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -18,13 +18,19 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import {
+  useGetBikeTrackConfig,
+  getGetBikeTrackConfigQueryKey,
+  useUpdateBikeTrackConfig,
+} from "@workspace/api-client-react";
+import {
   Bike, Plus, AlertTriangle, CheckCircle2, Clock, Wrench, Lock,
   User, Phone, Calendar, ChevronRight, ChevronLeft, Pencil, Trash2,
-  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck,
+  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -242,6 +248,94 @@ function CheckItemsEditor({
   );
 }
 
+// ─── Bike Config Dialog ───────────────────────────────────────────────────────
+
+function BikeConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetBikeTrackConfig();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const updateConfig = useUpdateBikeTrackConfig();
+
+  const [defaultDepositPounds, setDefaultDepositPounds] = useState("");
+  const [hireDurationHours, setHireDurationHours] = useState("");
+  const [requireHelmet, setRequireHelmet] = useState(false);
+
+  useEffect(() => {
+    if (!config || !open) return;
+    const pence = config.bike_default_deposit_pence;
+    setDefaultDepositPounds(pence ? (parseInt(pence, 10) / 100).toFixed(2) : "");
+    setHireDurationHours(config.bike_hire_duration_hours ?? "");
+    setRequireHelmet(config.bike_require_helmet === "true");
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          bike_default_deposit_pence: defaultDepositPounds
+            ? String(Math.round(parseFloat(defaultDepositPounds) * 100))
+            : "",
+          bike_hire_duration_hours: hireDurationHours,
+          bike_require_helmet: requireHelmet ? "true" : "false",
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetBikeTrackConfigQueryKey() });
+          toast({ title: "Template saved", description: "New hires will use these defaults." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="rounded-sm">
+          <Settings className="w-4 h-4 mr-2" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>BikeTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure defaults for new bike hire records.</p>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div className="space-y-1.5">
+            <Label>Default deposit (£)</Label>
+            <Input value={defaultDepositPounds} onChange={e => setDefaultDepositPounds(e.target.value)}
+              placeholder="e.g. 20.00" type="number" step="0.01" min="0" className="rounded-sm" />
+            <p className="text-xs text-muted-foreground">Pre-fills the deposit field when recording a new hire.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Default hire duration (hours)</Label>
+            <Input value={hireDurationHours} onChange={e => setHireDurationHours(e.target.value)}
+              placeholder="e.g. 4" type="number" min="0" className="rounded-sm" />
+            <p className="text-xs text-muted-foreground">Used to calculate the expected return time.</p>
+          </div>
+          <div className="flex items-center justify-between rounded-sm border border-border p-3">
+            <div>
+              <p className="text-sm font-medium">Require helmet</p>
+              <p className="text-xs text-muted-foreground">Add helmet check to pre-hire checklist</p>
+            </div>
+            <Switch checked={requireHelmet} onCheckedChange={setRequireHelmet} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── New Hire Dialog (3 steps) ────────────────────────────────────────────────
 
 function NewHireDialog({
@@ -275,8 +369,26 @@ function NewHireDialog({
   const [checkNotes, setCheckNotes] = useState("");
   const [skipCheck, setSkipCheck] = useState(false);
 
+  const { data: config } = useGetBikeTrackConfig();
   const availableBikes = useMemo(() => bikes.filter(b => b.active && b.status === "available"), [bikes]);
   const selectedBike = useMemo(() => bikes.find(b => b.id === selectedBikeId), [bikes, selectedBikeId]);
+
+  // Pre-fill from template on first open
+  useEffect(() => {
+    if (!open || !config) return;
+    if (!depositPence && config.bike_default_deposit_pence) {
+      const p = parseInt(config.bike_default_deposit_pence, 10);
+      if (!isNaN(p) && p > 0) setDepositPence((p / 100).toFixed(2));
+    }
+    if (!returnExpected && config.bike_hire_duration_hours) {
+      const hours = parseFloat(config.bike_hire_duration_hours);
+      if (!isNaN(hours) && hours > 0) {
+        const d = new Date();
+        d.setHours(d.getHours() + hours);
+        setReturnExpected(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+      }
+    }
+  }, [open]);
 
   function reset() {
     setStep(1); setSelectedBikeId(null);
@@ -1032,9 +1144,12 @@ export default function BikeTrackPage() {
         <p className="text-sm text-muted-foreground mt-1">
           Bike hire logbook — fleet management, guest hires, safety checks &amp; annual servicing
         </p>
-        <Button onClick={() => setShowNewHire(true)} className="gap-2 rounded-sm flex-shrink-0">
-          <Plus className="w-4 h-4" /> New Hire
-        </Button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {canAdmin && <BikeConfigDialog />}
+          <Button onClick={() => setShowNewHire(true)} className="gap-2 rounded-sm">
+            <Plus className="w-4 h-4" /> New Hire
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards */}

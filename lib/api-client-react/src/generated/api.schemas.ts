@@ -478,6 +478,64 @@ export interface UpdateFoodSafetyRecordRequest {
   submittedAt?: string | null;
 }
 
+export interface FireSafetyConfig {
+  /** JSON: [{name:string, location:string}] */
+  fire_escape_routes?: string;
+  /** JSON: string[] */
+  fire_alarm_zones?: string;
+  /** JSON: string[] */
+  fire_extinguisher_points?: string;
+  fire_show_drill?: string;
+  fire_default_performer?: string;
+}
+export type UpdateFireSafetyConfig200 = { ok: boolean };
+
+export interface LegionellaConfig {
+  /** JSON: [{name:string, type:"hot"|"cold", location?:string}] */
+  water_sentinel_outlets?: string;
+  /** JSON: string[] */
+  water_non_sentinel_outlets?: string;
+  water_default_performer?: string;
+}
+export type UpdateLegionellaConfig200 = { ok: boolean };
+
+export interface PoolTrackConfig {
+  pool_name?: string;
+  pool_ph_min?: string;
+  pool_ph_max?: string;
+  pool_free_chlor_min?: string;
+  pool_free_chlor_max?: string;
+  pool_temp_min?: string;
+  pool_temp_max?: string;
+  pool_track_air_temp?: string;
+  pool_default_performer?: string;
+}
+export type UpdatePoolTrackConfig200 = { ok: boolean };
+
+export interface BikeTrackConfig {
+  bike_default_deposit_pence?: string;
+  bike_hire_duration_hours?: string;
+  bike_require_helmet?: string;
+}
+export type UpdateBikeTrackConfig200 = { ok: boolean };
+
+export interface IncidentConfig {
+  /** JSON: string[] */
+  incident_locations?: string;
+  /** JSON: string[] */
+  incident_departments?: string;
+  incident_default_reporter?: string;
+  incident_show_investigation?: string;
+}
+export type UpdateIncidentConfig200 = { ok: boolean };
+
+export interface GreenTrackConfig {
+  /** JSON: string[] */
+  green_default_operators?: string;
+  green_show_fuel?: string;
+}
+export type UpdateGreenTrackConfig200 = { ok: boolean };
+
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   siteId?: number;

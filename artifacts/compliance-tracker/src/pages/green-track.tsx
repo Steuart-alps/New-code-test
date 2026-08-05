@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -17,12 +17,18 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
+  useGetGreenTrackConfig,
+  getGetGreenTrackConfigQueryKey,
+  useUpdateGreenTrackConfig,
+} from "@workspace/api-client-react";
+import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown,
-  ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet,
+  ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -54,6 +60,98 @@ function daysUntil(d: string | null | undefined): number | null {
   if (!d) return null;
   const diff = new Date(d).getTime() - Date.now();
   return Math.ceil(diff / 86_400_000);
+}
+
+// ─── Green Config Dialog ──────────────────────────────────────────────────────
+
+function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
+}
+
+function GreenConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetGreenTrackConfig();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const updateConfig = useUpdateGreenTrackConfig();
+
+  const [defaultOperators, setDefaultOperators] = useState<string[]>([]);
+  const [showFuel, setShowFuel] = useState(true);
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setDefaultOperators(parseJsonArray<string>(config.green_default_operators));
+    setShowFuel(config.green_show_fuel !== "false");
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          green_default_operators: JSON.stringify(defaultOperators.filter(Boolean)),
+          green_show_fuel: showFuel ? "true" : "false",
+        },
+      },
+      {
+        onSuccess: () => {
+          qc.invalidateQueries({ queryKey: getGetGreenTrackConfigQueryKey() });
+          toast({ title: "Template saved", description: "GreenTrack settings updated." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="rounded-sm h-8 gap-1.5">
+          <Settings className="w-3.5 h-3.5" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>GreenTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure defaults for pre-use checks.</p>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div className="space-y-2">
+            <Label>Default operators</Label>
+            <p className="text-xs text-muted-foreground">These appear as suggestions in the operator field on pre-use checks.</p>
+            {defaultOperators.map((op, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <Input value={op} placeholder="Operator name" className="h-8 text-sm rounded-sm"
+                  onChange={e => { const n = [...defaultOperators]; n[i] = e.target.value; setDefaultOperators(n); }} />
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+                  onClick={() => setDefaultOperators(defaultOperators.filter((_, x) => x !== i))}>
+                  <X className="w-3.5 h-3.5 text-destructive" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => setDefaultOperators([...defaultOperators, ""])}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Add operator
+            </Button>
+          </div>
+          <div className="flex items-center justify-between rounded-sm border border-border p-3">
+            <div>
+              <p className="text-sm font-medium">Fuel &amp; oil log</p>
+              <p className="text-xs text-muted-foreground">Show the fuel/oil tab in GreenTrack</p>
+            </div>
+            <Switch checked={showFuel} onCheckedChange={setShowFuel} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ─── Machine types ────────────────────────────────────────────────────────────
@@ -436,6 +534,7 @@ function PreUseDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const { data: config } = useGetGreenTrackConfig();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", checkDate: today, operator: "",
@@ -517,8 +616,17 @@ function PreUseDialog({
             </div>
             <div>
               <Label>Operator <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.operator}
-                onChange={e => setForm(f => ({ ...f, operator: e.target.value }))} placeholder="Staff name" />
+              {(() => {
+                const ops = parseJsonArray<string>(config?.green_default_operators);
+                return (
+                  <>
+                    {ops.length > 0 && <datalist id="green-operators-list">{ops.map(op => <option key={op} value={op} />)}</datalist>}
+                    <Input className="mt-1 rounded-sm" value={form.operator}
+                      list={ops.length > 0 ? "green-operators-list" : undefined}
+                      onChange={e => setForm(f => ({ ...f, operator: e.target.value }))} placeholder="Staff name" />
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -1253,13 +1361,16 @@ export default function GreenTrackPage() {
       (f.filledBy ?? "").toLowerCase().includes(q)
     ), [fuelLogs, q]);
 
+  const { data: greenConfig } = useGetGreenTrackConfig();
+  const showFuelTab = greenConfig?.green_show_fuel !== "false";
+
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: "fleet",    label: "Fleet",       icon: Tractor,        count: machines.length },
     { key: "pre-use",  label: "Pre-use",     icon: CheckCheck,     count: status?.checkedTodayCount },
     { key: "services", label: "Services",    icon: Wrench },
     { key: "defects",  label: "Defects",     icon: ShieldAlert,    count: status?.openDefects || undefined },
     { key: "puwer",    label: "Inspections", icon: ClipboardCheck },
-    { key: "fuel",     label: "Fuel / Oil",  icon: Fuel },
+    ...(showFuelTab ? [{ key: "fuel" as Tab, label: "Fuel / Oil", icon: Fuel }] : []),
   ];
 
   const activeMachines = machines.filter(m => m.active);
@@ -1385,6 +1496,7 @@ export default function GreenTrackPage() {
                 <Plus className="w-3.5 h-3.5" /> Log fuel/oil
               </Button>
             )}
+            {canAdmin && <GreenConfigDialog />}
           </div>
         </div>
 

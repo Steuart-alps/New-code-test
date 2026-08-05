@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { legionellaChecksTable, sitesTable } from "@workspace/db/schema";
+import { legionellaChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 
@@ -284,6 +284,51 @@ router.delete("/:id", requireAuth, async (req, res) => {
     .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId)));
 
   res.status(204).end();
+});
+
+// ── Template config ───────────────────────────────────────────────────────────
+const WATER_CONFIG_KEYS = [
+  "water_sentinel_outlets",     // JSON: [{name:string, type:"hot"|"cold", location?:string}]
+  "water_non_sentinel_outlets", // JSON: string[]
+  "water_default_performer",
+] as const;
+
+const WATER_DEFAULT_CONFIG = {
+  water_sentinel_outlets: "",
+  water_non_sentinel_outlets: "",
+  water_default_performer: "",
+};
+
+router.get("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const config: Record<string, string> = { ...WATER_DEFAULT_CONFIG };
+  for (const row of settingRows) {
+    if (WATER_CONFIG_KEYS.includes(row.key as (typeof WATER_CONFIG_KEYS)[number]) && row.value != null) {
+      config[row.key] = row.value;
+    }
+  }
+  res.json(config);
+});
+
+router.put("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const updates = req.body as Record<string, string>;
+  for (const key of WATER_CONFIG_KEYS) {
+    if (key in updates) {
+      const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
+      if (existing.length > 0) {
+        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+      } else {
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+      }
+    }
+  }
+  res.json({ ok: true });
 });
 
 export default router;

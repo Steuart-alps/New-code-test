@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -14,6 +14,9 @@ import {
   LegionellaCheck,
   LegionellaStatus as LegionellaStatusType,
   CreateLegionellaCheckRequest,
+  useGetLegionellaConfig,
+  getGetLegionellaConfigQueryKey,
+  useUpdateLegionellaConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -24,9 +27,11 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun } from "lucide-react";
+import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -139,6 +144,156 @@ function StatusBadge({ status }: { status: "ok" | "due_soon" | "overdue" | "neve
   );
 }
 
+// ── Config Dialog ─────────────────────────────────────────────────────────────
+
+function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
+}
+
+type OutletEntry = { name: string; type: string; location: string };
+
+function LegionellaConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetLegionellaConfig();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const updateConfig = useUpdateLegionellaConfig();
+
+  const [defaultPerformer, setDefaultPerformer] = useState("");
+  const [sentinelOutlets, setSentinelOutlets] = useState<OutletEntry[]>([]);
+  const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setDefaultPerformer(config.water_default_performer ?? "");
+    setSentinelOutlets(parseJsonArray<OutletEntry>(config.water_sentinel_outlets));
+    setNonSentinelOutlets(parseJsonArray<string>(config.water_nonsent_outlets));
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          water_default_performer: defaultPerformer,
+          water_sentinel_outlets: JSON.stringify(sentinelOutlets.filter(o => o.name)),
+          water_nonsent_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
+          toast({ title: "Template saved", description: "New checks will use these defaults." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Settings className="w-4 h-4 mr-2" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>LegionellaTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure defaults for new water safety checks.</p>
+        </DialogHeader>
+
+        <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 w-full grid grid-cols-3">
+            <TabsTrigger value="defaults">Defaults</TabsTrigger>
+            <TabsTrigger value="sentinel">Sentinel Outlets</TabsTrigger>
+            <TabsTrigger value="nonsent">Non-sentinel</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <div className="space-y-1.5">
+              <Label>Default performed by</Label>
+              <Input value={defaultPerformer} onChange={e => setDefaultPerformer(e.target.value)}
+                placeholder="e.g. Responsible person" className="rounded-sm" />
+              <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="sentinel" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              Sentinel outlets are the first or last outlets on a hot or cold water circuit (HSG274 Part 2, Table 2.1). List them here as location suggestions.
+            </p>
+            <div className="space-y-2">
+              {sentinelOutlets.map((o, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <div className="flex-1 space-y-1">
+                    <Input value={o.name} placeholder="Outlet name (e.g. HWS sentinel — 2nd floor bathroom)"
+                      className="h-8 text-sm rounded-sm"
+                      onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], name: e.target.value }; setSentinelOutlets(n); }} />
+                    <div className="flex gap-1.5">
+                      <select value={o.type}
+                        onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], type: e.target.value }; setSentinelOutlets(n); }}
+                        className="h-7 rounded-sm border border-input bg-background px-2 text-xs flex-1">
+                        <option value="">Type</option>
+                        <option value="hot">Hot</option>
+                        <option value="cold">Cold</option>
+                        <option value="calorifier">Calorifier</option>
+                      </select>
+                      <Input value={o.location} placeholder="Location (optional)"
+                        className="h-7 text-xs rounded-sm flex-1"
+                        onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], location: e.target.value }; setSentinelOutlets(n); }} />
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 mt-0.5"
+                    onClick={() => setSentinelOutlets(sentinelOutlets.filter((_, x) => x !== i))}>
+                    <X className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setSentinelOutlets([...sentinelOutlets, { name: "", type: "", location: "" }])}>
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add sentinel outlet
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="nonsent" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              Non-sentinel (representative) outlets checked periodically. These appear as location suggestions on checks.
+            </p>
+            <div className="space-y-2">
+              {nonSentinelOutlets.map((o, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  <Input value={o} placeholder='e.g. "Ground floor toilet — cold tap"'
+                    className="h-8 text-sm rounded-sm"
+                    onChange={e => { const n = [...nonSentinelOutlets]; n[i] = e.target.value; setNonSentinelOutlets(n); }} />
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+                    onClick={() => setNonSentinelOutlets(nonSentinelOutlets.filter((_, x) => x !== i))}>
+                    <X className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setNonSentinelOutlets([...nonSentinelOutlets, ""])}>
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add outlet
+              </Button>
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Record Check Dialog ────────────────────────────────────────────────────────
+
 function RecordCheckDialog({ siteId }: { siteId?: number }) {
   const [open, setOpen] = useState(false);
   const [checkType, setCheckType] = useState<LegionellaCheckType>("calorifier_temp");
@@ -154,6 +309,13 @@ function RecordCheckDialog({ siteId }: { siteId?: number }) {
   const queryClient = useQueryClient();
   const createCheck = useCreateLegionellaCheck();
   const { data: sites } = useListSites();
+  const { data: config } = useGetLegionellaConfig();
+
+  // Pre-fill from template
+  useEffect(() => {
+    if (!open || !config) return;
+    if (!performedBy && config.water_default_performer) setPerformedBy(config.water_default_performer);
+  }, [open]);
 
   const isTemperatureCheck = TEMPERATURE_TYPES.has(checkType);
 
@@ -519,7 +681,10 @@ export default function LegionellaPage() {
               </p>
             </div>
           </div>
-          <RecordCheckDialog siteId={filterSite} />
+          <div className="flex items-center gap-2">
+            {canAdmin && <LegionellaConfigDialog />}
+            <RecordCheckDialog siteId={filterSite} />
+          </div>
         </div>
 
         {/* Status Overview */}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -14,6 +14,9 @@ import {
   FireSafetyCheck,
   FireSafetyStatus as FireSafetyStatusType,
   CreateFireSafetyCheckRequest,
+  useGetFireSafetyConfig,
+  getGetFireSafetyConfigQueryKey,
+  useUpdateFireSafetyConfig,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -24,11 +27,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
-  Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus,
+  Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -238,6 +243,156 @@ function AlarmPanelDisplay({ data }: { data: AlarmPanelNotes }) {
   );
 }
 
+// ── Config Dialog ─────────────────────────────────────────────────────────────
+
+function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
+}
+
+function FireConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetFireSafetyConfig();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const updateConfig = useUpdateFireSafetyConfig();
+
+  const [defaultPerformer, setDefaultPerformer] = useState("");
+  const [escapeRoutes, setEscapeRoutes] = useState<Array<{ name: string; location: string }>>([]);
+  const [alarmZones, setAlarmZones] = useState<string[]>([]);
+  const [extinguisherPoints, setExtinguisherPoints] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setDefaultPerformer(config.fire_default_performer ?? "");
+    setEscapeRoutes(parseJsonArray<{ name: string; location: string }>(config.fire_escape_routes));
+    setAlarmZones(parseJsonArray<string>(config.fire_alarm_zones));
+    setExtinguisherPoints(parseJsonArray<string>(config.fire_extinguisher_points));
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          fire_default_performer: defaultPerformer,
+          fire_escape_routes: JSON.stringify(escapeRoutes.filter(r => r.name || r.location)),
+          fire_alarm_zones: JSON.stringify(alarmZones.filter(Boolean)),
+          fire_extinguisher_points: JSON.stringify(extinguisherPoints.filter(Boolean)),
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetFireSafetyConfigQueryKey() });
+          toast({ title: "Template saved", description: "New checks will use these defaults." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  const StringListEditor = ({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) => (
+    <div className="space-y-2">
+      {items.map((item, i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <Input value={item} placeholder={placeholder} className="h-8 text-sm rounded-sm"
+            onChange={e => { const n = [...items]; n[i] = e.target.value; onChange(n); }} />
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0"
+            onClick={() => onChange(items.filter((_, x) => x !== i))}>
+            <X className="w-3.5 h-3.5 text-destructive" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={() => onChange([...items, ""])}>
+        <Plus className="w-3.5 h-3.5 mr-1.5" /> Add
+      </Button>
+    </div>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Settings className="w-4 h-4 mr-2" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>FireTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure defaults for new fire safety checks.</p>
+        </DialogHeader>
+
+        <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 w-full grid grid-cols-4">
+            <TabsTrigger value="defaults">Defaults</TabsTrigger>
+            <TabsTrigger value="routes">Escape Routes</TabsTrigger>
+            <TabsTrigger value="zones">Alarm Zones</TabsTrigger>
+            <TabsTrigger value="ext">Extinguishers</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <div className="space-y-1.5">
+              <Label>Default performed by</Label>
+              <Input value={defaultPerformer} onChange={e => setDefaultPerformer(e.target.value)}
+                placeholder="e.g. Fire Marshal on duty" className="rounded-sm" />
+              <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="routes" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              List your named escape routes. They'll be pre-loaded when recording a fire walk so staff just mark each one clear or obstructed.
+            </p>
+            <div className="space-y-2">
+              {escapeRoutes.map((r, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <div className="flex-1 space-y-1">
+                    <Input value={r.name} placeholder='Route name (e.g. "Main entrance → car park")'
+                      className="h-8 text-sm rounded-sm"
+                      onChange={e => { const n = [...escapeRoutes]; n[i] = { ...n[i], name: e.target.value }; setEscapeRoutes(n); }} />
+                    <Input value={r.location} placeholder="Location / assembly point (optional)"
+                      className="h-7 text-xs rounded-sm"
+                      onChange={e => { const n = [...escapeRoutes]; n[i] = { ...n[i], location: e.target.value }; setEscapeRoutes(n); }} />
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 mt-0.5"
+                    onClick={() => setEscapeRoutes(escapeRoutes.filter((_, x) => x !== i))}>
+                    <X className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => setEscapeRoutes([...escapeRoutes, { name: "", location: "" }])}>
+                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add route
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="zones" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              List your alarm panel zones. They'll be pre-filled in the "Zones tested" field on alarm panel checks.
+            </p>
+            <StringListEditor items={alarmZones} onChange={setAlarmZones} placeholder='e.g. "Zone 1 — Ground floor"' />
+          </TabsContent>
+
+          <TabsContent value="ext" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">
+              List your extinguisher locations. Used as reference during extinguisher visual checks.
+            </p>
+            <StringListEditor items={extinguisherPoints} onChange={setExtinguisherPoints} placeholder='e.g. "Reception — CO₂"' />
+          </TabsContent>
+        </Tabs>
+
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Record Check Dialog ───────────────────────────────────────────────────────
 
 function RecordCheckDialog({ siteId }: { siteId?: number }) {
@@ -263,6 +418,32 @@ function RecordCheckDialog({ siteId }: { siteId?: number }) {
   const queryClient = useQueryClient();
   const createCheck = useCreateFireSafetyCheck();
   const { data: sites } = useListSites();
+  const { data: config } = useGetFireSafetyConfig();
+
+  // Pre-fill from template
+  useEffect(() => {
+    if (!open || !config) return;
+    if (!performedBy && config.fire_default_performer) setPerformedBy(config.fire_default_performer);
+  }, [open]);
+
+  // Pre-fill check-type-specific fields when checkType changes (only if still empty)
+  useEffect(() => {
+    if (!open || !config) return;
+    if (checkType === "fire_walk" && routes.length === 0 && config.fire_escape_routes) {
+      try {
+        const saved = JSON.parse(config.fire_escape_routes) as Array<{ name: string; location: string }>;
+        if (Array.isArray(saved) && saved.length > 0) {
+          setRoutes(saved.map(r => ({ name: r.name || "", status: "clear" as const, note: r.location || "" })));
+        }
+      } catch {}
+    }
+    if (checkType === "alarm_panel" && !zonesTested && config.fire_alarm_zones) {
+      try {
+        const zones = JSON.parse(config.fire_alarm_zones) as string[];
+        if (Array.isArray(zones) && zones.length > 0) setZonesTested(zones.filter(Boolean).join(", "));
+      } catch {}
+    }
+  }, [open, checkType, config]);
 
   // Auto-compute result for fire walk
   const effectiveResult: "pass" | "fail" = checkType === "fire_walk"
@@ -765,7 +946,10 @@ export default function FireSafetyPage() {
               Fire safety logbook — alarm tests, fire walks, escape route sign-offs, panel checks
             </p>
           </div>
-          <RecordCheckDialog siteId={filterSite} />
+          <div className="flex items-center gap-2">
+            {canAdmin && <FireConfigDialog />}
+            <RecordCheckDialog siteId={filterSite} />
+          </div>
         </div>
 
         {/* Status overview — two rows */}

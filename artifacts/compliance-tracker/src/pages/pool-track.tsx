@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -11,13 +11,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Waves, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
-  Lock, Pencil, Trash2, Filter, Droplets, Thermometer, Wind,
+  Lock, Pencil, Trash2, Filter, Droplets, Thermometer, Wind, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { useListSites } from "@workspace/api-client-react";
+import {
+  useListSites,
+  useGetPoolTrackConfig,
+  getGetPoolTrackConfigQueryKey,
+  useUpdatePoolTrackConfig,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -42,6 +50,148 @@ function todayIso() {
 function nowTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// ── Pool config dialog ────────────────────────────────────────────────────────
+
+function PoolConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const { data: config } = useGetPoolTrackConfig();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const updateConfig = useUpdatePoolTrackConfig();
+
+  const [poolName, setPoolName] = useState("");
+  const [defaultPerformer, setDefaultPerformer] = useState("");
+  const [showAirTemp, setShowAirTemp] = useState(true);
+  const [phMin, setPhMin] = useState("7.2");
+  const [phMax, setPhMax] = useState("7.6");
+  const [freeChlorMin, setFreeChlorMin] = useState("1.0");
+  const [freeChlorMax, setFreeChlorMax] = useState("3.0");
+  const [tempMin, setTempMin] = useState("27");
+  const [tempMax, setTempMax] = useState("32");
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setPoolName(config.pool_name ?? "");
+    setDefaultPerformer(config.pool_default_performer ?? "");
+    setShowAirTemp(config.pool_show_air_temp !== "false");
+    setPhMin(config.pool_ph_min ?? "7.2");
+    setPhMax(config.pool_ph_max ?? "7.6");
+    setFreeChlorMin(config.pool_free_chlor_min ?? "1.0");
+    setFreeChlorMax(config.pool_free_chlor_max ?? "3.0");
+    setTempMin(config.pool_temp_min ?? "27");
+    setTempMax(config.pool_temp_max ?? "32");
+  }, [config, open]);
+
+  const handleSave = () => {
+    updateConfig.mutate(
+      {
+        data: {
+          pool_name: poolName,
+          pool_default_performer: defaultPerformer,
+          pool_show_air_temp: showAirTemp ? "true" : "false",
+          pool_ph_min: phMin,
+          pool_ph_max: phMax,
+          pool_free_chlor_min: freeChlorMin,
+          pool_free_chlor_max: freeChlorMax,
+          pool_temp_min: tempMin,
+          pool_temp_max: tempMax,
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetPoolTrackConfigQueryKey() });
+          toast({ title: "Template saved", description: "Pool settings updated." });
+          setOpen(false);
+        },
+        onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Settings className="w-4 h-4 mr-2" />
+          Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>PoolTrack Template</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Configure safe ranges and defaults for pool water testing.</p>
+        </DialogHeader>
+
+        <Tabs defaultValue="ranges" className="flex-1 min-h-0 flex flex-col">
+          <TabsList className="shrink-0 w-full grid grid-cols-2">
+            <TabsTrigger value="ranges">Safe Ranges</TabsTrigger>
+            <TabsTrigger value="defaults">Defaults</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="ranges" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <p className="text-xs text-muted-foreground">Set safe ranges for your pool. These appear as guidance text inside the testing form (PWTAG / HSG179 defaults shown).</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>pH minimum</Label>
+                <Input value={phMin} onChange={e => setPhMin(e.target.value)} placeholder="7.2" type="number" step="0.1" className="rounded-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>pH maximum</Label>
+                <Input value={phMax} onChange={e => setPhMax(e.target.value)} placeholder="7.6" type="number" step="0.1" className="rounded-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Free chlorine min (mg/L)</Label>
+                <Input value={freeChlorMin} onChange={e => setFreeChlorMin(e.target.value)} placeholder="1.0" type="number" step="0.1" className="rounded-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Free chlorine max (mg/L)</Label>
+                <Input value={freeChlorMax} onChange={e => setFreeChlorMax(e.target.value)} placeholder="3.0" type="number" step="0.1" className="rounded-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Water temp min (°C)</Label>
+                <Input value={tempMin} onChange={e => setTempMin(e.target.value)} placeholder="27" type="number" className="rounded-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Water temp max (°C)</Label>
+                <Input value={tempMax} onChange={e => setTempMax(e.target.value)} placeholder="32" type="number" className="rounded-sm" />
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
+            <div className="space-y-1.5">
+              <Label>Pool name</Label>
+              <Input value={poolName} onChange={e => setPoolName(e.target.value)}
+                placeholder="e.g. Main pool" className="rounded-sm" />
+              <p className="text-xs text-muted-foreground">Shown in the page header.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Default performed by</Label>
+              <Input value={defaultPerformer} onChange={e => setDefaultPerformer(e.target.value)}
+                placeholder="e.g. Pool supervisor" className="rounded-sm" />
+              <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
+            </div>
+            <div className="flex items-center justify-between rounded-sm border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">Air temperature field</p>
+                <p className="text-xs text-muted-foreground">Show air temp in the full weekly check form</p>
+              </div>
+              <Switch checked={showAirTemp} onCheckedChange={setShowAirTemp} />
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleSave} disabled={updateConfig.isPending}>
+            {updateConfig.isPending ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ── Check type config ─────────────────────────────────────────────────────────
@@ -191,6 +341,13 @@ function RecordDialog({
 
   const { toast } = useToast();
   const { data: sites } = useListSites();
+  const { data: config } = useGetPoolTrackConfig();
+
+  // Pre-fill from template (new records only)
+  useEffect(() => {
+    if (!open || isEdit || !config) return;
+    if (!performedBy && config.pool_default_performer) setPerformedBy(config.pool_default_performer);
+  }, [open]);
 
   const parsedPh = ph ? parseFloat(ph) : null;
   const parsedFree = freeChlor ? parseFloat(freeChlor) : null;
@@ -493,7 +650,10 @@ export default function PoolTrackPage() {
             </div>
             <p className="text-sm text-muted-foreground">Swimming pool water testing and safety logbook (PWTAG / HSG179)</p>
           </div>
-          <RecordDialog siteId={filterSite} onSaved={fetchAll} />
+          <div className="flex items-center gap-2">
+            {canAdmin && <PoolConfigDialog />}
+            <RecordDialog siteId={filterSite} onSaved={fetchAll} />
+          </div>
         </div>
 
         {/* Status grid */}

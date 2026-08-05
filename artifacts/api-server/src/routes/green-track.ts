@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
-import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
+import { sql, eq, and } from "drizzle-orm";
+import { getClientId, requireClientAdmin, requireAuth } from "../middleware/requireAuth";
+import { appSettingsTable } from "@workspace/db/schema";
 
 const router = Router();
 
@@ -615,6 +616,49 @@ router.get("/status", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch status" });
   }
+});
+
+// ── Template config ───────────────────────────────────────────────────────────
+const GREEN_CONFIG_KEYS = [
+  "green_default_operators", // JSON: string[]
+  "green_show_fuel",         // "true"|"false"
+] as const;
+
+const GREEN_DEFAULT_CONFIG = {
+  green_default_operators: "",
+  green_show_fuel: "true",
+};
+
+router.get("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const config: Record<string, string> = { ...GREEN_DEFAULT_CONFIG };
+  for (const row of settingRows) {
+    if (GREEN_CONFIG_KEYS.includes(row.key as (typeof GREEN_CONFIG_KEYS)[number]) && row.value != null) {
+      config[row.key] = row.value;
+    }
+  }
+  res.json(config);
+});
+
+router.put("/config", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const updates = req.body as Record<string, string>;
+  for (const key of GREEN_CONFIG_KEYS) {
+    if (key in updates) {
+      const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
+      if (existing.length > 0) {
+        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+      } else {
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+      }
+    }
+  }
+  res.json({ ok: true });
 });
 
 export default router;
