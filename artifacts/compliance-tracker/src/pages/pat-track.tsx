@@ -30,7 +30,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   Zap, Plus, AlertTriangle, CheckCircle2, Clock, Pencil, Trash2,
-  Lock, Search, Settings, X, ClipboardList, PackageCheck,
+  Lock, Search, Settings, X, ClipboardList, PackageCheck, Library,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, addMonths, parseISO, isValid } from "date-fns";
@@ -46,6 +46,155 @@ const APPLIANCE_TYPES = [
 ] as const;
 
 const ITEM_RESULTS = ["pass", "fail", "na"] as const;
+
+// ─── Room presets ──────────────────────────────────────────────────────────────
+
+const ROOM_PRESETS = {
+  "hotel-suite": {
+    label: "Hotel Suite",
+    emoji: "🛏️",
+    items: [
+      { name: "Television",               type: "AV Equipment"      },
+      { name: "Bedside Lamp (Left)",      type: "Class I"           },
+      { name: "Bedside Lamp (Right)",     type: "Class I"           },
+      { name: "Standing Lamp",            type: "Class I"           },
+      { name: "Mini Fridge",              type: "Kitchen Appliance" },
+      { name: "Kettle",                   type: "Kitchen Appliance" },
+      { name: "Hair Dryer",               type: "Class II"          },
+      { name: "Iron",                     type: "Class I"           },
+      { name: "Trouser Press",            type: "Class I"           },
+      { name: "Telephone",                type: "IT Equipment"      },
+      { name: "Air Conditioning Unit",    type: "Class I"           },
+      { name: "Shower Radio",             type: "AV Equipment"      },
+      { name: "Safe (Electric)",          type: "Class I"           },
+    ],
+  },
+  "hotel-classic": {
+    label: "Classic Hotel Room",
+    emoji: "🏨",
+    items: [
+      { name: "Television",   type: "AV Equipment"      },
+      { name: "Bedside Lamp", type: "Class I"           },
+      { name: "Desk Lamp",    type: "Class I"           },
+      { name: "Kettle",       type: "Kitchen Appliance" },
+      { name: "Hair Dryer",   type: "Class II"          },
+      { name: "Iron",         type: "Class I"           },
+      { name: "Telephone",    type: "IT Equipment"      },
+    ],
+  },
+  "office": {
+    label: "Office",
+    emoji: "💼",
+    items: [
+      { name: "Desktop PC",          type: "IT Equipment"  },
+      { name: "Monitor",             type: "IT Equipment"  },
+      { name: "Desk Lamp",           type: "Class I"       },
+      { name: "Extension Lead",      type: "Extension Lead"},
+      { name: "Printer",             type: "IT Equipment"  },
+      { name: "Shredder",            type: "IT Equipment"  },
+      { name: "Desk Fan",            type: "Class I"       },
+      { name: "Telephone / Handset", type: "IT Equipment"  },
+      { name: "Laptop Charger",      type: "IT Equipment"  },
+      { name: "Cordless Phone Base", type: "IT Equipment"  },
+    ],
+  },
+  "bar-restaurant": {
+    label: "Bar / Restaurant",
+    emoji: "🍽️",
+    items: [
+      { name: "Commercial Coffee Machine", type: "Kitchen Appliance" },
+      { name: "Blender",                   type: "Kitchen Appliance" },
+      { name: "Toaster",                   type: "Kitchen Appliance" },
+      { name: "Kettle",                    type: "Kitchen Appliance" },
+      { name: "Bar Fridge",                type: "Kitchen Appliance" },
+      { name: "Ice Machine",               type: "Kitchen Appliance" },
+      { name: "Glasswasher",               type: "Class I"           },
+      { name: "POS Terminal",              type: "IT Equipment"      },
+      { name: "Card Payment Terminal",     type: "IT Equipment"      },
+      { name: "Television",               type: "AV Equipment"      },
+      { name: "Radio / Music System",      type: "AV Equipment"      },
+      { name: "Electric Bottle Opener",    type: "Kitchen Appliance" },
+    ],
+  },
+  "reception": {
+    label: "Reception",
+    emoji: "🛎️",
+    items: [
+      { name: "Desktop PC",            type: "IT Equipment"  },
+      { name: "Monitor",               type: "IT Equipment"  },
+      { name: "Printer",               type: "IT Equipment"  },
+      { name: "Telephone / Switchboard",type: "IT Equipment"  },
+      { name: "Desk Lamp",             type: "Class I"       },
+      { name: "Extension Lead",        type: "Extension Lead"},
+      { name: "Card Payment Terminal", type: "IT Equipment"  },
+      { name: "Cordless Phone",        type: "IT Equipment"  },
+      { name: "TV / Information Screen",type: "AV Equipment"  },
+    ],
+  },
+  "kitchen": {
+    label: "Kitchen",
+    emoji: "🍳",
+    items: [
+      { name: "Commercial Microwave",       type: "Kitchen Appliance" },
+      { name: "Kettle",                     type: "Kitchen Appliance" },
+      { name: "Toaster",                    type: "Kitchen Appliance" },
+      { name: "Food Blender",               type: "Kitchen Appliance" },
+      { name: "Stand Mixer / Food Mixer",   type: "Kitchen Appliance" },
+      { name: "Commercial Coffee Machine",  type: "Kitchen Appliance" },
+      { name: "Hot Water Urn",              type: "Kitchen Appliance" },
+      { name: "Soup Kettle",                type: "Kitchen Appliance" },
+      { name: "Contact Grill / Sandwich Press", type: "Kitchen Appliance" },
+      { name: "Electric Deep Fryer",        type: "Kitchen Appliance" },
+      { name: "Bain Marie",                 type: "Kitchen Appliance" },
+      { name: "Hand Blender",               type: "Kitchen Appliance" },
+      { name: "Refrigerator",               type: "Kitchen Appliance" },
+      { name: "Chest Freezer",              type: "Kitchen Appliance" },
+      { name: "Dishwasher",                 type: "Class I"           },
+      { name: "Waffle Maker",               type: "Kitchen Appliance" },
+      { name: "Juicer",                     type: "Kitchen Appliance" },
+    ],
+  },
+  "pro-shop": {
+    label: "Pro-Shop",
+    emoji: "⛳",
+    items: [
+      { name: "Desktop PC",                  type: "IT Equipment"      },
+      { name: "Printer",                     type: "IT Equipment"      },
+      { name: "POS Terminal / Cash Register",type: "IT Equipment"      },
+      { name: "Card Payment Terminal",       type: "IT Equipment"      },
+      { name: "Telephone",                   type: "IT Equipment"      },
+      { name: "Desk Lamp",                   type: "Class I"           },
+      { name: "Extension Lead",              type: "Extension Lead"    },
+      { name: "Golf Trolley Battery Charger",type: "Class I"           },
+      { name: "Refrigerated Display Cabinet",type: "Kitchen Appliance" },
+      { name: "TV / Display Screen",         type: "AV Equipment"      },
+      { name: "Label Printer",               type: "IT Equipment"      },
+    ],
+  },
+  "greenkeeping": {
+    label: "Greenkeeping Facility",
+    emoji: "🌿",
+    items: [
+      { name: "Battery Charger — Ride-On Mower",    type: "Class I"       },
+      { name: "Battery Charger — Electric Buggy",   type: "Class I"       },
+      { name: "Battery Charger — Electric Sprayer", type: "Class I"       },
+      { name: "Battery Charger — GPS Unit",         type: "Class I"       },
+      { name: "Cordless Tool Charger — Drill",      type: "Portable Tool" },
+      { name: "Cordless Tool Charger — Hedge Trimmer", type: "Portable Tool" },
+      { name: "Extension Lead",                     type: "Extension Lead"},
+      { name: "Electric Pressure Washer",           type: "Portable Tool" },
+      { name: "Angle Grinder",                      type: "Portable Tool" },
+      { name: "Electric Bench Grinder",             type: "Portable Tool" },
+      { name: "Workshop Lamp / Inspection Light",   type: "Class I"       },
+      { name: "Kettle",                             type: "Kitchen Appliance" },
+      { name: "Microwave",                          type: "Kitchen Appliance" },
+      { name: "Refrigerator",                       type: "Kitchen Appliance" },
+      { name: "Radio",                              type: "AV Equipment"  },
+    ],
+  },
+} as const;
+
+type PresetKey = keyof typeof ROOM_PRESETS;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -436,6 +585,342 @@ function ApplianceDialog({ appliance, onSaved, onClose, open, sites, config }: A
 
 // ─── TestDialog ───────────────────────────────────────────────────────────────
 
+// ─── PresetDialog ─────────────────────────────────────────────────────────────
+
+interface PresetItem {
+  name: string;
+  type: string;
+  checked: boolean;
+}
+
+function PresetDialog({ open, onClose, onSaved, sites, config }: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  sites: { id: number; name: string }[];
+  config: any;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [step, setStep] = useState<1 | 2>(1);
+  const [selectedPreset, setSelectedPreset] = useState<PresetKey | "">("");
+  const [location, setLocation] = useState("");
+  const [siteId, setSiteId] = useState("");
+  const [items, setItems] = useState<PresetItem[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [resettingTemplate, setResettingTemplate] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemType, setNewItemType] = useState("Other");
+
+  const locations = parseJsonArray<string>(config?.pat_locations);
+
+  // Fetch saved per-preset templates
+  const { data: savedTemplates = {} } = useQuery<Record<string, PresetItem[]>>({
+    queryKey: ["/api/pat-track/preset-templates"],
+    queryFn: () => apiFetch("/preset-templates"),
+    enabled: open,
+  });
+
+  // Reset when closed
+  useEffect(() => {
+    if (!open) {
+      setStep(1); setSelectedPreset(""); setLocation(""); setSiteId(""); setItems([]);
+      setNewItemName(""); setNewItemType("Other");
+    }
+  }, [open]);
+
+  const handleSelectPreset = (key: PresetKey) => {
+    setSelectedPreset(key);
+    // Use saved template if one exists; otherwise fall back to hardcoded defaults
+    const saved = savedTemplates[key];
+    if (saved && saved.length > 0) {
+      setItems(saved.map(item => ({ ...item, checked: true })));
+    } else {
+      setItems(ROOM_PRESETS[key].items.map(item => ({ ...item, checked: true })));
+    }
+    setStep(2);
+  };
+
+  const hasCustomTemplate = selectedPreset ? !!savedTemplates[selectedPreset]?.length : false;
+  const selectedCount = items.filter(i => i.checked && i.name.trim()).length;
+
+  // Save the current item list (all items, checked or not) as the template for this preset
+  const handleSaveTemplate = async () => {
+    if (!selectedPreset) return;
+    setSavingTemplate(true);
+    try {
+      await apiFetch(`/preset-templates/${selectedPreset}`, {
+        method: "PUT",
+        body: JSON.stringify({ items: items.map(({ name, type }) => ({ name, type })) }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/pat-track/preset-templates"] });
+      toast({ title: "Template saved", description: `Your ${ROOM_PRESETS[selectedPreset].label} template has been saved` });
+    } catch (err: any) {
+      toast({ title: "Failed to save template", description: err.message, variant: "destructive" });
+    } finally { setSavingTemplate(false); }
+  };
+
+  // Reset this preset back to the built-in defaults
+  const handleResetTemplate = async () => {
+    if (!selectedPreset) return;
+    setResettingTemplate(true);
+    try {
+      await apiFetch(`/preset-templates/${selectedPreset}`, { method: "DELETE" });
+      queryClient.invalidateQueries({ queryKey: ["/api/pat-track/preset-templates"] });
+      setItems(ROOM_PRESETS[selectedPreset].items.map(item => ({ ...item, checked: true })));
+      toast({ title: "Reset to defaults" });
+    } catch (err: any) {
+      toast({ title: "Failed to reset", description: err.message, variant: "destructive" });
+    } finally { setResettingTemplate(false); }
+  };
+
+  // Add a new custom item to the list
+  const handleAddItem = () => {
+    if (!newItemName.trim()) return;
+    setItems(prev => [...prev, { name: newItemName.trim(), type: newItemType, checked: true }]);
+    setNewItemName("");
+  };
+
+  const handleAdd = async () => {
+    const toAdd = items.filter(i => i.checked && i.name.trim());
+    if (toAdd.length === 0) { toast({ title: "No appliances selected", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      await Promise.all(
+        toAdd.map(item =>
+          apiFetch("/appliances", {
+            method: "POST",
+            body: JSON.stringify({
+              name:          item.name.trim(),
+              applianceType: item.type,
+              location:      location.trim() || null,
+              assetTag:      null,
+              description:   null,
+              siteId:        siteId ? parseInt(siteId, 10) : null,
+              active:        true,
+            }),
+          })
+        )
+      );
+      toast({ title: `${toAdd.length} appliance${toAdd.length !== 1 ? "s" : ""} added to register` });
+      onSaved();
+      onClose();
+    } catch (err: any) {
+      toast({ title: "Failed to add appliances", description: err.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
+      <DialogContent className="max-w-2xl rounded-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Library className="w-4 h-4" />
+            {step === 1 ? "Load appliance preset" : "Review appliances to add"}
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* ── Step 1: Choose room type ────────────────────────── */}
+        {step === 1 && (
+          <div className="py-2">
+            <p className="text-sm text-muted-foreground mb-4">
+              Select a room or area type to load its appliance list. Saved templates are shown with a ✦ badge.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {(Object.entries(ROOM_PRESETS) as [PresetKey, (typeof ROOM_PRESETS)[PresetKey]][]).map(([key, preset]) => {
+                const isCustomised = !!savedTemplates[key]?.length;
+                const itemCount = isCustomised ? savedTemplates[key].length : preset.items.length;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handleSelectPreset(key)}
+                    className="border border-border rounded-sm p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors relative"
+                  >
+                    {isCustomised && (
+                      <span className="absolute top-2 right-2 text-[10px] font-semibold text-primary bg-primary/10 rounded-sm px-1 py-0.5 leading-none">
+                        ✦ saved
+                      </span>
+                    )}
+                    <p className="text-2xl mb-1.5">{preset.emoji}</p>
+                    <p className="text-sm font-medium leading-tight">{preset.label}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{itemCount} items</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: Review & customise ──────────────────────── */}
+        {step === 2 && selectedPreset && (
+          <div className="space-y-4 py-1">
+            {/* Back + breadcrumb + template actions */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStep(1)}
+                  className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                >
+                  ← Change room type
+                </button>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-sm font-medium">
+                  {ROOM_PRESETS[selectedPreset].emoji} {ROOM_PRESETS[selectedPreset].label}
+                </span>
+                {hasCustomTemplate && (
+                  <span className="text-[10px] font-semibold text-primary bg-primary/10 rounded-sm px-1.5 py-0.5">✦ saved template</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button
+                  size="sm" variant="outline"
+                  className="rounded-sm h-7 text-xs gap-1"
+                  disabled={savingTemplate || saving}
+                  onClick={handleSaveTemplate}
+                >
+                  {savingTemplate ? "Saving…" : "Save as template"}
+                </Button>
+                {hasCustomTemplate && (
+                  <Button
+                    size="sm" variant="ghost"
+                    className="rounded-sm h-7 text-xs text-muted-foreground hover:text-destructive"
+                    disabled={resettingTemplate || saving}
+                    onClick={handleResetTemplate}
+                  >
+                    {resettingTemplate ? "Resetting…" : "Reset to defaults"}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Location + site */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label>
+                  Location / area
+                  <span className="text-muted-foreground text-xs ml-1">optional — applied to all</span>
+                </Label>
+                {locations.length > 0 && (
+                  <datalist id="preset-locations-list">
+                    {locations.map(l => <option key={l} value={l} />)}
+                  </datalist>
+                )}
+                <Input
+                  className="mt-1 rounded-sm"
+                  value={location}
+                  list={locations.length > 0 ? "preset-locations-list" : undefined}
+                  onChange={e => setLocation(e.target.value)}
+                  placeholder="e.g. Room 101, Ground Floor Bar"
+                />
+              </div>
+              {sites.length > 0 && (
+                <div>
+                  <Label>Site <span className="text-muted-foreground text-xs ml-1">optional</span></Label>
+                  <Select value={siteId} onValueChange={setSiteId}>
+                    <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All sites</SelectItem>
+                      {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Checklist */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>Appliances to add <span className="text-muted-foreground text-xs">({selectedCount} selected)</span></Label>
+                <div className="flex gap-3">
+                  <button
+                    className="text-xs text-primary hover:underline underline-offset-2"
+                    onClick={() => setItems(prev => prev.map(x => ({ ...x, checked: true })))}
+                  >Select all</button>
+                  <button
+                    className="text-xs text-muted-foreground hover:underline underline-offset-2"
+                    onClick={() => setItems(prev => prev.map(x => ({ ...x, checked: false })))}
+                  >None</button>
+                </div>
+              </div>
+              <div className="border border-border rounded-sm divide-y divide-border max-h-56 overflow-y-auto">
+                {items.map((item, i) => (
+                  <div key={i} className={cn("flex items-center gap-3 px-3 py-2 group", !item.checked && "opacity-40")}>
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      onChange={e => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, checked: e.target.checked } : it))}
+                      className="flex-shrink-0 accent-primary"
+                    />
+                    <input
+                      type="text"
+                      value={item.name}
+                      onChange={e => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, name: e.target.value } : it))}
+                      className="flex-1 bg-transparent text-sm border-0 border-b border-transparent focus:border-border focus:outline-none py-0.5 min-w-0"
+                    />
+                    <select
+                      value={item.type}
+                      onChange={e => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, type: e.target.value } : it))}
+                      className="text-xs text-muted-foreground bg-transparent border-0 focus:outline-none flex-shrink-0 cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    >
+                      {APPLIANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 group-hover:hidden">{item.type}</span>
+                    <button
+                      onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))}
+                      className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-muted-foreground hover:text-destructive transition-opacity"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add custom item */}
+              <div className="flex items-center gap-2 mt-2 border border-dashed border-border rounded-sm px-3 py-2">
+                <input
+                  type="text"
+                  value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddItem(); } }}
+                  className="flex-1 bg-transparent text-sm border-0 focus:outline-none py-0.5 min-w-0 placeholder:text-muted-foreground/50"
+                  placeholder="Add item… (e.g. Smart TV)"
+                />
+                <select
+                  value={newItemType}
+                  onChange={e => setNewItemType(e.target.value)}
+                  className="text-xs text-muted-foreground bg-transparent border-0 focus:outline-none flex-shrink-0 cursor-pointer"
+                >
+                  {APPLIANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button
+                  onClick={handleAddItem}
+                  disabled={!newItemName.trim()}
+                  className="flex-shrink-0 text-primary disabled:text-muted-foreground hover:opacity-80"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Click a name to rename · hover a row to change type or remove</p>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
+          {step === 2 && (
+            <Button onClick={handleAdd} disabled={saving || selectedCount === 0} className="rounded-sm">
+              {saving ? "Adding…" : `Add ${selectedCount} appliance${selectedCount !== 1 ? "s" : ""}`}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── TestDialog ───────────────────────────────────────────────────────────────
+
 interface TestDialogProps {
   test?: PATTest | null;
   appliances: Appliance[];
@@ -656,6 +1141,7 @@ export default function PATTrackPage() {
   // Dialog state
   const [applianceDialog, setApplianceDialog] = useState(false);
   const [editAppliance, setEditAppliance] = useState<Appliance | null>(null);
+  const [presetDialog, setPresetDialog] = useState(false);
   const [testDialog, setTestDialog] = useState(false);
   const [editTest, setEditTest] = useState<PATTest | null>(null);
   const [presetApplianceId, setPresetApplianceId] = useState<number | undefined>();
@@ -797,10 +1283,16 @@ export default function PATTrackPage() {
               </TabsTrigger>
             </TabsList>
             {activeTab === "appliances" && !lockUI && canAdmin && (
-              <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8"
-                onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
-                <Plus className="w-3.5 h-3.5" /> Add appliance
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8"
+                  onClick={() => setPresetDialog(true)}>
+                  <Library className="w-3.5 h-3.5" /> Load preset
+                </Button>
+                <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8"
+                  onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
+                  <Plus className="w-3.5 h-3.5" /> Add appliance
+                </Button>
+              </div>
             )}
           </div>
 
@@ -809,12 +1301,18 @@ export default function PATTrackPage() {
             {filteredAppliances.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
                 <Zap className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">{appliances.length === 0 ? "No appliances in register yet — add your first appliance to get started" : "No appliances match your search"}</p>
+                <p className="text-sm">{appliances.length === 0 ? "No appliances in register yet — load a preset or add appliances one at a time to get started" : "No appliances match your search"}</p>
                 {appliances.length === 0 && canAdmin && !lockUI && (
-                  <Button variant="outline" className="mt-4 rounded-sm gap-2"
-                    onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
-                    <Plus className="w-4 h-4" /> Add first appliance
-                  </Button>
+                  <div className="flex items-center justify-center gap-3 mt-4">
+                    <Button variant="default" className="rounded-sm gap-2"
+                      onClick={() => setPresetDialog(true)}>
+                      <Library className="w-4 h-4" /> Load preset
+                    </Button>
+                    <Button variant="outline" className="rounded-sm gap-2"
+                      onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
+                      <Plus className="w-4 h-4" /> Add manually
+                    </Button>
+                  </div>
                 )}
               </div>
             ) : (
@@ -965,6 +1463,14 @@ export default function PATTrackPage() {
       </div>
 
       {/* ── Dialogs ──────────────────────────────────────────────────────── */}
+      <PresetDialog
+        open={presetDialog}
+        sites={sites}
+        config={config}
+        onSaved={refetchAll}
+        onClose={() => setPresetDialog(false)}
+      />
+
       <ApplianceDialog
         open={applianceDialog}
         appliance={editAppliance}

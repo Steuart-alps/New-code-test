@@ -293,4 +293,69 @@ router.put("/config", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Preset templates (per-client customisable room presets) ───────────────────
+
+const VALID_PRESET_KEYS = [
+  "hotel-suite", "hotel-classic", "office", "bar-restaurant",
+  "reception", "kitchen", "pro-shop", "greenkeeping",
+] as const;
+
+type ValidPresetKey = (typeof VALID_PRESET_KEYS)[number];
+
+function presetSettingKey(presetKey: ValidPresetKey) {
+  return `pat_preset_${presetKey}` as const;
+}
+
+router.get("/preset-templates", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const settingRows = await db.select().from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+
+  const templates: Record<string, unknown[]> = {};
+  for (const row of settingRows) {
+    for (const key of VALID_PRESET_KEYS) {
+      if (row.key === presetSettingKey(key) && row.value) {
+        try { templates[key] = JSON.parse(row.value); } catch { /* ignore */ }
+      }
+    }
+  }
+  res.json(templates);
+});
+
+router.put("/preset-templates/:key", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const presetKey = req.params.key as ValidPresetKey;
+  if (!VALID_PRESET_KEYS.includes(presetKey)) return res.status(400).json({ error: "Unknown preset key" });
+
+  const items = req.body?.items;
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array" });
+
+  const settingKey = presetSettingKey(presetKey);
+  const value = JSON.stringify(items);
+  const existing = await db.select({ clientId: appSettingsTable.clientId }).from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey))).limit(1);
+
+  if (existing.length > 0) {
+    await db.update(appSettingsTable).set({ value, updatedAt: new Date() })
+      .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey)));
+  } else {
+    await db.insert(appSettingsTable).values({ clientId, key: settingKey, value });
+  }
+  res.json({ ok: true });
+});
+
+router.delete("/preset-templates/:key", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const presetKey = req.params.key as ValidPresetKey;
+  if (!VALID_PRESET_KEYS.includes(presetKey)) return res.status(400).json({ error: "Unknown preset key" });
+
+  await db.delete(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, presetSettingKey(presetKey))));
+  res.json({ ok: true });
+});
+
 export default router;
