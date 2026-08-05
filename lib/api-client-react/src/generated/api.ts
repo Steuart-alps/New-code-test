@@ -66,6 +66,8 @@ import type {
   UpdateFoodSafetyRecordRequest,
   UpdateGreenTrackConfig200,
   UpdateIncidentConfig200,
+  PATTrackConfig,
+  UpdatePATTrackConfig200,
   UpdateLegionellaCheckRequest,
   UpdateLegionellaConfig200,
   UpdatePoolTrackConfig200,
@@ -4625,3 +4627,29 @@ export const getUpdateGreenTrackConfigMutationOptions = <TError = ErrorType<unkn
 };
 export const useUpdateGreenTrackConfig = <TError = ErrorType<unknown>, TContext = unknown>(options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof updateGreenTrackConfig>>, TError, { data: BodyType<GreenTrackConfig> }, TContext>; request?: SecondParameter<typeof customFetch>; }): UseMutationResult<Awaited<ReturnType<typeof updateGreenTrackConfig>>, TError, { data: BodyType<GreenTrackConfig> }, TContext> =>
   useMutation(getUpdateGreenTrackConfigMutationOptions(options));
+
+// ─── PATtrack config ──────────────────────────────────────────────────────────
+export const getGetPATTrackConfigQueryKey = () => [`/api/pat-track/config`] as const;
+export const getPATTrackConfig = async (options?: RequestInit): Promise<PATTrackConfig> =>
+  customFetch<PATTrackConfig>(`/api/pat-track/config`, { ...options, method: "GET" });
+export const getGetPATTrackConfigQueryOptions = <TData = Awaited<ReturnType<typeof getPATTrackConfig>>, TError = ErrorType<unknown>>(options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof getPATTrackConfig>>, TError, TData>; request?: SecondParameter<typeof customFetch>; }) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetPATTrackConfigQueryKey();
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getPATTrackConfig>>> = ({ signal }) => getPATTrackConfig({ signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<Awaited<ReturnType<typeof getPATTrackConfig>>, TError, TData> & { queryKey: QueryKey };
+};
+export function useGetPATTrackConfig<TData = Awaited<ReturnType<typeof getPATTrackConfig>>, TError = ErrorType<unknown>>(options?: { query?: UseQueryOptions<Awaited<ReturnType<typeof getPATTrackConfig>>, TError, TData>; request?: SecondParameter<typeof customFetch>; }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPATTrackConfigQueryOptions(options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+export const updatePATTrackConfig = async (pATTrackConfig: PATTrackConfig, options?: RequestInit): Promise<UpdatePATTrackConfig200> =>
+  customFetch<UpdatePATTrackConfig200>(`/api/pat-track/config`, { ...options, method: "PUT", headers: { "Content-Type": "application/json", ...options?.headers }, body: JSON.stringify(pATTrackConfig) });
+export const getUpdatePATTrackConfigMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof updatePATTrackConfig>>, TError, { data: BodyType<PATTrackConfig> }, TContext>; request?: SecondParameter<typeof customFetch>; }): UseMutationOptions<Awaited<ReturnType<typeof updatePATTrackConfig>>, TError, { data: BodyType<PATTrackConfig> }, TContext> => {
+  const mutationKey = ["updatePATTrackConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options ? (options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey ? options : { ...options, mutation: { ...options.mutation, mutationKey } }) : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePATTrackConfig>>, { data: BodyType<PATTrackConfig> }> = (props) => { const { data } = props ?? {}; return updatePATTrackConfig(data, requestOptions); };
+  return { mutationFn, ...mutationOptions };
+};
+export const useUpdatePATTrackConfig = <TError = ErrorType<unknown>, TContext = unknown>(options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof updatePATTrackConfig>>, TError, { data: BodyType<PATTrackConfig> }, TContext>; request?: SecondParameter<typeof customFetch>; }): UseMutationResult<Awaited<ReturnType<typeof updatePATTrackConfig>>, TError, { data: BodyType<PATTrackConfig> }, TContext> =>
+  useMutation(getUpdatePATTrackConfigMutationOptions(options));

@@ -44,6 +44,7 @@ import DailyTrackStatusPage from "@/pages/daily-track-status";
 import StaffRosterPage from "@/pages/staff-roster";
 import SignOffPage from "@/pages/sign-off";
 import IncidentsPage from "@/pages/incidents";
+import PATTrackPage from "@/pages/pat-track";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -129,6 +130,7 @@ function ProtectedRoutes() {
       <Route path="/daily-track-pm" component={DailyTrackPmPage} />
       <Route path="/daily-track-status" component={DailyTrackStatusPage} />
       <Route path="/incidents" component={IncidentsPage} />
+      <Route path="/pat-track" component={PATTrackPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}

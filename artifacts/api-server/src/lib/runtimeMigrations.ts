@@ -267,6 +267,7 @@ export async function runRuntimeMigrations() {
     await migrateMobileSessions();
     await migrateIncidents();
     await migrateSousVide();
+    await migratePATtrack();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1028,6 +1029,47 @@ async function migrateSousVide() {
   await db.execute(sql`
     ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS sous_vide jsonb NOT NULL DEFAULT '[]'
   `);
+}
+
+async function migratePATtrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_appliances" (
+      "id"              serial PRIMARY KEY,
+      "client_id"       integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"         integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "name"            text NOT NULL,
+      "appliance_type"  text NOT NULL DEFAULT 'Other',
+      "location"        text,
+      "asset_tag"       text,
+      "description"     text,
+      "active"          boolean NOT NULL DEFAULT true,
+      "created_at"      timestamp NOT NULL DEFAULT now(),
+      "updated_at"      timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_appliances_client" ON "pat_appliances" ("client_id")`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_tests" (
+      "id"                    serial PRIMARY KEY,
+      "client_id"             integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "appliance_id"          integer NOT NULL REFERENCES "pat_appliances"("id") ON DELETE CASCADE,
+      "test_date"             date NOT NULL,
+      "result"                text NOT NULL DEFAULT 'pass',
+      "next_test_date"        date,
+      "tested_by"             text,
+      "visual_inspection"     text DEFAULT 'pass',
+      "earth_continuity_ohms" text,
+      "insulation_mohms"      text,
+      "operating_current"     text,
+      "notes"                 text,
+      "created_by"            integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"            timestamp NOT NULL DEFAULT now(),
+      "updated_at"            timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_client" ON "pat_tests" ("client_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_appliance" ON "pat_tests" ("appliance_id")`);
 }
 
 async function migrateMobileSessions() {

@@ -1,0 +1,1024 @@
+import { useState, useMemo, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { AppLayout } from "@/components/layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
+import {
+  useGetPATTrackConfig,
+  getGetPATTrackConfigQueryKey,
+  useUpdatePATTrackConfig,
+} from "@workspace/api-client-react";
+import {
+  Zap, Plus, AlertTriangle, CheckCircle2, Clock, Pencil, Trash2,
+  Lock, Search, Settings, X, ClipboardList, PackageCheck,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { format, addMonths, parseISO, isValid } from "date-fns";
+
+// ─── Constants ─────────────────────────────────────────────────────────────────
+
+const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+
+const APPLIANCE_TYPES = [
+  "Class I", "Class II", "Class III",
+  "Extension Lead", "IT Equipment", "Portable Tool",
+  "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other",
+] as const;
+
+const ITEM_RESULTS = ["pass", "fail", "na"] as const;
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+interface Appliance {
+  id: number;
+  client_id: number;
+  site_id: number | null;
+  name: string;
+  appliance_type: string;
+  location: string | null;
+  asset_tag: string | null;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  last_test_date: string | null;
+  last_result: string | null;
+  next_test_date: string | null;
+  last_tested_by: string | null;
+}
+
+interface PATTest {
+  id: number;
+  client_id: number;
+  appliance_id: number;
+  test_date: string;
+  result: string;
+  next_test_date: string | null;
+  tested_by: string | null;
+  visual_inspection: string | null;
+  earth_continuity_ohms: string | null;
+  insulation_mohms: string | null;
+  operating_current: string | null;
+  notes: string | null;
+  created_at: string;
+  appliance_name: string;
+  appliance_type: string;
+  asset_tag: string | null;
+}
+
+interface PATStatus {
+  totalAppliances: number;
+  untested: number;
+  overdue: number;
+  dueSoon: number;
+  ok: number;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function todayIso() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function addDays(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split("T")[0];
+}
+
+function parseJsonArray<T>(v: string | undefined): T[] {
+  if (!v) return [];
+  try { const r = JSON.parse(v); return Array.isArray(r) ? r : []; } catch { return []; }
+}
+
+function applianceStatus(a: Appliance): "overdue" | "due-soon" | "ok" | "untested" {
+  if (!a.next_test_date) return "untested";
+  const today = todayIso();
+  const in30 = addDays(30);
+  if (a.next_test_date < today) return "overdue";
+  if (a.next_test_date <= in30) return "due-soon";
+  return "ok";
+}
+
+function StatusBadge({ status }: { status: ReturnType<typeof applianceStatus> }) {
+  if (status === "overdue")   return <Badge className="bg-rose-100 text-rose-800 border-rose-200 rounded-sm text-xs">Overdue</Badge>;
+  if (status === "due-soon")  return <Badge className="bg-amber-100 text-amber-800 border-amber-200 rounded-sm text-xs">Due soon</Badge>;
+  if (status === "ok")        return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 rounded-sm text-xs">Up to date</Badge>;
+  return <Badge className="bg-slate-100 text-slate-600 border-slate-200 rounded-sm text-xs">Not tested</Badge>;
+}
+
+function ResultBadge({ result }: { result: string }) {
+  if (result === "pass") return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 rounded-sm text-xs">Pass</Badge>;
+  if (result === "fail") return <Badge className="bg-rose-100 text-rose-800 border-rose-200 rounded-sm text-xs">Fail</Badge>;
+  return <Badge className="bg-slate-100 text-slate-600 border-slate-200 rounded-sm text-xs">{result}</Badge>;
+}
+
+// ─── apiFetch ─────────────────────────────────────────────────────────────────
+
+async function apiFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${baseUrl}/api/pat-track${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...opts?.headers },
+    ...opts,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(msg || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+// ─── PATConfigDialog ──────────────────────────────────────────────────────────
+
+function PATConfigDialog() {
+  const [open, setOpen] = useState(false);
+  const [defaultTester, setDefaultTester] = useState("");
+  const [retestMonths, setRetestMonths] = useState("12");
+  const [locations, setLocations] = useState<string[]>([]);
+  const [newLocation, setNewLocation] = useState("");
+  const [showEarthBond, setShowEarthBond] = useState(true);
+  const [showInsulation, setShowInsulation] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: config } = useGetPATTrackConfig();
+  const updateConfig = useUpdatePATTrackConfig();
+
+  useEffect(() => {
+    if (!config || !open) return;
+    setDefaultTester(config.pat_default_tester ?? "");
+    setRetestMonths(config.pat_retest_months ?? "12");
+    setLocations(parseJsonArray<string>(config.pat_locations));
+    setShowEarthBond(config.pat_show_earth_bond !== "false");
+    setShowInsulation(config.pat_show_insulation !== "false");
+  }, [config, open]);
+
+  const handleSave = () => {
+    setSaving(true);
+    updateConfig.mutate(
+      {
+        data: {
+          pat_default_tester:  defaultTester,
+          pat_retest_months:   retestMonths,
+          pat_locations:       JSON.stringify(locations.filter(Boolean)),
+          pat_show_earth_bond: showEarthBond ? "true" : "false",
+          pat_show_insulation: showInsulation ? "true" : "false",
+        },
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetPATTrackConfigQueryKey() });
+          toast({ title: "Template saved" });
+          setOpen(false);
+        },
+        onError: (e: any) => toast({ title: "Failed to save", description: e.message, variant: "destructive" }),
+        onSettled: () => setSaving(false),
+      }
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-1.5 rounded-sm h-8">
+          <Settings className="w-3.5 h-3.5" /> Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg rounded-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="w-4 h-4" /> PATtrack Template Settings
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-5 py-1 max-h-[65vh] overflow-y-auto pr-1">
+
+          {/* Defaults */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Defaults</p>
+            <div>
+              <Label>Default tester name</Label>
+              <Input className="mt-1 rounded-sm" value={defaultTester}
+                onChange={e => setDefaultTester(e.target.value)} placeholder="e.g. John Smith" />
+            </div>
+            <div>
+              <Label>Default retest interval (months)</Label>
+              <Select value={retestMonths} onValueChange={setRetestMonths}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="3">3 months (quarterly)</SelectItem>
+                  <SelectItem value="6">6 months (twice yearly)</SelectItem>
+                  <SelectItem value="12">12 months (annual)</SelectItem>
+                  <SelectItem value="24">24 months (every 2 years)</SelectItem>
+                  <SelectItem value="48">48 months (every 4 years)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Sets the default "next test date" when logging a new test</p>
+            </div>
+          </div>
+
+          {/* Test fields */}
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Optional test fields</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Earth bond continuity (Ω)</p>
+                <p className="text-xs text-muted-foreground">Show earth continuity reading field (for Class I appliances)</p>
+              </div>
+              <Switch checked={showEarthBond} onCheckedChange={setShowEarthBond} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Insulation resistance (MΩ)</p>
+                <p className="text-xs text-muted-foreground">Show insulation resistance reading field</p>
+              </div>
+              <Switch checked={showInsulation} onCheckedChange={setShowInsulation} />
+            </div>
+          </div>
+
+          {/* Locations */}
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Locations / areas</p>
+            <p className="text-xs text-muted-foreground">Suggested locations that appear as quick-pick options when adding appliances</p>
+            <div className="flex gap-2">
+              <Input className="rounded-sm flex-1" value={newLocation}
+                onChange={e => setNewLocation(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && newLocation.trim()) {
+                    e.preventDefault();
+                    if (!locations.includes(newLocation.trim())) setLocations(l => [...l, newLocation.trim()]);
+                    setNewLocation("");
+                  }
+                }}
+                placeholder="e.g. Office, Staff Kitchen, Workshop" />
+              <Button size="sm" variant="outline" className="rounded-sm" onClick={() => {
+                if (newLocation.trim() && !locations.includes(newLocation.trim())) {
+                  setLocations(l => [...l, newLocation.trim()]); setNewLocation("");
+                }
+              }}>Add</Button>
+            </div>
+            {locations.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {locations.map(loc => (
+                  <span key={loc} className="inline-flex items-center gap-1 bg-muted rounded-sm px-2 py-0.5 text-xs">
+                    {loc}
+                    <button onClick={() => setLocations(l => l.filter(x => x !== loc))} className="hover:text-destructive">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={saving} className="rounded-sm">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-sm">
+            {saving ? "Saving…" : "Save template"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── ApplianceDialog ──────────────────────────────────────────────────────────
+
+interface ApplianceDialogProps {
+  appliance?: Appliance | null;
+  onSaved: () => void;
+  onClose: () => void;
+  open: boolean;
+  sites: { id: number; name: string }[];
+  config: any;
+}
+
+function ApplianceDialog({ appliance, onSaved, onClose, open, sites, config }: ApplianceDialogProps) {
+  const isEdit = !!appliance;
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const locations = parseJsonArray<string>(config?.pat_locations);
+
+  const blank = {
+    name: "", applianceType: "Other", location: "", assetTag: "",
+    description: "", siteId: "", active: true,
+  };
+  const [form, setForm] = useState(blank);
+
+  const reset = () => setForm(appliance ? {
+    name: appliance.name, applianceType: appliance.appliance_type,
+    location: appliance.location ?? "", assetTag: appliance.asset_tag ?? "",
+    description: appliance.description ?? "",
+    siteId: appliance.site_id ? String(appliance.site_id) : "",
+    active: appliance.active,
+  } : blank);
+
+  useEffect(() => { if (open) reset(); }, [open]);
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast({ title: "Appliance name is required", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const body = {
+        name: form.name.trim(), applianceType: form.applianceType,
+        location: form.location.trim() || null, assetTag: form.assetTag.trim() || null,
+        description: form.description.trim() || null,
+        siteId: form.siteId ? parseInt(form.siteId, 10) : null,
+        active: form.active,
+      };
+      if (isEdit) {
+        await apiFetch(`/appliances/${appliance!.id}`, { method: "PUT", body: JSON.stringify(body) });
+      } else {
+        await apiFetch("/appliances", { method: "POST", body: JSON.stringify(body) });
+      }
+      toast({ title: isEdit ? "Appliance updated" : "Appliance added" });
+      onSaved(); onClose();
+    } catch (err: any) {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
+      <DialogContent className="max-w-md rounded-sm" onOpenAutoFocus={reset}>
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Edit Appliance" : "Add Appliance"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-1 max-h-[65vh] overflow-y-auto pr-1">
+          <div>
+            <Label>Appliance name *</Label>
+            <Input className="mt-1 rounded-sm" value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Staff Room Kettle, Office Toaster" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Appliance type</Label>
+              <Select value={form.applianceType} onValueChange={v => setForm(f => ({ ...f, applianceType: v }))}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {APPLIANCE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Asset tag <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input className="mt-1 rounded-sm" value={form.assetTag}
+                onChange={e => setForm(f => ({ ...f, assetTag: e.target.value }))}
+                placeholder="e.g. PAT-001" />
+            </div>
+          </div>
+          <div>
+            <Label>Location / area <span className="text-muted-foreground text-xs">optional</span></Label>
+            {locations.length > 0 && <datalist id="pat-locations-list">{locations.map(l => <option key={l} value={l} />)}</datalist>}
+            <Input className="mt-1 rounded-sm" value={form.location}
+              list={locations.length > 0 ? "pat-locations-list" : undefined}
+              onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+              placeholder="e.g. Staff Kitchen, Office A" />
+          </div>
+          <div>
+            <Label>Description <span className="text-muted-foreground text-xs">optional</span></Label>
+            <Input className="mt-1 rounded-sm" value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              placeholder="Model, make, serial number…" />
+          </div>
+          {sites.length > 0 && (
+            <div>
+              <Label>Site <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All sites</SelectItem>
+                  {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {isEdit && (
+            <div className="flex items-center justify-between border border-border rounded-sm px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">Active</p>
+                <p className="text-xs text-muted-foreground">Inactive appliances are hidden from the register</p>
+              </div>
+              <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} />
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-sm">
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Add appliance"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── TestDialog ───────────────────────────────────────────────────────────────
+
+interface TestDialogProps {
+  test?: PATTest | null;
+  appliances: Appliance[];
+  onSaved: () => void;
+  onClose: () => void;
+  open: boolean;
+  config: any;
+  presetApplianceId?: number;
+}
+
+function TestDialog({ test, appliances, onSaved, onClose, open, config, presetApplianceId }: TestDialogProps) {
+  const isEdit = !!test;
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const retestMonths = parseInt(config?.pat_retest_months ?? "12", 10) || 12;
+  const showEarthBond = config?.pat_show_earth_bond !== "false";
+  const showInsulation = config?.pat_show_insulation !== "false";
+
+  const computeNextDate = (testDate: string) => {
+    if (!testDate) return "";
+    try {
+      const d = addMonths(parseISO(testDate), retestMonths);
+      return isValid(d) ? d.toISOString().split("T")[0] : "";
+    } catch { return ""; }
+  };
+
+  const blank = {
+    applianceId: presetApplianceId ? String(presetApplianceId) : "",
+    testDate: todayIso(), result: "pass", nextTestDate: computeNextDate(todayIso()),
+    testedBy: config?.pat_default_tester ?? "",
+    visualInspection: "pass", earthContinuityOhms: "", insulationMohms: "",
+    operatingCurrent: "", notes: "",
+  };
+  const [form, setForm] = useState(blank);
+
+  const reset = () => setForm(test ? {
+    applianceId: String(test.appliance_id), testDate: test.test_date,
+    result: test.result, nextTestDate: test.next_test_date ?? "",
+    testedBy: test.tested_by ?? "", visualInspection: test.visual_inspection ?? "pass",
+    earthContinuityOhms: test.earth_continuity_ohms ?? "",
+    insulationMohms: test.insulation_mohms ?? "",
+    operatingCurrent: test.operating_current ?? "",
+    notes: test.notes ?? "",
+  } : { ...blank, applianceId: presetApplianceId ? String(presetApplianceId) : "", testedBy: config?.pat_default_tester ?? "" });
+
+  useEffect(() => { if (open) reset(); }, [open, config]);
+
+  // Auto-compute next test date when test date changes (new tests only)
+  useEffect(() => {
+    if (isEdit || !form.testDate) return;
+    setForm(f => ({ ...f, nextTestDate: computeNextDate(f.testDate) }));
+  }, [form.testDate, retestMonths]);
+
+  const handleSave = async () => {
+    if (!form.applianceId) { toast({ title: "Select an appliance", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const body = {
+        applianceId:         parseInt(form.applianceId, 10),
+        testDate:            form.testDate,
+        result:              form.result,
+        nextTestDate:        form.nextTestDate || null,
+        testedBy:            form.testedBy.trim() || null,
+        visualInspection:    form.visualInspection || null,
+        earthContinuityOhms: form.earthContinuityOhms.trim() || null,
+        insulationMohms:     form.insulationMohms.trim() || null,
+        operatingCurrent:    form.operatingCurrent.trim() || null,
+        notes:               form.notes.trim() || null,
+      };
+      if (isEdit) {
+        await apiFetch(`/tests/${test!.id}`, { method: "PUT", body: JSON.stringify(body) });
+      } else {
+        await apiFetch("/tests", { method: "POST", body: JSON.stringify(body) });
+      }
+      toast({ title: isEdit ? "Test record updated" : "Test recorded" });
+      onSaved(); onClose();
+    } catch (err: any) {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  };
+
+  const activeAppliances = appliances.filter(a => a.active);
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
+      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-yellow-600" />
+            {isEdit ? "Edit PAT Test Record" : "Log PAT Test"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-1 max-h-[65vh] overflow-y-auto pr-1">
+
+          {/* Appliance */}
+          <div>
+            <Label>Appliance *</Label>
+            <Select value={form.applianceId} onValueChange={v => setForm(f => ({ ...f, applianceId: v }))}>
+              <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select appliance…" /></SelectTrigger>
+              <SelectContent>
+                {activeAppliances.map(a => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.name}{a.asset_tag ? ` (${a.asset_tag})` : ""}{a.location ? ` — ${a.location}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Date & Result */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Test date *</Label>
+              <Input type="date" className="mt-1 rounded-sm" value={form.testDate}
+                onChange={e => setForm(f => ({ ...f, testDate: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Overall result *</Label>
+              <Select value={form.result} onValueChange={v => setForm(f => ({ ...f, result: v }))}>
+                <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pass">Pass ✓</SelectItem>
+                  <SelectItem value="fail">Fail ✗</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Tester & Next date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Tested by <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input className="mt-1 rounded-sm" value={form.testedBy}
+                onChange={e => setForm(f => ({ ...f, testedBy: e.target.value }))}
+                placeholder="Tester name" />
+            </div>
+            <div>
+              <Label>Next test due <span className="text-muted-foreground text-xs">optional</span></Label>
+              <Input type="date" className="mt-1 rounded-sm" value={form.nextTestDate}
+                onChange={e => setForm(f => ({ ...f, nextTestDate: e.target.value }))} />
+            </div>
+          </div>
+
+          {/* Visual inspection */}
+          <div>
+            <Label>Visual inspection</Label>
+            <Select value={form.visualInspection} onValueChange={v => setForm(f => ({ ...f, visualInspection: v }))}>
+              <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pass">Pass</SelectItem>
+                <SelectItem value="fail">Fail</SelectItem>
+                <SelectItem value="na">N/A</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Electrical measurements */}
+          {(showEarthBond || showInsulation) && (
+            <div className="border border-border rounded-sm p-3 space-y-3 bg-muted/20">
+              <p className="text-xs font-medium text-muted-foreground">Electrical measurements</p>
+              <div className="grid grid-cols-2 gap-3">
+                {showEarthBond && (
+                  <div>
+                    <Label>Earth continuity (Ω) <span className="text-muted-foreground text-xs">optional</span></Label>
+                    <Input className="mt-1 rounded-sm" value={form.earthContinuityOhms}
+                      onChange={e => setForm(f => ({ ...f, earthContinuityOhms: e.target.value }))}
+                      placeholder="e.g. 0.05" />
+                  </div>
+                )}
+                {showInsulation && (
+                  <div>
+                    <Label>Insulation resistance (MΩ) <span className="text-muted-foreground text-xs">optional</span></Label>
+                    <Input className="mt-1 rounded-sm" value={form.insulationMohms}
+                      onChange={e => setForm(f => ({ ...f, insulationMohms: e.target.value }))}
+                      placeholder="e.g. 2.0" />
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label>Operating current (A) <span className="text-muted-foreground text-xs">optional</span></Label>
+                <Input className="mt-1 rounded-sm" value={form.operatingCurrent}
+                  onChange={e => setForm(f => ({ ...f, operatingCurrent: e.target.value }))}
+                  placeholder="e.g. 3.5" />
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          <div>
+            <Label>Notes <span className="text-muted-foreground text-xs">optional</span></Label>
+            <Textarea className="mt-1 rounded-sm" value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              rows={2} placeholder="Defects noted, actions taken…" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving} className="rounded-sm">Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-sm">
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Log test"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Main page ─────────────────────────────────────────────────────────────────
+
+export default function PATTrackPage() {
+  const { user } = useAuth();
+  const canAdmin = useCanAdmin();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [q, setQ] = useState("");
+  const [activeTab, setActiveTab] = useState<"appliances" | "tests">("appliances");
+
+  // Dialog state
+  const [applianceDialog, setApplianceDialog] = useState(false);
+  const [editAppliance, setEditAppliance] = useState<Appliance | null>(null);
+  const [testDialog, setTestDialog] = useState(false);
+  const [editTest, setEditTest] = useState<PATTest | null>(null);
+  const [presetApplianceId, setPresetApplianceId] = useState<number | undefined>();
+  const [deleteApplianceId, setDeleteApplianceId] = useState<number | null>(null);
+  const [deleteTestId, setDeleteTestId] = useState<number | null>(null);
+
+  // Data
+  const { data: appliances = [], refetch: refetchAppliances } = useQuery<Appliance[]>({
+    queryKey: ["/api/pat-track/appliances"],
+    queryFn: () => apiFetch("/appliances"),
+  });
+  const { data: tests = [], refetch: refetchTests } = useQuery<PATTest[]>({
+    queryKey: ["/api/pat-track/tests"],
+    queryFn: () => apiFetch("/tests"),
+  });
+  const { data: status } = useQuery<PATStatus>({
+    queryKey: ["/api/pat-track/status"],
+    queryFn: () => apiFetch("/status"),
+  });
+  const { data: sites = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["/api/sites"],
+    queryFn: () => fetch(`${baseUrl}/api/sites`, { credentials: "include" }).then(r => r.json()),
+  });
+  const { data: config } = useGetPATTrackConfig();
+
+  const refetchAll = () => {
+    refetchAppliances();
+    refetchTests();
+    queryClient.invalidateQueries({ queryKey: ["/api/pat-track/status"] });
+  };
+
+  // Filtered lists
+  const filteredAppliances = useMemo(() => {
+    const lq = q.toLowerCase();
+    return appliances.filter(a =>
+      a.name.toLowerCase().includes(lq) ||
+      (a.appliance_type ?? "").toLowerCase().includes(lq) ||
+      (a.location ?? "").toLowerCase().includes(lq) ||
+      (a.asset_tag ?? "").toLowerCase().includes(lq)
+    );
+  }, [appliances, q]);
+
+  const filteredTests = useMemo(() => {
+    const lq = q.toLowerCase();
+    return tests.filter(t =>
+      t.appliance_name.toLowerCase().includes(lq) ||
+      (t.tested_by ?? "").toLowerCase().includes(lq) ||
+      (t.asset_tag ?? "").toLowerCase().includes(lq)
+    );
+  }, [tests, q]);
+
+  // Delete handlers
+  const deleteAppliance = async () => {
+    if (!deleteApplianceId) return;
+    try {
+      await apiFetch(`/appliances/${deleteApplianceId}`, { method: "DELETE" });
+      toast({ title: "Appliance deleted" });
+      refetchAll();
+    } catch (err: any) {
+      toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+    } finally { setDeleteApplianceId(null); }
+  };
+
+  const deleteTest = async () => {
+    if (!deleteTestId) return;
+    try {
+      await apiFetch(`/tests/${deleteTestId}`, { method: "DELETE" });
+      toast({ title: "Test record deleted" });
+      refetchAll();
+    } catch (err: any) {
+      toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+    } finally { setDeleteTestId(null); }
+  };
+
+  const lockUI = user?.role === "client_viewer";
+
+  return (
+    <AppLayout title="PATtrack">
+      <div className="space-y-6">
+
+        {/* ── Status strip ─────────────────────────────────────────────── */}
+        {status && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Total appliances", value: status.totalAppliances, sub: "in register", icon: PackageCheck, cls: "text-primary" },
+              { label: "Overdue", value: status.overdue, sub: "need testing now", icon: AlertTriangle, cls: status.overdue > 0 ? "text-rose-600" : "text-emerald-600" },
+              { label: "Due within 30 days", value: status.dueSoon, sub: "upcoming", icon: Clock, cls: status.dueSoon > 0 ? "text-amber-600" : "text-emerald-600" },
+              { label: "Up to date", value: status.ok, sub: "within test window", icon: CheckCircle2, cls: "text-emerald-600" },
+            ].map(s => (
+              <Card key={s.label} className="border-border/50 shadow-sm">
+                <CardContent className="p-4 flex items-start gap-3">
+                  <s.icon className={cn("w-5 h-5 mt-0.5 flex-shrink-0", s.cls)} />
+                  <div>
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                    <p className={cn("text-2xl font-bold", s.cls)}>{s.value}</p>
+                    <p className="text-xs text-muted-foreground">{s.sub}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* ── Header ───────────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm text-muted-foreground mt-1">
+            In-house PAT testing register — maintain your appliance inventory and keep test records up to date
+          </p>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canAdmin && <PATConfigDialog />}
+            {!lockUI && (
+              <Button className="gap-2 rounded-sm h-8 text-sm" size="sm" onClick={() => {
+                setEditTest(null); setPresetApplianceId(undefined); setTestDialog(true);
+              }}>
+                <Plus className="w-4 h-4" /> Log Test
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Search ───────────────────────────────────────────────────── */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-9 rounded-sm" placeholder="Search appliances, locations, asset tags…"
+            value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+
+        {/* ── Tabs ─────────────────────────────────────────────────────── */}
+        <Tabs value={activeTab} onValueChange={v => setActiveTab(v as any)}>
+          <div className="flex items-center justify-between gap-3">
+            <TabsList className="rounded-sm">
+              <TabsTrigger value="appliances" className="rounded-sm gap-1.5">
+                <PackageCheck className="w-3.5 h-3.5" /> Appliances
+                <span className="ml-1 text-xs text-muted-foreground">({appliances.length})</span>
+              </TabsTrigger>
+              <TabsTrigger value="tests" className="rounded-sm gap-1.5">
+                <ClipboardList className="w-3.5 h-3.5" /> Test history
+                <span className="ml-1 text-xs text-muted-foreground">({tests.length})</span>
+              </TabsTrigger>
+            </TabsList>
+            {activeTab === "appliances" && !lockUI && canAdmin && (
+              <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8"
+                onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
+                <Plus className="w-3.5 h-3.5" /> Add appliance
+              </Button>
+            )}
+          </div>
+
+          {/* ── Appliances tab ──────────────────────────────────────── */}
+          <TabsContent value="appliances" className="mt-4">
+            {filteredAppliances.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <Zap className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">{appliances.length === 0 ? "No appliances in register yet — add your first appliance to get started" : "No appliances match your search"}</p>
+                {appliances.length === 0 && canAdmin && !lockUI && (
+                  <Button variant="outline" className="mt-4 rounded-sm gap-2"
+                    onClick={() => { setEditAppliance(null); setApplianceDialog(true); }}>
+                    <Plus className="w-4 h-4" /> Add first appliance
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="border border-border rounded-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40">
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Appliance</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Type</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Location</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Last tested</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Next due</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Status</th>
+                      <th className="px-4 py-2.5 w-28"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredAppliances.map(a => {
+                      const st = applianceStatus(a);
+                      return (
+                        <tr key={a.id} className="group hover:bg-muted/20 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-sm">{a.name}</p>
+                            {a.asset_tag && <p className="text-xs text-muted-foreground">{a.asset_tag}</p>}
+                          </td>
+                          <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">{a.appliance_type}</td>
+                          <td className="px-4 py-3 hidden md:table-cell text-xs text-muted-foreground">{a.location ?? "—"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-xs text-muted-foreground">
+                            {a.last_test_date ? (
+                              <span>
+                                {format(parseISO(a.last_test_date), "dd MMM yyyy")}
+                                {a.last_result && <> — <ResultBadge result={a.last_result} /></>}
+                              </span>
+                            ) : <span className="text-muted-foreground/50">Never</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {a.next_test_date ? format(parseISO(a.next_test_date), "dd MMM yyyy") : <span className="text-muted-foreground/50">—</span>}
+                          </td>
+                          <td className="px-4 py-3"><StatusBadge status={st} /></td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {!lockUI && (
+                                <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="Log test"
+                                  onClick={() => { setEditTest(null); setPresetApplianceId(a.id); setTestDialog(true); }}>
+                                  <Zap className="w-3.5 h-3.5 text-yellow-600" />
+                                </Button>
+                              )}
+                              {canAdmin && (
+                                <>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm"
+                                    onClick={() => { setEditAppliance(a); setApplianceDialog(true); }}>
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    onClick={() => setDeleteApplianceId(a.id)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="border-t border-border px-4 py-2 bg-muted/20 text-xs text-muted-foreground">
+                  Showing {filteredAppliances.length} of {appliances.length} appliance{appliances.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Tests tab ───────────────────────────────────────────── */}
+          <TabsContent value="tests" className="mt-4">
+            {filteredTests.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <ClipboardList className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">{tests.length === 0 ? "No test records yet — log your first PAT test to get started" : "No tests match your search"}</p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40">
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Appliance</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Test date</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Result</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Tested by</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Next due</th>
+                      <th className="px-4 py-2.5 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredTests.map(t => (
+                      <tr key={t.id} className="group hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-sm">{t.appliance_name}</p>
+                          {t.asset_tag && <p className="text-xs text-muted-foreground">{t.asset_tag}</p>}
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell text-sm">
+                          {format(parseISO(t.test_date), "dd MMM yyyy")}
+                        </td>
+                        <td className="px-4 py-3"><ResultBadge result={t.result} /></td>
+                        <td className="px-4 py-3 hidden md:table-cell text-xs text-muted-foreground">
+                          {t.tested_by ?? <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell text-xs text-muted-foreground">
+                          {t.next_test_date ? format(parseISO(t.next_test_date), "dd MMM yyyy") : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {!lockUI && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm"
+                                onClick={() => { setEditTest(t); setTestDialog(true); }}>
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {canAdmin && (
+                              <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => setDeleteTestId(t.id)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="border-t border-border px-4 py-2 bg-muted/20 text-xs text-muted-foreground">
+                  Showing {filteredTests.length} of {tests.length} test record{tests.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* ── Legal footer ─────────────────────────────────────────────── */}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-sm p-4 text-xs text-yellow-900">
+          <p className="font-semibold mb-1">PAT Testing — legal framework</p>
+          <p>
+            The Electricity at Work Regulations 1989 require that all electrical systems (including appliances) are maintained in a safe condition.
+            The IET Code of Practice for In-Service Inspection and Testing of Electrical Equipment provides recommended inspection intervals based on appliance class and environment.
+            PAT testing records are not a legal requirement in themselves, but they demonstrate due diligence if an incident occurs.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Dialogs ──────────────────────────────────────────────────────── */}
+      <ApplianceDialog
+        open={applianceDialog}
+        appliance={editAppliance}
+        sites={sites}
+        config={config}
+        onSaved={refetchAll}
+        onClose={() => { setApplianceDialog(false); setEditAppliance(null); }}
+      />
+
+      <TestDialog
+        open={testDialog}
+        test={editTest}
+        appliances={appliances}
+        config={config}
+        presetApplianceId={presetApplianceId}
+        onSaved={refetchAll}
+        onClose={() => { setTestDialog(false); setEditTest(null); setPresetApplianceId(undefined); }}
+      />
+
+      {/* Delete appliance confirm */}
+      <AlertDialog open={!!deleteApplianceId} onOpenChange={() => setDeleteApplianceId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete appliance?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the appliance and all its test records. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteAppliance} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete test confirm */}
+      <AlertDialog open={!!deleteTestId} onOpenChange={() => setDeleteTestId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete test record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this PAT test record. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteTest} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </AppLayout>
+  );
+}

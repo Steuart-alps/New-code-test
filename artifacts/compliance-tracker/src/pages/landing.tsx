@@ -219,6 +219,27 @@ const MODULES = [
       "Follow-up / re-inspection date tracking",
     ],
   },
+  {
+    key: "pattrack",
+    label: "PATtrack",
+    price: 10,
+    icon: Zap,
+    color: "text-yellow-700",
+    bg: "bg-yellow-50",
+    border: "border-yellow-200",
+    activeBorder: "border-yellow-500",
+    activeBg: "bg-yellow-50",
+    required: false,
+    description: "In-house PAT testing register — maintain a full appliance inventory, log pass/fail results, and track next test due dates across your sites.",
+    features: [
+      "Appliance register (Class I, II, extension leads, IT equipment…)",
+      "Pass / fail test records with tester name",
+      "Automatic next test due date tracking",
+      "Earth continuity and insulation resistance fields",
+      "Overdue and due-soon status dashboard",
+      "Asset tag and location per appliance",
+    ],
+  },
 ];
 
 const FEATURES = [

@@ -534,6 +534,16 @@ export interface GreenTrackConfig {
 }
 export type UpdateGreenTrackConfig200 = { ok: boolean };
 
+export interface PATTrackConfig {
+  pat_default_tester?: string;
+  pat_retest_months?: string;
+  /** JSON: string[] */
+  pat_locations?: string;
+  pat_show_earth_bond?: string;
+  pat_show_insulation?: string;
+}
+export type UpdatePATTrackConfig200 = { ok: boolean };
+
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
   siteId?: number;

@@ -33,6 +33,7 @@ import {
   Waves as WavesIcon,
   Tractor,
   Anchor,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -73,6 +74,7 @@ function useNavGroups() {
         { href: "/pool-track",     label: "PoolTrack",       icon: WavesIcon,       serviceKey: "pooltrack" },
         { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
         { href: "/swim-track",     label: "SwimTrack",       icon: Anchor,          serviceKey: "swimtrack" },
+        { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKey: "dailytrack_am" },
         { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKey: "dailytrack_pm" },
       ],
