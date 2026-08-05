@@ -297,7 +297,7 @@ router.put("/config", requireAuth, async (req, res) => {
 
 const VALID_PRESET_KEYS = [
   "hotel-suite", "hotel-classic", "office", "bar-restaurant",
-  "reception", "kitchen", "pro-shop", "greenkeeping",
+  "reception", "kitchen", "pro-shop", "greenkeeping", "retail-shop",
 ] as const;
 
 type ValidPresetKey = (typeof VALID_PRESET_KEYS)[number];

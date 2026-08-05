@@ -22,6 +22,7 @@ export interface AuthClient {
   logoUrl: string | null;
   primaryColor: string;
   active: boolean;
+  businessType?: string | null;
 }
 
 interface AuthContextValue {

@@ -22,7 +22,7 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, type AuthClient } from "@/context/auth-context";
 import {
   useGetPATTrackConfig,
   getGetPATTrackConfigQueryKey,
@@ -192,9 +192,56 @@ const ROOM_PRESETS = {
       { name: "Radio",                              type: "AV Equipment"  },
     ],
   },
+  "retail-shop": {
+    label: "Retail Shop",
+    emoji: "🏪",
+    items: [
+      { name: "POS Terminal / Till",          type: "IT Equipment"      },
+      { name: "Barcode Scanner",              type: "IT Equipment"      },
+      { name: "Receipt Printer",              type: "IT Equipment"      },
+      { name: "Card Payment Terminal",        type: "IT Equipment"      },
+      { name: "Electric Till Drawer",         type: "Class I"           },
+      { name: "Label Printer",                type: "IT Equipment"      },
+      { name: "Security Tag Deactivator",     type: "Class I"           },
+      { name: "Desktop PC",                   type: "IT Equipment"      },
+      { name: "Monitor",                      type: "IT Equipment"      },
+      { name: "Extension Lead",               type: "Extension Lead"    },
+      { name: "CCTV Monitor",                 type: "AV Equipment"      },
+      { name: "Display / Info Screen",        type: "AV Equipment"      },
+      { name: "Electric Fan / Heater",        type: "Class I"           },
+      { name: "Kettle (Staff Room)",          type: "Kitchen Appliance" },
+      { name: "Microwave (Staff Room)",       type: "Kitchen Appliance" },
+      { name: "Refrigerator (Staff Room)",    type: "Kitchen Appliance" },
+    ],
+  },
 } as const;
 
 type PresetKey = keyof typeof ROOM_PRESETS;
+
+// Business type → suggested preset keys (ordered by relevance)
+const BUSINESS_TYPE_PRESETS: Record<string, PresetKey[]> = {
+  hotel_accommodation:    ["hotel-suite", "hotel-classic", "reception", "kitchen", "bar-restaurant"],
+  holiday_park_campsite:  ["reception", "kitchen", "bar-restaurant", "greenkeeping", "office"],
+  leisure_sports_centre:  ["reception", "pro-shop", "kitchen", "office"],
+  restaurant_cafe_pub:    ["bar-restaurant", "kitchen", "reception"],
+  care_home_healthcare:   ["office", "kitchen", "reception"],
+  nursery_school:         ["office", "kitchen", "reception"],
+  offices_commercial:     ["office", "reception"],
+  retail:                 ["retail-shop", "office", "reception"],
+  other:                  Object.keys(ROOM_PRESETS) as PresetKey[],
+};
+
+const BUSINESS_TYPE_LABELS: Record<string, string> = {
+  hotel_accommodation:   "Hotel / Accommodation",
+  holiday_park_campsite: "Holiday Park / Campsite",
+  leisure_sports_centre: "Leisure / Sports Centre",
+  restaurant_cafe_pub:   "Restaurant / Café / Pub",
+  care_home_healthcare:  "Care Home / Healthcare",
+  nursery_school:        "Nursery / School",
+  offices_commercial:    "Offices / Commercial",
+  retail:                "Retail",
+  other:                 "Other",
+};
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -585,6 +632,44 @@ function ApplianceDialog({ appliance, onSaved, onClose, open, sites, config }: A
 
 // ─── TestDialog ───────────────────────────────────────────────────────────────
 
+// ─── PresetGrid helper ────────────────────────────────────────────────────────
+
+function PresetGrid({
+  presetKeys,
+  savedTemplates,
+  onSelect,
+}: {
+  presetKeys: PresetKey[];
+  savedTemplates: Record<string, { name: string; type: string }[]>;
+  onSelect: (key: PresetKey) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {presetKeys.map(key => {
+        const preset = ROOM_PRESETS[key];
+        const isCustomised = !!savedTemplates[key]?.length;
+        const itemCount = isCustomised ? savedTemplates[key].length : preset.items.length;
+        return (
+          <button
+            key={key}
+            onClick={() => onSelect(key)}
+            className="border border-border rounded-sm p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors relative"
+          >
+            {isCustomised && (
+              <span className="absolute top-2 right-2 text-[10px] font-semibold text-primary bg-primary/10 rounded-sm px-1 py-0.5 leading-none">
+                ✦ saved
+              </span>
+            )}
+            <p className="text-2xl mb-1.5">{preset.emoji}</p>
+            <p className="text-sm font-medium leading-tight">{preset.label}</p>
+            <p className="text-xs text-muted-foreground mt-1">{itemCount} items</p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── PresetDialog ─────────────────────────────────────────────────────────────
 
 interface PresetItem {
@@ -593,12 +678,13 @@ interface PresetItem {
   checked: boolean;
 }
 
-function PresetDialog({ open, onClose, onSaved, sites, config }: {
+function PresetDialog({ open, onClose, onSaved, sites, config, businessType }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
   sites: { id: number; name: string }[];
   config: any;
+  businessType?: string | null;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -612,6 +698,7 @@ function PresetDialog({ open, onClose, onSaved, sites, config }: {
   const [resettingTemplate, setResettingTemplate] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [newItemType, setNewItemType] = useState("Other");
+  const [showOther, setShowOther] = useState(false);
 
   const locations = parseJsonArray<string>(config?.pat_locations);
 
@@ -622,11 +709,19 @@ function PresetDialog({ open, onClose, onSaved, sites, config }: {
     enabled: open,
   });
 
+  // Derive suggested / other preset keys from business type
+  const allPresetKeys = Object.keys(ROOM_PRESETS) as PresetKey[];
+  const suggestedKeys: PresetKey[] = businessType
+    ? (BUSINESS_TYPE_PRESETS[businessType] ?? allPresetKeys)
+    : allPresetKeys;
+  const otherKeys: PresetKey[] = allPresetKeys.filter(k => !suggestedKeys.includes(k));
+  const hasSections = otherKeys.length > 0; // only show sections when business type narrows things down
+
   // Reset when closed
   useEffect(() => {
     if (!open) {
       setStep(1); setSelectedPreset(""); setLocation(""); setSiteId(""); setItems([]);
-      setNewItemName(""); setNewItemType("Other");
+      setNewItemName(""); setNewItemType("Other"); setShowOther(false);
     }
   }, [open]);
 
@@ -723,32 +818,49 @@ function PresetDialog({ open, onClose, onSaved, sites, config }: {
 
         {/* ── Step 1: Choose room type ────────────────────────── */}
         {step === 1 && (
-          <div className="py-2">
-            <p className="text-sm text-muted-foreground mb-4">
-              Select a room or area type to load its appliance list. Saved templates are shown with a ✦ badge.
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {(Object.entries(ROOM_PRESETS) as [PresetKey, (typeof ROOM_PRESETS)[PresetKey]][]).map(([key, preset]) => {
-                const isCustomised = !!savedTemplates[key]?.length;
-                const itemCount = isCustomised ? savedTemplates[key].length : preset.items.length;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => handleSelectPreset(key)}
-                    className="border border-border rounded-sm p-4 text-left hover:border-primary hover:bg-primary/5 transition-colors relative"
-                  >
-                    {isCustomised && (
-                      <span className="absolute top-2 right-2 text-[10px] font-semibold text-primary bg-primary/10 rounded-sm px-1 py-0.5 leading-none">
-                        ✦ saved
-                      </span>
-                    )}
-                    <p className="text-2xl mb-1.5">{preset.emoji}</p>
-                    <p className="text-sm font-medium leading-tight">{preset.label}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{itemCount} items</p>
-                  </button>
-                );
-              })}
+          <div className="py-2 space-y-5">
+            {/* Suggested section (or full grid when no business type) */}
+            <div>
+              {hasSections && (
+                <div className="flex items-center gap-2 mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Suggested for{" "}
+                    {businessType ? BUSINESS_TYPE_LABELS[businessType] ?? "your business" : "your business"}
+                  </p>
+                </div>
+              )}
+              {!hasSections && (
+                <p className="text-sm text-muted-foreground mb-3">
+                  Select a room or area type to load its appliance list. Saved templates are shown with a ✦ badge.
+                </p>
+              )}
+              <PresetGrid
+                presetKeys={suggestedKeys}
+                savedTemplates={savedTemplates}
+                onSelect={handleSelectPreset}
+              />
             </div>
+
+            {/* Other room types (only shown when business type narrows things down) */}
+            {hasSections && (
+              <div>
+                <button
+                  onClick={() => setShowOther(v => !v)}
+                  className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline flex items-center gap-1"
+                >
+                  {showOther ? "▾" : "▸"} Other room types ({otherKeys.length})
+                </button>
+                {showOther && (
+                  <div className="mt-3">
+                    <PresetGrid
+                      presetKeys={otherKeys}
+                      savedTemplates={savedTemplates}
+                      onSelect={handleSelectPreset}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1131,7 +1243,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PATTrackPage() {
-  const { user } = useAuth();
+  const { user, client } = useAuth();
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1467,6 +1579,7 @@ export default function PATTrackPage() {
         open={presetDialog}
         sites={sites}
         config={config}
+        businessType={client?.businessType}
         onSaved={refetchAll}
         onClose={() => setPresetDialog(false)}
       />
