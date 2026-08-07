@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, getClientId } from "../middleware/requireAuth";
 
 const router = Router();
@@ -243,6 +243,57 @@ router.put("/:id", requireAuth, async (req, res) => {
     .returning();
 
   res.json(updated);
+});
+
+// ── Status — due/overdue per check type ───────────────────────────────────────
+router.get("/status", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const MS_DAY = 86400000;
+  const todayDays = Math.floor(Date.now() / MS_DAY);
+  const toUtcDays = (iso: string) => Math.floor(new Date(iso).getTime() / MS_DAY);
+
+  function computeStatus(lastDate: string | null, frequencyDays: number) {
+    if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as const };
+    const dueDays = toUtcDays(lastDate) + frequencyDays;
+    const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
+    const daysUntilDue = dueDays - todayDays;
+    const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
+    const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
+    return { lastDate, dueDate, status };
+  }
+
+  const [diary, weekly, probe, cleanDaily, cleanWeekly, cleanMonthly, taskCountsRes] = await Promise.all([
+    db.execute(sql`SELECT MAX(record_date)::text AS last_date FROM food_safety_records WHERE client_id = ${clientId}`),
+    db.execute(sql`SELECT MAX(week_commencing)::text AS last_date FROM kitchen_weekly_records WHERE client_id = ${clientId}`),
+    db.execute(sql`SELECT MAX(check_date)::text AS last_date FROM kitchen_probe_checks WHERE client_id = ${clientId}`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'daily'`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'weekly'`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'monthly'`),
+    db.execute(sql`
+      SELECT frequency, COUNT(*)::int AS task_count
+      FROM kitchen_cleaning_tasks
+      WHERE client_id = ${clientId} AND active = true
+      GROUP BY frequency
+    `),
+  ]);
+
+  const taskCounts = Object.fromEntries(
+    (taskCountsRes.rows as any[]).map((r: any) => [r.frequency, Number(r.task_count)])
+  );
+
+  const statuses: any[] = [
+    { checkType: "daily_diary",   frequencyDays: 1,  ...computeStatus((diary.rows[0] as any)?.last_date  ?? null, 1) },
+    { checkType: "weekly_review", frequencyDays: 7,  ...computeStatus((weekly.rows[0] as any)?.last_date ?? null, 7) },
+    { checkType: "probe_check",   frequencyDays: 30, ...computeStatus((probe.rows[0] as any)?.last_date  ?? null, 30) },
+  ];
+
+  if ((taskCounts["daily"]   ?? 0) > 0) statuses.push({ checkType: "cleaning_daily",   frequencyDays: 1,  ...computeStatus((cleanDaily.rows[0] as any)?.last_date   ?? null, 1) });
+  if ((taskCounts["weekly"]  ?? 0) > 0) statuses.push({ checkType: "cleaning_weekly",  frequencyDays: 7,  ...computeStatus((cleanWeekly.rows[0] as any)?.last_date  ?? null, 7) });
+  if ((taskCounts["monthly"] ?? 0) > 0) statuses.push({ checkType: "cleaning_monthly", frequencyDays: 30, ...computeStatus((cleanMonthly.rows[0] as any)?.last_date ?? null, 30) });
+
+  res.json(statuses);
 });
 
 export default router;

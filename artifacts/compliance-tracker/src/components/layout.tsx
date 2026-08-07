@@ -12,6 +12,7 @@ import {
   Users,
   LogOut,
   ChevronDown,
+  ArrowLeft,
   ArrowLeftRight,
   AlertOctagon,
   Smartphone,
@@ -280,7 +281,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
 
         {/* Top Header */}
         <header className="h-[80px] bg-white/80 backdrop-blur-md border-b border-border flex items-center justify-between px-6 lg:px-8 z-10 sticky top-0">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {location !== "/dashboard" && (
+              <button
+                onClick={() => window.history.back()}
+                className="p-1.5 rounded-sm hover:bg-muted border border-transparent hover:border-border transition-all text-[#162D42]/60 hover:text-[#162D42]"
+                title="Go back"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
             <h1 className="text-2xl font-display font-medium text-[#162D42]">
               {title}
             </h1>

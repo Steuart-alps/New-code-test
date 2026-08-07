@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "@/lib/api";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -25,7 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
@@ -1088,6 +1089,35 @@ function DailyDiaryTab() {
 
 // ── Page shell ────────────────────────────────────────────────────────────────
 
+// ── Kitchen check status helpers ──────────────────────────────────────────────
+
+type KitchenCheckStatus = { checkType: string; frequencyDays: number; lastDate: string | null; dueDate: string | null; status: "ok" | "due_soon" | "overdue" | "never" };
+
+const KITCHEN_CHECK_LABELS: Record<string, string> = {
+  daily_diary:     "Daily Diary",
+  weekly_review:   "Weekly Review",
+  probe_check:     "Probe Check",
+  cleaning_daily:  "Daily Cleaning",
+  cleaning_weekly: "Weekly Cleaning",
+  cleaning_monthly:"Monthly Cleaning",
+};
+
+const KITCHEN_CHECK_TAB: Record<string, ActiveTab> = {
+  daily_diary:     "diary",
+  weekly_review:   "weekly",
+  probe_check:     "probe",
+  cleaning_daily:  "cleaning",
+  cleaning_weekly: "cleaning",
+  cleaning_monthly:"cleaning",
+};
+
+function KitchenStatusBadge({ status }: { status: KitchenCheckStatus["status"] }) {
+  if (status === "overdue")  return <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 shrink-0"><AlertTriangle className="w-3 h-3 mr-1" />Overdue</Badge>;
+  if (status === "due_soon") return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 shrink-0">Due</Badge>;
+  if (status === "ok")       return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0"><CheckCircle className="w-3 h-3 mr-1" />OK</Badge>;
+  return <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200 shrink-0">Never</Badge>;
+}
+
 const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] = [
   { id: "diary",    label: "Daily Diary",         icon: Calendar,      description: "Daily temperature records, deliveries and corrective actions" },
   { id: "weekly",   label: "Weekly Review",        icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
@@ -1106,6 +1136,16 @@ export default function KitchenPage() {
   const serverLocked = (configError as any)?.status === 403;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("diary");
+  const [checkStatus, setCheckStatus] = useState<KitchenCheckStatus[]>([]);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const r = await apiFetch("/food-safety/status");
+      if (r.ok) setCheckStatus(await r.json());
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { if (hasKitchentrack) loadStatus(); }, [hasKitchentrack, loadStatus]);
 
   if (!hasKitchentrack || serverLocked) {
     return (
@@ -1158,6 +1198,35 @@ export default function KitchenPage() {
           </div>
           {activeTab === "diary" && <ConfigDialog />}
         </div>
+
+        {/* Check status cards */}
+        {checkStatus.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {checkStatus.map(item => (
+              <Card
+                key={item.checkType}
+                className={cn(
+                  "border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                  item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
+                  item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
+                  item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
+                                               "border-l-emerald-500 bg-emerald-50/50"
+                )}
+                onClick={() => setActiveTab(KITCHEN_CHECK_TAB[item.checkType] ?? "diary")}
+              >
+                <CardContent className="px-3 pt-3 pb-2 space-y-1">
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-xs font-medium leading-snug">{KITCHEN_CHECK_LABELS[item.checkType] ?? item.checkType}</p>
+                    <KitchenStatusBadge status={item.status} />
+                  </div>
+                  {item.lastDate && <p className="text-[11px] text-muted-foreground">Last: {format(new Date(item.lastDate), "dd/MM/yy")}</p>}
+                  {item.dueDate  && <p className="text-[11px] text-muted-foreground">Due: {format(new Date(item.dueDate),  "dd/MM/yy")}</p>}
+                  {item.status === "never" && <p className="text-[11px] text-muted-foreground italic">Not recorded</p>}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
 
         {/* Tab bar */}
         <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-full sm:w-auto sm:inline-flex border border-border/50">
