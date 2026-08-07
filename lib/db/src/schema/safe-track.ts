@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, bigint, boolean } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -14,6 +14,11 @@ export const safeRiskAssessmentsTable = pgTable("safe_risk_assessments", {
   status: text("status").notNull().default("draft"),
   version: text("version").notNull().default("1.0"),
   signature: text("signature"),
+  requiresAcknowledgement: boolean("requires_acknowledgement").notNull().default(false),
+  objectPath: text("object_path"),
+  fileName: text("file_name"),
+  fileSize: bigint("file_size", { mode: "number" }),
+  mimeType: text("mime_type"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -29,6 +34,11 @@ export const safeSopsTable = pgTable("safe_sops", {
   version: text("version").notNull().default("1.0"),
   publishedAt: timestamp("published_at"),
   signature: text("signature"),
+  requiresAcknowledgement: boolean("requires_acknowledgement").notNull().default(false),
+  objectPath: text("object_path"),
+  fileName: text("file_name"),
+  fileSize: bigint("file_size", { mode: "number" }),
+  mimeType: text("mime_type"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -86,6 +96,11 @@ export const safeHandbookTable = pgTable("safe_handbook", {
   version: text("version").notNull().default("1.0"),
   publishedAt: timestamp("published_at"),
   signature: text("signature"),
+  requiresAcknowledgement: boolean("requires_acknowledgement").notNull().default(false),
+  objectPath: text("object_path"),
+  fileName: text("file_name"),
+  fileSize: bigint("file_size", { mode: "number" }),
+  mimeType: text("mime_type"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

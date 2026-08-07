@@ -53,14 +53,23 @@ type ColdFoodRow = {
   tempPm: string;             // PM temperature reading (°C)
   correctiveAction: string;   // Action if out of range
 };
-type HotTemperatureRow = {
+type CookingRow = {
   item: string;
-  cookTimeStart: string;      // Time started cooking
-  cookTimeFinish: string;     // Time finished cooking
-  cookCoreTemp: string;       // Core temp at end of cooking (°C)
-  coolTimeStart: string;      // Time cooling started
-  coolTimeFinish: string;     // Time cooling finished
-  reheatCoreTemp: string;     // Core temp when reheated (°C)
+  timeStart: string;          // Time started cooking
+  timeFinish: string;         // Time finished cooking
+  coreTemp: string;           // Core temp at end (°C)
+};
+type CoolingRow = {
+  item: string;
+  timeStart: string;          // Time cooling started
+  timeFinish: string;         // Time cooling finished
+  coreTemp: string;           // Core temp after cooling (°C) — target ≤8°C within 90 min
+};
+type ReheatingRow = {
+  item: string;
+  timeStart: string;          // Time reheating started
+  timeFinish: string;         // Time finished reheating
+  coreTemp: string;           // Core temp (°C)
 };
 type HotHoldingRow = {
   item: string;
@@ -87,6 +96,17 @@ function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): 
 }
 function parseStringArray(raw: string | undefined | null): string[] {
   return parseJsonArray<string>(raw);
+}
+
+/** Returns elapsed minutes between two HH:mm strings, null if either is blank. */
+function coolingMins(start: string, finish: string): number | null {
+  if (!start || !finish) return null;
+  const [sh, sm] = start.split(":").map(Number);
+  const [fh, fm] = finish.split(":").map(Number);
+  if ([sh, sm, fh, fm].some(isNaN)) return null;
+  let m = (fh * 60 + fm) - (sh * 60 + sm);
+  if (m < 0) m += 24 * 60; // overnight wrap
+  return m;
 }
 type ColdUnit = { name: string; type: "fridge" | "freezer" };
 function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"]): ColdUnit[] {
@@ -393,7 +413,9 @@ function DailyDiaryTab() {
 
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
   const [coldFood, setColdFood] = useState<ColdFoodRow[]>([]);
-  const [hotTemperature, setHotTemperature] = useState<HotTemperatureRow[]>([]);
+  const [cooking, setCooking] = useState<CookingRow[]>([]);
+  const [cooling, setCooling] = useState<CoolingRow[]>([]);
+  const [reheating, setReheating] = useState<ReheatingRow[]>([]);
   const [hotHolding, setHotHolding] = useState<HotHoldingRow[]>([]);
   const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
@@ -401,10 +423,22 @@ function DailyDiaryTab() {
 
   useEffect(() => {
     if (record) {
-      // Load saved record — always use saved data, never overwrite with template
       setDeliveries((record.deliveries || []) as DeliveryRow[]);
       setColdFood((record.coldFood || []) as ColdFoodRow[]);
-      setHotTemperature((record.hotTemperature || []) as HotTemperatureRow[]);
+
+      // Support old combined-row format (cookTimeStart field) — migrate to split arrays
+      const rawHot: any[] = (record.hotTemperature || []) as any[];
+      const isOldFormat = rawHot.some(r => "cookTimeStart" in r || "coolTimeStart" in r);
+      if (isOldFormat) {
+        setCooking(rawHot.map(r => ({ item: r.item || "", timeStart: r.cookTimeStart || "", timeFinish: r.cookTimeFinish || "", coreTemp: r.cookCoreTemp || "" })));
+        setCooling(rawHot.filter(r => r.coolTimeStart || r.coolTimeFinish).map(r => ({ item: r.item || "", timeStart: r.coolTimeStart || "", timeFinish: r.coolTimeFinish || "", coreTemp: "" })));
+        setReheating(rawHot.filter(r => r.reheatCoreTemp).map(r => ({ item: r.item || "", timeStart: "", timeFinish: "", coreTemp: r.reheatCoreTemp || "" })));
+      } else {
+        setCooking(rawHot as CookingRow[]);
+        setCooling(((record as any).cooling || []) as CoolingRow[]);
+        setReheating(((record as any).reheating || []) as ReheatingRow[]);
+      }
+
       setHotHolding((record.hotHolding || []) as HotHoldingRow[]);
       setSousVide(((record as any).sousVide || []) as SousVideRow[]);
       setCorrectives(record.correctives || "");
@@ -414,9 +448,8 @@ function DailyDiaryTab() {
       const coldRows: ColdFoodRow[] = templateColdUnits.map(u => ({
         unit: u.name, tempAm: "", tempPm: "", correctiveAction: "",
       }));
-      const hotRows: HotTemperatureRow[] = templateHotItems.map(item => ({
-        item, cookTimeStart: "", cookTimeFinish: "", cookCoreTemp: "",
-        coolTimeStart: "", coolTimeFinish: "", reheatCoreTemp: "",
+      const cookingRows: CookingRow[] = templateHotItems.map(item => ({
+        item, timeStart: "", timeFinish: "", coreTemp: "",
       }));
       const holdingRows: HotHoldingRow[] = templateHoldingItems.map(item => ({
         item, coreTemp: "", timeOfCheck: "",
@@ -426,7 +459,9 @@ function DailyDiaryTab() {
       }));
       setDeliveries([]);
       setColdFood(coldRows);
-      setHotTemperature(hotRows);
+      setCooking(cookingRows);
+      setCooling([]);
+      setReheating([]);
       setHotHolding(holdingRows);
       setSousVide(svRows);
       setCorrectives("");
@@ -435,22 +470,26 @@ function DailyDiaryTab() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record, selectedDate]);
 
+  const buildData = (submittedAt?: string) => ({
+    recordDate: selectedDate,
+    deliveries,
+    coldFood,
+    hotTemperature: cooking,
+    cooling,
+    reheating,
+    hotHolding,
+    sousVide,
+    cookingLimit,
+    coolingLimit,
+    reheatingLimit,
+    hotHoldingLimit,
+    correctives: correctives || undefined,
+    managerSignature: managerSignature || undefined,
+    submittedAt,
+  });
+
   const handleSaveDraft = async () => {
-    const data = {
-      recordDate: selectedDate,
-      deliveries,
-      coldFood,
-      hotTemperature,
-      hotHolding,
-      sousVide,
-      cookingLimit,
-      coolingLimit,
-      reheatingLimit,
-      hotHoldingLimit,
-      correctives: correctives || undefined,
-      managerSignature: managerSignature || undefined,
-      submittedAt: undefined,
-    };
+    const data = buildData(undefined);
 
     if (record) {
       updateRecord.mutate(
@@ -488,51 +527,17 @@ function DailyDiaryTab() {
       toast({ title: "Manager signature required", variant: "destructive" });
       return;
     }
-
-    const data = {
-      recordDate: selectedDate,
-      deliveries,
-      coldFood,
-      hotTemperature,
-      hotHolding,
-      sousVide,
-      cookingLimit,
-      coolingLimit,
-      reheatingLimit,
-      hotHoldingLimit,
-      correctives: correctives || undefined,
-      managerSignature,
-      submittedAt: new Date().toISOString(),
+    const data = buildData(new Date().toISOString());
+    const onSuccess = () => {
+      queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
+      queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
+      toast({ title: "Diary filed", description: "Kitchen diary signed off and stored." });
     };
-
+    const onError = (error: any) => toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
     if (record) {
-      updateRecord.mutate(
-        { id: record.id, data },
-        {
-          onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
-            queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
-            toast({ title: "Record submitted", description: "Kitchen diary signed off." });
-          },
-          onError: (error: any) => {
-            toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
-          },
-        }
-      );
+      updateRecord.mutate({ id: record.id, data }, { onSuccess, onError });
     } else {
-      createRecord.mutate(
-        { data },
-        {
-          onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
-            queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
-            toast({ title: "Record submitted" });
-          },
-          onError: (error: any) => {
-            toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
-          },
-        }
-      );
+      createRecord.mutate({ data }, { onSuccess, onError });
     }
   };
 
@@ -574,6 +579,23 @@ function DailyDiaryTab() {
         </Card>
       ) : (
         <>
+          {/* Filed banner */}
+          {isSubmitted && record?.submittedAt && (
+            <Card className="border-emerald-200 bg-emerald-50">
+              <CardContent className="py-4 px-6 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-emerald-800">Diary filed</p>
+                  <p className="text-sm text-emerald-700">
+                    Signed off by <span className="font-medium">{record.managerSignature || "—"}</span> on {format(new Date(record.submittedAt), "EEEE d MMMM yyyy 'at' HH:mm")}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Deliveries */}
           {showDeliveries && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
@@ -739,79 +761,150 @@ function DailyDiaryTab() {
             </CardContent>
           </Card>
 
-          {/* Hot Temperature Record */}
+          {/* ── Cooking ──────────────────────────────────────────────────── */}
           {showHotTemp && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-display">Hot Temperature Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">
-                    Cooking: {cookingLimit} · Cooling: {coolingLimit} · Reheating: {reheatingLimit}
-                  </CardDescription>
+                  <CardTitle className="text-base font-display">Cooking Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Target: {cookingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
-                  <Button variant="outline" size="sm" onClick={() => setHotTemperature([...hotTemperature, {
-                    item: "", cookTimeStart: "", cookTimeFinish: "", cookCoreTemp: "",
-                    coolTimeStart: "", coolTimeFinish: "", reheatCoreTemp: "",
-                  }])}>
+                  <Button variant="outline" size="sm" onClick={() => setCooking([...cooking, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
                     <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
                   </Button>
                 )}
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[700px]">
-                  <thead className="bg-muted/40 border-b border-border">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground" rowSpan={2}>Food Item</th>
-                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={3}>COOKING</th>
-                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={2}>COOLING</th>
-                      <th className="text-center px-2 py-1 font-medium text-muted-foreground border-l border-border" colSpan={1}>REHEATING</th>
-                      {!isSubmitted && <th className="w-8" />}
-                    </tr>
-                    <tr className="border-t border-border/50">
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Time started</th>
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Core temp</th>
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Time started</th>
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
-                      <th className="text-left px-2 py-1.5 font-medium text-muted-foreground border-l border-border whitespace-nowrap">Core temp</th>
-                      {!isSubmitted && <th />}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {hotTemperature.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No hot food records yet.</td></tr>
-                    ) : hotTemperature.map((row, i) => {
-                      const upd = (f: keyof HotTemperatureRow, v: string) => { const n = [...hotTemperature]; n[i] = { ...n[i], [f]: v }; setHotTemperature(n); };
-                      const inp = (f: keyof HotTemperatureRow, ph: string, cls = "") => (
-                        <Input value={row[f]} disabled={isSubmitted} onChange={e => upd(f, e.target.value)}
-                          className={cn("h-7 text-xs rounded-sm", cls)} placeholder={ph} />
-                      );
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time started</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Core temp (°C)</th>
+                    {!isSubmitted && <th className="w-8" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {cooking.length === 0
+                    ? <tr><td colSpan={5} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooking records yet.</td></tr>
+                    : cooking.map((row, i) => {
+                      const upd = (f: keyof CookingRow, v: string) => { const n = [...cooking]; n[i] = { ...n[i], [f]: v }; setCooking(n); };
                       return (
                         <tr key={i} className="hover:bg-muted/10">
-                          <td className="px-3 py-1.5">{inp("item", "Food item", "min-w-[120px]")}</td>
-                          <td className="px-2 py-1.5 border-l border-border/40">{inp("cookTimeStart", "HH:mm", "w-20")}</td>
-                          <td className="px-2 py-1.5">{inp("cookTimeFinish", "HH:mm", "w-20")}</td>
-                          <td className="px-2 py-1.5">{inp("cookCoreTemp", "°C", "w-16")}</td>
-                          <td className="px-2 py-1.5 border-l border-border/40">{inp("coolTimeStart", "HH:mm", "w-20")}</td>
-                          <td className="px-2 py-1.5">{inp("coolTimeFinish", "HH:mm", "w-20")}</td>
-                          <td className="px-2 py-1.5 border-l border-border/40">{inp("reheatCoreTemp", "°C", "w-16")}</td>
-                          {!isSubmitted && (
-                            <td className="px-2 py-1.5">
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"
-                                onClick={() => setHotTemperature(hotTemperature.filter((_, x) => x !== i))}>
-                                <Trash2 className="w-3 h-3 text-destructive" />
-                              </Button>
-                            </td>
-                          )}
+                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Chicken" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooking(cooking.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>}
+
+          {/* ── Cooling ──────────────────────────────────────────────────── */}
+          {showHotTemp && <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Cooling Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Target: {coolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
+                </div>
+                {!isSubmitted && (
+                  <Button variant="outline" size="sm" onClick={() => setCooling([...cooling, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  </Button>
+                )}
               </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Cooling started</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Cooling finished</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Duration</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">End temp (°C)</th>
+                    {!isSubmitted && <th className="w-8" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {cooling.length === 0
+                    ? <tr><td colSpan={6} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooling records yet.</td></tr>
+                    : cooling.map((row, i) => {
+                      const upd = (f: keyof CoolingRow, v: string) => { const n = [...cooling]; n[i] = { ...n[i], [f]: v }; setCooling(n); };
+                      const mins = coolingMins(row.timeStart, row.timeFinish);
+                      const overTime = mins !== null && mins > 90;
+                      const durationLabel = mins === null ? "" : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+                      return (
+                        <tr key={i} className={cn("hover:bg-muted/10", overTime && "bg-rose-50")}>
+                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Soup" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5">
+                            <span className={cn("text-xs font-medium", overTime ? "text-rose-600" : "text-muted-foreground")}>
+                              {overTime && <AlertTriangle className="w-3 h-3 inline mr-0.5" />}{durationLabel}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooling(cooling.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>}
+
+          {/* ── Reheating ────────────────────────────────────────────────── */}
+          {showHotTemp && <Card>
+            <CardHeader className="border-b border-border/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-display">Reheating Record</CardTitle>
+                  <CardDescription className="text-xs mt-1">Target: {reheatingLimit}</CardDescription>
+                </div>
+                {!isSubmitted && (
+                  <Button variant="outline" size="sm" onClick={() => setReheating([...reheating, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Row
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Food item</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time started</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Core temp (°C)</th>
+                    {!isSubmitted && <th className="w-8" />}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {reheating.length === 0
+                    ? <tr><td colSpan={5} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No reheating records yet.</td></tr>
+                    : reheating.map((row, i) => {
+                      const upd = (f: keyof ReheatingRow, v: string) => { const n = [...reheating]; n[i] = { ...n[i], [f]: v }; setReheating(n); };
+                      return (
+                        <tr key={i} className="hover:bg-muted/10">
+                          <td className="px-3 py-1.5"><Input value={row.item} disabled={isSubmitted} onChange={e => upd("item", e.target.value)} className="h-7 text-xs rounded-sm min-w-[110px]" placeholder="e.g. Curry" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
+                          <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setReheating(reheating.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
             </CardContent>
           </Card>}
 
@@ -995,9 +1088,11 @@ function DailyDiaryTab() {
           </Card>
 
           {/* Sign-off */}
+          {!isSubmitted && (
           <Card>
             <CardHeader className="border-b border-border/50 pb-4">
-              <CardTitle className="text-base font-display">Manager Sign-off</CardTitle>
+              <CardTitle className="text-base font-display">Sign off &amp; File</CardTitle>
+              <CardDescription className="text-xs mt-1">Once filed, all entries are locked. Use "Save Draft" to save progress without locking.</CardDescription>
             </CardHeader>
             <CardContent className="p-4">
               <div className="space-y-4">
@@ -1007,40 +1102,21 @@ function DailyDiaryTab() {
                     value={managerSignature}
                     onChange={(e) => setManagerSignature(e.target.value)}
                     placeholder="Type your name to sign"
-                    disabled={isSubmitted}
                   />
                 </div>
                 <div className="flex items-center gap-3">
-                  {!isSubmitted && (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={handleSaveDraft}
-                        disabled={createRecord.isPending || updateRecord.isPending}
-                      >
-                        <Save className="w-4 h-4 mr-2" />
-                        Save Draft
-                      </Button>
-                      <Button
-                        onClick={handleSubmit}
-                        disabled={createRecord.isPending || updateRecord.isPending}
-                        className="shadow-lg shadow-primary/20"
-                      >
-                        <CheckCircle2 className="w-4 h-4 mr-2" />
-                        {createRecord.isPending || updateRecord.isPending ? "Submitting..." : "Submit & Sign"}
-                      </Button>
-                    </>
-                  )}
-                  {isSubmitted && (
-                    <div className="flex items-center gap-2 text-sm text-emerald-700">
-                      <CheckCircle2 className="w-4 h-4" />
-                      Submitted on {format(new Date(record.submittedAt!), "dd/MM/yyyy 'at' HH:mm")}
-                    </div>
-                  )}
+                  <Button variant="outline" onClick={handleSaveDraft} disabled={createRecord.isPending || updateRecord.isPending}>
+                    <Save className="w-4 h-4 mr-2" />Save Draft
+                  </Button>
+                  <Button onClick={handleSubmit} disabled={createRecord.isPending || updateRecord.isPending} className="shadow-lg shadow-primary/20">
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                    {createRecord.isPending || updateRecord.isPending ? "Filing..." : "File Diary"}
+                  </Button>
                 </div>
               </div>
             </CardContent>
           </Card>
+          )}
         </>
       )}
 

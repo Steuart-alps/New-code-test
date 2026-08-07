@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import {
   safeRiskAssessmentsTable,
   safeSopsTable,
@@ -12,6 +13,7 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 const router = Router();
 
@@ -94,9 +96,114 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
   return sub;
 }
 
+// ── File attachment helpers ───────────────────────────────────────────────────
+
+const fileFields = z.object({
+  objectPath: z.string().max(2000).nullable().optional(),
+  fileName: z.string().max(500).nullable().optional(),
+  fileSize: z.number().int().nullable().optional(),
+  mimeType: z.string().max(200).nullable().optional(),
+});
+
+// Shared presigned upload URL endpoint
+router.post("/request-upload", requireAuth, async (req, res) => {
+  try {
+    const storage = new ObjectStorageService();
+    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
+    res.json({ uploadUrl, objectPath });
+  } catch (err: any) {
+    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  }
+});
+
+// Generic download-url handler factory
+function downloadUrlRoute(table: any) {
+  return async (req: any, res: any) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [row] = await db.select().from(table)
+      .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row.objectPath) return res.status(404).json({ error: "No file attached" });
+    try {
+      const storage = new ObjectStorageService();
+      const downloadUrl = await storage.getSignedDownloadURL(row.objectPath);
+      res.json({ downloadUrl, fileName: row.fileName });
+    } catch (err: any) {
+      res.status(500).json({ error: "Could not generate download URL", detail: err?.message });
+    }
+  };
+}
+
+// ── Acknowledgement helpers ───────────────────────────────────────────────────
+
+const ackSaveSchema = z.object({
+  acknowledgements: z.array(z.object({
+    staffRosterId: z.number().int(),
+    staffName: z.string().max(200),
+    signature: z.string().max(500).nullable().optional(),
+  })).min(1).max(500),
+});
+
+function ackListRoute(table: any, docType: string) {
+  return async (req: any, res: any) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const [doc] = await db.select({ id: table.id }).from(table)
+      .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    const result = await db.execute(sql`
+      SELECT id, staff_roster_id, staff_name, signature, acknowledged_at
+      FROM safe_track_acknowledgements
+      WHERE document_id = ${id} AND document_type = ${docType} AND client_id = ${clientId}
+      ORDER BY acknowledged_at ASC
+    `);
+    res.json(result.rows);
+  };
+}
+
+function ackSaveRoute(table: any, docType: string) {
+  return async (req: any, res: any) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    const parsed = ackSaveSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+    const [doc] = await db.select({ id: table.id }).from(table)
+      .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+    const acknowledgedBy: number | null = (req.session as any).userId ?? null;
+    let created = 0;
+    for (const ack of parsed.data.acknowledgements) {
+      // Idempotent — skip already acknowledged
+      const existing = await db.execute(sql`
+        SELECT id FROM safe_track_acknowledgements
+        WHERE document_id = ${id} AND document_type = ${docType}
+          AND staff_roster_id = ${ack.staffRosterId} AND client_id = ${clientId}
+        LIMIT 1
+      `);
+      if (existing.rows.length) continue;
+      await db.execute(sql`
+        INSERT INTO safe_track_acknowledgements
+          (client_id, document_type, document_id, staff_roster_id, staff_name, signature, acknowledged_by)
+        VALUES
+          (${clientId}, ${docType}, ${id}, ${ack.staffRosterId}, ${ack.staffName}, ${ack.signature ?? null}, ${acknowledgedBy})
+      `);
+      created++;
+    }
+    res.json({ created });
+  };
+}
+
 // ── Risk Assessments ─────────────────────────────────────────────────────────
 
-const signatureField = z.string().max(500000).nullable().optional(); // base64 PNG
+const signatureField = z.string().max(500000).nullable().optional();
 
 const raCreate = z.object({
   title: z.string().min(1).max(500),
@@ -107,8 +214,12 @@ const raCreate = z.object({
   version: z.string().max(20).optional(),
   siteId: z.number().int().nullable().optional(),
   signature: signatureField,
-});
+  requiresAcknowledgement: z.boolean().optional(),
+}).merge(fileFields);
 
+router.get("/risk-assessments/:id/download-url",    requireAuth, downloadUrlRoute(safeRiskAssessmentsTable));
+router.get("/risk-assessments/:id/acknowledgements", requireAuth, ackListRoute(safeRiskAssessmentsTable, "ra"));
+router.post("/risk-assessments/:id/acknowledge",     requireAuth, ackSaveRoute(safeRiskAssessmentsTable, "ra"));
 router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, raCreate.partial()));
 
 // ── SOPs ─────────────────────────────────────────────────────────────────────
@@ -121,8 +232,12 @@ const sopCreate = z.object({
   publishedAt: z.string().datetime().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   signature: signatureField,
-});
+  requiresAcknowledgement: z.boolean().optional(),
+}).merge(fileFields);
 
+router.get("/sops/:id/download-url",    requireAuth, downloadUrlRoute(safeSopsTable));
+router.get("/sops/:id/acknowledgements", requireAuth, ackListRoute(safeSopsTable, "sop"));
+router.post("/sops/:id/acknowledge",     requireAuth, ackSaveRoute(safeSopsTable, "sop"));
 router.use("/sops", crudFor(safeSopsTable, sopCreate, sopCreate.partial()));
 
 // ── Training Records ─────────────────────────────────────────────────────────
@@ -174,8 +289,12 @@ const handbookCreate = z.object({
   publishedAt: z.string().datetime().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   signature: signatureField,
-});
+  requiresAcknowledgement: z.boolean().optional(),
+}).merge(fileFields);
 
+router.get("/handbook/:id/download-url",    requireAuth, downloadUrlRoute(safeHandbookTable));
+router.get("/handbook/:id/acknowledgements", requireAuth, ackListRoute(safeHandbookTable, "handbook"));
+router.post("/handbook/:id/acknowledge",     requireAuth, ackSaveRoute(safeHandbookTable, "handbook"));
 router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, handbookCreate.partial()));
 
 export default router;

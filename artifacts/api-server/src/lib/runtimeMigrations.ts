@@ -535,6 +535,31 @@ async function migrateSignatures() {
   await db.execute(sql`ALTER TABLE "safe_risk_assessments" ADD COLUMN IF NOT EXISTS "signature" text`);
   await db.execute(sql`ALTER TABLE "safe_sops" ADD COLUMN IF NOT EXISTS "signature" text`);
   await db.execute(sql`ALTER TABLE "safe_handbook" ADD COLUMN IF NOT EXISTS "signature" text`);
+  // File attachments and acknowledgements for SafeTrack documents
+  for (const tbl of ["safe_risk_assessments", "safe_sops", "safe_handbook"]) {
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "object_path" text`));
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "file_name" text`));
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "file_size" bigint`));
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "mime_type" text`));
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "requires_acknowledgement" boolean NOT NULL DEFAULT false`));
+  }
+  // SafeTrack acknowledgements table
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_track_acknowledgements" (
+      "id"               serial PRIMARY KEY,
+      "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "document_type"    text NOT NULL,
+      "document_id"      integer NOT NULL,
+      "staff_roster_id"  integer REFERENCES "staff_roster"("id") ON DELETE SET NULL,
+      "staff_name"       text NOT NULL,
+      "signature"        text,
+      "acknowledged_at"  timestamp NOT NULL DEFAULT now(),
+      "acknowledged_by"  integer REFERENCES "users"("id") ON DELETE SET NULL
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_safe_track_acks_doc" ON "safe_track_acknowledgements" ("document_type", "document_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_safe_track_acks_client" ON "safe_track_acknowledgements" ("client_id")`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "IDX_safe_track_acks_unique" ON "safe_track_acknowledgements" ("document_type", "document_id", "staff_roster_id") WHERE "staff_roster_id" IS NOT NULL`);
 }
 
 // ---- Department field on documents + sign-off token on clients ----
@@ -1030,6 +1055,9 @@ async function migrateIncidents() {
 async function migrateSousVide() {
   await db.execute(sql`
     ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS sous_vide jsonb NOT NULL DEFAULT '[]'
+  `);
+  await db.execute(sql`ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS cooling jsonb NOT NULL DEFAULT '[]'`);
+  await db.execute(sql`ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS reheating jsonb NOT NULL DEFAULT '[]'
   `);
 }
 
