@@ -62,10 +62,10 @@ const REVIEW_QUESTIONS: { key: string; label: string }[] = [
 
 // ── YNA toggle ────────────────────────────────────────────────────────────────
 
-function YNAToggle({ value, onChange, disabled }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean }) {
+function YNAToggle({ value, onChange, disabled, invertColors }: { value: Answer; onChange: (v: Answer) => void; disabled?: boolean; invertColors?: boolean }) {
   const opts: { v: Answer; label: string; cls: string }[] = [
-    { v: "yes", label: "Yes", cls: "bg-emerald-100 text-emerald-800 border-emerald-300" },
-    { v: "no",  label: "No",  cls: "bg-rose-100 text-rose-800 border-rose-300" },
+    { v: "yes", label: "Yes", cls: invertColors ? "bg-rose-100 text-rose-800 border-rose-300"    : "bg-emerald-100 text-emerald-800 border-emerald-300" },
+    { v: "no",  label: "No",  cls: invertColors ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-rose-100 text-rose-800 border-rose-300" },
     { v: "na",  label: "N/A", cls: "bg-slate-100 text-slate-700 border-slate-300" },
   ];
   return (
@@ -357,6 +357,7 @@ export default function WeeklyReviewTab() {
                   value={additional.issuesThreeTimes ?? ""}
                   onChange={v => setAdditional(prev => ({ ...prev, issuesThreeTimes: v }))}
                   disabled={isSubmitted}
+                  invertColors
                 />
               </div>
               <div className="space-y-1.5">
