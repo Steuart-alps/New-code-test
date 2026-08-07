@@ -28,10 +28,11 @@ export const SERVICES = {
   swimtrack:     { label: "SwimTrack",     amountPence: 1000 },
   incidenttrack: { label: "IncidentTrack", amountPence: 1000 },
   pattrack:      { label: "PATtrack",      amountPence: 1000 },
+  pesttrack:     { label: "PestTrack",     amountPence: 1000 },
 } as const;
 
 export type ServiceKey = keyof typeof SERVICES;
-export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack"] as const satisfies readonly ServiceKey[];
+export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack"] as const satisfies readonly ServiceKey[];
 
 export const BUNDLE_KEY = "bundle";
 export const BUNDLE_LABEL = "ComplyTrack Complete";

@@ -40,6 +40,7 @@ import w3wRouter from "./w3w";
 import fixTrackPublicRouter from "./fix-track-public";
 import incidentsRouter from "./incidents";
 import patTrackRouter from "./pat-track";
+import pestTrackRouter from "./pest-track";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -88,7 +89,8 @@ router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);
 router.use("/incidents", requireAuth, requireService("incidenttrack"), incidentsRouter);
-router.use("/pat-track", requireAuth, requireService("pattrack"), patTrackRouter);
+router.use("/pat-track",  requireAuth, requireService("pattrack"),  patTrackRouter);
+router.use("/pest-track", requireAuth, requireService("pesttrack"), pestTrackRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);
 

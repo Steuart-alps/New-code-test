@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen, Waves, TreePine,
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen, Waves, TreePine, Bug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -238,6 +238,27 @@ const MODULES = [
       "Earth continuity and insulation resistance fields",
       "Overdue and due-soon status dashboard",
       "Asset tag and location per appliance",
+    ],
+  },
+  {
+    key: "pesttrack",
+    label: "PestTrack",
+    price: 10,
+    icon: Bug,
+    color: "text-emerald-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    activeBorder: "border-emerald-500",
+    activeBg: "bg-emerald-50",
+    required: false,
+    description: "Pest control compliance log — record contractor visits, findings, treatments, and any pest activity spotted between visits.",
+    features: [
+      "Contractor visit log with findings and treatments",
+      "Recommendations and remedial action tracking",
+      "Pest activity log — sightings, droppings, damage",
+      "Severity rating (low / medium / high) per incident",
+      "Open / resolved status for each activity record",
+      "Next visit due tracking with overdue alerts",
     ],
   },
 ];

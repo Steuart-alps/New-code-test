@@ -268,6 +268,7 @@ export async function runRuntimeMigrations() {
     await migrateIncidents();
     await migrateSousVide();
     await migratePATtrack();
+    await migratePestTrack();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1070,6 +1071,52 @@ async function migratePATtrack() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_client" ON "pat_tests" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_appliance" ON "pat_tests" ("appliance_id")`);
+}
+
+async function migratePestTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pest_visits" (
+      "id"                  serial PRIMARY KEY,
+      "client_id"           integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"             integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "visit_date"          date NOT NULL,
+      "contractor_name"     text,
+      "contractor_company"  text,
+      "areas_inspected"     text,
+      "findings"            text,
+      "treatments_applied"  text,
+      "recommendations"     text,
+      "next_visit_date"     date,
+      "signed_off_by"       text,
+      "notes"               text,
+      "created_by"          integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"          timestamp NOT NULL DEFAULT now(),
+      "updated_at"          timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_visits_client" ON "pest_visits" ("client_id")`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pest_activity" (
+      "id"            serial PRIMARY KEY,
+      "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"       integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "recorded_date" date NOT NULL,
+      "pest_type"     text NOT NULL DEFAULT 'rodent',
+      "evidence_type" text NOT NULL DEFAULT 'live_sighting',
+      "location"      text,
+      "severity"      text NOT NULL DEFAULT 'low',
+      "action_taken"  text,
+      "recorded_by"   text,
+      "resolved"      boolean NOT NULL DEFAULT false,
+      "resolved_at"   timestamp,
+      "notes"         text,
+      "created_by"    integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"    timestamp NOT NULL DEFAULT now(),
+      "updated_at"    timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
 }
 
 async function migrateMobileSessions() {
