@@ -353,6 +353,7 @@ function ConfigDialog() {
 // ── Daily Diary tab ───────────────────────────────────────────────────────────
 
 function DailyDiaryTab() {
+  const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   const { data: config } = useGetFoodSafetyConfig();
@@ -394,7 +395,7 @@ function DailyDiaryTab() {
   const [hotHolding, setHotHolding] = useState<HotHoldingRow[]>([]);
   const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
-  const [managerSignature, setManagerSignature] = useState("");
+  const [managerSignature, setManagerSignature] = useState(user?.name ?? "");
 
   useEffect(() => {
     if (record) {
@@ -405,7 +406,7 @@ function DailyDiaryTab() {
       setHotHolding((record.hotHolding || []) as HotHoldingRow[]);
       setSousVide(((record as any).sousVide || []) as SousVideRow[]);
       setCorrectives(record.correctives || "");
-      setManagerSignature(record.managerSignature || "");
+      setManagerSignature(record.managerSignature || user?.name || "");
     } else {
       // New record — initialise from template
       const coldRows: ColdFoodRow[] = templateColdUnits.map(u => ({
