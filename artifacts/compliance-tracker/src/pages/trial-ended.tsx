@@ -156,6 +156,20 @@ export default function TrialEndedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Pre-tick the modules the account picked on the pricing page at signup.
+  useEffect(() => {
+    const picked = (client as any)?.selectedServices as string[] | null | undefined;
+    if (!picked || picked.length === 0) return;
+    if (picked.includes("bundle")) {
+      setBundle(true);
+      setSelectedAddons(new Set(ADDONS.map(a => a.key)));
+    } else {
+      const known = new Set(ADDONS.map(a => a.key));
+      setSelectedAddons(new Set(picked.filter(k => known.has(k))));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client?.id]);
+
   async function startCheckout() {
     setCheckingOut(true);
     try {

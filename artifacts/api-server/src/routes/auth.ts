@@ -405,7 +405,14 @@ router.post("/auth/register", async (req, res) => {
     const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [client] = await db
       .insert(clientsTable)
-      .values({ name: clientName, slug, primaryColor: "#6366f1", active: true, trialEndsAt, ...(businessType ? { businessType } : {}) } as any)
+      .values({
+        name: clientName, slug, primaryColor: "#6366f1", active: true, trialEndsAt,
+        ...(businessType ? { businessType } : {}),
+        // Remember the modules picked on the pricing page so the post-trial
+        // checkout can pre-tick them. `["bundle"]` marks a full-bundle pick.
+        ...(bundle ? { selectedServices: ["bundle"] }
+          : requestedServices && requestedServices.length > 0 ? { selectedServices: requestedServices } : {}),
+      } as any)
       .returning();
     clientId = client.id;
   } catch (err) {

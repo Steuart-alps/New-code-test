@@ -292,6 +292,8 @@ async function migrateLegacyCategories() {
   await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "responsible_person" text`);
   await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "custom_frequency_days" integer`);
   await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
+  // Module keys selected on the pricing page at signup — pre-ticks post-trial checkout
+  await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "selected_services" jsonb`);
   // check_records only exists in older installs — skip gracefully if absent
   await db.execute(sql`
     DO $$ BEGIN
