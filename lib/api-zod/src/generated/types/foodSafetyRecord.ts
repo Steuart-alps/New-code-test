@@ -9,6 +9,7 @@
 export interface FoodSafetyRecord {
   id: number;
   clientId: number;
+  siteId?: number | null;
   recordDate: string;
   deliveries?: unknown[];
   coldFood?: unknown[];

@@ -8,6 +8,7 @@ import React, {
 import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import { apiFetch, setToken } from './api';
+import { registerForPushNotifications, unregisterPushToken } from './push';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
 
@@ -47,6 +48,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           applyToken(stored);
           const me = await apiFetch<AuthUser>('/api/auth/me');
           setUser(me);
+          // Re-register the device for push on every authenticated app start.
+          void registerForPushNotifications();
         }
       } catch {
         // Stale or invalid token — clear it
@@ -73,12 +76,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await SecureStore.setItemAsync(TOKEN_KEY, ok.token);
       applyToken(ok.token);
       setUser(ok.user);
+      // Register this device for push once the bearer token is active.
+      void registerForPushNotifications();
       return { requires2fa: false };
     },
     [applyToken],
   );
 
   const logout = useCallback(async () => {
+    // Unregister the device's push token while we still have a valid bearer.
+    await unregisterPushToken();
     try {
       await apiFetch('/api/auth/mobile-logout', { method: 'POST' });
     } catch {

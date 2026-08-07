@@ -876,6 +876,15 @@ paths:
       operationId: getFoodSafetyConfig
       tags: [food-safety]
       summary: Get kitchen configuration (fridge/freezer counts, temperature limits)
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            When provided, returns the effective config for that site
+            (defaults ← client-level ← site-level) plus which keys are
+            overridden at the site level via _siteOverrides.
+          schema:
+            type: integer
       responses:
         "200":
           description: Kitchen configuration
@@ -887,6 +896,18 @@ paths:
       operationId: updateFoodSafetyConfig
       tags: [food-safety]
       summary: Update kitchen configuration
+      description: >-
+        Only keys present in the body are written. A key sent with value null
+        clears that key: for a site-scoped PUT (with siteId) it removes the
+        site override so the key inherits the client-level value; for a
+        client-level PUT it removes the stored value so the key reverts to the
+        default.
+      parameters:
+        - in: query
+          name: siteId
+          description: When provided, writes site-scoped overrides for that site.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -908,6 +929,14 @@ paths:
       operationId: resetFoodSafetyConfig
       tags: [food-safety]
       summary: Reset kitchen configuration to defaults
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            When provided, clears only that site's overrides. Without it,
+            resets the client-level template to defaults.
+          schema:
+            type: integer
       responses:
         "200":
           description: Reset to defaults
@@ -1131,6 +1160,19 @@ paths:
       operationId: listFoodSafetyRecords
       tags: [food-safety]
       summary: List food safety diary record summaries (dates and submission state)
+      parameters:
+        - in: query
+          name: siteId
+          description: >-
+            Scope to a site's diary. Omit for the whole-organisation diary
+            (records with no site). Must belong to the caller's client.
+          schema:
+            type: integer
+        - in: query
+          name: date
+          description: When provided, returns the single record for that date in the given scope (or null).
+          schema:
+            type: string
       responses:
         "200":
           description: List of record summaries
@@ -1144,6 +1186,12 @@ paths:
       operationId: createFoodSafetyRecord
       tags: [food-safety]
       summary: Create a daily food safety record
+      parameters:
+        - in: query
+          name: siteId
+          description: Scope the new record to a site. Omit for the whole-organisation diary.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -1169,6 +1217,11 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
       responses:
         "200":
           description: Record for the date (null if none)
@@ -1454,6 +1507,17 @@ components:
         notes:
           type: string
           nullable: true
+        gasSafeNumber:
+          type: string
+          nullable: true
+        publicLiabilityExpiry:
+          type: string
+          format: date
+          nullable: true
+        dbsCheckDate:
+          type: string
+          format: date
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -1485,6 +1549,18 @@ components:
           nullable: true
         notes:
           type: string
+          nullable: true
+        gasSafeNumber:
+          type: string
+          maxLength: 30
+          nullable: true
+        publicLiabilityExpiry:
+          type: string
+          format: date
+          nullable: true
+        dbsCheckDate:
+          type: string
+          format: date
           nullable: true
       required:
         - name
@@ -2065,38 +2141,62 @@ components:
       properties:
         food_cold_units:
           type: string
+          nullable: true
         food_default_hot_items:
           type: string
+          nullable: true
         food_default_holding_items:
           type: string
+          nullable: true
         food_default_sv_items:
           type: string
+          nullable: true
         food_show_deliveries:
           type: string
+          nullable: true
         food_show_cold_food:
           type: string
+          nullable: true
         food_show_hot_temperature:
           type: string
+          nullable: true
         food_show_cooling:
           type: string
+          nullable: true
         food_show_reheating:
           type: string
+          nullable: true
         food_show_hot_holding:
           type: string
+          nullable: true
         food_show_sous_vide:
           type: string
+          nullable: true
         food_num_fridges:
           type: string
+          nullable: true
         food_num_freezers:
           type: string
+          nullable: true
         food_cooking_limit:
           type: string
+          nullable: true
         food_cooling_limit:
           type: string
+          nullable: true
         food_reheating_limit:
           type: string
+          nullable: true
         food_hot_holding_limit:
           type: string
+          nullable: true
+        _siteOverrides:
+          description: >-
+            Keys that are overridden at the site level for the requested site.
+            Only present when the config is fetched with a siteId.
+          type: array
+          items:
+            type: string
 
     FoodSafetyRecordSummary:
       type: object
@@ -2120,6 +2220,9 @@ components:
           type: integer
         clientId:
           type: integer
+        siteId:
+          type: integer
+          nullable: true
         recordDate:
           type: string
         deliveries:

@@ -33,6 +33,8 @@ import {
   Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -744,6 +746,13 @@ function BikeFormDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const { data: formOptions } = useFormOptions();
+  // Effective (custom or default) bike types; include the record's stored value
+  // even if it was removed from the list so editing an old bike still works.
+  const typeOpts = (() => {
+    const opts = pickOptions(formOptions, "bike_types");
+    return bike?.type && !opts.includes(bike.type) ? [...opts, bike.type] : opts;
+  })();
   const [ref, setRef] = useState(bike?.ref ?? "");
   const [name, setName] = useState(bike?.name ?? "");
   const [type, setType] = useState(bike?.type ?? "hybrid");
@@ -798,8 +807,8 @@ function BikeFormDialog({
             <Select value={type} onValueChange={setType}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.entries(BIKE_TYPES).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
+                {typeOpts.map(k => (
+                  <SelectItem key={k} value={k}>{BIKE_TYPES[k] ?? k}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1342,6 +1351,12 @@ ${rows.map(h => `<tr>
                 <Plus className="w-3.5 h-3.5" /> Add Bike
               </Button>
             )}
+            <FormOptionsEditor
+              optionKey="bike_types"
+              title="Bike types"
+              triggerLabel="Bike types"
+              labelFor={v => BIKE_TYPES[v] ?? v}
+            />
             <div className="relative flex-1 max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search bikes…" className="pl-8 h-8 rounded-sm text-sm" />

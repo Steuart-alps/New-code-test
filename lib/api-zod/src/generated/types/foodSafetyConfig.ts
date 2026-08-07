@@ -7,21 +7,23 @@
  */
 
 export interface FoodSafetyConfig {
-  food_cold_units?: string;
-  food_default_hot_items?: string;
-  food_default_holding_items?: string;
-  food_default_sv_items?: string;
-  food_show_deliveries?: string;
-  food_show_cold_food?: string;
-  food_show_hot_temperature?: string;
-  food_show_cooling?: string;
-  food_show_reheating?: string;
-  food_show_hot_holding?: string;
-  food_show_sous_vide?: string;
-  food_num_fridges?: string;
-  food_num_freezers?: string;
-  food_cooking_limit?: string;
-  food_cooling_limit?: string;
-  food_reheating_limit?: string;
-  food_hot_holding_limit?: string;
+  food_cold_units?: string | null;
+  food_default_hot_items?: string | null;
+  food_default_holding_items?: string | null;
+  food_default_sv_items?: string | null;
+  food_show_deliveries?: string | null;
+  food_show_cold_food?: string | null;
+  food_show_hot_temperature?: string | null;
+  food_show_cooling?: string | null;
+  food_show_reheating?: string | null;
+  food_show_hot_holding?: string | null;
+  food_show_sous_vide?: string | null;
+  food_num_fridges?: string | null;
+  food_num_freezers?: string | null;
+  food_cooking_limit?: string | null;
+  food_cooling_limit?: string | null;
+  food_reheating_limit?: string | null;
+  food_hot_holding_limit?: string | null;
+  /** Keys that are overridden at the site level for the requested site. Only present when the config is fetched with a siteId. */
+  _siteOverrides?: string[];
 }

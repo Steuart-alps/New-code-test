@@ -12,6 +12,7 @@ import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
+import { sendPushToUsers } from "./pushNotifications";
 
 interface OutstandingDocSummary {
   title: string;
@@ -140,7 +141,7 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
 
       // Managers only.
       const managers = await db
-        .select({ email: usersTable.email })
+        .select({ id: usersTable.id, email: usersTable.email })
         .from(usersTable)
         .where(and(
           eq(usersTable.clientId, client.id),
@@ -149,6 +150,7 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
         ))
         .limit(20);
       const emails = managers.map((m) => m.email).filter(Boolean) as string[];
+      const userIds = [...new Set(managers.map((m) => m.id))];
       if (emails.length === 0) continue;
 
       // Claim first so concurrent job runs can't double-send; release the
@@ -173,6 +175,13 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
         await db.execute(sql`DELETE FROM doc_ack_reminder_log WHERE id = ${claimId}`);
         throw sendErr;
       }
+
+      // Push managers a matching alert (best-effort; never blocks the job).
+      await sendPushToUsers(userIds, {
+        title: "Document sign-offs outstanding",
+        body: `${docCount} document${docCount !== 1 ? "s" : ""} awaiting staff acknowledgement.`,
+        data: { route: "/(tabs)/docs" },
+      });
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

@@ -11,6 +11,7 @@ import { usersTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
+import { sendPushToUsers } from "./pushNotifications";
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -113,11 +114,12 @@ export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<
   for (const [clientId, clientHires] of byClient) {
     try {
       const users = await db
-        .select({ email: usersTable.email })
+        .select({ id: usersTable.id, email: usersTable.email })
         .from(usersTable)
         .where(and(eq(usersTable.clientId, clientId), eq(usersTable.active, true)))
         .limit(20);
       const emails = users.map((u) => u.email).filter(Boolean) as string[];
+      const userIds = [...new Set(users.map((u) => u.id))];
       if (emails.length === 0) continue;
 
       // Claim the hires first (only rows still unclaimed) so concurrent job
@@ -143,6 +145,13 @@ export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<
         `);
         throw sendErr;
       }
+
+      // Push staff a matching alert (best-effort; never blocks the job).
+      await sendPushToUsers(userIds, {
+        title: "Bike hire overdue",
+        body: `${toSend.length} bike hire${toSend.length !== 1 ? "s have" : " has"} not been returned on time.`,
+        data: { route: "/(tabs)" },
+      });
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

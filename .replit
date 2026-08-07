@@ -42,6 +42,10 @@ args = "module-routes"
 task = "workflow.run"
 args = "typecheck"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test-config"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -93,6 +97,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run typecheck && pnpm --filter @workspace/compliance-tracker run typecheck && pnpm --filter @workspace/mobile run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "test-config"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/api-server && pnpm run test:config:ci"
 
 [workflows.workflow.metadata]
 isValidation = true

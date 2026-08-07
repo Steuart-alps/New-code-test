@@ -15,7 +15,10 @@ export type FormOptionKey =
   | "fixtrack_issue_types"
   | "fixtrack_trades"
   | "premises_inspection_types"
-  | "traintrack_types";
+  | "traintrack_types"
+  | "pest_types"
+  | "pest_evidence_types"
+  | "bike_types";
 
 export interface FormOptionsResponse {
   options: Record<string, string[]>;

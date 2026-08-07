@@ -66,6 +66,9 @@ export interface Contractor {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  gasSafeNumber?: string | null;
+  publicLiabilityExpiry?: string | null;
+  dbsCheckDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,6 +80,10 @@ export interface CreateContractorRequest {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  /** @maxLength 30 */
+  gasSafeNumber?: string | null;
+  publicLiabilityExpiry?: string | null;
+  dbsCheckDate?: string | null;
 }
 
 export interface Certificate {
@@ -432,23 +439,25 @@ export interface PoolTrackConfig {
 }
 
 export interface FoodSafetyConfig {
-  food_cold_units?: string;
-  food_default_hot_items?: string;
-  food_default_holding_items?: string;
-  food_default_sv_items?: string;
-  food_show_deliveries?: string;
-  food_show_cold_food?: string;
-  food_show_hot_temperature?: string;
-  food_show_cooling?: string;
-  food_show_reheating?: string;
-  food_show_hot_holding?: string;
-  food_show_sous_vide?: string;
-  food_num_fridges?: string;
-  food_num_freezers?: string;
-  food_cooking_limit?: string;
-  food_cooling_limit?: string;
-  food_reheating_limit?: string;
-  food_hot_holding_limit?: string;
+  food_cold_units?: string | null;
+  food_default_hot_items?: string | null;
+  food_default_holding_items?: string | null;
+  food_default_sv_items?: string | null;
+  food_show_deliveries?: string | null;
+  food_show_cold_food?: string | null;
+  food_show_hot_temperature?: string | null;
+  food_show_cooling?: string | null;
+  food_show_reheating?: string | null;
+  food_show_hot_holding?: string | null;
+  food_show_sous_vide?: string | null;
+  food_num_fridges?: string | null;
+  food_num_freezers?: string | null;
+  food_cooking_limit?: string | null;
+  food_cooling_limit?: string | null;
+  food_reheating_limit?: string | null;
+  food_hot_holding_limit?: string | null;
+  /** Keys that are overridden at the site level for the requested site. Only present when the config is fetched with a siteId. */
+  _siteOverrides?: string[];
 }
 
 export interface FoodSafetyRecordSummary {
@@ -460,6 +469,7 @@ export interface FoodSafetyRecordSummary {
 export interface FoodSafetyRecord {
   id: number;
   clientId: number;
+  siteId?: number | null;
   recordDate: string;
   deliveries?: unknown[];
   coldFood?: unknown[];
@@ -642,8 +652,54 @@ export type GetFireSafetyStatusParams = {
   siteId?: number;
 };
 
+export type GetFoodSafetyConfigParams = {
+  /**
+   * When provided, returns the effective config for that site (defaults ← client-level ← site-level) plus which keys are overridden at the site level via _siteOverrides.
+   */
+  siteId?: number;
+};
+
+export type UpdateFoodSafetyConfigParams = {
+  /**
+   * When provided, writes site-scoped overrides for that site.
+   */
+  siteId?: number;
+};
+
 export type UpdateFoodSafetyConfig200 = {
   ok: boolean;
+};
+
+export type ResetFoodSafetyConfigParams = {
+  /**
+   * When provided, clears only that site's overrides. Without it, resets the client-level template to defaults.
+   */
+  siteId?: number;
+};
+
+export type ListFoodSafetyRecordsParams = {
+  /**
+   * Scope to a site's diary. Omit for the whole-organisation diary (records with no site). Must belong to the caller's client.
+   */
+  siteId?: number;
+  /**
+   * When provided, returns the single record for that date in the given scope (or null).
+   */
+  date?: string;
+};
+
+export type CreateFoodSafetyRecordParams = {
+  /**
+   * Scope the new record to a site. Omit for the whole-organisation diary.
+   */
+  siteId?: number;
+};
+
+export type GetFoodSafetyRecordByDateParams = {
+  /**
+   * Scope to a site's diary. Omit for the whole-organisation diary.
+   */
+  siteId?: number;
 };
 
 export type ListLegionellaChecksParams = {

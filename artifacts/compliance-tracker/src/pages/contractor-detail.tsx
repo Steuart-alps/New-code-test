@@ -10,11 +10,11 @@ import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { StatusBadge, PriorityBadge } from "@/components/badges";
+import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { format } from "date-fns";
 import {
   Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft,
-  Plus, ShieldCheck
+  Plus, ShieldCheck, Flame, ShieldCheck as ShieldIcon, FileBadge
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
@@ -100,6 +100,48 @@ export default function ContractorDetailPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Compliance */}
+            <div className="mt-6 space-y-4 pt-6 border-t border-border/50">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Compliance</p>
+
+              <div className="flex flex-wrap gap-1.5 empty:hidden">
+                <LiabilityBadge expiry={contractor.publicLiabilityExpiry} />
+                <DbsReviewBadge dbsCheckDate={contractor.dbsCheckDate} />
+              </div>
+
+              <div className="flex items-start">
+                <Flame className="w-4 h-4 mr-3 mt-0.5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Gas Safe No.</p>
+                  <p className="text-sm font-medium">{contractor.gasSafeNumber || "—"}</p>
+                </div>
+              </div>
+
+              <div className="flex items-start">
+                <FileBadge className="w-4 h-4 mr-3 mt-0.5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Public Liability Expiry</p>
+                  <p className="text-sm font-medium">
+                    {contractor.publicLiabilityExpiry
+                      ? format(new Date(contractor.publicLiabilityExpiry), "MMM d, yyyy")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start">
+                <ShieldIcon className="w-4 h-4 mr-3 mt-0.5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">DBS Check Date</p>
+                  <p className="text-sm font-medium">
+                    {contractor.dbsCheckDate
+                      ? format(new Date(contractor.dbsCheckDate), "MMM d, yyyy")
+                      : "—"}
+                  </p>
+                </div>
+              </div>
             </div>
           </Card>
         </div>

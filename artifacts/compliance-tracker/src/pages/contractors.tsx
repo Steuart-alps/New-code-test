@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Building, Mail, Phone, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 
 export default function ContractorsPage() {
   const [search, setSearch] = useState("");
@@ -57,7 +58,14 @@ export default function ContractorsPage() {
                 </div>
                 <h3 className="font-display font-semibold text-lg">{contractor.name}</h3>
                 {contractor.company && <p className="text-sm text-muted-foreground mt-0.5">{contractor.company}</p>}
-                
+
+                {(contractor.publicLiabilityExpiry || contractor.dbsCheckDate) && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    <LiabilityBadge expiry={contractor.publicLiabilityExpiry} />
+                    <DbsReviewBadge dbsCheckDate={contractor.dbsCheckDate} />
+                  </div>
+                )}
+
                 <div className="mt-auto pt-5 space-y-2">
                   <div className="flex items-center text-sm text-muted-foreground">
                     <Mail className="w-4 h-4 mr-2 opacity-70" /> {contractor.email}

@@ -36,6 +36,24 @@ export const DEFAULT_PREMISES_INSPECTION_TYPES = [
   "routine", "hazard", "fault", "housekeeping", "signage",
 ] as const;
 
+// Pest activity vocabularies (mirror the pest-track web dropdowns). These are
+// plain labels — they don't drive any typed calculation. Values are the stable
+// codes stored in the DB; the web maps them to friendly labels where present.
+export const DEFAULT_PEST_TYPES = [
+  "rodent", "insect", "bird", "other",
+] as const;
+
+export const DEFAULT_PEST_EVIDENCE_TYPES = [
+  "live_sighting", "droppings", "damage", "nest", "tracks", "other",
+] as const;
+
+// Bike fleet type — a pure display vocabulary chosen when registering a bike.
+// (Bike check types pre_hire/post_return are system-set, and service types
+// annual/interim/adhoc drive next-service scheduling, so neither is included.)
+export const DEFAULT_BIKE_TYPES = [
+  "road", "mountain", "hybrid", "ebike", "kids", "cargo", "other",
+] as const;
+
 export const DEFAULT_TRAINTRACK_TYPES = [
   "Fire Safety Awareness",
   "Food Hygiene (Level 2)",
@@ -64,6 +82,9 @@ export const FORM_OPTION_DEFAULTS: Record<string, readonly string[]> = {
   fixtrack_trades:           DEFAULT_FIXTRACK_TRADES,
   premises_inspection_types: DEFAULT_PREMISES_INSPECTION_TYPES,
   traintrack_types:          DEFAULT_TRAINTRACK_TYPES,
+  pest_types:                DEFAULT_PEST_TYPES,
+  pest_evidence_types:       DEFAULT_PEST_EVIDENCE_TYPES,
+  bike_types:                DEFAULT_BIKE_TYPES,
 };
 
 export type FormOptionKey = keyof typeof FORM_OPTION_DEFAULTS;

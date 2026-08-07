@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { countClientSites, getPerSitePrice, quantityForSiteCount } from "./billing";
+import { sendPushToUsers } from "./pushNotifications";
 
 /**
  * How many days before trial end the reminder fires.
@@ -181,6 +182,20 @@ export async function runTrialReminderJob(
       `);
       continue;
     }
+
+    // Push consultants a matching alert (best-effort; never blocks the job).
+    const daysLeft = Math.max(
+      1,
+      Math.ceil((client.trialEndsAt!.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+    );
+    await sendPushToUsers(
+      consultants.map((c) => c.id),
+      {
+        title: "Free trial ending soon",
+        body: `Your ComplyTrack trial for ${client.name} ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`,
+        data: { route: "/(tabs)/profile" },
+      },
+    );
 
     clientsNotified++;
     emailsSent += sentForClient;

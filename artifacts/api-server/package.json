@@ -16,7 +16,9 @@
     "test:dept-isolation": "node tests/dept-isolation.mjs",
     "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",
     "test:dailytrack-locks": "node tests/dailytrack-locks.mjs",
-    "test:dailytrack-locks:ci": "bash tests/run-dailytrack-locks.sh"
+    "test:dailytrack-locks:ci": "bash tests/run-dailytrack-locks.sh",
+    "test:config": "node tests/config-endpoints.mjs",
+    "test:config:ci": "bash tests/run-config-endpoints.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

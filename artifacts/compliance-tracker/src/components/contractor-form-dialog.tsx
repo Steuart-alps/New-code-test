@@ -44,9 +44,20 @@ const formSchema = z.object({
   phone:   z.string().optional(),
   address: z.string().optional(),
   notes:   z.string().optional(),
+  gasSafeNumber:         z.string().max(30, "Max 30 characters").optional(),
+  publicLiabilityExpiry: z.string().optional(),
+  dbsCheckDate:          z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+/** Format an API date/ISO value into the YYYY-MM-DD a date input expects. */
+function toDateInput(value: unknown): string {
+  if (!value) return "";
+  const d = new Date(value as string | number | Date);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -79,7 +90,10 @@ export function ContractorFormDialog({
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { name: "", company: "", email: "", phone: "", address: "", notes: "" },
+    defaultValues: {
+      name: "", company: "", email: "", phone: "", address: "", notes: "",
+      gasSafeNumber: "", publicLiabilityExpiry: "", dbsCheckDate: "",
+    },
   });
 
   useEffect(() => {
@@ -91,10 +105,16 @@ export function ContractorFormDialog({
         phone:   contractor.phone    || "",
         address: contractor.address  || "",
         notes:   contractor.notes    || "",
+        gasSafeNumber:         contractor.gasSafeNumber || "",
+        publicLiabilityExpiry: toDateInput(contractor.publicLiabilityExpiry),
+        dbsCheckDate:          toDateInput(contractor.dbsCheckDate),
       });
       setTrades(Array.isArray((contractor as any).trades) ? (contractor as any).trades : []);
     } else {
-      form.reset({ name: "", company: "", email: "", phone: "", address: "", notes: "" });
+      form.reset({
+        name: "", company: "", email: "", phone: "", address: "", notes: "",
+        gasSafeNumber: "", publicLiabilityExpiry: "", dbsCheckDate: "",
+      });
       setTrades([]);
     }
   }, [contractor, isOpen, form]);
@@ -108,7 +128,13 @@ export function ContractorFormDialog({
   const onSubmit = async (data: FormValues) => {
     setSaving(true);
     try {
-      const payload = { ...data, trades };
+      const payload = {
+        ...data,
+        trades,
+        gasSafeNumber:         data.gasSafeNumber?.trim() || null,
+        publicLiabilityExpiry: data.publicLiabilityExpiry || null,
+        dbsCheckDate:          data.dbsCheckDate || null,
+      };
       if (contractor) {
         const res = await apiFetch(`/contractors/${contractor.id}`, {
           method: "PUT",
@@ -178,6 +204,35 @@ export function ContractorFormDialog({
             <div className="col-span-2 space-y-1.5">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" {...form.register("notes")} className="resize-none h-20" />
+            </div>
+          </div>
+
+          {/* Compliance */}
+          <div className="space-y-2.5 pt-2 border-t border-border/50">
+            <div>
+              <Label>Compliance</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Record registration and check details so expiries can be flagged for review.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="gasSafeNumber">Gas Safe Registration No.</Label>
+                <Input id="gasSafeNumber" maxLength={30} {...form.register("gasSafeNumber")} />
+                {form.formState.errors.gasSafeNumber && (
+                  <p className="text-xs text-destructive">{form.formState.errors.gasSafeNumber.message}</p>
+                )}
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="publicLiabilityExpiry">Public Liability Insurance Expiry</Label>
+                <Input type="date" id="publicLiabilityExpiry" {...form.register("publicLiabilityExpiry")} />
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsCheckDate">DBS Check Date</Label>
+                <Input type="date" id="dbsCheckDate" {...form.register("dbsCheckDate")} />
+              </div>
             </div>
           </div>
 

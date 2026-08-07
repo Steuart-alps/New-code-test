@@ -28,6 +28,7 @@ import type {
   CreateComplianceItemRequest,
   CreateContractorRequest,
   CreateFireSafetyCheckRequest,
+  CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
   CreateLegionellaCheckRequest,
   CreateSiteRequest,
@@ -40,6 +41,8 @@ import type {
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
   GetFireSafetyStatusParams,
+  GetFoodSafetyConfigParams,
+  GetFoodSafetyRecordByDateParams,
   GetLegionellaStatusParams,
   GreenTrackConfig,
   HealthStatus,
@@ -49,11 +52,13 @@ import type {
   LegionellaStatus,
   ListComplianceItemsParams,
   ListFireSafetyChecksParams,
+  ListFoodSafetyRecordsParams,
   ListLegionellaChecksParams,
   PATTrackConfig,
   PoolTrackConfig,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  ResetFoodSafetyConfigParams,
   SendRemindersResponse,
   Site,
   TestEmailRequest,
@@ -62,6 +67,7 @@ import type {
   UpdateComplianceItemRequest,
   UpdateFireSafetyCheckRequest,
   UpdateFoodSafetyConfig200,
+  UpdateFoodSafetyConfigParams,
   UpdateFoodSafetyRecordRequest,
   UpdateLegionellaCheckRequest,
   UpdateSiteRequest,
@@ -3678,41 +3684,63 @@ export const useDeleteFireSafetyCheck = <
 /**
  * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
  */
-export const getGetFoodSafetyConfigUrl = () => {
-  return `/api/food-safety/config`;
+export const getGetFoodSafetyConfigUrl = (
+  params?: GetFoodSafetyConfigParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety/config?${stringifiedParams}`
+    : `/api/food-safety/config`;
 };
 
 export const getFoodSafetyConfig = async (
+  params?: GetFoodSafetyConfigParams,
   options?: RequestInit,
 ): Promise<FoodSafetyConfig> => {
-  return customFetch<FoodSafetyConfig>(getGetFoodSafetyConfigUrl(), {
+  return customFetch<FoodSafetyConfig>(getGetFoodSafetyConfigUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getGetFoodSafetyConfigQueryKey = () => {
-  return [`/api/food-safety/config`] as const;
+export const getGetFoodSafetyConfigQueryKey = (
+  params?: GetFoodSafetyConfigParams,
+) => {
+  return [`/api/food-safety/config`, ...(params ? [params] : [])] as const;
 };
 
 export const getGetFoodSafetyConfigQueryOptions = <
   TData = Awaited<ReturnType<typeof getFoodSafetyConfig>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getFoodSafetyConfig>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: GetFoodSafetyConfigParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetFoodSafetyConfigQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFoodSafetyConfigQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getFoodSafetyConfig>>
-  > = ({ signal }) => getFoodSafetyConfig({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    getFoodSafetyConfig(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof getFoodSafetyConfig>>,
@@ -3733,15 +3761,18 @@ export type GetFoodSafetyConfigQueryError = ErrorType<unknown>;
 export function useGetFoodSafetyConfig<
   TData = Awaited<ReturnType<typeof getFoodSafetyConfig>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getFoodSafetyConfig>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetFoodSafetyConfigQueryOptions(options);
+>(
+  params?: GetFoodSafetyConfigParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyConfig>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFoodSafetyConfigQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -3751,18 +3782,34 @@ export function useGetFoodSafetyConfig<
 }
 
 /**
+ * Only keys present in the body are written. A key sent with value null clears that key: for a site-scoped PUT (with siteId) it removes the site override so the key inherits the client-level value; for a client-level PUT it removes the stored value so the key reverts to the default.
  * @summary Update kitchen configuration
  */
-export const getUpdateFoodSafetyConfigUrl = () => {
-  return `/api/food-safety/config`;
+export const getUpdateFoodSafetyConfigUrl = (
+  params?: UpdateFoodSafetyConfigParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety/config?${stringifiedParams}`
+    : `/api/food-safety/config`;
 };
 
 export const updateFoodSafetyConfig = async (
   foodSafetyConfig: FoodSafetyConfig,
+  params?: UpdateFoodSafetyConfigParams,
   options?: RequestInit,
 ): Promise<UpdateFoodSafetyConfig200> => {
   return customFetch<UpdateFoodSafetyConfig200>(
-    getUpdateFoodSafetyConfigUrl(),
+    getUpdateFoodSafetyConfigUrl(params),
     {
       ...options,
       method: "PUT",
@@ -3779,14 +3826,14 @@ export const getUpdateFoodSafetyConfigMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
     TError,
-    { data: BodyType<FoodSafetyConfig> },
+    { data: BodyType<FoodSafetyConfig>; params?: UpdateFoodSafetyConfigParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
   TError,
-  { data: BodyType<FoodSafetyConfig> },
+  { data: BodyType<FoodSafetyConfig>; params?: UpdateFoodSafetyConfigParams },
   TContext
 > => {
   const mutationKey = ["updateFoodSafetyConfig"];
@@ -3800,11 +3847,11 @@ export const getUpdateFoodSafetyConfigMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
-    { data: BodyType<FoodSafetyConfig> }
+    { data: BodyType<FoodSafetyConfig>; params?: UpdateFoodSafetyConfigParams }
   > = (props) => {
-    const { data } = props ?? {};
+    const { data, params } = props ?? {};
 
-    return updateFoodSafetyConfig(data, requestOptions);
+    return updateFoodSafetyConfig(data, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -3826,14 +3873,14 @@ export const useUpdateFoodSafetyConfig = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
     TError,
-    { data: BodyType<FoodSafetyConfig> },
+    { data: BodyType<FoodSafetyConfig>; params?: UpdateFoodSafetyConfigParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof updateFoodSafetyConfig>>,
   TError,
-  { data: BodyType<FoodSafetyConfig> },
+  { data: BodyType<FoodSafetyConfig>; params?: UpdateFoodSafetyConfigParams },
   TContext
 > => {
   return useMutation(getUpdateFoodSafetyConfigMutationOptions(options));
@@ -3842,14 +3889,29 @@ export const useUpdateFoodSafetyConfig = <
 /**
  * @summary Reset kitchen configuration to defaults
  */
-export const getResetFoodSafetyConfigUrl = () => {
-  return `/api/food-safety/config`;
+export const getResetFoodSafetyConfigUrl = (
+  params?: ResetFoodSafetyConfigParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety/config?${stringifiedParams}`
+    : `/api/food-safety/config`;
 };
 
 export const resetFoodSafetyConfig = async (
+  params?: ResetFoodSafetyConfigParams,
   options?: RequestInit,
 ): Promise<FoodSafetyConfig> => {
-  return customFetch<FoodSafetyConfig>(getResetFoodSafetyConfigUrl(), {
+  return customFetch<FoodSafetyConfig>(getResetFoodSafetyConfigUrl(params), {
     ...options,
     method: "DELETE",
   });
@@ -3862,14 +3924,14 @@ export const getResetFoodSafetyConfigMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
     TError,
-    void,
+    { params?: ResetFoodSafetyConfigParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
   TError,
-  void,
+  { params?: ResetFoodSafetyConfigParams },
   TContext
 > => {
   const mutationKey = ["resetFoodSafetyConfig"];
@@ -3883,9 +3945,11 @@ export const getResetFoodSafetyConfigMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
-    void
-  > = () => {
-    return resetFoodSafetyConfig(requestOptions);
+    { params?: ResetFoodSafetyConfigParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return resetFoodSafetyConfig(params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -3907,14 +3971,14 @@ export const useResetFoodSafetyConfig = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
     TError,
-    void,
+    { params?: ResetFoodSafetyConfigParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
   TError,
-  void,
+  { params?: ResetFoodSafetyConfigParams },
   TContext
 > => {
   return useMutation(getResetFoodSafetyConfigMutationOptions(options));
@@ -5050,41 +5114,66 @@ export const useUpdatePoolTrackConfig = <
 /**
  * @summary List food safety diary record summaries (dates and submission state)
  */
-export const getListFoodSafetyRecordsUrl = () => {
-  return `/api/food-safety`;
+export const getListFoodSafetyRecordsUrl = (
+  params?: ListFoodSafetyRecordsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety?${stringifiedParams}`
+    : `/api/food-safety`;
 };
 
 export const listFoodSafetyRecords = async (
+  params?: ListFoodSafetyRecordsParams,
   options?: RequestInit,
 ): Promise<FoodSafetyRecordSummary[]> => {
-  return customFetch<FoodSafetyRecordSummary[]>(getListFoodSafetyRecordsUrl(), {
-    ...options,
-    method: "GET",
-  });
+  return customFetch<FoodSafetyRecordSummary[]>(
+    getListFoodSafetyRecordsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
-export const getListFoodSafetyRecordsQueryKey = () => {
-  return [`/api/food-safety`] as const;
+export const getListFoodSafetyRecordsQueryKey = (
+  params?: ListFoodSafetyRecordsParams,
+) => {
+  return [`/api/food-safety`, ...(params ? [params] : [])] as const;
 };
 
 export const getListFoodSafetyRecordsQueryOptions = <
   TData = Awaited<ReturnType<typeof listFoodSafetyRecords>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listFoodSafetyRecords>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: ListFoodSafetyRecordsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListFoodSafetyRecordsQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getListFoodSafetyRecordsQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof listFoodSafetyRecords>>
-  > = ({ signal }) => listFoodSafetyRecords({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    listFoodSafetyRecords(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listFoodSafetyRecords>>,
@@ -5105,15 +5194,18 @@ export type ListFoodSafetyRecordsQueryError = ErrorType<unknown>;
 export function useListFoodSafetyRecords<
   TData = Awaited<ReturnType<typeof listFoodSafetyRecords>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listFoodSafetyRecords>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListFoodSafetyRecordsQueryOptions(options);
+>(
+  params?: ListFoodSafetyRecordsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFoodSafetyRecords>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListFoodSafetyRecordsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -5125,15 +5217,30 @@ export function useListFoodSafetyRecords<
 /**
  * @summary Create a daily food safety record
  */
-export const getCreateFoodSafetyRecordUrl = () => {
-  return `/api/food-safety`;
+export const getCreateFoodSafetyRecordUrl = (
+  params?: CreateFoodSafetyRecordParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety?${stringifiedParams}`
+    : `/api/food-safety`;
 };
 
 export const createFoodSafetyRecord = async (
   createFoodSafetyRecordRequest: CreateFoodSafetyRecordRequest,
+  params?: CreateFoodSafetyRecordParams,
   options?: RequestInit,
 ): Promise<FoodSafetyRecord> => {
-  return customFetch<FoodSafetyRecord>(getCreateFoodSafetyRecordUrl(), {
+  return customFetch<FoodSafetyRecord>(getCreateFoodSafetyRecordUrl(params), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -5148,14 +5255,20 @@ export const getCreateFoodSafetyRecordMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createFoodSafetyRecord>>,
     TError,
-    { data: BodyType<CreateFoodSafetyRecordRequest> },
+    {
+      data: BodyType<CreateFoodSafetyRecordRequest>;
+      params?: CreateFoodSafetyRecordParams;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createFoodSafetyRecord>>,
   TError,
-  { data: BodyType<CreateFoodSafetyRecordRequest> },
+  {
+    data: BodyType<CreateFoodSafetyRecordRequest>;
+    params?: CreateFoodSafetyRecordParams;
+  },
   TContext
 > => {
   const mutationKey = ["createFoodSafetyRecord"];
@@ -5169,11 +5282,14 @@ export const getCreateFoodSafetyRecordMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createFoodSafetyRecord>>,
-    { data: BodyType<CreateFoodSafetyRecordRequest> }
+    {
+      data: BodyType<CreateFoodSafetyRecordRequest>;
+      params?: CreateFoodSafetyRecordParams;
+    }
   > = (props) => {
-    const { data } = props ?? {};
+    const { data, params } = props ?? {};
 
-    return createFoodSafetyRecord(data, requestOptions);
+    return createFoodSafetyRecord(data, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -5196,14 +5312,20 @@ export const useCreateFoodSafetyRecord = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createFoodSafetyRecord>>,
     TError,
-    { data: BodyType<CreateFoodSafetyRecordRequest> },
+    {
+      data: BodyType<CreateFoodSafetyRecordRequest>;
+      params?: CreateFoodSafetyRecordParams;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof createFoodSafetyRecord>>,
   TError,
-  { data: BodyType<CreateFoodSafetyRecordRequest> },
+  {
+    data: BodyType<CreateFoodSafetyRecordRequest>;
+    params?: CreateFoodSafetyRecordParams;
+  },
   TContext
 > => {
   return useMutation(getCreateFoodSafetyRecordMutationOptions(options));
@@ -5212,22 +5334,47 @@ export const useCreateFoodSafetyRecord = <
 /**
  * @summary Get the food safety record for a specific date
  */
-export const getGetFoodSafetyRecordByDateUrl = (date: string) => {
-  return `/api/food-safety/by-date/${date}`;
+export const getGetFoodSafetyRecordByDateUrl = (
+  date: string,
+  params?: GetFoodSafetyRecordByDateParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety/by-date/${date}?${stringifiedParams}`
+    : `/api/food-safety/by-date/${date}`;
 };
 
 export const getFoodSafetyRecordByDate = async (
   date: string,
+  params?: GetFoodSafetyRecordByDateParams,
   options?: RequestInit,
 ): Promise<FoodSafetyRecord> => {
-  return customFetch<FoodSafetyRecord>(getGetFoodSafetyRecordByDateUrl(date), {
-    ...options,
-    method: "GET",
-  });
+  return customFetch<FoodSafetyRecord>(
+    getGetFoodSafetyRecordByDateUrl(date, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
-export const getGetFoodSafetyRecordByDateQueryKey = (date: string) => {
-  return [`/api/food-safety/by-date/${date}`] as const;
+export const getGetFoodSafetyRecordByDateQueryKey = (
+  date: string,
+  params?: GetFoodSafetyRecordByDateParams,
+) => {
+  return [
+    `/api/food-safety/by-date/${date}`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getGetFoodSafetyRecordByDateQueryOptions = <
@@ -5235,6 +5382,7 @@ export const getGetFoodSafetyRecordByDateQueryOptions = <
   TError = ErrorType<ErrorResponse>,
 >(
   date: string,
+  params?: GetFoodSafetyRecordByDateParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
@@ -5247,12 +5395,13 @@ export const getGetFoodSafetyRecordByDateQueryOptions = <
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
   const queryKey =
-    queryOptions?.queryKey ?? getGetFoodSafetyRecordByDateQueryKey(date);
+    queryOptions?.queryKey ??
+    getGetFoodSafetyRecordByDateQueryKey(date, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>
   > = ({ signal }) =>
-    getFoodSafetyRecordByDate(date, { signal, ...requestOptions });
+    getFoodSafetyRecordByDate(date, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -5280,6 +5429,7 @@ export function useGetFoodSafetyRecordByDate<
   TError = ErrorType<ErrorResponse>,
 >(
   date: string,
+  params?: GetFoodSafetyRecordByDateParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getFoodSafetyRecordByDate>>,
@@ -5289,7 +5439,11 @@ export function useGetFoodSafetyRecordByDate<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetFoodSafetyRecordByDateQueryOptions(date, options);
+  const queryOptions = getGetFoodSafetyRecordByDateQueryOptions(
+    date,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

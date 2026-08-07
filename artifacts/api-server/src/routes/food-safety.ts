@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { foodSafetyRecordsTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
+import { eq, and, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 
 const router = Router();
@@ -81,6 +81,34 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_sous_vide: "true",
 };
 
+// ── Per-site override support ─────────────────────────────────────────────────
+// Site-level values are stored in app_settings under a prefixed key:
+//   site.<siteId>.<configKey>  (e.g. "site.12.food_show_cooling")
+// The effective config for a site is: DEFAULT ← client-level ← site-level.
+const SITE_PREFIX = "site.";
+const siteKeyFor = (siteId: number, key: string) => `${SITE_PREFIX}${siteId}.${key}`;
+
+/** Parse an optional siteId query param. Returns:
+ *  - { siteId: null } when absent (client-level operation)
+ *  - { siteId: number } when a valid positive integer
+ *  - { error } when malformed */
+function parseSiteId(raw: unknown): { siteId: number | null } | { error: string } {
+  if (raw === undefined || raw === null || raw === "") return { siteId: null };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return { error: "Invalid siteId" };
+  return { siteId: n };
+}
+
+/** Confirm the site exists and belongs to the given client. */
+async function siteBelongsToClient(siteId: number, clientId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: sitesTable.id })
+    .from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)))
+    .limit(1);
+  return !!row;
+}
+
 // ── Validation for the customisable template ──────────────────────────────────
 const MAX_ROW_NAME = 40;
 const MAX_ROWS = 30;
@@ -134,16 +162,26 @@ function cleanColdUnits(raw: string): { value: string } | { error: string } {
   return { value: JSON.stringify(out) };
 }
 
-/** Validate + normalise an incoming config patch. Returns cleaned values keyed
- *  by CONFIG_KEYS, or an error message. Only keys present in the patch are
- *  returned. */
+/** Validate + normalise an incoming config patch. Returns cleaned values to set
+ *  keyed by CONFIG_KEYS, plus a list of keys the caller explicitly asked to
+ *  clear (value === null — only meaningful for site-scoped PUTs, where clearing
+ *  removes the site override so the key inherits the client-level value). Only
+ *  keys present in the patch are considered. */
 function validateConfigPatch(
   updates: Record<string, unknown>
-): { values: Partial<Record<(typeof CONFIG_KEYS)[number], string>> } | { error: string } {
+): { values: Partial<Record<(typeof CONFIG_KEYS)[number], string>>; clears: (typeof CONFIG_KEYS)[number][] } | { error: string } {
   const out: Partial<Record<(typeof CONFIG_KEYS)[number], string>> = {};
+  const clears: (typeof CONFIG_KEYS)[number][] = [];
   for (const key of CONFIG_KEYS) {
     if (!(key in updates)) continue;
     const raw = updates[key];
+
+    // Explicit null clears the override for this key.
+    if (raw === null) {
+      clears.push(key);
+      continue;
+    }
+
     if (typeof raw !== "string") return { error: `${key} must be a string` };
 
     if ((SECTION_SHOW_KEYS as readonly string[]).includes(key)) {
@@ -166,97 +204,184 @@ function validateConfigPatch(
       out[key] = val;
     }
   }
-  return { values: out };
+  return { values: out, clears };
 }
 
-// GET /api/food-safety/config
+// GET /api/food-safety/config[?siteId=N]
+// Without siteId: returns the client-level effective config (defaults ← client).
+// With siteId: returns the site's effective config (defaults ← client ← site)
+// plus _siteOverrides listing which keys the site overrides.
 router.get("/config", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
+  if ("error" in site) return res.status(400).json({ error: site.error });
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+    return res.status(400).json({ error: "Invalid siteId" });
+  }
+
   const rows = await db
     .select()
     .from(appSettingsTable)
-    .where(
-      and(
-        eq(appSettingsTable.clientId, clientId),
-        // We fetch all and filter in JS to keep it simple
-      )
-    );
+    .where(eq(appSettingsTable.clientId, clientId));
 
-  const stored = new Set<string>();
+  // client-level values keyed by config key
+  const clientStored = new Set<string>();
   const config: Record<string, string> = { ...DEFAULT_CONFIG };
   for (const row of rows) {
     if (CONFIG_KEYS.includes(row.key as (typeof CONFIG_KEYS)[number]) && row.value != null) {
       config[row.key] = row.value;
-      stored.add(row.key);
+      clientStored.add(row.key);
     }
   }
 
   // Backward compatibility: cooling/reheating were introduced as their own
   // toggles later. If a client saved a template before they existed, inherit
   // their visibility from the original grouped "hot temperature" toggle.
-  if (stored.has("food_show_hot_temperature")) {
-    if (!stored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
-    if (!stored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
+  if (clientStored.has("food_show_hot_temperature")) {
+    if (!clientStored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
+    if (!clientStored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
+  }
+
+  // Overlay site-level values on top of the client-level config.
+  const siteOverrides: string[] = [];
+  if (site.siteId !== null) {
+    const prefix = `${SITE_PREFIX}${site.siteId}.`;
+    for (const row of rows) {
+      if (!row.key.startsWith(prefix) || row.value == null) continue;
+      const baseKey = row.key.slice(prefix.length);
+      if (CONFIG_KEYS.includes(baseKey as (typeof CONFIG_KEYS)[number])) {
+        config[baseKey] = row.value;
+        siteOverrides.push(baseKey);
+      }
+    }
+    return res.json({ ...config, _siteOverrides: siteOverrides });
   }
 
   res.json(config);
 });
 
-// PUT /api/food-safety/config — admin-only template customisation
+// PUT /api/food-safety/config[?siteId=N] — admin-only template customisation.
+// Without siteId: writes client-level template values (unchanged behaviour).
+// With siteId: writes site-scoped override keys (site.<siteId>.<key>).
 router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
+  if ("error" in site) return res.status(400).json({ error: site.error });
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+    return res.status(400).json({ error: "Invalid siteId" });
+  }
+
   const validated = validateConfigPatch((req.body ?? {}) as Record<string, unknown>);
   if ("error" in validated) return res.status(400).json({ error: validated.error });
 
-  for (const [key, value] of Object.entries(validated.values) as [
+  const storageKeyOf = (baseKey: string) =>
+    site.siteId !== null ? siteKeyFor(site.siteId, baseKey) : baseKey;
+
+  // Upsert the keys that carry a value.
+  for (const [baseKey, value] of Object.entries(validated.values) as [
     (typeof CONFIG_KEYS)[number],
     string,
   ][]) {
+    const storageKey = storageKeyOf(baseKey);
+
     const existing = await db
       .select({ clientId: appSettingsTable.clientId })
       .from(appSettingsTable)
-      .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)))
+      .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, storageKey)))
       .limit(1);
 
     if (existing.length > 0) {
       await db
         .update(appSettingsTable)
         .set({ value, updatedAt: new Date() })
-        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, storageKey)));
     } else {
-      await db.insert(appSettingsTable).values({ clientId, key, value });
+      await db.insert(appSettingsTable).values({ clientId, key: storageKey, value });
     }
+  }
+
+  // Clear keys sent as null. For a site PUT this removes the site override so the
+  // key inherits the client-level value; for a client PUT it removes the stored
+  // client value so the key reverts to DEFAULT_CONFIG.
+  if (validated.clears.length > 0) {
+    const clearKeys = validated.clears.map(storageKeyOf);
+    await db
+      .delete(appSettingsTable)
+      .where(and(eq(appSettingsTable.clientId, clientId), inArray(appSettingsTable.key, clearKeys)));
   }
 
   res.json({ ok: true });
 });
 
-// DELETE /api/food-safety/config — reset the template to defaults (admin-only).
-// Removes every stored template key; GET then falls back to DEFAULT_CONFIG.
+// DELETE /api/food-safety/config[?siteId=N] — admin-only reset.
+// Without siteId: removes every client-level template key; GET then falls back
+// to DEFAULT_CONFIG (unchanged behaviour).
+// With siteId: removes only that site's override keys; the client-level template
+// is left untouched and remains the effective config for the site.
 router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  await db
-    .delete(appSettingsTable)
-    .where(
-      and(
-        eq(appSettingsTable.clientId, clientId),
-        inArray(appSettingsTable.key, CONFIG_KEYS as unknown as string[])
-      )
-    );
+  const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
+  if ("error" in site) return res.status(400).json({ error: site.error });
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+    return res.status(400).json({ error: "Invalid siteId" });
+  }
+
+  if (site.siteId !== null) {
+    const siteKeys = (CONFIG_KEYS as readonly string[]).map((k) => siteKeyFor(site.siteId as number, k));
+    await db
+      .delete(appSettingsTable)
+      .where(and(eq(appSettingsTable.clientId, clientId), inArray(appSettingsTable.key, siteKeys)));
+  } else {
+    await db
+      .delete(appSettingsTable)
+      .where(
+        and(
+          eq(appSettingsTable.clientId, clientId),
+          inArray(appSettingsTable.key, CONFIG_KEYS as unknown as string[])
+        )
+      );
+  }
 
   res.json({ ...DEFAULT_CONFIG });
 });
 
-// GET /api/food-safety/by-date/:date
+// Drizzle condition selecting the right diary scope: a specific site when
+// siteId is given, otherwise the whole-organisation diary (site_id IS NULL).
+const siteScopeCond = (siteId: number | null) =>
+  siteId === null ? isNull(foodSafetyRecordsTable.siteId) : eq(foodSafetyRecordsTable.siteId, siteId);
+
+/** Resolve + validate the optional siteId query param against the client's
+ *  sites. On error, writes the response and returns undefined. */
+async function resolveDiarySiteId(
+  req: any,
+  res: any,
+  clientId: number
+): Promise<number | null | undefined> {
+  const site = parseSiteId(req.query?.siteId);
+  if ("error" in site) {
+    res.status(400).json({ error: site.error });
+    return undefined;
+  }
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+    res.status(400).json({ error: "Invalid siteId" });
+    return undefined;
+  }
+  return site.siteId;
+}
+
+// GET /api/food-safety/by-date/:date[?siteId=N]
 router.get("/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
 
   const date = req.params.date as string;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Invalid date" });
@@ -264,17 +389,20 @@ router.get("/by-date/:date", requireAuth, async (req, res) => {
   const [record] = await db
     .select()
     .from(foodSafetyRecordsTable)
-    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date)))
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date), siteScopeCond(siteId)))
     .limit(1);
 
   if (!record) return res.status(404).json({ error: "No record for this date" });
   res.json(record);
 });
 
-// GET /api/food-safety?date=YYYY-MM-DD
+// GET /api/food-safety?date=YYYY-MM-DD[&siteId=N]
 router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
 
   const { date } = req.query as { date?: string };
   if (!date) {
@@ -282,7 +410,7 @@ router.get("/", requireAuth, async (req, res) => {
     const records = await db
       .select({ id: foodSafetyRecordsTable.id, recordDate: foodSafetyRecordsTable.recordDate, submittedAt: foodSafetyRecordsTable.submittedAt })
       .from(foodSafetyRecordsTable)
-      .where(eq(foodSafetyRecordsTable.clientId, clientId))
+      .where(and(eq(foodSafetyRecordsTable.clientId, clientId), siteScopeCond(siteId)))
       .orderBy(foodSafetyRecordsTable.recordDate);
     return res.json(records);
   }
@@ -290,28 +418,31 @@ router.get("/", requireAuth, async (req, res) => {
   const [record] = await db
     .select()
     .from(foodSafetyRecordsTable)
-    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date)))
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date), siteScopeCond(siteId)))
     .limit(1);
 
   if (!record) return res.json(null);
   res.json(record);
 });
 
-// POST /api/food-safety
+// POST /api/food-safety[?siteId=N]
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
 
   const parsed = createRecordSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data;
 
-  // Check if record already exists for this date
+  // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
     .select({ id: foodSafetyRecordsTable.id })
     .from(foodSafetyRecordsTable)
-    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate)))
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
 
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
@@ -320,6 +451,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     .insert(foodSafetyRecordsTable)
     .values({
       clientId,
+      siteId: siteId ?? null,
       recordDate: data.recordDate,
       deliveries: data.deliveries ?? [],
       coldFood: data.coldFood ?? [],
@@ -360,6 +492,9 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+
   const appendSchema = z.object({
     recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     section: z.enum(SECTION_KEYS),
@@ -371,20 +506,31 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   const { recordDate, section, row } = parsed.data;
   const column = SECTION_COLUMNS[section];
   const rowJson = JSON.stringify(row);
+  const userId = (req.session as any).userId ?? null;
 
-  // Ensure the day's record exists (ignore the race where another writer
-  // creates it first), then append in a single UPDATE.
-  await db.execute(sql`
-    INSERT INTO food_safety_records (client_id, record_date, created_by)
-    VALUES (${clientId}, ${recordDate}, ${(req.session as any).userId ?? null})
-    ON CONFLICT (client_id, record_date) DO NOTHING
-  `);
+  // Ensure the day's record exists for this diary scope (ignore the race where
+  // another writer creates it first), then append in a single UPDATE. The
+  // ON CONFLICT target uses the matching partial unique index for the scope.
+  if (siteId === null) {
+    await db.execute(sql`
+      INSERT INTO food_safety_records (client_id, record_date, created_by)
+      VALUES (${clientId}, ${recordDate}, ${userId})
+      ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+    `);
+  } else {
+    await db.execute(sql`
+      INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
+      VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
+      ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+    `);
+  }
 
+  const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
   const result = await db.execute(sql`
     UPDATE food_safety_records
     SET ${sql.raw(`"${column}"`)} = COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb) || ${rowJson}::jsonb,
         updated_at = now()
-    WHERE client_id = ${clientId} AND record_date = ${recordDate}
+    WHERE client_id = ${clientId} AND record_date = ${recordDate} AND ${scopeCond}
     RETURNING *
   `);
   const updated = (result.rows ?? [])[0];

@@ -29,19 +29,20 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
-const PEST_TYPES = ["rodent", "insect", "bird", "other"] as const;
+// Friendly labels for the stable stored codes. The selectable options now come
+// from the per-client effective option list (useFormOptions); these maps just
+// prettify known values and fall back to the raw value for custom ones.
 const PEST_TYPE_LABELS: Record<string, string> = {
   rodent: "Rodent", insect: "Insect", bird: "Bird", other: "Other",
 };
 
-const EVIDENCE_TYPES = [
-  "live_sighting", "droppings", "damage", "nest", "tracks", "other",
-] as const;
 const EVIDENCE_LABELS: Record<string, string> = {
   live_sighting: "Live sighting",
   droppings:     "Droppings",
@@ -74,6 +75,12 @@ function fmt(d: string | null | undefined) {
   if (!d) return null;
   const p = parseISO(d);
   return isValid(p) ? format(p, "dd MMM yyyy") : null;
+}
+
+/** Ensure a record's stored value is selectable even if removed from the list. */
+function withValue(opts: string[], value?: string | null): string[] {
+  if (value && !opts.includes(value)) return [...opts, value];
+  return opts;
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -286,6 +293,11 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
   const { toast } = useToast();
   const isEdit = !!activity;
   const [saving, setSaving] = useState(false);
+  const { data: formOptions } = useFormOptions();
+  // Effective (custom or default) lists; include the record's stored value even
+  // if it was removed from the list, so editing an old record still works.
+  const pestTypeOpts = withValue(pickOptions(formOptions, "pest_types"), activity?.pest_type);
+  const evidenceTypeOpts = withValue(pickOptions(formOptions, "pest_evidence_types"), activity?.evidence_type);
   const [form, setForm] = useState(() => ({
     recordedDate: activity?.recorded_date ?? new Date().toISOString().slice(0, 10),
     pestType:     activity?.pest_type ?? "rodent",
@@ -349,7 +361,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
             <Select value={form.pestType} onValueChange={v => setForm(f => ({ ...f, pestType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {PEST_TYPES.map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t]}</SelectItem>)}
+                {pestTypeOpts.map(t => <SelectItem key={t} value={t}>{PEST_TYPE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -358,7 +370,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
             <Select value={form.evidenceType} onValueChange={v => setForm(f => ({ ...f, evidenceType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {EVIDENCE_TYPES.map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t]}</SelectItem>)}
+                {evidenceTypeOpts.map(t => <SelectItem key={t} value={t}>{EVIDENCE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -675,6 +687,18 @@ ${sortedActivity.map(a => `<tr>
               title="Print or save the full pest control log for environmental health inspections">
               <Printer className="w-3.5 h-3.5" /> Export log
             </Button>
+            <FormOptionsEditor
+              optionKey="pest_types"
+              title="Pest types"
+              triggerLabel="Pest types"
+              labelFor={v => PEST_TYPE_LABELS[v] ?? v}
+            />
+            <FormOptionsEditor
+              optionKey="pest_evidence_types"
+              title="Evidence types"
+              triggerLabel="Evidence types"
+              labelFor={v => EVIDENCE_LABELS[v] ?? v}
+            />
             {canAdmin && (
               <Button variant="outline" size="sm" className="rounded-sm gap-1.5 h-8 text-xs"
                 onClick={() => setConfigDialog(true)}>

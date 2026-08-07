@@ -44,6 +44,7 @@ import patTrackRouter from "./pat-track";
 import pestTrackRouter from "./pest-track";
 import premisesTrackRouter from "./premises-track";
 import formOptionsRouter from "./form-options";
+import mobileRouter from "./mobile";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -97,6 +98,7 @@ router.use("/pat-track",  requireAuth, requireService("pattrack"),  patTrackRout
 router.use("/pest-track", requireAuth, requireService("pesttrack"), pestTrackRouter);
 router.use("/premises-track", requireAuth, requireService("premisestrack"), premisesTrackRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
+router.use(mobileRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);
 

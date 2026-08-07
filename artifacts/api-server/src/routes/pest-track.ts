@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { pestVisitsTable, pestActivityTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, denyViewers } from "../middleware/requireAuth";
+import { getEffectiveOptionList } from "../lib/formOptions";
 import { z } from "zod";
 
 const router = Router();
@@ -191,6 +192,15 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
 
+  // pestType/evidenceType are validated against the client's effective option
+  // list at request time (custom or default) rather than a fixed enum.
+  const [allowedPestTypes, allowedEvidenceTypes] = await Promise.all([
+    getEffectiveOptionList(clientId, "pest_types"),
+    getEffectiveOptionList(clientId, "pest_evidence_types"),
+  ]);
+  if (!allowedPestTypes.includes(d.pestType)) return res.status(400).json({ error: "Invalid pest type" });
+  if (!allowedEvidenceTypes.includes(d.evidenceType)) return res.status(400).json({ error: "Invalid evidence type" });
+
   const [row] = await db.insert(pestActivityTable).values({
     clientId,
     siteId:       d.siteId ?? null,
@@ -217,6 +227,26 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
   const body = ActivityBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+
+  const [existing] = await db.select({
+    id:           pestActivityTable.id,
+    pestType:     pestActivityTable.pestType,
+    evidenceType: pestActivityTable.evidenceType,
+  }).from(pestActivityTable)
+    .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
+    .limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  // Allow a value that is unchanged from the stored record even if it is no
+  // longer in the client's effective list; reject only NEW values not in it.
+  if (d.pestType !== existing.pestType) {
+    const allowed = await getEffectiveOptionList(clientId, "pest_types");
+    if (!allowed.includes(d.pestType)) return res.status(400).json({ error: "Invalid pest type" });
+  }
+  if (d.evidenceType !== existing.evidenceType) {
+    const allowed = await getEffectiveOptionList(clientId, "pest_evidence_types");
+    if (!allowed.includes(d.evidenceType)) return res.status(400).json({ error: "Invalid evidence type" });
+  }
 
   await db.update(pestActivityTable).set({
     siteId:       d.siteId ?? null,

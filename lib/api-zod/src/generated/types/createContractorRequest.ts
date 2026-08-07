@@ -13,4 +13,8 @@ export interface CreateContractorRequest {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  /** @maxLength 30 */
+  gasSafeNumber?: string | null;
+  publicLiabilityExpiry?: Date | null;
+  dbsCheckDate?: Date | null;
 }

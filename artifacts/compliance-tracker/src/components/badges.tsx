@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Clock, AlertCircle, ArrowRightCircle } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, ArrowRightCircle, ShieldAlert } from "lucide-react";
+import { liabilityStatus, dbsNeedsReview } from "@/lib/contractor-compliance";
 
 type Status = "pending" | "in_progress" | "completed" | "overdue";
 type Priority = "low" | "medium" | "high" | "critical";
@@ -71,4 +72,34 @@ export function ExpiryBadge({ expiryDate }: { expiryDate: string | null | undefi
     return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200 shadow-none">Expiring Soon ({daysUntil}d)</Badge>;
   }
   return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200 shadow-none">Valid</Badge>;
+}
+
+/** Warning badge for public liability insurance that is expired or expiring within 30 days. */
+export function LiabilityBadge({ expiry, className }: { expiry: string | Date | null | undefined; className?: string }) {
+  const status = liabilityStatus(expiry);
+  if (status === "expired") {
+    return (
+      <Badge variant="outline" className={cn("gap-1.5 font-medium bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300", className)}>
+        <AlertCircle className="w-3.5 h-3.5" /> PL insurance expired
+      </Badge>
+    );
+  }
+  if (status === "expiring") {
+    return (
+      <Badge variant="outline" className={cn("gap-1.5 font-medium bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300", className)}>
+        <Clock className="w-3.5 h-3.5" /> PL insurance expiring soon
+      </Badge>
+    );
+  }
+  return null;
+}
+
+/** "Review recommended" prompt when a DBS check is older than 3 years (soft rule). */
+export function DbsReviewBadge({ dbsCheckDate, className }: { dbsCheckDate: string | Date | null | undefined; className?: string }) {
+  if (!dbsNeedsReview(dbsCheckDate)) return null;
+  return (
+    <Badge variant="outline" className={cn("gap-1.5 font-medium bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300", className)}>
+      <ShieldAlert className="w-3.5 h-3.5" /> DBS review recommended
+    </Badge>
+  );
 }

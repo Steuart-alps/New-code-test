@@ -14,6 +14,9 @@ export interface Contractor {
   phone?: string | null;
   address?: string | null;
   notes?: string | null;
+  gasSafeNumber?: string | null;
+  publicLiabilityExpiry?: Date | null;
+  dbsCheckDate?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

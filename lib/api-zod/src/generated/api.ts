@@ -164,6 +164,9 @@ export const ListContractorsResponseItem = zod.object({
   phone: zod.string().nullish(),
   address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  gasSafeNumber: zod.string().nullish(),
+  publicLiabilityExpiry: zod.date().nullish(),
+  dbsCheckDate: zod.date().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -172,6 +175,8 @@ export const ListContractorsResponse = zod.array(ListContractorsResponseItem);
 /**
  * @summary Create a contractor
  */
+export const createContractorBodyGasSafeNumberMax = 30;
+
 export const CreateContractorBody = zod.object({
   name: zod.string(),
   company: zod.string().nullish(),
@@ -179,6 +184,12 @@ export const CreateContractorBody = zod.object({
   phone: zod.string().nullish(),
   address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  gasSafeNumber: zod
+    .string()
+    .max(createContractorBodyGasSafeNumberMax)
+    .nullish(),
+  publicLiabilityExpiry: zod.date().nullish(),
+  dbsCheckDate: zod.date().nullish(),
 });
 
 /**
@@ -196,6 +207,9 @@ export const GetContractorResponse = zod.object({
   phone: zod.string().nullish(),
   address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  gasSafeNumber: zod.string().nullish(),
+  publicLiabilityExpiry: zod.date().nullish(),
+  dbsCheckDate: zod.date().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -207,6 +221,8 @@ export const UpdateContractorParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const updateContractorBodyGasSafeNumberMax = 30;
+
 export const UpdateContractorBody = zod.object({
   name: zod.string(),
   company: zod.string().nullish(),
@@ -214,6 +230,12 @@ export const UpdateContractorBody = zod.object({
   phone: zod.string().nullish(),
   address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  gasSafeNumber: zod
+    .string()
+    .max(updateContractorBodyGasSafeNumberMax)
+    .nullish(),
+  publicLiabilityExpiry: zod.date().nullish(),
+  dbsCheckDate: zod.date().nullish(),
 });
 
 export const UpdateContractorResponse = zod.object({
@@ -224,6 +246,9 @@ export const UpdateContractorResponse = zod.object({
   phone: zod.string().nullish(),
   address: zod.string().nullish(),
   notes: zod.string().nullish(),
+  gasSafeNumber: zod.string().nullish(),
+  publicLiabilityExpiry: zod.date().nullish(),
+  dbsCheckDate: zod.date().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -802,47 +827,76 @@ export const DeleteFireSafetyCheckParams = zod.object({
 /**
  * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
  */
+export const GetFoodSafetyConfigQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "When provided, returns the effective config for that site (defaults ← client-level ← site-level) plus which keys are overridden at the site level via _siteOverrides.",
+    ),
+});
+
 export const GetFoodSafetyConfigResponse = zod.object({
-  food_cold_units: zod.string().optional(),
-  food_default_hot_items: zod.string().optional(),
-  food_default_holding_items: zod.string().optional(),
-  food_default_sv_items: zod.string().optional(),
-  food_show_deliveries: zod.string().optional(),
-  food_show_cold_food: zod.string().optional(),
-  food_show_hot_temperature: zod.string().optional(),
-  food_show_cooling: zod.string().optional(),
-  food_show_reheating: zod.string().optional(),
-  food_show_hot_holding: zod.string().optional(),
-  food_show_sous_vide: zod.string().optional(),
-  food_num_fridges: zod.string().optional(),
-  food_num_freezers: zod.string().optional(),
-  food_cooking_limit: zod.string().optional(),
-  food_cooling_limit: zod.string().optional(),
-  food_reheating_limit: zod.string().optional(),
-  food_hot_holding_limit: zod.string().optional(),
+  food_cold_units: zod.string().nullish(),
+  food_default_hot_items: zod.string().nullish(),
+  food_default_holding_items: zod.string().nullish(),
+  food_default_sv_items: zod.string().nullish(),
+  food_show_deliveries: zod.string().nullish(),
+  food_show_cold_food: zod.string().nullish(),
+  food_show_hot_temperature: zod.string().nullish(),
+  food_show_cooling: zod.string().nullish(),
+  food_show_reheating: zod.string().nullish(),
+  food_show_hot_holding: zod.string().nullish(),
+  food_show_sous_vide: zod.string().nullish(),
+  food_num_fridges: zod.string().nullish(),
+  food_num_freezers: zod.string().nullish(),
+  food_cooking_limit: zod.string().nullish(),
+  food_cooling_limit: zod.string().nullish(),
+  food_reheating_limit: zod.string().nullish(),
+  food_hot_holding_limit: zod.string().nullish(),
+  _siteOverrides: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Keys that are overridden at the site level for the requested site. Only present when the config is fetched with a siteId.",
+    ),
 });
 
 /**
+ * Only keys present in the body are written. A key sent with value null clears that key: for a site-scoped PUT (with siteId) it removes the site override so the key inherits the client-level value; for a client-level PUT it removes the stored value so the key reverts to the default.
  * @summary Update kitchen configuration
  */
+export const UpdateFoodSafetyConfigQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe("When provided, writes site-scoped overrides for that site."),
+});
+
 export const UpdateFoodSafetyConfigBody = zod.object({
-  food_cold_units: zod.string().optional(),
-  food_default_hot_items: zod.string().optional(),
-  food_default_holding_items: zod.string().optional(),
-  food_default_sv_items: zod.string().optional(),
-  food_show_deliveries: zod.string().optional(),
-  food_show_cold_food: zod.string().optional(),
-  food_show_hot_temperature: zod.string().optional(),
-  food_show_cooling: zod.string().optional(),
-  food_show_reheating: zod.string().optional(),
-  food_show_hot_holding: zod.string().optional(),
-  food_show_sous_vide: zod.string().optional(),
-  food_num_fridges: zod.string().optional(),
-  food_num_freezers: zod.string().optional(),
-  food_cooking_limit: zod.string().optional(),
-  food_cooling_limit: zod.string().optional(),
-  food_reheating_limit: zod.string().optional(),
-  food_hot_holding_limit: zod.string().optional(),
+  food_cold_units: zod.string().nullish(),
+  food_default_hot_items: zod.string().nullish(),
+  food_default_holding_items: zod.string().nullish(),
+  food_default_sv_items: zod.string().nullish(),
+  food_show_deliveries: zod.string().nullish(),
+  food_show_cold_food: zod.string().nullish(),
+  food_show_hot_temperature: zod.string().nullish(),
+  food_show_cooling: zod.string().nullish(),
+  food_show_reheating: zod.string().nullish(),
+  food_show_hot_holding: zod.string().nullish(),
+  food_show_sous_vide: zod.string().nullish(),
+  food_num_fridges: zod.string().nullish(),
+  food_num_freezers: zod.string().nullish(),
+  food_cooking_limit: zod.string().nullish(),
+  food_cooling_limit: zod.string().nullish(),
+  food_reheating_limit: zod.string().nullish(),
+  food_hot_holding_limit: zod.string().nullish(),
+  _siteOverrides: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Keys that are overridden at the site level for the requested site. Only present when the config is fetched with a siteId.",
+    ),
 });
 
 export const UpdateFoodSafetyConfigResponse = zod.object({
@@ -852,24 +906,39 @@ export const UpdateFoodSafetyConfigResponse = zod.object({
 /**
  * @summary Reset kitchen configuration to defaults
  */
+export const ResetFoodSafetyConfigQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "When provided, clears only that site's overrides. Without it, resets the client-level template to defaults.",
+    ),
+});
+
 export const ResetFoodSafetyConfigResponse = zod.object({
-  food_cold_units: zod.string().optional(),
-  food_default_hot_items: zod.string().optional(),
-  food_default_holding_items: zod.string().optional(),
-  food_default_sv_items: zod.string().optional(),
-  food_show_deliveries: zod.string().optional(),
-  food_show_cold_food: zod.string().optional(),
-  food_show_hot_temperature: zod.string().optional(),
-  food_show_cooling: zod.string().optional(),
-  food_show_reheating: zod.string().optional(),
-  food_show_hot_holding: zod.string().optional(),
-  food_show_sous_vide: zod.string().optional(),
-  food_num_fridges: zod.string().optional(),
-  food_num_freezers: zod.string().optional(),
-  food_cooking_limit: zod.string().optional(),
-  food_cooling_limit: zod.string().optional(),
-  food_reheating_limit: zod.string().optional(),
-  food_hot_holding_limit: zod.string().optional(),
+  food_cold_units: zod.string().nullish(),
+  food_default_hot_items: zod.string().nullish(),
+  food_default_holding_items: zod.string().nullish(),
+  food_default_sv_items: zod.string().nullish(),
+  food_show_deliveries: zod.string().nullish(),
+  food_show_cold_food: zod.string().nullish(),
+  food_show_hot_temperature: zod.string().nullish(),
+  food_show_cooling: zod.string().nullish(),
+  food_show_reheating: zod.string().nullish(),
+  food_show_hot_holding: zod.string().nullish(),
+  food_show_sous_vide: zod.string().nullish(),
+  food_num_fridges: zod.string().nullish(),
+  food_num_freezers: zod.string().nullish(),
+  food_cooking_limit: zod.string().nullish(),
+  food_cooling_limit: zod.string().nullish(),
+  food_reheating_limit: zod.string().nullish(),
+  food_hot_holding_limit: zod.string().nullish(),
+  _siteOverrides: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Keys that are overridden at the site level for the requested site. Only present when the config is fetched with a siteId.",
+    ),
 });
 
 /**
@@ -1073,6 +1142,21 @@ export const UpdatePoolTrackConfigResponse = zod.object({
 /**
  * @summary List food safety diary record summaries (dates and submission state)
  */
+export const ListFoodSafetyRecordsQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Scope to a site's diary. Omit for the whole-organisation diary (records with no site). Must belong to the caller's client.",
+    ),
+  date: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "When provided, returns the single record for that date in the given scope (or null).",
+    ),
+});
+
 export const ListFoodSafetyRecordsResponseItem = zod.object({
   id: zod.number(),
   recordDate: zod.string(),
@@ -1085,6 +1169,15 @@ export const ListFoodSafetyRecordsResponse = zod.array(
 /**
  * @summary Create a daily food safety record
  */
+export const CreateFoodSafetyRecordQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Scope the new record to a site. Omit for the whole-organisation diary.",
+    ),
+});
+
 export const CreateFoodSafetyRecordBody = zod.object({
   recordDate: zod.string(),
   deliveries: zod.array(zod.unknown()).optional(),
@@ -1107,9 +1200,19 @@ export const GetFoodSafetyRecordByDateParams = zod.object({
   date: zod.coerce.string(),
 });
 
+export const GetFoodSafetyRecordByDateQueryParams = zod.object({
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Scope to a site's diary. Omit for the whole-organisation diary.",
+    ),
+});
+
 export const GetFoodSafetyRecordByDateResponse = zod.object({
   id: zod.number(),
   clientId: zod.number(),
+  siteId: zod.number().nullish(),
   recordDate: zod.string(),
   deliveries: zod.array(zod.unknown()).optional(),
   coldFood: zod.array(zod.unknown()).optional(),
@@ -1150,6 +1253,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
 export const UpdateFoodSafetyRecordResponse = zod.object({
   id: zod.number(),
   clientId: zod.number(),
+  siteId: zod.number().nullish(),
   recordDate: zod.string(),
   deliveries: zod.array(zod.unknown()).optional(),
   coldFood: zod.array(zod.unknown()).optional(),

@@ -1,5 +1,6 @@
 import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
+import { sitesTable } from "./sites";
 import { usersTable } from "./users";
 
 export const foodSafetyRecordsTable = pgTable("food_safety_records", {
@@ -7,6 +8,9 @@ export const foodSafetyRecordsTable = pgTable("food_safety_records", {
   clientId: integer("client_id")
     .notNull()
     .references(() => clientsTable.id, { onDelete: "cascade" }),
+  // Optional per-site scoping. NULL = whole-organisation (client-level) diary,
+  // preserving the original single-diary-per-client behaviour.
+  siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
   recordDate: date("record_date").notNull(),
   deliveries: jsonb("deliveries").notNull().default([]),
   coldFood: jsonb("cold_food").notNull().default([]),

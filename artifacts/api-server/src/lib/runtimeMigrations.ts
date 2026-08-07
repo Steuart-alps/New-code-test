@@ -79,10 +79,11 @@ export async function runRuntimeMigrations() {
     await db.execute(
       sql`CREATE INDEX IF NOT EXISTS "IDX_food_safety_client_date" ON "food_safety_records" ("client_id", "record_date")`
     );
-    // One diary record per client per day — required for atomic append upserts.
-    await db.execute(
-      sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_food_safety_client_date" ON "food_safety_records" ("client_id", "record_date")`
-    );
+    // NOTE: uniqueness for the diary is now scoped per-site and created by
+    // migrateFoodSafetySiteScoping() at the very end of runRuntimeMigrations
+    // (two partial unique indexes). The legacy whole-table unique index
+    // "UQ_food_safety_client_date" is deliberately no longer created here — that
+    // migration drops it — otherwise two sites could not share a record date.
 
     // ---- Legionella water safety table ----
     await db.execute(sql`
@@ -276,6 +277,31 @@ export async function runRuntimeMigrations() {
     await migratePremisesTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
+
+    // ---- Push notification tokens (keep this LAST) ----
+    // Placed at the very end of the migration function so other agents can add
+    // their own migrations above without conflicting with this region.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "push_tokens" (
+        "id" serial PRIMARY KEY,
+        "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "client_id" integer REFERENCES "clients"("id") ON DELETE CASCADE,
+        "token" text NOT NULL,
+        "platform" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(
+      sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_push_tokens_token" ON "push_tokens" ("token")`
+    );
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS "IDX_push_tokens_user" ON "push_tokens" ("user_id")`
+    );
+
+    // ---- Contractor compliance fields (keep at VERY END) ----
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "gas_safe_number" text`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_check_date" timestamp`);
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1275,5 +1301,87 @@ async function migrateMobileSessions() {
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_mobile_sessions_token"
     ON "mobile_sessions" ("token")
+  `);
+}
+
+// Adds optional per-site scoping to the kitchen diary and reworks the
+// uniqueness so that the same (client, date) can exist once per site plus once
+// for the whole organisation (site_id IS NULL). Because Postgres treats NULLs
+// as distinct, a single unique index over (client_id, record_date, site_id)
+// would NOT prevent two whole-org rows for the same day; so we use two partial
+// unique indexes instead.
+async function migrateFoodSafetySiteScoping() {
+  // 1. Nullable site_id column (whole-org diary keeps site_id NULL).
+  await db.execute(sql`
+    ALTER TABLE "food_safety_records"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_food_safety_client_site_date"
+    ON "food_safety_records" ("client_id", "site_id", "record_date")
+  `);
+
+  // 2. Retire the old (client_id, record_date) uniqueness. The live DB may hold
+  //    it as either a unique CONSTRAINT or a bare unique INDEX (migration text
+  //    has historically drifted), and the name may vary — resolve the real
+  //    names from the catalog before dropping.
+  const constraintRows = await db.execute(sql`
+    SELECT c.conname
+    FROM pg_constraint c
+    WHERE c.conrelid = 'food_safety_records'::regclass
+      AND c.contype = 'u'
+      AND c.conkey = (
+        SELECT array_agg(a.attnum ORDER BY a.attnum)
+        FROM pg_attribute a
+        WHERE a.attrelid = 'food_safety_records'::regclass
+          AND a.attname IN ('client_id', 'record_date')
+      )
+  `);
+  for (const row of (constraintRows.rows ?? []) as Array<{ conname: string }>) {
+    await db.execute(sql`ALTER TABLE "food_safety_records" DROP CONSTRAINT IF EXISTS ${sql.raw(`"${row.conname}"`)}`);
+  }
+  // Any remaining plain unique index over exactly (client_id, record_date)
+  // that is NOT partial (no WHERE clause) is the legacy whole-table unique.
+  // Match at the catalog level: exactly two key columns, no expression keys,
+  // and the key attnums are precisely {client_id, record_date} — so wider
+  // indexes like (client_id, record_date, created_by) are never touched.
+  const indexRows = await db.execute(sql`
+    SELECT i.relname AS indexname
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    WHERE x.indrelid = 'food_safety_records'::regclass
+      AND x.indisunique
+      AND x.indpred IS NULL
+      AND x.indexprs IS NULL
+      AND x.indnkeyatts = 2
+      AND 0 <> ALL (x.indkey::int2[])
+      AND (
+        SELECT array_agg(k ORDER BY k)
+        FROM unnest(x.indkey::int2[]) AS k
+      ) = (
+        SELECT array_agg(a.attnum ORDER BY a.attnum)
+        FROM pg_attribute a
+        WHERE a.attrelid = 'food_safety_records'::regclass
+          AND a.attname IN ('client_id', 'record_date')
+      )
+  `);
+  for (const row of (indexRows.rows ?? []) as Array<{ indexname: string }>) {
+    await db.execute(sql`DROP INDEX IF EXISTS ${sql.raw(`"${row.indexname}"`)}`);
+  }
+  // Belt-and-braces: drop the known historical name too.
+  await db.execute(sql`DROP INDEX IF EXISTS "UQ_food_safety_client_date"`);
+
+  // 3. Two partial unique indexes replacing the old single one.
+  //    - whole-org diary: one row per (client, date) when site_id IS NULL
+  //    - per-site diary:  one row per (client, site, date) when site_id NOT NULL
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_food_safety_client_date_nosite"
+    ON "food_safety_records" ("client_id", "record_date")
+    WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_food_safety_client_site_date"
+    ON "food_safety_records" ("client_id", "site_id", "record_date")
+    WHERE "site_id" IS NOT NULL
   `);
 }

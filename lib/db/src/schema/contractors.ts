@@ -15,6 +15,9 @@ export const contractorsTable = pgTable("contractors", {
   address: text("address"),
   notes: text("notes"),
   trades: jsonb("trades").default([]).$type<string[]>(),
+  gasSafeNumber: text("gas_safe_number"),
+  publicLiabilityExpiry: timestamp("public_liability_expiry"),
+  dbsCheckDate: timestamp("dbs_check_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

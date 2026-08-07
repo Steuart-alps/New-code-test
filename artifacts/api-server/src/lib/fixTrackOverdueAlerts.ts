@@ -13,6 +13,7 @@ import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
+import { sendPushToUsers } from "./pushNotifications";
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -144,7 +145,7 @@ export async function runFixTrackOverdueAlertJob(
 
       // Managers: client_admin users OR maintenance managers.
       const managers = await db
-        .select({ email: usersTable.email })
+        .select({ id: usersTable.id, email: usersTable.email })
         .from(usersTable)
         .where(and(
           eq(usersTable.clientId, client.id),
@@ -153,6 +154,7 @@ export async function runFixTrackOverdueAlertJob(
         ))
         .limit(30);
       const emails = [...new Set(managers.map((m) => m.email).filter(Boolean) as string[])];
+      const userIds = [...new Set(managers.map((m) => m.id))];
       if (emails.length === 0) continue;
 
       // Claim first so concurrent job runs can't double-send; release the
@@ -173,6 +175,13 @@ export async function runFixTrackOverdueAlertJob(
         await db.execute(sql`DELETE FROM fix_track_alert_log WHERE id = ${claimId}`);
         throw sendErr;
       }
+
+      // Push managers a matching alert (best-effort; never blocks the job).
+      await sendPushToUsers(userIds, {
+        title: "Urgent maintenance overdue",
+        body: `${issues.length} urgent issue${issues.length !== 1 ? "s" : ""} need attention in FixTrack.`,
+        data: { route: "/(tabs)/issues" },
+      });
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

@@ -13,6 +13,7 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import { setBaseUrl } from '@workspace/api-client-react';
 import { AuthProvider, useAuth } from '@/lib/auth';
 
@@ -41,6 +42,24 @@ function RootLayoutNav() {
       router.replace('/(tabs)' as any);
     }
   }, [isAuthenticated, isLoading, segments]);
+
+  // Notification taps: navigate to a route hint carried in the payload's data.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as
+        | { route?: string }
+        | undefined;
+      const route = data?.route;
+      if (route && typeof route === 'string' && isAuthenticated) {
+        try {
+          router.push(route as any);
+        } catch {
+          // Ignore invalid route hints.
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [isAuthenticated]);
 
   return (
     <Stack screenOptions={{ headerBackTitle: '' }}>

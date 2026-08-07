@@ -3,14 +3,29 @@ import { db } from "@workspace/db";
 import { contractorsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
-  CreateContractorBody,
   GetContractorParams,
   UpdateContractorParams,
-  UpdateContractorBody,
   DeleteContractorParams,
 } from "@workspace/api-zod";
+import { z } from "zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
+
+// Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
+// use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
+const CreateContractorBody = z.object({
+  name:                  z.string().min(1),
+  company:               z.string().nullish(),
+  email:                 z.string().email(),
+  phone:                 z.string().nullish(),
+  address:               z.string().nullish(),
+  notes:                 z.string().nullish(),
+  gasSafeNumber:         z.string().max(30).nullish(),
+  publicLiabilityExpiry: z.coerce.date().nullish(),
+  dbsCheckDate:          z.coerce.date().nullish(),
+});
+
+const UpdateContractorBody = CreateContractorBody;
 
 const router: IRouter = Router();
 
@@ -56,6 +71,13 @@ router.post("/contractors", requireAuth, requireClientAdmin, async (req, res) =>
       return;
     }
   }
+  if (body.gasSafeNumber) {
+    const gasCheck = filterName(body.gasSafeNumber);
+    if (!gasCheck.ok) {
+      res.status(400).json({ error: gasCheck.message });
+      return;
+    }
+  }
   const [contractor] = await db
     .insert(contractorsTable)
     .values({ ...body, clientId, trades, updatedAt: new Date() })
@@ -91,6 +113,13 @@ router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res)
     const companyCheck = filterName(body.company);
     if (!companyCheck.ok) {
       res.status(400).json({ error: companyCheck.message });
+      return;
+    }
+  }
+  if (body.gasSafeNumber) {
+    const gasCheck = filterName(body.gasSafeNumber);
+    if (!gasCheck.ok) {
+      res.status(400).json({ error: gasCheck.message });
       return;
     }
   }

@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { getEffectiveOptionList } from "../lib/formOptions";
 
 const router = Router();
 
@@ -108,6 +109,10 @@ router.post("/bikes", requireAuth, denyViewers, async (req, res) => {
   const parsed = bikeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  // bike type is validated against the client's effective option list (custom
+  // or default) rather than a fixed enum, so clients can customise the list.
+  const allowedTypes = await getEffectiveOptionList(clientId, "bike_types");
+  if (!allowedTypes.includes(d.type)) return res.status(400).json({ error: "Invalid bike type" });
   const [row] = await db.insert(bikesTable).values({
     clientId,
     siteId: d.siteId ?? null,
@@ -128,6 +133,20 @@ router.put("/bikes/:id", requireAuth, denyViewers, async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const parsed = bikeSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const [existing] = await db.select({ id: bikesTable.id, type: bikesTable.type })
+    .from(bikesTable)
+    .where(and(eq(bikesTable.id, id), eq(bikesTable.clientId, clientId)))
+    .limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  // Allow an unchanged stored type even if it is no longer in the effective
+  // list; reject only NEW types not in it.
+  if (parsed.data.type !== undefined && parsed.data.type !== existing.type) {
+    const allowedTypes = await getEffectiveOptionList(clientId, "bike_types");
+    if (!allowedTypes.includes(parsed.data.type)) return res.status(400).json({ error: "Invalid bike type" });
+  }
+
   const [row] = await db.update(bikesTable)
     .set({ ...parsed.data, updatedAt: new Date() })
     .where(and(eq(bikesTable.id, id), eq(bikesTable.clientId, clientId)))

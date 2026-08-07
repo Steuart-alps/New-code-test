@@ -13,6 +13,7 @@ import {
   getGetFoodSafetyRecordByDateQueryKey,
   useCreateFoodSafetyRecord,
   useUpdateFoodSafetyRecord,
+  useListSites,
   FoodSafetyRecord,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -125,7 +126,21 @@ function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"
 // ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
   const [open, setOpen] = useState(false);
-  const { data: config } = useGetFoodSafetyConfig();
+  // Which site's template we're editing. null = "All sites (default)" (the
+  // client-level template). A number = a specific site's overrides.
+  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const { data: sites } = useListSites();
+  const configParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
+  const { data: config } = useGetFoodSafetyConfig(configParams, {
+    query: { queryKey: getGetFoodSafetyConfigQueryKey(configParams) },
+  });
+  // The pure client-level effective config (defaults ← client) — used as the
+  // baseline to diff a site's edits against so we only persist genuine
+  // overrides and clear reverted ones.
+  const { data: clientConfig } = useGetFoodSafetyConfig(undefined, {
+    query: { queryKey: getGetFoodSafetyConfigQueryKey() },
+  });
+  const siteOverrides: string[] = ((config as any)?._siteOverrides as string[] | undefined) ?? [];
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateConfig = useUpdateFoodSafetyConfig();
@@ -173,31 +188,59 @@ function ConfigDialog() {
     setDefaultSvItems(parseStringArray(config.food_default_sv_items));
   }, [config, open]);
 
+  // Invalidate every food-safety config query (client-level + all sites) so both
+  // the editor and the diary pick up the new values.
+  const invalidateAllConfigs = () =>
+    queryClient.invalidateQueries({ queryKey: getGetFoodSafetyConfigQueryKey().slice(0, 1) });
+
   const handleSave = () => {
+    // The full config the admin has composed in the dialog.
+    const desired: Record<string, string> = {
+      food_cooking_limit: cookingLimit,
+      food_cooling_limit: coolingLimit,
+      food_reheating_limit: reheatingLimit,
+      food_hot_holding_limit: hotHoldingLimit,
+      food_show_deliveries: showDeliveries ? "true" : "false",
+      food_show_cold_food: showColdFood ? "true" : "false",
+      food_show_hot_temperature: showHotTemp ? "true" : "false",
+      food_show_cooling: showCooling ? "true" : "false",
+      food_show_reheating: showReheating ? "true" : "false",
+      food_show_hot_holding: showHotHolding ? "true" : "false",
+      food_show_sous_vide: showSousVide ? "true" : "false",
+      food_cold_units: JSON.stringify(coldUnits.map(u => ({ ...u, name: u.name.trim() })).filter(u => u.name)),
+      food_default_hot_items: JSON.stringify(defaultHotItems.filter(Boolean)),
+      food_default_holding_items: JSON.stringify(defaultHoldingItems.filter(Boolean)),
+      food_default_sv_items: JSON.stringify(defaultSvItems.filter(Boolean)),
+    };
+
+    // For the client-level template we save every key as-is (unchanged
+    // behaviour). For a site we diff against the client-level effective config
+    // and only persist keys that differ; keys reverted to the client value are
+    // cleared (null) so they resume inheriting.
+    let payload: Record<string, string | null> = desired;
+    if (selectedSiteId != null) {
+      const base = (clientConfig as Record<string, string> | undefined) ?? {};
+      payload = {};
+      for (const [k, v] of Object.entries(desired)) {
+        if (base[k] !== v) payload[k] = v;   // genuine override
+        else payload[k] = null;              // reverted → clear the override
+      }
+    }
+
     updateConfig.mutate(
       {
-        data: {
-          food_cooking_limit: cookingLimit,
-          food_cooling_limit: coolingLimit,
-          food_reheating_limit: reheatingLimit,
-          food_hot_holding_limit: hotHoldingLimit,
-          food_show_deliveries: showDeliveries ? "true" : "false",
-          food_show_cold_food: showColdFood ? "true" : "false",
-          food_show_hot_temperature: showHotTemp ? "true" : "false",
-          food_show_cooling: showCooling ? "true" : "false",
-          food_show_reheating: showReheating ? "true" : "false",
-          food_show_hot_holding: showHotHolding ? "true" : "false",
-          food_show_sous_vide: showSousVide ? "true" : "false",
-          food_cold_units: JSON.stringify(coldUnits.map(u => ({ ...u, name: u.name.trim() })).filter(u => u.name)),
-          food_default_hot_items: JSON.stringify(defaultHotItems.filter(Boolean)),
-          food_default_holding_items: JSON.stringify(defaultHoldingItems.filter(Boolean)),
-          food_default_sv_items: JSON.stringify(defaultSvItems.filter(Boolean)),
-        },
+        data: payload,
+        params: configParams,
       },
       {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getGetFoodSafetyConfigQueryKey() });
-          toast({ title: "Template saved", description: "New diary days will use these defaults automatically." });
+          invalidateAllConfigs();
+          toast({
+            title: "Template saved",
+            description: selectedSiteId != null
+              ? "This site now uses these settings for new diary days."
+              : "New diary days will use these defaults automatically.",
+          });
           setOpen(false);
         },
         onError: (err: any) => {
@@ -208,11 +251,19 @@ function ConfigDialog() {
   };
 
   const handleReset = () => {
-    if (!window.confirm("Reset the diary template to the default sections and rows? This cannot be undone.")) return;
-    resetConfig.mutate(undefined as void, {
+    const msg = selectedSiteId != null
+      ? "Clear this site's overrides? It will fall back to the default (all-sites) template. This cannot be undone."
+      : "Reset the diary template to the default sections and rows? This cannot be undone.";
+    if (!window.confirm(msg)) return;
+    resetConfig.mutate({ params: configParams }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetFoodSafetyConfigQueryKey() });
-        toast({ title: "Template reset", description: "The diary template is back to its defaults." });
+        invalidateAllConfigs();
+        toast({
+          title: selectedSiteId != null ? "Site overrides cleared" : "Template reset",
+          description: selectedSiteId != null
+            ? "This site now follows the default template."
+            : "The diary template is back to its defaults.",
+        });
         setOpen(false);
       },
       onError: (err: any) => {
@@ -258,6 +309,27 @@ function ConfigDialog() {
             Configure once — every new diary day will use these settings automatically.
           </p>
         </DialogHeader>
+
+        {sites && sites.length > 0 && (
+          <div className="shrink-0 space-y-1.5 rounded-sm border border-border p-3">
+            <Label className="text-sm font-medium">Editing template for</Label>
+            <select
+              value={selectedSiteId ?? ""}
+              onChange={e => setSelectedSiteId(e.target.value === "" ? null : Number(e.target.value))}
+              className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
+            >
+              <option value="">All sites (default)</option>
+              {sites.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {selectedSiteId != null
+                ? `Changes here override the default template for this site only. Unchanged settings inherit the default.${siteOverrides.length > 0 ? ` (${siteOverrides.length} setting${siteOverrides.length === 1 ? "" : "s"} currently overridden)` : ""}`
+                : "This is the default template used by every site that has no overrides of its own."}
+            </p>
+          </div>
+        )}
 
         <Tabs defaultValue="sections" className="flex-1 min-h-0 flex flex-col">
           <TabsList className="shrink-0 w-full grid grid-cols-4">
@@ -394,7 +466,9 @@ function ConfigDialog() {
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2 sm:justify-between">
           <Button variant="ghost" className="text-destructive hover:text-destructive"
             onClick={handleReset} disabled={resetConfig.isPending || updateConfig.isPending}>
-            {resetConfig.isPending ? "Resetting…" : "Reset to defaults"}
+            {resetConfig.isPending
+              ? (selectedSiteId != null ? "Clearing…" : "Resetting…")
+              : (selectedSiteId != null ? "Clear site overrides" : "Reset to defaults")}
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
@@ -413,13 +487,27 @@ function ConfigDialog() {
 function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  // Which site's diary we're viewing/filling. null = "All sites" = the
+  // whole-organisation diary (records with no site), matching the original
+  // single-diary behaviour.
+  const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
+  const { data: sites } = useListSites();
 
-  const { data: config } = useGetFoodSafetyConfig();
-  const { data: records } = useListFoodSafetyRecords();
-  const { data: record, isLoading: recordLoading } = useGetFoodSafetyRecordByDate(selectedDate, {
+  // The diary is scoped to the selected site: it loads that site's effective
+  // config (defaults ← client ← site) AND that site's records. When no site is
+  // chosen, both fall back to the whole-organisation diary.
+  const configParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
+  const recordParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
+  const { data: config } = useGetFoodSafetyConfig(configParams, {
+    query: { queryKey: getGetFoodSafetyConfigQueryKey(configParams) },
+  });
+  const { data: records } = useListFoodSafetyRecords(recordParams, {
+    query: { queryKey: getListFoodSafetyRecordsQueryKey(recordParams) },
+  });
+  const { data: record, isLoading: recordLoading } = useGetFoodSafetyRecordByDate(selectedDate, recordParams, {
     query: {
       enabled: !!selectedDate,
-      queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate),
+      queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams),
       retry: false,
     },
   });
@@ -509,7 +597,13 @@ function DailyDiaryTab() {
       setManagerSignature("");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record, selectedDate]);
+  }, [record, selectedDate, selectedSiteId]);
+
+  // Invalidate the record queries for the current diary scope.
+  const invalidateRecords = () => {
+    queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams) });
+    queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey(recordParams) });
+  };
 
   const buildData = (submittedAt?: string) => ({
     recordDate: selectedDate,
@@ -537,8 +631,7 @@ function DailyDiaryTab() {
         { id: record.id, data },
         {
           onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
-            queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
+            invalidateRecords();
             toast({ title: "Draft saved" });
           },
           onError: (error: any) => {
@@ -548,11 +641,10 @@ function DailyDiaryTab() {
       );
     } else {
       createRecord.mutate(
-        { data },
+        { data, params: recordParams },
         {
           onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
-            queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
+            invalidateRecords();
             toast({ title: "Draft created" });
           },
           onError: (error: any) => {
@@ -570,15 +662,14 @@ function DailyDiaryTab() {
     }
     const data = buildData(new Date().toISOString());
     const onSuccess = () => {
-      queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate) });
-      queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey() });
+      invalidateRecords();
       toast({ title: "Diary filed", description: "Kitchen diary signed off and stored." });
     };
     const onError = (error: any) => toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
     if (record) {
       updateRecord.mutate({ id: record.id, data }, { onSuccess, onError });
     } else {
-      createRecord.mutate({ data }, { onSuccess, onError });
+      createRecord.mutate({ data, params: recordParams }, { onSuccess, onError });
     }
   };
 
@@ -600,7 +691,7 @@ function DailyDiaryTab() {
           </div>
         </CardHeader>
         <CardContent className="p-4">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <Label className="text-sm">Date:</Label>
             <Input
               type="date"
@@ -608,6 +699,21 @@ function DailyDiaryTab() {
               onChange={(e) => setSelectedDate(e.target.value)}
               className="max-w-xs"
             />
+            {sites && sites.length > 0 && (
+              <>
+                <Label className="text-sm">Site:</Label>
+                <select
+                  value={selectedSiteId ?? ""}
+                  onChange={(e) => setSelectedSiteId(e.target.value === "" ? null : Number(e.target.value))}
+                  className="h-9 rounded-sm border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">All sites</option>
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1326,8 +1432,8 @@ export default function KitchenPage() {
   const canAdmin = useCanAdmin();
   const hasKitchentrack = hasService("kitchentrack");
 
-  const { error: configError } = useGetFoodSafetyConfig({
-    query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFoodSafetyConfigQueryKey() },
+  const { error: configError } = useGetFoodSafetyConfig(undefined, {
+    query: { enabled: hasKitchentrack, retry: (count: number, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFoodSafetyConfigQueryKey() },
   });
   const serverLocked = (configError as any)?.status === 403;
 
