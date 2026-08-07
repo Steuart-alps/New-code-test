@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useGetDashboardStats, useListSites } from "@workspace/api-client-react";
 import { ChecksAlertPanel } from "@/components/checks-alert-panel";
@@ -10,6 +10,7 @@ import {
   FileWarning, Clock, ShieldAlert, Building, Briefcase, Activity, Building2,
   CheckCircle2, Circle, LayoutGrid, ArrowRight, Sunrise, Sunset,
   Flame, UtensilsCrossed, Droplets, FileText, AlertTriangle, Wrench,
+  Waves, Zap, Bug, SlidersHorizontal, X, Check,
 } from "lucide-react";
 import { useAuth, useIsConsultant } from "@/context/auth-context";
 import { Link, useLocation } from "wouter";
@@ -291,31 +292,265 @@ function FixTrackCard() {
   );
 }
 
-function ModuleTrackRow({ hasService }: { hasService: (key: string) => boolean }) {
-  const cards = [
-    { key: "firetrack",       node: <FireTrackCard /> },
-    { key: "kitchentrack",    node: <KitchenTrackCard /> },
-    { key: "legionellatrack", node: <LegionellaTrackCard /> },
-    { key: "safetrack",       node: <SafeTrackCard /> },
-    { key: "fixtrack",        node: <FixTrackCard /> },
-  ].filter(c => hasService(c.key));
+function PoolTrackCard() {
+  const [statuses, setStatuses] = useState<{ checkType: string; status: CheckStatus }[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  if (cards.length === 0) return null;
+  useEffect(() => {
+    apiFetch("/pool-track/status")
+      .then(r => r.ok ? r.json() : [])
+      .then(setStatuses)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const counts = { ok: 0, due_soon: 0, overdue: 0, never: 0 };
+  statuses.forEach(s => { counts[s.status as CheckStatus]++; });
+  const pill = statusPill(counts.overdue, counts.due_soon, counts.ok, counts.never);
+
+  return (
+    <Link href="/pool-track">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-cyan-50 rounded-lg"><Waves className="w-4 h-4 text-cyan-600" /></div>
+              <span className="text-sm font-semibold">PoolTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? <div className="h-2 bg-muted rounded-full animate-pulse" /> : <CheckStatusBar items={statuses} />}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function PATTrackCard() {
+  const [status, setStatus] = useState<{ overdue: number; dueSoon: number; ok: number; untested: number; totalAppliances: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/pat-track/status")
+      .then(r => r.ok ? r.json() : null)
+      .then(setStatus)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pill = !status
+    ? { label: "No appliances", cls: "bg-muted text-muted-foreground" }
+    : status.overdue > 0
+      ? { label: `${status.overdue} overdue`, cls: "bg-red-100 text-red-700" }
+      : status.dueSoon > 0
+        ? { label: `${status.dueSoon} due soon`, cls: "bg-amber-100 text-amber-700" }
+        : status.totalAppliances > 0
+          ? { label: "All tests current", cls: "bg-emerald-100 text-emerald-700" }
+          : { label: "No appliances", cls: "bg-muted text-muted-foreground" };
+
+  return (
+    <Link href="/pat-track">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-yellow-50 rounded-lg"><Zap className="w-4 h-4 text-yellow-600" /></div>
+              <span className="text-sm font-semibold">PATtrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (status?.overdue ?? 0) > 0 ? "text-red-600" : "text-foreground")}>{status?.overdue ?? 0}</p>
+                <p className="text-muted-foreground">Overdue</p>
+              </div>
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (status?.dueSoon ?? 0) > 0 ? "text-amber-600" : "text-foreground")}>{status?.dueSoon ?? 0}</p>
+                <p className="text-muted-foreground">Due soon</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-display font-bold">{status?.totalAppliances ?? 0}</p>
+                <p className="text-muted-foreground">Appliances</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function PestTrackCard() {
+  const [status, setStatus] = useState<{ last_visit_date: string | null; next_visit_date: string | null; next_visit_overdue: boolean; open_activity_count: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/pest-track/status")
+      .then(r => r.ok ? r.json() : null)
+      .then(setStatus)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pill = !status
+    ? { label: "No visits yet", cls: "bg-muted text-muted-foreground" }
+    : status.next_visit_overdue
+      ? { label: "Visit overdue", cls: "bg-red-100 text-red-700" }
+      : (status.open_activity_count ?? 0) > 0
+        ? { label: `${status.open_activity_count} open activity`, cls: "bg-amber-100 text-amber-700" }
+        : status.last_visit_date
+          ? { label: "Up to date", cls: "bg-emerald-100 text-emerald-700" }
+          : { label: "No visits yet", cls: "bg-muted text-muted-foreground" };
+
+  return (
+    <Link href="/pest-track">
+      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-50 rounded-lg"><Bug className="w-4 h-4 text-emerald-600" /></div>
+              <span className="text-sm font-semibold">PestTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (status?.open_activity_count ?? 0) > 0 ? "text-amber-600" : "text-foreground")}>{status?.open_activity_count ?? 0}</p>
+                <p className="text-muted-foreground">Open activity</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium tabular-nums">{status?.last_visit_date ?? "—"}</p>
+                <p className="text-muted-foreground">Last visit</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+// ── Module status board definition ────────────────────────────────────────────
+
+const ALL_MODULE_CARDS: { key: string; label: string; node: React.ReactNode }[] = [
+  { key: "firetrack",       label: "FireTrack",       node: <FireTrackCard /> },
+  { key: "kitchentrack",    label: "KitchenTrack",    node: <KitchenTrackCard /> },
+  { key: "legionellatrack", label: "LegionellaTrack", node: <LegionellaTrackCard /> },
+  { key: "safetrack",       label: "SafeTrack",       node: <SafeTrackCard /> },
+  { key: "fixtrack",        label: "FixTrack",        node: <FixTrackCard /> },
+  { key: "pooltrack",       label: "PoolTrack",       node: <PoolTrackCard /> },
+  { key: "pattrack",        label: "PATtrack",        node: <PATTrackCard /> },
+  { key: "pesttrack",       label: "PestTrack",       node: <PestTrackCard /> },
+];
+
+function ModuleTrackRow({ hasService, activeClientId }: { hasService: (key: string) => boolean; activeClientId: number | null }) {
+  const storageKey = `module_status_board_${activeClientId ?? "default"}`;
+
+  const available = ALL_MODULE_CARDS.filter(c => hasService(c.key));
+
+  // null = "nothing saved" → show all available
+  const [savedKeys, setSavedKeys] = useState<string[] | null>(() => {
+    try {
+      const s = localStorage.getItem(storageKey);
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  });
+
+  const [customising, setCustomising] = useState(false);
+
+  const effectiveSelected = savedKeys !== null
+    ? new Set(savedKeys)
+    : new Set(available.map(c => c.key));
+
+  const visible = available.filter(c => effectiveSelected.has(c.key));
+
+  const toggle = (key: string) => {
+    const next = new Set(effectiveSelected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    const arr = [...next];
+    setSavedKeys(arr);
+    try { localStorage.setItem(storageKey, JSON.stringify(arr)); } catch {}
+  };
+
+  const resetToAll = () => {
+    setSavedKeys(null);
+    try { localStorage.removeItem(storageKey); } catch {}
+  };
+
+  if (available.length === 0) return null;
 
   return (
     <div className="mb-8">
-      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
-        <AlertTriangle className="w-3.5 h-3.5" /> Module Status
-      </h2>
-      <div className={cn(
-        "grid gap-4",
-        cards.length === 1 && "grid-cols-1 max-w-xs",
-        cards.length === 2 && "grid-cols-1 sm:grid-cols-2",
-        cards.length === 3 && "grid-cols-1 sm:grid-cols-3",
-        cards.length >= 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4",
-      )}>
-        {cards.map(c => <div key={c.key}>{c.node}</div>)}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5" /> Module Status
+        </h2>
+        <button
+          onClick={() => setCustomising(v => !v)}
+          className={cn(
+            "flex items-center gap-1 text-xs rounded-sm px-2 py-0.5 transition-colors",
+            customising
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          <SlidersHorizontal className="w-3 h-3" />
+          {customising ? "Done" : "Customise"}
+        </button>
       </div>
+
+      {/* ── Inline picker ── */}
+      {customising && (
+        <div className="border border-border rounded-sm p-3 mb-4 bg-muted/20">
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-xs text-muted-foreground">Select which modules appear on your status board</p>
+            {savedKeys !== null && (
+              <button onClick={resetToAll} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+                Reset to all
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {available.map(c => {
+              const on = effectiveSelected.has(c.key);
+              return (
+                <button
+                  key={c.key}
+                  onClick={() => toggle(c.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium border transition-colors",
+                    on
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "bg-background text-muted-foreground border-border hover:border-primary/30"
+                  )}
+                >
+                  {on && <Check className="w-3 h-3" />}
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          {visible.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-2 italic">Select at least one module to display.</p>
+          )}
+        </div>
+      )}
+
+      {visible.length > 0 && (
+        <div className={cn(
+          "grid gap-4",
+          visible.length === 1 && "grid-cols-1 max-w-xs",
+          visible.length === 2 && "grid-cols-1 sm:grid-cols-2",
+          visible.length === 3 && "grid-cols-1 sm:grid-cols-3",
+          visible.length >= 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4",
+        )}>
+          {visible.map(c => <div key={c.key}>{c.node}</div>)}
+        </div>
+      )}
     </div>
   );
 }
@@ -620,7 +855,7 @@ export default function Dashboard() {
 
       <ChecksAlertPanel />
 
-      <ModuleTrackRow hasService={hasService} />
+      <ModuleTrackRow hasService={hasService} activeClientId={activeClientId} />
 
       {hasService("dailytrack_pm") && (
         <DailyChecklistSnapshot activeClientId={activeClientId} />
