@@ -55,7 +55,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     res.json(rows);
   });
 
-  sub.post("/", requireAuth, async (req, res) => {
+  sub.post("/", requireAuth, denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const parsed = createSchema.safeParse(req.body);
@@ -67,7 +67,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     res.status(201).json(row);
   });
 
-  sub.put("/:id", requireAuth, async (req, res) => {
+  sub.put("/:id", requireAuth, denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const id = parseInt(req.params.id as string);
@@ -82,7 +82,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     res.json(row);
   });
 
-  sub.delete("/:id", requireAuth, async (req, res) => {
+  sub.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
     const id = parseInt(req.params.id as string);

@@ -1,8 +1,9 @@
 import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { RequestHandler } from "express";
-import { findLiveSubscription } from "./billing";
+import { findLiveSubscription, PER_SITE_CURRENCY } from "./billing";
+import { getUncachableStripeClient, getStripeSync } from "./stripeClient";
 import { getClientId } from "../middleware/requireAuth";
 import { logger } from "./logger";
 
@@ -166,4 +167,87 @@ export function requireAnyService(...keys: ServiceKey[]): RequestHandler {
 export async function requireAnyEntitlement(clientId: number, ...keys: ServiceKey[]): Promise<boolean> {
   const services = await getEntitledServices(clientId);
   return keys.some((key) => isEntitled(services, key));
+}
+
+export interface EnsurePricesResult {
+  created: string[];
+  existing: string[];
+}
+
+/**
+ * Ensure every per-site service in the catalogue (all SERVICES plus the
+ * capped bundle) has a live monthly GBP Stripe price tagged with its
+ * `service_key` price metadata.
+ *
+ * Prices are resolved dynamically by that metadata (see getServicePrice), so a
+ * module can't be activated from billing until its price exists. This helper
+ * is idempotent: it only creates a product + recurring price for keys that are
+ * currently missing one, then triggers a Stripe → DB backfill so the new rows
+ * appear in the synced stripe.* tables the app reads from. Amounts follow the
+ * existing convention (£10.00/site/month per add-on; £50.00 for the bundle),
+ * matching the pricing page. No proration logic is touched.
+ */
+export async function ensureServicePrices(): Promise<EnsurePricesResult> {
+  const stripe = await getUncachableStripeClient();
+
+  // Which service_keys already have a live monthly price? Read from the synced
+  // tables (the same source getServicePrice trusts) so we never create a
+  // duplicate for a key that is already priced.
+  const existingRows = await db.execute(sql`
+    SELECT DISTINCT pr.metadata->>'service_key' AS service_key
+    FROM stripe.prices pr
+    JOIN stripe.products p ON p.id = pr.product
+    WHERE p.active = true
+      AND pr.active = true
+      AND (pr.recurring->>'interval') = 'month'
+      AND pr.metadata->>'service_key' IS NOT NULL
+  `);
+  const existing = new Set(
+    (existingRows.rows as { service_key: string | null }[])
+      .map((r) => r.service_key)
+      .filter((k): k is string => !!k),
+  );
+
+  // Full catalogue: every SERVICES entry (core + add-ons) plus the bundle.
+  const catalogue: { key: string; label: string; amountPence: number }[] = [
+    ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
+    { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
+  ];
+
+  const created: string[] = [];
+  for (const svc of catalogue) {
+    if (existing.has(svc.key)) continue;
+    // Create a dedicated product + monthly recurring price carrying the
+    // service_key metadata the rest of the billing code keys off. Idempotency
+    // keys guard against duplicate creation on retries.
+    const product = await stripe.products.create(
+      { name: svc.label, metadata: { service_key: svc.key } },
+      { idempotencyKey: `svc-product-${svc.key}` },
+    );
+    await stripe.prices.create(
+      {
+        product: product.id,
+        unit_amount: svc.amountPence,
+        currency: PER_SITE_CURRENCY,
+        recurring: { interval: "month" },
+        metadata: { service_key: svc.key },
+      },
+      { idempotencyKey: `svc-price-${svc.key}` },
+    );
+    created.push(svc.key);
+    logger.info({ serviceKey: svc.key, amountPence: svc.amountPence }, "Created Stripe price for service");
+  }
+
+  if (created.length > 0) {
+    // Pull the new products/prices into the synced stripe.* tables the app
+    // reads from, so getServicePrice() resolves them immediately.
+    try {
+      const sync = await getStripeSync();
+      await sync.syncBackfill();
+    } catch (err) {
+      logger.error({ err }, "Stripe backfill after price creation failed; webhook will sync eventually");
+    }
+  }
+
+  return { created, existing: Array.from(existing) };
 }

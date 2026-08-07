@@ -1,22 +1,48 @@
 /**
- * Daily FixTrack overdue-issue alert job.
+ * Daily FixTrack overdue / stale-issue alert job.
  *
  * For each active client, emails the client's managers (client_admin users
- * and maintenance managers) a digest of open issues that are URGENT and
- * either past their target date OR without an update in 7+ days. Throttled
- * to one email per client per day via fix_track_alert_log (claim-first
+ * and maintenance managers) a digest of open issues that either:
+ *   - are URGENT and past their target date OR without an update in 7+ days, or
+ *   - (any priority) have been open/unactioned — no status change or notes, i.e.
+ *     no update — for N days (default 7, configurable per-client via the
+ *     app_settings key `fixTrackStaleDays`).
+ *
+ * `updated_at` is bumped on every status change / notes edit, so "no update in N
+ * days" is our proxy for "unactioned for N days".
+ *
+ * Throttled to one email per client per day via fix_track_alert_log (claim-first
  * dedupe, mirroring docAckReminders / bikeOverdueReminders).
  */
 
 import { db } from "@workspace/db";
-import { clientsTable, usersTable } from "@workspace/db/schema";
+import { clientsTable, usersTable, appSettingsTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 
+/** Default days an open issue may sit unactioned before it's chased. */
+export const DEFAULT_STALE_DAYS = 7;
+
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Read the per-client "stale after N days" threshold from app_settings
+ * (key `fixTrackStaleDays`), falling back to the default. Clamped to a sane
+ * range so a bad value can't disable or spam the job.
+ */
+export async function getStaleDays(clientId: number): Promise<number> {
+  const [row] = await db
+    .select({ value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
+    .limit(1);
+  const parsed = row?.value ? Number.parseInt(row.value, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_STALE_DAYS;
+  return Math.min(parsed, 365);
 }
 
 interface OverdueIssue {
@@ -31,8 +57,15 @@ interface OverdueIssue {
   reason: string; // "overdue" | "stale"
 }
 
-/** Open, urgent issues that are past target date OR stale (no update 7+ days). */
-export async function getOverdueUrgentIssues(clientId: number): Promise<OverdueIssue[]> {
+/**
+ * Open issues that need a chase, either because they are URGENT and past target
+ * date / stale, OR (any priority) have had no update (status change or notes)
+ * for `staleDays` days.
+ */
+export async function getOverdueUrgentIssues(
+  clientId: number,
+  staleDays: number = DEFAULT_STALE_DAYS,
+): Promise<OverdueIssue[]> {
   const result = await db.execute(sql`
     SELECT
       fi.id, fi.title, fi.location, fi.priority, fi.status,
@@ -45,11 +78,18 @@ export async function getOverdueUrgentIssues(clientId: number): Promise<OverdueI
     FROM  fix_track_issues fi
     LEFT  JOIN sites s ON s.id = fi.site_id
     WHERE fi.client_id = ${clientId}
-      AND fi.priority  = 'urgent'
       AND fi.status IN ('reported', 'in_progress')
       AND (
-        (fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE)
-        OR fi.updated_at < now() - interval '7 days'
+        -- URGENT issues: past target date or stale for 7+ days.
+        (
+          fi.priority = 'urgent'
+          AND (
+            (fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE)
+            OR fi.updated_at < now() - interval '7 days'
+          )
+        )
+        -- Any issue left unactioned (no update) for the configured window.
+        OR fi.updated_at < now() - (${staleDays} * interval '1 day')
       )
     ORDER BY fi.target_date ASC NULLS LAST, fi.updated_at ASC
   `);
@@ -86,11 +126,11 @@ function buildEmailHtml(issues: OverdueIssue[], appUrl: string): string {
   <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
     <div style="background:#0f172a;padding:32px 40px;">
       <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">FixTrack — urgent issue${issues.length !== 1 ? "s" : ""} needing attention</div>
+      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">FixTrack — issue${issues.length !== 1 ? "s" : ""} needing attention</div>
     </div>
     <div style="padding:32px 40px;">
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
-        ${issues.length} urgent maintenance issue${issues.length !== 1 ? "s are" : " is"} overdue or have had no update in over a week. Please review and take action in FixTrack.
+        ${issues.length} maintenance issue${issues.length !== 1 ? "s are" : " is"} overdue or have been left unactioned. Please review and take action in FixTrack.
       </p>
       <table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;">
         <tbody>${rows}</tbody>
@@ -140,7 +180,8 @@ export async function runFixTrackOverdueAlertJob(
       `);
       if (((recent as any).rows ?? []).length > 0) continue;
 
-      const issues = await getOverdueUrgentIssues(client.id);
+      const staleDays = await getStaleDays(client.id);
+      const issues = await getOverdueUrgentIssues(client.id, staleDays);
       if (issues.length === 0) continue;
 
       // Managers: client_admin users OR maintenance managers.
@@ -168,7 +209,7 @@ export async function runFixTrackOverdueAlertJob(
       const claimId = ((claim as any).rows ?? [])[0]?.id;
       if (!claimId) continue;
 
-      const subject = `⚠️ ${issues.length} urgent maintenance issue${issues.length !== 1 ? "s" : ""} overdue — ComplyTrack`;
+      const subject = `⚠️ ${issues.length} maintenance issue${issues.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
       try {
         await send({ to: emails, subject, html: buildEmailHtml(issues, appUrl) });
       } catch (sendErr) {
@@ -178,8 +219,8 @@ export async function runFixTrackOverdueAlertJob(
 
       // Push managers a matching alert (best-effort; never blocks the job).
       await sendPushToUsers(userIds, {
-        title: "Urgent maintenance overdue",
-        body: `${issues.length} urgent issue${issues.length !== 1 ? "s" : ""} need attention in FixTrack.`,
+        title: "Maintenance issues need attention",
+        body: `${issues.length} issue${issues.length !== 1 ? "s" : ""} overdue or unactioned in FixTrack.`,
         data: { route: "/(tabs)/issues" },
       });
 

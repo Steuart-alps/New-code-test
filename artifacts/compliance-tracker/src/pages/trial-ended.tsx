@@ -3,7 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine, AlertOctagon } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, FolderOpen, BookOpen, Waves, TreePine, AlertOctagon, Bike, LifeBuoy, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -105,6 +105,78 @@ const ADDONS = [
     iconColor: "text-rose-700",
     activeBorder: "border-rose-500",
     activeBg: "bg-rose-50/60",
+  },
+  {
+    key: "biketrack",
+    label: "BikeTrack",
+    desc: "Bike hire service & maintenance records",
+    icon: Bike,
+    iconColor: "text-lime-700",
+    activeBorder: "border-lime-500",
+    activeBg: "bg-lime-50/60",
+  },
+  {
+    key: "pooltrack",
+    label: "PoolTrack",
+    desc: "Swimming pool water quality logbook (PWTAG)",
+    icon: LifeBuoy,
+    iconColor: "text-blue-600",
+    activeBorder: "border-blue-400",
+    activeBg: "bg-blue-50/60",
+  },
+  {
+    key: "greentrack",
+    label: "GreenTrack",
+    desc: "Grounds & landscaping maintenance records",
+    icon: Leaf,
+    iconColor: "text-green-600",
+    activeBorder: "border-green-400",
+    activeBg: "bg-green-50/60",
+  },
+  {
+    key: "swimtrack",
+    label: "SwimTrack",
+    desc: "Open water & swimming safety logbook",
+    icon: Waves,
+    iconColor: "text-teal-600",
+    activeBorder: "border-teal-400",
+    activeBg: "bg-teal-50/60",
+  },
+  {
+    key: "pattrack",
+    label: "PATtrack",
+    desc: "Portable appliance testing records",
+    icon: PlugZap,
+    iconColor: "text-yellow-600",
+    activeBorder: "border-yellow-400",
+    activeBg: "bg-yellow-50/60",
+  },
+  {
+    key: "pesttrack",
+    label: "PestTrack",
+    desc: "Pest control monitoring & treatment log",
+    icon: Bug,
+    iconColor: "text-stone-700",
+    activeBorder: "border-stone-500",
+    activeBg: "bg-stone-50/60",
+  },
+  {
+    key: "dailytrack_am",
+    label: "DailyTrack AM",
+    desc: "Opening checks & morning checklists",
+    icon: Sunrise,
+    iconColor: "text-amber-500",
+    activeBorder: "border-amber-400",
+    activeBg: "bg-amber-50/60",
+  },
+  {
+    key: "dailytrack_pm",
+    label: "DailyTrack PM",
+    desc: "Closing checks & evening checklists",
+    icon: Sunset,
+    iconColor: "text-orange-500",
+    activeBorder: "border-orange-400",
+    activeBg: "bg-orange-50/60",
   },
 ];
 

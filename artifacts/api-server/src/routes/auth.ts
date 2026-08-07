@@ -7,7 +7,7 @@ import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
-import { loginRateLimit } from "../middleware/loginRateLimit";
+import { loginRateLimit, makeLoginRateLimit } from "../lib/loginRateLimit";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
@@ -305,7 +305,11 @@ const ResetPasswordBody = z.object({
   password: z.string().min(8),
 });
 
-router.post("/auth/reset-password", async (req, res) => {
+// Guard token-guessing on reset-password: an invalid/expired token returns 400
+// (not 401), so count 400 as a failed attempt here in addition to 401.
+const resetPasswordRateLimit = makeLoginRateLimit({ failureStatuses: [400, 401] });
+
+router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => {
   const body = ResetPasswordBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Invalid request" });

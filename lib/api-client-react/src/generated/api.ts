@@ -31,6 +31,9 @@ import type {
   CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
   CreateLegionellaCheckRequest,
+  CreatePATApplianceRequest,
+  CreatePATTestRequest,
+  CreatePremisesInspectionRequest,
   CreateSiteRequest,
   DashboardStats,
   ErrorResponse,
@@ -44,6 +47,7 @@ import type {
   GetFoodSafetyConfigParams,
   GetFoodSafetyRecordByDateParams,
   GetLegionellaStatusParams,
+  GetPATPresetTemplates200,
   GreenTrackConfig,
   HealthStatus,
   IncidentConfig,
@@ -54,11 +58,20 @@ import type {
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
   ListLegionellaChecksParams,
+  ListPATTestsParams,
+  ListPremisesInspectionsParams,
+  OkResponse,
+  PATAppliance,
+  PATTest,
   PATTrackConfig,
+  PATTrackStatus,
   PoolTrackConfig,
+  PremisesInspection,
+  PremisesTrackSummary,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
+  SavePATPresetTemplateBody,
   SendRemindersResponse,
   Site,
   TestEmailRequest,
@@ -4948,6 +4961,1451 @@ export const useUpdatePATTrackConfig = <
   TContext
 > => {
   return useMutation(getUpdatePATTrackConfigMutationOptions(options));
+};
+
+/**
+ * @summary List PAT appliances with their latest test summary
+ */
+export const getListPATAppliancesUrl = () => {
+  return `/api/pat-track/appliances`;
+};
+
+export const listPATAppliances = async (
+  options?: RequestInit,
+): Promise<PATAppliance[]> => {
+  return customFetch<PATAppliance[]>(getListPATAppliancesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPATAppliancesQueryKey = () => {
+  return [`/api/pat-track/appliances`] as const;
+};
+
+export const getListPATAppliancesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPATAppliances>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listPATAppliances>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListPATAppliancesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPATAppliances>>
+  > = ({ signal }) => listPATAppliances({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPATAppliances>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListPATAppliancesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPATAppliances>>
+>;
+export type ListPATAppliancesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List PAT appliances with their latest test summary
+ */
+
+export function useListPATAppliances<
+  TData = Awaited<ReturnType<typeof listPATAppliances>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listPATAppliances>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListPATAppliancesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Add a PAT appliance to the register
+ */
+export const getCreatePATApplianceUrl = () => {
+  return `/api/pat-track/appliances`;
+};
+
+export const createPATAppliance = async (
+  createPATApplianceRequest: CreatePATApplianceRequest,
+  options?: RequestInit,
+): Promise<PATAppliance> => {
+  return customFetch<PATAppliance>(getCreatePATApplianceUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPATApplianceRequest),
+  });
+};
+
+export const getCreatePATApplianceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPATAppliance>>,
+    TError,
+    { data: BodyType<CreatePATApplianceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPATAppliance>>,
+  TError,
+  { data: BodyType<CreatePATApplianceRequest> },
+  TContext
+> => {
+  const mutationKey = ["createPATAppliance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPATAppliance>>,
+    { data: BodyType<CreatePATApplianceRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createPATAppliance(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePATApplianceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPATAppliance>>
+>;
+export type CreatePATApplianceMutationBody =
+  BodyType<CreatePATApplianceRequest>;
+export type CreatePATApplianceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Add a PAT appliance to the register
+ */
+export const useCreatePATAppliance = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPATAppliance>>,
+    TError,
+    { data: BodyType<CreatePATApplianceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPATAppliance>>,
+  TError,
+  { data: BodyType<CreatePATApplianceRequest> },
+  TContext
+> => {
+  return useMutation(getCreatePATApplianceMutationOptions(options));
+};
+
+/**
+ * @summary Update a PAT appliance
+ */
+export const getUpdatePATApplianceUrl = (id: number) => {
+  return `/api/pat-track/appliances/${id}`;
+};
+
+export const updatePATAppliance = async (
+  id: number,
+  createPATApplianceRequest: CreatePATApplianceRequest,
+  options?: RequestInit,
+): Promise<PATAppliance> => {
+  return customFetch<PATAppliance>(getUpdatePATApplianceUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPATApplianceRequest),
+  });
+};
+
+export const getUpdatePATApplianceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATAppliance>>,
+    TError,
+    { id: number; data: BodyType<CreatePATApplianceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePATAppliance>>,
+  TError,
+  { id: number; data: BodyType<CreatePATApplianceRequest> },
+  TContext
+> => {
+  const mutationKey = ["updatePATAppliance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePATAppliance>>,
+    { id: number; data: BodyType<CreatePATApplianceRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updatePATAppliance(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePATApplianceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePATAppliance>>
+>;
+export type UpdatePATApplianceMutationBody =
+  BodyType<CreatePATApplianceRequest>;
+export type UpdatePATApplianceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a PAT appliance
+ */
+export const useUpdatePATAppliance = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATAppliance>>,
+    TError,
+    { id: number; data: BodyType<CreatePATApplianceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePATAppliance>>,
+  TError,
+  { id: number; data: BodyType<CreatePATApplianceRequest> },
+  TContext
+> => {
+  return useMutation(getUpdatePATApplianceMutationOptions(options));
+};
+
+/**
+ * @summary Delete a PAT appliance
+ */
+export const getDeletePATApplianceUrl = (id: number) => {
+  return `/api/pat-track/appliances/${id}`;
+};
+
+export const deletePATAppliance = async (
+  id: number,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getDeletePATApplianceUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeletePATApplianceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATAppliance>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deletePATAppliance>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deletePATAppliance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deletePATAppliance>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deletePATAppliance(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeletePATApplianceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deletePATAppliance>>
+>;
+
+export type DeletePATApplianceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a PAT appliance
+ */
+export const useDeletePATAppliance = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATAppliance>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deletePATAppliance>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeletePATApplianceMutationOptions(options));
+};
+
+/**
+ * @summary List PAT test records
+ */
+export const getListPATTestsUrl = (params?: ListPATTestsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/pat-track/tests?${stringifiedParams}`
+    : `/api/pat-track/tests`;
+};
+
+export const listPATTests = async (
+  params?: ListPATTestsParams,
+  options?: RequestInit,
+): Promise<PATTest[]> => {
+  return customFetch<PATTest[]>(getListPATTestsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPATTestsQueryKey = (params?: ListPATTestsParams) => {
+  return [`/api/pat-track/tests`, ...(params ? [params] : [])] as const;
+};
+
+export const getListPATTestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPATTests>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListPATTestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPATTests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListPATTestsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listPATTests>>> = ({
+    signal,
+  }) => listPATTests(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPATTests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListPATTestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPATTests>>
+>;
+export type ListPATTestsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List PAT test records
+ */
+
+export function useListPATTests<
+  TData = Awaited<ReturnType<typeof listPATTests>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListPATTestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPATTests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListPATTestsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Record a PAT test result
+ */
+export const getCreatePATTestUrl = () => {
+  return `/api/pat-track/tests`;
+};
+
+export const createPATTest = async (
+  createPATTestRequest: CreatePATTestRequest,
+  options?: RequestInit,
+): Promise<PATTest> => {
+  return customFetch<PATTest>(getCreatePATTestUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPATTestRequest),
+  });
+};
+
+export const getCreatePATTestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPATTest>>,
+    TError,
+    { data: BodyType<CreatePATTestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPATTest>>,
+  TError,
+  { data: BodyType<CreatePATTestRequest> },
+  TContext
+> => {
+  const mutationKey = ["createPATTest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPATTest>>,
+    { data: BodyType<CreatePATTestRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createPATTest(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePATTestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPATTest>>
+>;
+export type CreatePATTestMutationBody = BodyType<CreatePATTestRequest>;
+export type CreatePATTestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Record a PAT test result
+ */
+export const useCreatePATTest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPATTest>>,
+    TError,
+    { data: BodyType<CreatePATTestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPATTest>>,
+  TError,
+  { data: BodyType<CreatePATTestRequest> },
+  TContext
+> => {
+  return useMutation(getCreatePATTestMutationOptions(options));
+};
+
+/**
+ * @summary Update a PAT test record
+ */
+export const getUpdatePATTestUrl = (id: number) => {
+  return `/api/pat-track/tests/${id}`;
+};
+
+export const updatePATTest = async (
+  id: number,
+  createPATTestRequest: CreatePATTestRequest,
+  options?: RequestInit,
+): Promise<PATTest> => {
+  return customFetch<PATTest>(getUpdatePATTestUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPATTestRequest),
+  });
+};
+
+export const getUpdatePATTestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATTest>>,
+    TError,
+    { id: number; data: BodyType<CreatePATTestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePATTest>>,
+  TError,
+  { id: number; data: BodyType<CreatePATTestRequest> },
+  TContext
+> => {
+  const mutationKey = ["updatePATTest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePATTest>>,
+    { id: number; data: BodyType<CreatePATTestRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updatePATTest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePATTestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePATTest>>
+>;
+export type UpdatePATTestMutationBody = BodyType<CreatePATTestRequest>;
+export type UpdatePATTestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a PAT test record
+ */
+export const useUpdatePATTest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATTest>>,
+    TError,
+    { id: number; data: BodyType<CreatePATTestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePATTest>>,
+  TError,
+  { id: number; data: BodyType<CreatePATTestRequest> },
+  TContext
+> => {
+  return useMutation(getUpdatePATTestMutationOptions(options));
+};
+
+/**
+ * @summary Delete a PAT test record
+ */
+export const getDeletePATTestUrl = (id: number) => {
+  return `/api/pat-track/tests/${id}`;
+};
+
+export const deletePATTest = async (
+  id: number,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getDeletePATTestUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeletePATTestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATTest>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deletePATTest>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deletePATTest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deletePATTest>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deletePATTest(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeletePATTestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deletePATTest>>
+>;
+
+export type DeletePATTestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a PAT test record
+ */
+export const useDeletePATTest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATTest>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deletePATTest>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeletePATTestMutationOptions(options));
+};
+
+/**
+ * @summary PAT register status summary (overdue / due-soon counts)
+ */
+export const getGetPATTrackStatusUrl = () => {
+  return `/api/pat-track/status`;
+};
+
+export const getPATTrackStatus = async (
+  options?: RequestInit,
+): Promise<PATTrackStatus> => {
+  return customFetch<PATTrackStatus>(getGetPATTrackStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPATTrackStatusQueryKey = () => {
+  return [`/api/pat-track/status`] as const;
+};
+
+export const getGetPATTrackStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPATTrackStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPATTrackStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPATTrackStatus>>
+  > = ({ signal }) => getPATTrackStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPATTrackStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPATTrackStatus>>
+>;
+export type GetPATTrackStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary PAT register status summary (overdue / due-soon counts)
+ */
+
+export function useGetPATTrackStatus<
+  TData = Awaited<ReturnType<typeof getPATTrackStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPATTrackStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get per-client customised appliance preset templates
+ */
+export const getGetPATPresetTemplatesUrl = () => {
+  return `/api/pat-track/preset-templates`;
+};
+
+export const getPATPresetTemplates = async (
+  options?: RequestInit,
+): Promise<GetPATPresetTemplates200> => {
+  return customFetch<GetPATPresetTemplates200>(getGetPATPresetTemplatesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPATPresetTemplatesQueryKey = () => {
+  return [`/api/pat-track/preset-templates`] as const;
+};
+
+export const getGetPATPresetTemplatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPATPresetTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATPresetTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPATPresetTemplatesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPATPresetTemplates>>
+  > = ({ signal }) => getPATPresetTemplates({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPATPresetTemplates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPATPresetTemplatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPATPresetTemplates>>
+>;
+export type GetPATPresetTemplatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get per-client customised appliance preset templates
+ */
+
+export function useGetPATPresetTemplates<
+  TData = Awaited<ReturnType<typeof getPATPresetTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATPresetTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPATPresetTemplatesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Save a customised appliance preset template
+ */
+export const getSavePATPresetTemplateUrl = (key: string) => {
+  return `/api/pat-track/preset-templates/${key}`;
+};
+
+export const savePATPresetTemplate = async (
+  key: string,
+  savePATPresetTemplateBody: SavePATPresetTemplateBody,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getSavePATPresetTemplateUrl(key), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(savePATPresetTemplateBody),
+  });
+};
+
+export const getSavePATPresetTemplateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePATPresetTemplate>>,
+    TError,
+    { key: string; data: BodyType<SavePATPresetTemplateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof savePATPresetTemplate>>,
+  TError,
+  { key: string; data: BodyType<SavePATPresetTemplateBody> },
+  TContext
+> => {
+  const mutationKey = ["savePATPresetTemplate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof savePATPresetTemplate>>,
+    { key: string; data: BodyType<SavePATPresetTemplateBody> }
+  > = (props) => {
+    const { key, data } = props ?? {};
+
+    return savePATPresetTemplate(key, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SavePATPresetTemplateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof savePATPresetTemplate>>
+>;
+export type SavePATPresetTemplateMutationBody =
+  BodyType<SavePATPresetTemplateBody>;
+export type SavePATPresetTemplateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Save a customised appliance preset template
+ */
+export const useSavePATPresetTemplate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof savePATPresetTemplate>>,
+    TError,
+    { key: string; data: BodyType<SavePATPresetTemplateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof savePATPresetTemplate>>,
+  TError,
+  { key: string; data: BodyType<SavePATPresetTemplateBody> },
+  TContext
+> => {
+  return useMutation(getSavePATPresetTemplateMutationOptions(options));
+};
+
+/**
+ * @summary Reset a preset template back to built-in defaults
+ */
+export const getDeletePATPresetTemplateUrl = (key: string) => {
+  return `/api/pat-track/preset-templates/${key}`;
+};
+
+export const deletePATPresetTemplate = async (
+  key: string,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getDeletePATPresetTemplateUrl(key), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeletePATPresetTemplateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATPresetTemplate>>,
+    TError,
+    { key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deletePATPresetTemplate>>,
+  TError,
+  { key: string },
+  TContext
+> => {
+  const mutationKey = ["deletePATPresetTemplate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deletePATPresetTemplate>>,
+    { key: string }
+  > = (props) => {
+    const { key } = props ?? {};
+
+    return deletePATPresetTemplate(key, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeletePATPresetTemplateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deletePATPresetTemplate>>
+>;
+
+export type DeletePATPresetTemplateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reset a preset template back to built-in defaults
+ */
+export const useDeletePATPresetTemplate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePATPresetTemplate>>,
+    TError,
+    { key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deletePATPresetTemplate>>,
+  TError,
+  { key: string },
+  TContext
+> => {
+  return useMutation(getDeletePATPresetTemplateMutationOptions(options));
+};
+
+/**
+ * @summary List premises inspections
+ */
+export const getListPremisesInspectionsUrl = (
+  params?: ListPremisesInspectionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/premises-track?${stringifiedParams}`
+    : `/api/premises-track`;
+};
+
+export const listPremisesInspections = async (
+  params?: ListPremisesInspectionsParams,
+  options?: RequestInit,
+): Promise<PremisesInspection[]> => {
+  return customFetch<PremisesInspection[]>(
+    getListPremisesInspectionsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListPremisesInspectionsQueryKey = (
+  params?: ListPremisesInspectionsParams,
+) => {
+  return [`/api/premises-track`, ...(params ? [params] : [])] as const;
+};
+
+export const getListPremisesInspectionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPremisesInspections>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListPremisesInspectionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPremisesInspections>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListPremisesInspectionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPremisesInspections>>
+  > = ({ signal }) =>
+    listPremisesInspections(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPremisesInspections>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListPremisesInspectionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPremisesInspections>>
+>;
+export type ListPremisesInspectionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List premises inspections
+ */
+
+export function useListPremisesInspections<
+  TData = Awaited<ReturnType<typeof listPremisesInspections>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListPremisesInspectionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPremisesInspections>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListPremisesInspectionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Record a premises inspection
+ */
+export const getCreatePremisesInspectionUrl = () => {
+  return `/api/premises-track`;
+};
+
+export const createPremisesInspection = async (
+  createPremisesInspectionRequest: CreatePremisesInspectionRequest,
+  options?: RequestInit,
+): Promise<PremisesInspection> => {
+  return customFetch<PremisesInspection>(getCreatePremisesInspectionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPremisesInspectionRequest),
+  });
+};
+
+export const getCreatePremisesInspectionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPremisesInspection>>,
+    TError,
+    { data: BodyType<CreatePremisesInspectionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPremisesInspection>>,
+  TError,
+  { data: BodyType<CreatePremisesInspectionRequest> },
+  TContext
+> => {
+  const mutationKey = ["createPremisesInspection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPremisesInspection>>,
+    { data: BodyType<CreatePremisesInspectionRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createPremisesInspection(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePremisesInspectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPremisesInspection>>
+>;
+export type CreatePremisesInspectionMutationBody =
+  BodyType<CreatePremisesInspectionRequest>;
+export type CreatePremisesInspectionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Record a premises inspection
+ */
+export const useCreatePremisesInspection = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPremisesInspection>>,
+    TError,
+    { data: BodyType<CreatePremisesInspectionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPremisesInspection>>,
+  TError,
+  { data: BodyType<CreatePremisesInspectionRequest> },
+  TContext
+> => {
+  return useMutation(getCreatePremisesInspectionMutationOptions(options));
+};
+
+/**
+ * @summary Premises inspection status summary
+ */
+export const getGetPremisesTrackSummaryUrl = () => {
+  return `/api/premises-track/summary`;
+};
+
+export const getPremisesTrackSummary = async (
+  options?: RequestInit,
+): Promise<PremisesTrackSummary> => {
+  return customFetch<PremisesTrackSummary>(getGetPremisesTrackSummaryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPremisesTrackSummaryQueryKey = () => {
+  return [`/api/premises-track/summary`] as const;
+};
+
+export const getGetPremisesTrackSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPremisesTrackSummary>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPremisesTrackSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPremisesTrackSummaryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPremisesTrackSummary>>
+  > = ({ signal }) => getPremisesTrackSummary({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPremisesTrackSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPremisesTrackSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPremisesTrackSummary>>
+>;
+export type GetPremisesTrackSummaryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Premises inspection status summary
+ */
+
+export function useGetPremisesTrackSummary<
+  TData = Awaited<ReturnType<typeof getPremisesTrackSummary>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPremisesTrackSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPremisesTrackSummaryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update a premises inspection
+ */
+export const getUpdatePremisesInspectionUrl = (id: number) => {
+  return `/api/premises-track/${id}`;
+};
+
+export const updatePremisesInspection = async (
+  id: number,
+  createPremisesInspectionRequest: CreatePremisesInspectionRequest,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getUpdatePremisesInspectionUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPremisesInspectionRequest),
+  });
+};
+
+export const getUpdatePremisesInspectionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePremisesInspection>>,
+    TError,
+    { id: number; data: BodyType<CreatePremisesInspectionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePremisesInspection>>,
+  TError,
+  { id: number; data: BodyType<CreatePremisesInspectionRequest> },
+  TContext
+> => {
+  const mutationKey = ["updatePremisesInspection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePremisesInspection>>,
+    { id: number; data: BodyType<CreatePremisesInspectionRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updatePremisesInspection(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePremisesInspectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePremisesInspection>>
+>;
+export type UpdatePremisesInspectionMutationBody =
+  BodyType<CreatePremisesInspectionRequest>;
+export type UpdatePremisesInspectionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a premises inspection
+ */
+export const useUpdatePremisesInspection = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePremisesInspection>>,
+    TError,
+    { id: number; data: BodyType<CreatePremisesInspectionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePremisesInspection>>,
+  TError,
+  { id: number; data: BodyType<CreatePremisesInspectionRequest> },
+  TContext
+> => {
+  return useMutation(getUpdatePremisesInspectionMutationOptions(options));
+};
+
+/**
+ * @summary Delete a premises inspection
+ */
+export const getDeletePremisesInspectionUrl = (id: number) => {
+  return `/api/premises-track/${id}`;
+};
+
+export const deletePremisesInspection = async (
+  id: number,
+  options?: RequestInit,
+): Promise<OkResponse> => {
+  return customFetch<OkResponse>(getDeletePremisesInspectionUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeletePremisesInspectionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePremisesInspection>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deletePremisesInspection>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["deletePremisesInspection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deletePremisesInspection>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deletePremisesInspection(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeletePremisesInspectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deletePremisesInspection>>
+>;
+
+export type DeletePremisesInspectionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a premises inspection
+ */
+export const useDeletePremisesInspection = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePremisesInspection>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deletePremisesInspection>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDeletePremisesInspectionMutationOptions(options));
 };
 
 /**

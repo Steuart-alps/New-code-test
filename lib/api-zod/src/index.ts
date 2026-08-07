@@ -9,6 +9,7 @@ export {
   GetFoodSafetyRecordByDateParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  SavePATPresetTemplateBody,
   SendRemindersResponse,
   TestEmailResponse,
 } from "./generated/api";

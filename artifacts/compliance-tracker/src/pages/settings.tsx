@@ -157,7 +157,9 @@ function DepartmentsCard() {
     if (!deptToDelete) return;
     setBusy(true);
     try {
-      await apiFetch(`/departments/${deptToDelete.id}`, { method: "DELETE" });
+      // The confirm dialog already lists the affected staff/sites, so proceed
+      // with force=true to satisfy the server's deletion-warning guard.
+      await apiFetch(`/departments/${deptToDelete.id}?force=true`, { method: "DELETE" });
       setDeptToDelete(null);
       await refresh();
     } catch (err: any) {

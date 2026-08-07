@@ -13,6 +13,7 @@ import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
+import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -77,6 +78,19 @@ function startScheduler() {
     }
   });
   logger.info("Contractor compliance reminder scheduler started (daily at 08:55)");
+
+  // Alert managers when staff training certificates are expiring within 30 days
+  // or have already expired (daily at 09:00; deduped per record milestone).
+  cron.schedule("0 9 * * *", async () => {
+    logger.info("Running training expiry reminder job...");
+    try {
+      const result = await runTrainingExpiryReminderJob();
+      logger.info({ result }, "Training expiry reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "Training expiry reminder job failed");
+    }
+  });
+  logger.info("Training expiry reminder scheduler started (daily at 09:00)");
 
   // Reconcile Stripe subscription quantities daily so any billing drift from
   // missed webhooks or transient Stripe failures self-heals.

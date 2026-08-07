@@ -129,12 +129,15 @@ function LegionellaTrackCard() {
 
 function KitchenTrackCard() {
   const [records, setRecords] = useState<{ id: number; recordDate: string; submittedAt: string | null }[]>([]);
+  const [checks, setChecks] = useState<{ checkType: string; status: CheckStatus }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch("/food-safety/")
-      .then(r => r.ok ? r.json() : [])
-      .then(setRecords)
+    Promise.all([
+      apiFetch("/food-safety/").then(r => r.ok ? r.json() : []),
+      apiFetch("/food-safety/status").then(r => r.ok ? r.json() : []),
+    ])
+      .then(([recs, sts]) => { setRecords(recs); setChecks(sts); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -146,11 +149,17 @@ function KitchenTrackCard() {
   const lastRecord = records.filter(r => r.submittedAt).sort((a, b) => b.recordDate.localeCompare(a.recordDate))[0];
   const todayRecord = records.find(r => r.recordDate === fmt(today));
 
-  const pill = !lastRecord
-    ? { label: "No records yet", cls: "bg-muted text-muted-foreground" }
-    : todayRecord?.submittedAt
-      ? { label: "Today submitted", cls: "bg-emerald-100 text-emerald-700" }
-      : { label: "Today pending", cls: "bg-amber-100 text-amber-700" };
+  const overdueChecks = checks.filter(c => c.status === "overdue").length;
+
+  // Overdue checks (missed daily diary, cleaning, etc.) take priority so managers
+  // see the red flag on the module card without opening KitchenTrack.
+  const pill = overdueChecks > 0
+    ? { label: `${overdueChecks} overdue`, cls: "bg-red-100 text-red-700" }
+    : !lastRecord
+      ? { label: "No records yet", cls: "bg-muted text-muted-foreground" }
+      : todayRecord?.submittedAt
+        ? { label: "Today submitted", cls: "bg-emerald-100 text-emerald-700" }
+        : { label: "Today pending", cls: "bg-amber-100 text-amber-700" };
 
   return (
     <Link href="/kitchen">
@@ -174,6 +183,12 @@ function KitchenTrackCard() {
               <div className="h-2 bg-muted rounded-full overflow-hidden">
                 <div className="h-full bg-amber-400 rounded-full" style={{ width: `${(recentSubmitted / 7) * 100}%` }} />
               </div>
+              {overdueChecks > 0 && (
+                <p className="text-[11px] font-medium text-rose-600 pt-0.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  {overdueChecks} check{overdueChecks === 1 ? "" : "s"} overdue
+                </p>
+              )}
               {lastRecord && (
                 <p className="text-[11px] text-muted-foreground pt-0.5">
                   Last submitted: {lastRecord.recordDate}

@@ -323,6 +323,26 @@ export async function runRuntimeMigrations() {
       ON "contractor_compliance_reminder_log" ("client_id")
     `);
 
+    // Deduplication log for TrainTrack staff-training-expiry reminders. One row
+    // per (client, record, milestone), where milestone encodes the expiry date
+    // it was sent for (e.g. "expiry:2025-03-01"), so a renewed certificate
+    // (new expiry date) produces a new milestone and re-alerts, while the same
+    // milestone is never re-sent. Self-contained / IF NOT EXISTS.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "training_expiry_reminder_log" (
+        "id"        serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_id" integer NOT NULL REFERENCES "train_track_records"("id") ON DELETE CASCADE,
+        "milestone" text NOT NULL,
+        "sent_at"   timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("client_id", "record_id", "milestone")
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_training_expiry_reminder_client"
+      ON "training_expiry_reminder_log" ("client_id")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

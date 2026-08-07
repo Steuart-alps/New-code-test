@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { seedDemo } from "../lib/seedDemo";
+import { ensureServicePrices } from "../lib/services";
+import { requireAuth, requireConsultant } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -25,6 +27,22 @@ router.post("/admin/seed-demo", async (req, res) => {
   } catch (err: any) {
     logger.error({ err }, "Demo seed failed");
     res.status(500).json({ error: err.message ?? "Seed failed" });
+  }
+});
+
+// Ensure a Stripe price exists for every activatable module so clients can
+// turn any of them on from their billing page. Idempotent — safe to call
+// repeatedly; only creates prices for modules that are currently missing one.
+// Consultant-only (platform administration action).
+// POST /api/admin/ensure-service-prices
+router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, async (_req, res) => {
+  try {
+    const result = await ensureServicePrices();
+    logger.info({ result }, "Ensured Stripe service prices");
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    logger.error({ err }, "Ensure service prices failed");
+    res.status(500).json({ error: err.message ?? "Failed to ensure service prices" });
   }
 });
 

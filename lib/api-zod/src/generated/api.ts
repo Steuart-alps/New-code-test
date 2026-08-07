@@ -1098,6 +1098,331 @@ export const UpdatePATTrackConfigResponse = zod.object({
 });
 
 /**
+ * @summary List PAT appliances with their latest test summary
+ */
+export const ListPATAppliancesResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  name: zod.string(),
+  applianceType: zod.string(),
+  location: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  description: zod.string().nullish(),
+  active: zod.boolean(),
+  lastTestDate: zod.string().nullish(),
+  lastResult: zod.string().nullish(),
+  nextTestDate: zod.string().nullish(),
+  lastTestedBy: zod.string().nullish(),
+  createdAt: zod.date().optional(),
+  updatedAt: zod.date().optional(),
+});
+export const ListPATAppliancesResponse = zod.array(
+  ListPATAppliancesResponseItem,
+);
+
+/**
+ * @summary Add a PAT appliance to the register
+ */
+export const CreatePATApplianceBody = zod.object({
+  name: zod.string(),
+  applianceType: zod.string().optional(),
+  location: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  description: zod.string().nullish(),
+  siteId: zod.number().nullish(),
+  active: zod.boolean().optional(),
+});
+
+/**
+ * @summary Update a PAT appliance
+ */
+export const UpdatePATApplianceParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdatePATApplianceBody = zod.object({
+  name: zod.string(),
+  applianceType: zod.string().optional(),
+  location: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  description: zod.string().nullish(),
+  siteId: zod.number().nullish(),
+  active: zod.boolean().optional(),
+});
+
+export const UpdatePATApplianceResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  name: zod.string(),
+  applianceType: zod.string(),
+  location: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  description: zod.string().nullish(),
+  active: zod.boolean(),
+  lastTestDate: zod.string().nullish(),
+  lastResult: zod.string().nullish(),
+  nextTestDate: zod.string().nullish(),
+  lastTestedBy: zod.string().nullish(),
+  createdAt: zod.date().optional(),
+  updatedAt: zod.date().optional(),
+});
+
+/**
+ * @summary Delete a PAT appliance
+ */
+export const DeletePATApplianceParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeletePATApplianceResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List PAT test records
+ */
+export const ListPATTestsQueryParams = zod.object({
+  applianceId: zod.coerce.number().optional(),
+});
+
+export const ListPATTestsResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  applianceId: zod.number(),
+  testDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  nextTestDate: zod.string().nullish(),
+  testedBy: zod.string().nullish(),
+  visualInspection: zod.enum(["pass", "fail", "na"]).nullish(),
+  earthContinuityOhms: zod.string().nullish(),
+  insulationMohms: zod.string().nullish(),
+  operatingCurrent: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  applianceName: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  createdAt: zod.date().optional(),
+  updatedAt: zod.date().optional(),
+});
+export const ListPATTestsResponse = zod.array(ListPATTestsResponseItem);
+
+/**
+ * @summary Record a PAT test result
+ */
+export const CreatePATTestBody = zod.object({
+  applianceId: zod.number(),
+  testDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  nextTestDate: zod.string().nullish(),
+  testedBy: zod.string().nullish(),
+  visualInspection: zod.enum(["pass", "fail", "na"]).nullish(),
+  earthContinuityOhms: zod.string().nullish(),
+  insulationMohms: zod.string().nullish(),
+  operatingCurrent: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Update a PAT test record
+ */
+export const UpdatePATTestParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdatePATTestBody = zod.object({
+  applianceId: zod.number(),
+  testDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  nextTestDate: zod.string().nullish(),
+  testedBy: zod.string().nullish(),
+  visualInspection: zod.enum(["pass", "fail", "na"]).nullish(),
+  earthContinuityOhms: zod.string().nullish(),
+  insulationMohms: zod.string().nullish(),
+  operatingCurrent: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+export const UpdatePATTestResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  applianceId: zod.number(),
+  testDate: zod.string(),
+  result: zod.enum(["pass", "fail"]),
+  nextTestDate: zod.string().nullish(),
+  testedBy: zod.string().nullish(),
+  visualInspection: zod.enum(["pass", "fail", "na"]).nullish(),
+  earthContinuityOhms: zod.string().nullish(),
+  insulationMohms: zod.string().nullish(),
+  operatingCurrent: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  applianceName: zod.string().nullish(),
+  assetTag: zod.string().nullish(),
+  createdAt: zod.date().optional(),
+  updatedAt: zod.date().optional(),
+});
+
+/**
+ * @summary Delete a PAT test record
+ */
+export const DeletePATTestParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeletePATTestResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary PAT register status summary (overdue / due-soon counts)
+ */
+export const GetPATTrackStatusResponse = zod.object({
+  totalAppliances: zod.number(),
+  untested: zod.number(),
+  overdue: zod.number(),
+  dueSoon: zod.number(),
+  ok: zod.number(),
+});
+
+/**
+ * @summary Get per-client customised appliance preset templates
+ */
+export const GetPATPresetTemplatesResponse = zod.record(
+  zod.string(),
+  zod.array(
+    zod.object({
+      name: zod.string(),
+      type: zod.string(),
+    }),
+  ),
+);
+
+/**
+ * @summary Save a customised appliance preset template
+ */
+export const SavePATPresetTemplateParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const SavePATPresetTemplateBody = zod.object({
+  items: zod.array(
+    zod.object({
+      name: zod.string(),
+      type: zod.string(),
+    }),
+  ),
+});
+
+export const SavePATPresetTemplateResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Reset a preset template back to built-in defaults
+ */
+export const DeletePATPresetTemplateParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const DeletePATPresetTemplateResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List premises inspections
+ */
+export const ListPremisesInspectionsQueryParams = zod.object({
+  from: zod.coerce.string().optional(),
+  to: zod.coerce.string().optional(),
+  siteId: zod.coerce.number().optional(),
+  type: zod.coerce.string().optional(),
+  status: zod.enum(["open", "actioned", "closed"]).optional(),
+});
+
+export const ListPremisesInspectionsResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  inspectionDate: zod.string(),
+  inspectionType: zod.string(),
+  area: zod.string().nullish(),
+  findings: zod.string().nullish(),
+  hazardDetails: zod.string().nullish(),
+  actionRequired: zod.string().nullish(),
+  actionTaken: zod.string().nullish(),
+  status: zod.enum(["open", "actioned", "closed"]),
+  inspectedBy: zod.string().nullish(),
+  createdBy: zod.number().nullish(),
+  createdAt: zod.date().optional(),
+  updatedAt: zod.date().optional(),
+});
+export const ListPremisesInspectionsResponse = zod.array(
+  ListPremisesInspectionsResponseItem,
+);
+
+/**
+ * @summary Record a premises inspection
+ */
+export const CreatePremisesInspectionBody = zod.object({
+  inspectionDate: zod.string(),
+  inspectionType: zod.string().optional(),
+  area: zod.string().nullish(),
+  findings: zod.string().nullish(),
+  hazardDetails: zod.string().nullish(),
+  actionRequired: zod.string().nullish(),
+  actionTaken: zod.string().nullish(),
+  status: zod.enum(["open", "actioned", "closed"]).optional(),
+  inspectedBy: zod.string().nullish(),
+  siteId: zod.number().nullish(),
+});
+
+/**
+ * @summary Premises inspection status summary
+ */
+export const GetPremisesTrackSummaryResponse = zod.object({
+  open: zod.number(),
+  actioned: zod.number(),
+  closed: zod.number(),
+  overdue: zod.number(),
+  total: zod.number(),
+});
+
+/**
+ * @summary Update a premises inspection
+ */
+export const UpdatePremisesInspectionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdatePremisesInspectionBody = zod.object({
+  inspectionDate: zod.string(),
+  inspectionType: zod.string().optional(),
+  area: zod.string().nullish(),
+  findings: zod.string().nullish(),
+  hazardDetails: zod.string().nullish(),
+  actionRequired: zod.string().nullish(),
+  actionTaken: zod.string().nullish(),
+  status: zod.enum(["open", "actioned", "closed"]).optional(),
+  inspectedBy: zod.string().nullish(),
+  siteId: zod.number().nullish(),
+});
+
+export const UpdatePremisesInspectionResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Delete a premises inspection
+ */
+export const DeletePremisesInspectionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeletePremisesInspectionResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary Get Pool configuration
  */
 export const GetPoolTrackConfigResponse = zod.object({

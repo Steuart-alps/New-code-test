@@ -46,6 +46,10 @@ args = "typecheck"
 task = "workflow.run"
 args = "test-config"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "repo-typecheck"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -96,7 +100,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run typecheck && pnpm --filter @workspace/compliance-tracker run typecheck && pnpm --filter @workspace/mobile run typecheck"
+args = "pnpm run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -108,6 +112,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd artifacts/api-server && pnpm run test:config:ci"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "repo-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true

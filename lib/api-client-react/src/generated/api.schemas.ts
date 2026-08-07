@@ -418,6 +418,166 @@ export interface IncidentConfig {
   incident_locations?: string;
 }
 
+export interface OkResponse {
+  ok: boolean;
+}
+
+export interface PATAppliance {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  name: string;
+  applianceType: string;
+  location?: string | null;
+  assetTag?: string | null;
+  description?: string | null;
+  active: boolean;
+  lastTestDate?: string | null;
+  lastResult?: string | null;
+  nextTestDate?: string | null;
+  lastTestedBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreatePATApplianceRequest {
+  name: string;
+  applianceType?: string;
+  location?: string | null;
+  assetTag?: string | null;
+  description?: string | null;
+  siteId?: number | null;
+  active?: boolean;
+}
+
+export type PATTestResult = (typeof PATTestResult)[keyof typeof PATTestResult];
+
+export const PATTestResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+export type PATTestVisualInspection =
+  | (typeof PATTestVisualInspection)[keyof typeof PATTestVisualInspection]
+  | null;
+
+export const PATTestVisualInspection = {
+  pass: "pass",
+  fail: "fail",
+  na: "na",
+} as const;
+
+export interface PATTest {
+  id: number;
+  clientId: number;
+  applianceId: number;
+  testDate: string;
+  result: PATTestResult;
+  nextTestDate?: string | null;
+  testedBy?: string | null;
+  visualInspection?: PATTestVisualInspection;
+  earthContinuityOhms?: string | null;
+  insulationMohms?: string | null;
+  operatingCurrent?: string | null;
+  notes?: string | null;
+  applianceName?: string | null;
+  assetTag?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreatePATTestRequestResult =
+  (typeof CreatePATTestRequestResult)[keyof typeof CreatePATTestRequestResult];
+
+export const CreatePATTestRequestResult = {
+  pass: "pass",
+  fail: "fail",
+} as const;
+
+export type CreatePATTestRequestVisualInspection =
+  | (typeof CreatePATTestRequestVisualInspection)[keyof typeof CreatePATTestRequestVisualInspection]
+  | null;
+
+export const CreatePATTestRequestVisualInspection = {
+  pass: "pass",
+  fail: "fail",
+  na: "na",
+} as const;
+
+export interface CreatePATTestRequest {
+  applianceId: number;
+  testDate: string;
+  result: CreatePATTestRequestResult;
+  nextTestDate?: string | null;
+  testedBy?: string | null;
+  visualInspection?: CreatePATTestRequestVisualInspection;
+  earthContinuityOhms?: string | null;
+  insulationMohms?: string | null;
+  operatingCurrent?: string | null;
+  notes?: string | null;
+}
+
+export interface PATTrackStatus {
+  totalAppliances: number;
+  untested: number;
+  overdue: number;
+  dueSoon: number;
+  ok: number;
+}
+
+export interface PATPresetItem {
+  name: string;
+  type: string;
+}
+
+export type PremisesInspectionStatus =
+  (typeof PremisesInspectionStatus)[keyof typeof PremisesInspectionStatus];
+
+export const PremisesInspectionStatus = {
+  open: "open",
+  actioned: "actioned",
+  closed: "closed",
+} as const;
+
+export interface PremisesInspection {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  inspectionDate: string;
+  inspectionType: string;
+  area?: string | null;
+  findings?: string | null;
+  hazardDetails?: string | null;
+  actionRequired?: string | null;
+  actionTaken?: string | null;
+  status: PremisesInspectionStatus;
+  inspectedBy?: string | null;
+  createdBy?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreatePremisesInspectionRequest {
+  inspectionDate: string;
+  inspectionType?: string;
+  area?: string | null;
+  findings?: string | null;
+  hazardDetails?: string | null;
+  actionRequired?: string | null;
+  actionTaken?: string | null;
+  status?: PremisesInspectionStatus;
+  inspectedBy?: string | null;
+  siteId?: number | null;
+}
+
+export interface PremisesTrackSummary {
+  open: number;
+  actioned: number;
+  closed: number;
+  overdue: number;
+  total: number;
+}
+
 export interface PATTrackConfig {
   pat_show_earth_bond?: string;
   pat_show_insulation?: string;
@@ -675,6 +835,24 @@ export type ResetFoodSafetyConfigParams = {
    * When provided, clears only that site's overrides. Without it, resets the client-level template to defaults.
    */
   siteId?: number;
+};
+
+export type ListPATTestsParams = {
+  applianceId?: number;
+};
+
+export type GetPATPresetTemplates200 = { [key: string]: PATPresetItem[] };
+
+export type SavePATPresetTemplateBody = {
+  items: PATPresetItem[];
+};
+
+export type ListPremisesInspectionsParams = {
+  from?: string;
+  to?: string;
+  siteId?: number;
+  type?: string;
+  status?: PremisesInspectionStatus;
 };
 
 export type ListFoodSafetyRecordsParams = {

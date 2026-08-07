@@ -16,6 +16,8 @@ const SETTING_KEYS = [
   "additionalReminderEmails",
   "notifyClientAdmins",
   "resendApiKey",
+  // FixTrack: days an open issue may sit unactioned before managers are chased.
+  "fixTrackStaleDays",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {
