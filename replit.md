@@ -129,6 +129,22 @@ Consultants pass `clientId` as a query param (injected by the frontend via `cust
 
 - **Consultant**: `consultant@complytrack.com` / `ChangeMe123!` (change password after first login)
 
+## Demo Accounts
+
+Client: **"The Grand Hotel"** — all modules unlocked (perpetual trial).  
+Password for all accounts: **`Demo1234!`**
+
+| Role | Email |
+|---|---|
+| Consultant | `consultant@demo.complytrack.app` |
+| Client Admin | `admin@demo.complytrack.app` |
+| Staff Member | `staff@demo.complytrack.app` |
+| Viewer (read-only) | `viewer@demo.complytrack.app` |
+| Maintenance Manager | `maintenance@demo.complytrack.app` |
+
+One-click login cards are shown on the sign-in page.  
+To reset demo data: `node artifacts/api-server/scripts/seed-demo.mjs` (idempotent — wipes and re-seeds).
+
 ## Key Package Scripts
 
 - `pnpm --filter @workspace/api-server run dev` — start API server
