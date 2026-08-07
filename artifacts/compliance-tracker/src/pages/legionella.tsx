@@ -294,9 +294,29 @@ function LegionellaConfigDialog() {
 
 // ── Record Check Dialog ────────────────────────────────────────────────────────
 
-function RecordCheckDialog({ siteId }: { siteId?: number }) {
-  const [open, setOpen] = useState(false);
+function RecordCheckDialog({
+  siteId,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  defaultCheckType,
+}: {
+  siteId?: number;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  defaultCheckType?: LegionellaCheckType;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (controlledOpen !== undefined) controlledOnOpenChange?.(v);
+    else setInternalOpen(v);
+  };
   const [checkType, setCheckType] = useState<LegionellaCheckType>("calorifier_temp");
+
+  // When opened via a status card click, pre-select that check type
+  useEffect(() => {
+    if (open && defaultCheckType) setCheckType(defaultCheckType);
+  }, [open, defaultCheckType]);
   const [checkDate, setCheckDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
   const [temperature, setTemperature] = useState("");
@@ -593,6 +613,8 @@ export default function LegionellaPage() {
 
   const [filterType, setFilterType] = useState<LegionellaCheckType | "">("");
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [quickCheckType, setQuickCheckType] = useState<LegionellaCheckType | undefined>(undefined);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
@@ -683,7 +705,7 @@ export default function LegionellaPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <LegionellaConfigDialog />}
-            <RecordCheckDialog siteId={filterSite} />
+            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
           </div>
         </div>
 
@@ -700,7 +722,7 @@ export default function LegionellaPage() {
               <Card
                 key={item.checkType}
                 className={cn(
-                  "border-l-4 transition-all hover:shadow-md",
+                  "border-l-4 transition-all hover:shadow-md cursor-pointer group",
                   item.status === "overdue"
                     ? "border-l-rose-500 bg-rose-50/50"
                     : item.status === "due_soon"
@@ -709,6 +731,7 @@ export default function LegionellaPage() {
                     ? "border-l-slate-400 bg-slate-50/50"
                     : "border-l-emerald-500 bg-emerald-50/50"
                 )}
+                onClick={() => { setQuickCheckType(item.checkType as LegionellaCheckType); setRecordOpen(true); }}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-2">
@@ -737,6 +760,9 @@ export default function LegionellaPage() {
                   {item.status === "never" && (
                     <div className="text-xs text-muted-foreground italic">No checks recorded yet</div>
                   )}
+                  <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
+                    + Record check →
+                  </div>
                 </CardContent>
               </Card>
             ))}

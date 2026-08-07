@@ -395,9 +395,29 @@ function FireConfigDialog() {
 
 // ── Record Check Dialog ───────────────────────────────────────────────────────
 
-function RecordCheckDialog({ siteId }: { siteId?: number }) {
-  const [open, setOpen] = useState(false);
+function RecordCheckDialog({
+  siteId,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  defaultCheckType,
+}: {
+  siteId?: number;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  defaultCheckType?: AnyCheckType;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (controlledOpen !== undefined) controlledOnOpenChange?.(v);
+    else setInternalOpen(v);
+  };
   const [checkType, setCheckType] = useState<AnyCheckType>("alarm");
+
+  // When opened via a status card click, pre-select that check type
+  useEffect(() => {
+    if (open && defaultCheckType) setCheckType(defaultCheckType);
+  }, [open, defaultCheckType]);
   const [checkDate, setCheckDate] = useState(todayIso());
   const [result, setResult] = useState<"pass" | "fail">("pass");
   const [location, setLocation] = useState("");
@@ -863,6 +883,8 @@ export default function FireSafetyPage() {
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
   const [filterSite, setFilterSite] = useState<number | undefined>(undefined);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetFireSafetyStatus(
     { siteId: filterSite },
@@ -948,7 +970,7 @@ export default function FireSafetyPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <FireConfigDialog />}
-            <RecordCheckDialog siteId={filterSite} />
+            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
           </div>
         </div>
 
@@ -965,12 +987,13 @@ export default function FireSafetyPage() {
               <Card
                 key={item.checkType}
                 className={cn(
-                  "border-l-4 transition-all hover:shadow-md",
+                  "border-l-4 transition-all hover:shadow-md cursor-pointer group",
                   item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
                   item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
                   item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
                                                "border-l-emerald-500 bg-emerald-50/50"
                 )}
+                onClick={() => { setQuickCheckType(item.checkType as AnyCheckType); setRecordOpen(true); }}
               >
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-start justify-between gap-2">
@@ -995,6 +1018,9 @@ export default function FireSafetyPage() {
                   {item.status === "never" && (
                     <div className="text-xs text-muted-foreground italic">Not yet recorded</div>
                   )}
+                  <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
+                    + Record check →
+                  </div>
                 </CardContent>
               </Card>
             ))}

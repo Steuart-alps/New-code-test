@@ -316,14 +316,30 @@ function RecordDialog({
   siteId,
   onSaved,
   existing,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  defaultCheckType,
 }: {
   siteId?: number;
   onSaved: () => void;
   existing?: PoolCheck;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  defaultCheckType?: string;
 }) {
   const isEdit = !!existing;
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (controlledOpen !== undefined) controlledOnOpenChange?.(v);
+    else setInternalOpen(v);
+  };
   const [checkType, setCheckType] = useState(existing?.check_type ?? "routine");
+
+  // When opened via a status card click, pre-select that check type
+  useEffect(() => {
+    if (open && defaultCheckType && !isEdit) setCheckType(defaultCheckType);
+  }, [open, defaultCheckType]);
   const [checkDate, setCheckDate] = useState(existing?.check_date ?? todayIso());
   const [checkTime, setCheckTime] = useState(existing?.check_time ?? nowTime());
   const [selectedSite, setSelectedSite] = useState<number | undefined>(existing?.site_id ?? siteId);
@@ -567,6 +583,8 @@ export default function PoolTrackPage() {
 
   const [filterType, setFilterType] = useState("");
   const [filterSite, setFilterSite] = useState<number | undefined>();
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [quickCheckType, setQuickCheckType] = useState<string | undefined>(undefined);
   const [checks, setChecks] = useState<PoolCheck[]>([]);
   const [status, setStatus] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -652,7 +670,7 @@ export default function PoolTrackPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <PoolConfigDialog />}
-            <RecordDialog siteId={filterSite} onSaved={fetchAll} />
+            <RecordDialog siteId={filterSite} onSaved={fetchAll} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
           </div>
         </div>
 
@@ -663,13 +681,17 @@ export default function PoolTrackPage() {
                 <Card key={i} className="animate-pulse"><CardContent className="p-4 h-20" /></Card>
               ))
             : status.map(item => (
-                <Card key={item.checkType} className={cn(
-                  "border-l-4 transition-all hover:shadow-md",
-                  item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
-                  item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
-                  item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
-                                               "border-l-emerald-500 bg-emerald-50/50"
-                )}>
+                <Card
+                  key={item.checkType}
+                  className={cn(
+                    "border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                    item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
+                    item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
+                    item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
+                                                 "border-l-emerald-500 bg-emerald-50/50"
+                  )}
+                  onClick={() => { setQuickCheckType(item.checkType); setRecordOpen(true); }}
+                >
                   <CardHeader className="pb-1 pt-3 px-4">
                     <CardTitle className="text-xs font-medium leading-snug">{CHECK_TYPE_LABELS[item.checkType] ?? item.checkType}</CardTitle>
                   </CardHeader>
@@ -691,6 +713,9 @@ export default function PoolTrackPage() {
                         {item.result === "pass" ? "Pass" : item.result === "action_required" ? "Action Req." : "Fail"}
                       </Badge>
                     )}
+                    <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
+                      + Record check →
+                    </div>
                   </CardContent>
                 </Card>
               ))
