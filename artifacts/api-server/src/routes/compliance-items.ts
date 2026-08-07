@@ -13,6 +13,7 @@ import {
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { filterName } from "../lib/contentFilter";
 
 const router: IRouter = Router();
 
@@ -165,6 +166,12 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     return;
   }
 
+  const titleCheck = filterName(body.title);
+  if (!titleCheck.ok) {
+    res.status(400).json({ error: titleCheck.message });
+    return;
+  }
+
   if (body.siteId != null) {
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
     if (!s || s.clientId !== clientId) {
@@ -251,6 +258,14 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
   const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const user = req.currentUser!;
+
+  if (body.title !== undefined) {
+    const titleCheck = filterName(body.title);
+    if (!titleCheck.ok) {
+      res.status(400).json({ error: titleCheck.message });
+      return;
+    }
+  }
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
   if (!existing[0] || (!canAccessClient(req, existing[0].clientId))) {

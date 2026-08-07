@@ -11,6 +11,7 @@ import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
+import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 
 const rawPort = process.env["PORT"];
 
@@ -96,6 +97,19 @@ function startScheduler() {
     }
   });
   logger.info("Doc acknowledgement reminder scheduler started (daily at 08:50)");
+
+  // Email managers a digest of overdue/stale urgent FixTrack issues
+  // (daily at 08:40; each client gets at most one email per day).
+  cron.schedule("40 8 * * *", async () => {
+    logger.info("Running FixTrack overdue alert job...");
+    try {
+      const result = await runFixTrackOverdueAlertJob();
+      logger.info({ result }, "FixTrack overdue alert job complete");
+    } catch (err) {
+      logger.error({ err }, "FixTrack overdue alert job failed");
+    }
+  });
+  logger.info("FixTrack overdue alert scheduler started (daily at 08:40)");
 
   // Notify staff about overdue bike hires (hourly; each hire notified once).
   cron.schedule("5 * * * *", async () => {

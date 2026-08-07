@@ -5,7 +5,7 @@ import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
-import { generateActionTokens, sendContractorAssignmentEmail } from "../lib/fixTrackNotifications";
+import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -34,6 +34,34 @@ async function verifyContractor(contractorId: number | null | undefined, clientI
   const [row] = await db.select({ id: contractorsTable.id }).from(contractorsTable)
     .where(and(eq(contractorsTable.id, contractorId), eq(contractorsTable.clientId, clientId))).limit(1);
   return !!row;
+}
+
+// Gas is one issue type but three distinct trades.
+const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
+
+/** Trades that match a given issue type — same matching as GET /contractors/suggest. */
+function tradesForIssueType(issueType: string): string[] {
+  return issueType === "gas" ? GAS_SUBTRADES : [issueType];
+}
+
+/**
+ * Pick the client's best-matching contractor for an issue type by trade.
+ * Returns the first (name-ordered) contractor whose trades cover the type,
+ * or null when none match. Used to auto-assign on issue creation.
+ */
+async function pickContractorForType(clientId: number, issueType: string): Promise<number | null> {
+  const matchTrades = tradesForIssueType(issueType);
+  const result = await db.execute(sql`
+    SELECT id, trades
+    FROM   contractors
+    WHERE  client_id = ${clientId}
+    ORDER  BY name
+  `);
+  for (const c of (result.rows as any[])) {
+    const trades = Array.isArray(c.trades) ? (c.trades as string[]) : [];
+    if (trades.some((t) => matchTrades.includes(t))) return c.id as number;
+  }
+  return null;
 }
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -164,8 +192,18 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   if (!(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
   if (!(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 
+  // Auto-assign: if no contractor supplied, pick the client's best-matching
+  // active contractor by trade for the issue type (same matching as
+  // GET /contractors/suggest). Never auto-sends an email — emails still
+  // require manager approval.
+  let contractorId = data.contractorId ?? null;
+  if (contractorId == null) {
+    const autoId = await pickContractorForType(clientId, data.issueType ?? "general");
+    if (autoId != null) contractorId = autoId;
+  }
+
   const [row] = await db.insert(fixTrackIssuesTable)
-    .values({ ...data, clientId, createdBy: (req.session as any).userId ?? null })
+    .values({ ...data, contractorId, clientId, createdBy: (req.session as any).userId ?? null })
     .returning();
   res.status(201).json(row);
 });
@@ -312,10 +350,7 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
   }));
 
   // Gas is one issue type but three distinct trades
-  const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
-  const matchTrades = issueType === "gas"
-    ? GAS_SUBTRADES
-    : issueType ? [issueType] : null;
+  const matchTrades = issueType ? tradesForIssueType(issueType) : null;
 
   const matches = matchTrades
     ? all.filter(c => c.trades.some((t: string) => matchTrades.includes(t)))
@@ -324,14 +359,96 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
   res.json({ matches, all });
 });
 
-// ── Send to contractor ────────────────────────────────────────────────────────
+// ── Contractor email approval workflow ───────────────────────────────────────
+//
+// Contractor emails require manager approval: staff request a send
+// (mode "assign" or "quote"); a manager (client_admin/consultant or a
+// maintenance manager) approves — which actually sends — or dismisses it.
 
-router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (req, res) => {
+function isManager(req: any): boolean {
+  const u = req.currentUser;
+  return !!u && (u.role === "client_admin" || u.role === "consultant" || u.isMaintenanceManager === true);
+}
+
+// Staff: request that a contractor email be sent (needs manager approval)
+router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const parsed = z.object({ mode: z.enum(["assign", "quote"]) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const requestConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const requestDeptId = getActiveDepartmentId(req);
+  if (requestDeptId !== null) {
+    requestConditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, requestDeptId))) as any,
+    );
+  }
+
+  const [row] = await db
+    .update(fixTrackIssuesTable)
+    .set({
+      emailRequestMode: parsed.data.mode,
+      emailRequestedBy: (req.session as any).userId ?? null,
+      emailRequestedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(...requestConditions))
+    .returning();
+  if (!row) return res.status(404).json({ error: "Not found" });
+  if (!row.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
+  res.json({ ok: true, message: "Approval requested" });
+});
+
+// Manager: dismiss a pending request without sending
+router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const rejectConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const rejectDeptId = getActiveDepartmentId(req);
+  if (rejectDeptId !== null) {
+    rejectConditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, rejectDeptId))) as any,
+    );
+  }
+
+  const [row] = await db
+    .update(fixTrackIssuesTable)
+    .set({ emailRequestMode: null, emailRequestedBy: null, emailRequestedAt: null, updatedAt: new Date() })
+    .where(and(...rejectConditions))
+    .returning();
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+// ── Send to contractor (managers only) ────────────────────────────────────────
+
+router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) {
+    return res.status(403).json({ error: "Manager approval required — use 'Request approval' instead" });
+  }
+
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const modeParsed = z.object({ mode: z.enum(["assign", "quote"]).optional() }).safeParse(req.body ?? {});
+  if (!modeParsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const sendDeptId = getActiveDepartmentId(req);
+  const sendDeptClause = sendDeptId !== null
+    ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    : sql``;
 
   const result = await db.execute(sql`
     SELECT
@@ -345,7 +462,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     LEFT  JOIN sites       s  ON s.id  = fi.site_id
     LEFT  JOIN contractors c  ON c.id  = fi.contractor_id
     LEFT  JOIN clients     cl ON cl.id = fi.client_id
-    WHERE fi.id = ${id} AND fi.client_id = ${clientId}
+    WHERE fi.id = ${id} AND fi.client_id = ${clientId}${sendDeptClause}
     LIMIT 1
   `);
 
@@ -353,6 +470,53 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   if (!issue)                 return res.status(404).json({ error: "Issue not found" });
   if (!issue.contractor_id)   return res.status(400).json({ error: "No contractor assigned to this issue" });
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
+
+  // Mode: explicit in body, else whatever the pending request asked for, else assign
+  const pendingModeResult = await db.execute(sql`
+    SELECT email_request_mode FROM fix_track_issues WHERE id = ${id} AND client_id = ${clientId}
+  `);
+  const pendingMode = ((pendingModeResult.rows as any[])[0]?.email_request_mode ?? null) as string | null;
+  const mode: "assign" | "quote" = modeParsed.data.mode ?? (pendingMode === "quote" ? "quote" : "assign");
+
+  const clearPendingRequest = () => db.execute(sql`
+    UPDATE fix_track_issues
+    SET email_request_mode = NULL, email_requested_by = NULL, email_requested_at = NULL, updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId}
+  `);
+
+  if (mode === "quote") {
+    // Quote requests carry no action tokens — just send the email.
+    const quoteDocs: { name: string; url: string }[] = [];
+    const quoteDocResult = await db.execute(sql`
+      SELECT sd.name, sd.object_path
+      FROM   fix_track_issues fi
+      JOIN   site_documents   sd ON sd.site_id = fi.site_id AND sd.client_id = fi.client_id
+      WHERE  fi.id = ${id} AND fi.client_id = ${clientId} AND fi.site_id IS NOT NULL
+      LIMIT  10
+    `);
+    for (const doc of (quoteDocResult.rows as any[])) {
+      try {
+        const url = await storage.getSignedDownloadURL(doc.object_path as string, 30 * 24 * 60 * 60);
+        quoteDocs.push({ name: doc.name as string, url });
+      } catch { /* skip */ }
+    }
+
+    await sendContractorQuoteEmail({
+      contractorName:   issue.contractor_name   ?? "Contractor",
+      contractorEmail:  issue.contractor_email,
+      issueTitle:       issue.title,
+      issueType:        issue.issue_type,
+      issuePriority:    issue.priority,
+      issueLocation:    issue.location,
+      issueDescription: issue.description,
+      siteName:         issue.site_name,
+      companyName:      issue.company_name ?? "ComplyTrack",
+      clientId,
+      siteDocuments:    quoteDocs.length ? quoteDocs : undefined,
+    });
+    await clearPendingRequest();
+    return res.json({ ok: true, message: "Quote request sent to contractor" });
+  }
 
   // Check for existing active (unused, non-expired) tokens for this issue.
   // Return 409 so the frontend can warn the manager before resending.
@@ -430,6 +594,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     siteDocuments:    siteDocuments.length ? siteDocuments : undefined,
   });
 
+  await clearPendingRequest();
   res.json({ ok: true, message: "Email sent to contractor" });
 });
 

@@ -10,6 +10,7 @@ import {
   DeleteContractorParams,
 } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { filterName } from "../lib/contentFilter";
 
 const router: IRouter = Router();
 
@@ -43,6 +44,18 @@ router.post("/contractors", requireAuth, requireClientAdmin, async (req, res) =>
     res.status(400).json({ error: "clientId required" });
     return;
   }
+  const nameCheck = filterName(body.name);
+  if (!nameCheck.ok) {
+    res.status(400).json({ error: nameCheck.message });
+    return;
+  }
+  if (body.company) {
+    const companyCheck = filterName(body.company);
+    if (!companyCheck.ok) {
+      res.status(400).json({ error: companyCheck.message });
+      return;
+    }
+  }
   const [contractor] = await db
     .insert(contractorsTable)
     .values({ ...body, clientId, trades, updatedAt: new Date() })
@@ -68,6 +81,19 @@ router.get("/contractors/:id", requireAuth, async (req, res) => {
 router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = UpdateContractorParams.parse({ id: Number(req.params.id) });
   const body    = UpdateContractorBody.parse(req.body);
+
+  const nameCheck = filterName(body.name);
+  if (!nameCheck.ok) {
+    res.status(400).json({ error: nameCheck.message });
+    return;
+  }
+  if (body.company) {
+    const companyCheck = filterName(body.company);
+    if (!companyCheck.ok) {
+      res.status(400).json({ error: companyCheck.message });
+      return;
+    }
+  }
 
   const existing = await db.select().from(contractorsTable).where(eq(contractorsTable.id, id));
   if (!existing[0] || !canAccessClient(req, existing[0].clientId)) {

@@ -23,7 +23,7 @@ interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, code?: string) => Promise<{ requires2fa: boolean }>;
   logout: () => Promise<void>;
 }
 
@@ -59,17 +59,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applyToken]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const res = await apiFetch<{ token: string; user: AuthUser }>(
-        '/api/auth/mobile-login',
-        {
-          method: 'POST',
-          body: JSON.stringify({ email, password }),
-        },
-      );
-      await SecureStore.setItemAsync(TOKEN_KEY, res.token);
-      applyToken(res.token);
-      setUser(res.user);
+    async (email: string, password: string, code?: string): Promise<{ requires2fa: boolean }> => {
+      const res = await apiFetch<
+        { token: string; user: AuthUser } | { requires2fa: true }
+      >('/api/auth/mobile-login', {
+        method: 'POST',
+        body: JSON.stringify(code ? { email, password, code } : { email, password }),
+      });
+      if ('requires2fa' in res && res.requires2fa) {
+        return { requires2fa: true };
+      }
+      const ok = res as { token: string; user: AuthUser };
+      await SecureStore.setItemAsync(TOKEN_KEY, ok.token);
+      applyToken(ok.token);
+      setUser(ok.user);
+      return { requires2fa: false };
     },
     [applyToken],
   );

@@ -25,14 +25,28 @@ export default function LoginScreen() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [needs2fa, setNeeds2fa] = useState(false);
+  const [code, setCode] = useState('');
   const passwordRef = useRef<TextInput>(null);
+  const codeRef = useRef<TextInput>(null);
 
   async function handleLogin() {
     if (!email.trim() || !password) return;
+    if (needs2fa && !code.trim()) return;
     setError('');
     setLoading(true);
     try {
-      await login(email.trim().toLowerCase(), password);
+      const result = await login(
+        email.trim().toLowerCase(),
+        password,
+        needs2fa ? code.trim() : undefined,
+      );
+      if (result.requires2fa) {
+        setNeeds2fa(true);
+        setLoading(false);
+        setTimeout(() => codeRef.current?.focus(), 100);
+        return;
+      }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
       setError(
@@ -44,7 +58,8 @@ export default function LoginScreen() {
     }
   }
 
-  const disabled = !email.trim() || !password || loading;
+  const disabled =
+    !email.trim() || !password || loading || (needs2fa && !code.trim());
 
   return (
     <View style={[styles.root, { backgroundColor: colors.navy }]}>
@@ -167,6 +182,47 @@ export default function LoginScreen() {
                 />
               </TouchableOpacity>
             </View>
+
+            {/* 2FA code */}
+            {needs2fa && (
+              <>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: colors.foreground, marginTop: 16 },
+                  ]}
+                >
+                  Verification code
+                </Text>
+                <TextInput
+                  ref={codeRef}
+                  style={[
+                    styles.input,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                      color: colors.foreground,
+                    },
+                  ]}
+                  value={code}
+                  onChangeText={setCode}
+                  placeholder="6-digit code from your authenticator app"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="number-pad"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={handleLogin}
+                  testID="totp-input"
+                />
+                <Text
+                  style={[styles.cardSub, { color: colors.mutedForeground, marginTop: 6, marginBottom: 0 }]}
+                >
+                  Two-factor authentication is enabled on this account. Enter the
+                  code from your authenticator app, or a recovery code.
+                </Text>
+              </>
+            )}
 
             {/* Error */}
             {!!error && (

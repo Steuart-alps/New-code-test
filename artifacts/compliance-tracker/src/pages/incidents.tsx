@@ -32,7 +32,7 @@ import {
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Lock, Search, Filter, FileWarning,
-  ShieldAlert, UserX, Activity, Settings, X,
+  ShieldAlert, UserX, Activity, Settings, X, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -377,6 +377,56 @@ export default function IncidentsPage() {
 
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
 
+  // ── Export register (for HSE audits / insurance) ─────────────────────────────
+
+  const siteName = (id: number | null) =>
+    id == null ? "All sites" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const handleExportRegister = () => {
+    const rows = [...filtered].sort((a, b) => (a.incidentDate < b.incidentDate ? 1 : -1));
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Incident Register</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  .riddor { color: #b91c1c; font-weight: bold; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Incident &amp; Accident Register</h1>
+<div class="meta">Generated ${esc(fmt(new Date().toISOString()))} — for HSE audit / insurance</div>
+<div class="meta">${rows.length} record${rows.length !== 1 ? "s" : ""}${riddorOutstanding > 0 ? ` · ${riddorOutstanding} RIDDOR report${riddorOutstanding !== 1 ? "s" : ""} outstanding` : ""}</div>
+${rows.length === 0 ? `<p class="empty">No incidents match the current filters.</p>` : `<table>
+<tr><th>Date</th><th>Type</th><th>Person involved</th><th>Location</th><th>Description</th><th>Severity</th><th>Actions taken</th><th>RIDDOR</th></tr>
+${rows.map(r => `<tr>
+  <td>${fmt(r.incidentDate)}${r.incidentTime ? ` ${esc(r.incidentTime)}` : ""}</td>
+  <td>${esc(TYPE_LABELS[r.incidentType] ?? r.incidentType)}</td>
+  <td>${esc(r.involvedName)}${r.involvedJobTitle ? `<br><span style="color:#666">${esc(r.involvedJobTitle)}</span>` : ""}<br><span style="color:#666">${esc(EMPLOYMENT_LABELS[r.involvedEmploymentType] ?? r.involvedEmploymentType)}</span></td>
+  <td>${esc(r.location)}${r.siteId ? `<br><span style="color:#666">${esc(siteName(r.siteId))}</span>` : ""}</td>
+  <td>${esc(r.description)}${r.injuriesSustained ? `<br><span style="color:#666">Injuries: ${esc(r.injuriesSustained)}</span>` : ""}</td>
+  <td>${esc(SEVERITY_LABELS[r.severity] ?? r.severity)}</td>
+  <td>${esc([r.immediateActions, r.correctiveActions].filter(Boolean).join(" — ")) || "—"}</td>
+  <td>${r.riddorReportable ? `<span class="riddor">Yes${r.reportedToHse ? ` (reported${r.hseReference ? ` ${esc(r.hseReference)}` : ""})` : " — outstanding"}</span>` : "No"}</td>
+</tr>`).join("")}
+</table>`}
+</body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the register.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  };
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const invalidate = () => {
@@ -524,6 +574,11 @@ export default function IncidentsPage() {
           Accident & incident logbook — accidents, near misses, dangerous occurrences and RIDDOR reporting
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" className="gap-2 rounded-sm"
+            onClick={handleExportRegister}
+            title="Print or save the incident register for HSE audits / insurance">
+            <Printer className="w-4 h-4" /> Export register
+          </Button>
           {canAdmin && <IncidentConfigDialog />}
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident

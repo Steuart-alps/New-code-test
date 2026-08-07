@@ -273,6 +273,7 @@ export async function runRuntimeMigrations() {
     await migrateSousVide();
     await migratePATtrack();
     await migratePestTrack();
+    await migratePremisesTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
 
@@ -985,6 +986,14 @@ async function migrateFixTrackV2() {
         REFERENCES "contractors"("id") ON DELETE SET NULL
   `);
 
+  // Pending contractor-email approval requests (manager approval workflow)
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issues"
+      ADD COLUMN IF NOT EXISTS "email_request_mode" text,
+      ADD COLUMN IF NOT EXISTS "email_requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "email_requested_at" timestamp
+  `);
+
   // One-time action tokens for contractor email buttons (Booked / Completed)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "fix_track_action_tokens" (
@@ -1010,6 +1019,21 @@ async function migrateFixTrackV2() {
   await db.execute(sql`
     ALTER TABLE "fix_track_issues"
       ADD COLUMN IF NOT EXISTS "completion_document_path" text
+  `);
+
+  // Deduplication log for the daily overdue-issue alert digest
+  // (one email per client per day).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fix_track_alert_log" (
+      "id"        serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_date"  date NOT NULL DEFAULT CURRENT_DATE,
+      "sent_at"   timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("client_id", "log_date")
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_fix_track_alert_log_client" ON "fix_track_alert_log" ("client_id")
   `);
 }
 
@@ -1162,6 +1186,29 @@ async function migratePestTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
+}
+
+async function migratePremisesTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "premises_inspections" (
+      "id"               serial PRIMARY KEY,
+      "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"          integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "inspection_date"  date NOT NULL,
+      "inspection_type"  text NOT NULL DEFAULT 'routine',
+      "area"             text,
+      "findings"         text,
+      "hazard_details"   text,
+      "action_required"  text,
+      "action_taken"     text,
+      "status"           text NOT NULL DEFAULT 'open',
+      "inspected_by"     text,
+      "created_by"       integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"       timestamp NOT NULL DEFAULT now(),
+      "updated_at"       timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_premises_inspections_client" ON "premises_inspections" ("client_id", "inspection_date")`);
 }
 
 async function migrateKitchenCleaning() {

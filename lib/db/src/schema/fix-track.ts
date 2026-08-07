@@ -21,6 +21,10 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
   solutionNotes: text("solution_notes"),
+  // Pending contractor-email approval request ("assign" | "quote")
+  emailRequestMode: text("email_request_mode"),
+  emailRequestedBy: integer("email_requested_by").references(() => usersTable.id, { onDelete: "set null" }),
+  emailRequestedAt: timestamp("email_requested_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

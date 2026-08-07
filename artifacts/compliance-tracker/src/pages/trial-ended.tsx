@@ -45,6 +45,15 @@ const ADDONS = [
   },
   {
     key: "safetrack",
+    label: "SafeTrack",
+    desc: "Risk assessments, SOPs & staff handbook",
+    icon: ShieldCheck,
+    iconColor: "text-indigo-700",
+    activeBorder: "border-indigo-500",
+    activeBg: "bg-indigo-50/60",
+  },
+  {
+    key: "premisestrack",
     label: "PremisesTrack",
     desc: "Premises safety logbook",
     icon: Building2,

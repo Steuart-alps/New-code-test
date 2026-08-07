@@ -31,7 +31,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   Zap, Plus, AlertTriangle, CheckCircle2, Clock, Pencil, Trash2,
-  Lock, Search, Settings, X, ClipboardList, PackageCheck, Library,
+  Lock, Search, Settings, X, ClipboardList, PackageCheck, Library, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, addMonths, parseISO, isValid } from "date-fns";
@@ -1334,6 +1334,71 @@ export default function PATTrackPage() {
 
   const lockUI = user?.role === "client_viewer";
 
+  // ── Export register (for insurance / electrical safety audits) ──────────────
+
+  const siteName = (id: number | null) =>
+    id == null ? "All sites" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const fmtDate = (d: string | null | undefined) => {
+    if (!d) return "—";
+    const p = parseISO(d);
+    return isValid(p) ? format(p, "dd MMM yyyy") : esc(d);
+  };
+
+  const resultLabel = (r: string | null) =>
+    r === "pass" ? "Pass" : r === "fail" ? "Fail" : r ? esc(r) : "Not tested";
+
+  const handleExportRegister = () => {
+    const rows = [...filteredAppliances].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>PAT Test Register</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  .fail { color: #b91c1c; font-weight: bold; }
+  .overdue { color: #b91c1c; font-weight: bold; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Portable Appliance Test (PAT) Register</h1>
+<div class="meta">Generated ${fmtDate(new Date().toISOString())} — for insurance / electrical safety audits</div>
+<div class="meta">${rows.length} appliance${rows.length !== 1 ? "s" : ""}${status ? ` · ${status.overdue} overdue · ${status.untested} not yet tested` : ""}</div>
+${rows.length === 0 ? `<p class="empty">No appliances match the current filters.</p>` : `<table>
+<tr><th>Appliance</th><th>Type</th><th>Location / room</th><th>Asset tag</th><th>Last test date</th><th>Result</th><th>Tested by</th><th>Next test due</th></tr>
+${rows.map(a => {
+  const st = applianceStatus(a);
+  return `<tr>
+  <td>${esc(a.name)}</td>
+  <td>${esc(a.appliance_type)}</td>
+  <td>${esc(a.location) || "—"}</td>
+  <td>${esc(a.asset_tag) || "—"}</td>
+  <td>${fmtDate(a.last_test_date)}</td>
+  <td><span class="${a.last_result === "fail" ? "fail" : ""}">${resultLabel(a.last_result)}</span></td>
+  <td>${esc(a.last_tested_by) || "—"}</td>
+  <td><span class="${st === "overdue" ? "overdue" : ""}">${fmtDate(a.next_test_date)}${st === "overdue" ? " (overdue)" : ""}</span></td>
+</tr>`;
+}).join("")}
+</table>`}
+</body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the register.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  };
+
   return (
     <AppLayout title="PATtrack">
       <div className="space-y-6">
@@ -1367,6 +1432,11 @@ export default function PATTrackPage() {
             In-house PAT testing register — maintain your appliance inventory and keep test records up to date
           </p>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Button variant="outline" size="sm" className="gap-1.5 rounded-sm h-8 text-sm"
+              onClick={handleExportRegister}
+              title="Print or save the PAT test register for insurance / electrical safety audits">
+              <Printer className="w-4 h-4" /> Export register
+            </Button>
             {canAdmin && <PATConfigDialog />}
             {!lockUI && (
               <Button className="gap-2 rounded-sm h-8 text-sm" size="sm" onClick={() => {

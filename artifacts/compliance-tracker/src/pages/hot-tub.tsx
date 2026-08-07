@@ -23,7 +23,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   Waves, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, ThermometerSun, Beaker, Search, Building2,
-  Filter, Settings2, ToggleLeft, ToggleRight,
+  Filter, Settings2, ToggleLeft, ToggleRight, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -280,6 +280,74 @@ export default function HotTubPage() {
     return rows;
   }, [checks, filterType, filterSite, filterTub, search, tubMap]);
 
+  // ── Export printable log (for health inspections) ────────────────────────────
+
+  const siteName = (id: number | null) =>
+    id == null ? "—" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const handleExportLog = () => {
+    // Respect the current on-page filters
+    const rows = [...filtered].sort((a, b) => (a.checkDate < b.checkDate ? 1 : -1));
+
+    const filterParts: string[] = [];
+    if (filterTub !== "all") filterParts.push(`Tub: ${tubMap.get(Number(filterTub))?.name ?? filterTub}`);
+    if (filterSite !== "all") filterParts.push(`Site: ${siteName(Number(filterSite))}`);
+    if (filterType !== "all") filterParts.push(`Check type: ${CHECK_TYPE_LABELS[filterType as CheckType] ?? filterType}`);
+    if (search.trim()) filterParts.push(`Search: "${search.trim()}"`);
+    const filterLine = filterParts.length ? `Filters applied — ${filterParts.join(" · ")}` : "All records";
+
+    const resultLabel = (r: string) =>
+      r === "pass" ? "Pass" : r === "action_required" ? "Action required" : r === "fail" ? "Fail" : r;
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hot Tub Maintenance Log</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Hot Tub &amp; Spa Maintenance Log</h1>
+<div class="meta">${esc(user?.name ?? "")} — generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for health inspection</div>
+<div class="meta">${esc(filterLine)}</div>
+<div class="meta">Records: ${rows.length}</div>
+
+<h2>Maintenance records</h2>
+${rows.length === 0 ? `<p class="empty">No records match the current filter.</p>` : `<table>
+<tr><th>Date</th><th>Session</th><th>Tub</th><th>Check</th><th>Result</th><th>pH</th><th>Sanitiser (ppm)</th><th>Temp (°C)</th><th>Location</th><th>Performed by</th><th>Notes</th></tr>
+${rows.map(r => `<tr>
+  <td>${fmt(r.checkDate)}</td>
+  <td>${esc(r.session ? (SESSION_LABELS[r.session] ?? r.session) : "")}</td>
+  <td>${esc(r.hotTubId ? (tubMap.get(r.hotTubId)?.name ?? "") : "")}</td>
+  <td>${esc(CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType)}</td>
+  <td>${esc(resultLabel(r.result))}</td>
+  <td>${esc(r.phValue)}</td>
+  <td>${esc(r.sanitiserLevel)}</td>
+  <td>${esc(r.temperature)}</td>
+  <td>${esc(r.location)}</td>
+  <td>${esc(r.performedBy)}</td>
+  <td>${esc(r.notes)}</td>
+</tr>`).join("")}
+</table>`}
+</body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the log.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  };
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const invalidate = () => {
@@ -404,6 +472,10 @@ export default function HotTubPage() {
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
+          <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
+            title="Print or save the hot tub maintenance log for health inspections">
+            <Printer className="w-4 h-4" /> Export log
+          </Button>
           {canAdmin && (
             <Button variant="outline" onClick={() => setShowManageTubs(true)} className="gap-2 rounded-sm">
               <Settings2 className="w-4 h-4" /> Manage Tubs

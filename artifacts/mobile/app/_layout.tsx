@@ -56,6 +56,15 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/cleaning"
+        options={{
+          title: 'Cleaning',
+          headerStyle: { backgroundColor: '#162d42' },
+          headerTintColor: '#ffffff',
+          headerTitleStyle: { fontFamily: 'Inter_600SemiBold' },
+        }}
+      />
+      <Stack.Screen
         name="issues/new"
         options={{
           title: 'Report Issue',

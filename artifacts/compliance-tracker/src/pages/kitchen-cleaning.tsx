@@ -20,7 +20,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { format, startOfWeek, startOfMonth, parseISO, addWeeks, subWeeks, addMonths, subMonths } from "date-fns";
 import {
   CheckSquare, Plus, Trash2, ChevronLeft, ChevronRight, Save,
-  Pencil, Settings, CheckCircle2, ClipboardList, CalendarDays, Loader2, X,
+  Pencil, Settings, CheckCircle2, ClipboardList, CalendarDays, Loader2, X, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -521,6 +521,64 @@ export default function CleaningScheduleTab() {
   const doneCount = completions.filter(c => c.done).length;
   const totalCount = completions.length;
 
+  // ── Export completion record (for food hygiene inspections) ──────────────
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  function handleExportRecord() {
+    if (completions.length === 0) {
+      toast({ title: "No tasks to export", description: "There are no cleaning tasks for this period." });
+      return;
+    }
+    const rows = byArea.flatMap(group =>
+      group.items.map(({ c }) => ({ area: group.area, c }))
+    );
+    const submittedLabel = log?.submitted_at
+      ? `Signed off ${format(parseISO(log.submitted_at), "d MMM yyyy 'at' HH:mm")}`
+      : "Draft — not yet signed off";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Cleaning Schedule Record</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  .done { color: #15803d; font-weight: bold; }
+  .not-done { color: #b91c1c; }
+  .signoff { margin-top: 18px; font-size: 11px; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Cleaning Schedule Completion Record</h1>
+<div class="meta">${esc(freqLabel(activeFreq))} schedule — ${esc(periodLabel(activeFreq, periodDate))}</div>
+<div class="meta">Generated ${esc(format(new Date(), "dd MMM yyyy"))} — for food hygiene inspection</div>
+<div class="meta">${doneCount} of ${totalCount} task${totalCount !== 1 ? "s" : ""} completed</div>
+${rows.length === 0 ? `<p class="empty">No cleaning tasks configured for this period.</p>` : `<table>
+<tr><th>Area</th><th>Task</th><th>Frequency</th><th>Completed</th><th>Completed by</th><th>Notes</th></tr>
+${rows.map(({ area, c }) => `<tr>
+  <td>${esc(area)}</td>
+  <td>${esc(c.taskName)}</td>
+  <td>${esc(freqLabel(activeFreq))}</td>
+  <td>${c.done ? `<span class="done">Done</span>` : `<span class="not-done">Not done</span>`}</td>
+  <td>${esc(c.doneBy) || "—"}</td>
+  <td>${esc(c.notes) || ""}</td>
+</tr>`).join("")}
+</table>`}
+<div class="signoff">Signed off by: <strong>${esc(signedBy) || "—"}</strong> · ${esc(submittedLabel)}</div>
+</body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the record.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   const freqTabs: Frequency[] = ["daily", "weekly", "monthly"];
@@ -546,11 +604,18 @@ export default function CleaningScheduleTab() {
             );
           })}
         </div>
-        {canAdmin && (
-          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setManageOpen(true)}>
-            <Settings className="w-4 h-4 mr-2" /> Manage Tasks
+        <div className={cn("flex items-center gap-2", canAdmin ? "ml-auto" : "sm:ml-auto")}>
+          <Button variant="outline" size="sm" onClick={handleExportRecord}
+            disabled={completions.length === 0}
+            title="Print or save this cleaning record for food hygiene inspections">
+            <Printer className="w-4 h-4 mr-2" /> Export record
           </Button>
-        )}
+          {canAdmin && (
+            <Button variant="outline" size="sm" onClick={() => setManageOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" /> Manage Tasks
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Period navigator ── */}

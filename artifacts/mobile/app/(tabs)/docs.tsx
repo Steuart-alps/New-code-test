@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   RefreshControl,
   ScrollView,
@@ -11,17 +12,28 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 
 type Tab = 'documents' | 'training';
 
 interface DocFile {
   id: number;
-  name: string;
+  title: string;
   category: string | null;
-  createdAt: string;
+  requires_acknowledgement?: boolean;
+  created_at: string;
+}
+
+interface Acknowledgement {
+  id: number;
+  document_id: number;
+  staff_roster_id: number | null;
+  staff_name: string;
+  acknowledged_at: string;
 }
 
 interface TrainingRecord {
@@ -38,8 +50,66 @@ function daysUntil(dateStr: string | null): number | null {
   return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
 }
 
+function formatCategory(category: string | null): string {
+  if (!category) return '';
+  return category
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 function DocRow({ doc }: { doc: DocFile }) {
   const colors = useColors();
+  const qc = useQueryClient();
+  const { user } = useAuth();
+
+  const requiresAck = !!doc.requires_acknowledgement;
+
+  const { data: acks = [] } = useQuery<Acknowledgement[]>({
+    queryKey: ['doc-acks', doc.id],
+    enabled: requiresAck,
+    queryFn: () =>
+      apiFetch<Acknowledgement[]>(
+        `/api/doc-track/documents/${doc.id}/acknowledgements`,
+      ).catch(() => []),
+  });
+
+  // Identity is derived server-side; the client no longer picks a roster entry.
+  // Determine whether *this* user has already acknowledged by matching the
+  // recorded staff_name (case-insensitive) against the signed-in user's name.
+  const alreadyAcknowledged = !!user && acks.some(
+    (a) => a.staff_name.trim().toLowerCase() === user.name.trim().toLowerCase(),
+  );
+
+  const { mutate: acknowledge, isPending } = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/doc-track/documents/${doc.id}/acknowledge`, {
+        method: 'POST',
+        // Acknowledge as self — the server resolves identity from the session
+        // and only honors an optional signature.
+        body: JSON.stringify({ signature: user?.name ?? null }),
+      }),
+    onSuccess: async () => {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.invalidateQueries({ queryKey: ['doc-acks', doc.id] });
+    },
+    onError: (err: Error) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', err.message);
+    },
+  });
+
+  function handleAcknowledge() {
+    Alert.alert(
+      'Acknowledge document',
+      `Confirm you have read and understood "${doc.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Acknowledge', onPress: () => acknowledge() },
+      ],
+    );
+  }
+
   return (
     <View
       style={[
@@ -52,15 +122,39 @@ function DocRow({ doc }: { doc: DocFile }) {
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-          {doc.name}
+          {doc.title}
         </Text>
         {!!doc.category && (
           <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>
-            {doc.category}
+            {formatCategory(doc.category)}
           </Text>
         )}
+        {requiresAck &&
+          (alreadyAcknowledged ? (
+            <View style={styles.ackDone}>
+              <Feather name="check-circle" size={13} color={colors.success} />
+              <Text style={[styles.ackDoneText, { color: colors.success }]}>
+                Acknowledged
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.ackBtn, { backgroundColor: colors.navy }]}
+              onPress={handleAcknowledge}
+              disabled={isPending}
+              activeOpacity={0.8}
+            >
+              {isPending ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <>
+                  <Feather name="check" size={13} color="#ffffff" />
+                  <Text style={styles.ackBtnText}>Acknowledge</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ))}
       </View>
-      <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
     </View>
   );
 }
@@ -118,9 +212,9 @@ export default function DocsScreen() {
     refetch: refetchDocs,
     isRefetching: docsRefetching,
   } = useQuery<DocFile[]>({
-    queryKey: ['doctrack-files'],
+    queryKey: ['doctrack-documents'],
     queryFn: () =>
-      apiFetch<DocFile[]>('/api/doctrack/files').catch(() => []),
+      apiFetch<DocFile[]>('/api/doc-track/documents').catch(() => []),
   });
 
   const {
@@ -218,7 +312,9 @@ export default function DocsScreen() {
               </Text>
             </View>
           ) : (
-            docs.map((doc) => <DocRow key={doc.id} doc={doc} />)
+            docs.map((doc) => (
+              <DocRow key={doc.id} doc={doc} />
+            ))
           )
         ) : training.length === 0 ? (
           <View
@@ -285,6 +381,25 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1 },
   rowTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginBottom: 2 },
   rowSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  ackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  ackBtnText: { color: '#ffffff', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  ackDone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 8,
+  },
+  ackDoneText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   rowBadge: {
     fontSize: 11,
     fontFamily: 'Inter_500Medium',

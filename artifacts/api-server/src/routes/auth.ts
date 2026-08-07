@@ -433,6 +433,30 @@ router.post("/auth/register", async (req, res) => {
     await seedStarterContent(clientId);
   }
 
+  // Send a branded welcome email — best-effort, never blocks signup.
+  try {
+    const appUrl = process.env.APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    await sendSystemEmail({
+      to: user.email,
+      subject: "Welcome to ComplyTrack",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #1e293b;">Welcome to ComplyTrack</h2>
+          <p>Hi ${name},</p>
+          <p>Thanks for signing up — your 14-day free trial has started. Your account is ready to go and we've pre-populated some starter compliance content so you can hit the ground running.</p>
+          <p style="margin: 24px 0;">
+            <a href="${appUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Go to your dashboard</a>
+          </p>
+          <p>If you have any questions, just reply to this email — we're happy to help.</p>
+          <p>Best regards,<br><strong>ComplyTrack</strong></p>
+        </div>
+      `,
+      text: `Hi ${name},\n\nThanks for signing up — your 14-day free trial has started. Your account is ready to go.\n\nGo to your dashboard: ${appUrl}\n\nIf you have any questions, just reply to this email.\n\nBest regards,\nComplyTrack`,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to send welcome email");
+  }
+
   // Log the user in immediately — trial has started, no card needed.
   (req.session as any).userId = user.id;
 
@@ -465,6 +489,9 @@ router.post("/auth/register", async (req, res) => {
 const MobileLoginBody = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  // Optional TOTP (or recovery) code for accounts with 2FA enabled. The mobile
+  // flow is stateless: the client re-submits credentials together with the code.
+  code: z.string().optional(),
 });
 
 /**
@@ -489,6 +516,31 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
   if (!valid) {
     res.status(401).json({ error: "Invalid email or password" });
     return;
+  }
+
+  // 2FA: if the account has TOTP enabled, require a code. The mobile client
+  // re-submits email + password + code (stateless — no pending session).
+  if (result.user.totpEnabled && result.user.totpSecret) {
+    const trimmed = (body.data.code ?? "").trim();
+    if (!trimmed) {
+      res.json({ requires2fa: true });
+      return;
+    }
+    if (/^\d{6}$/.test(trimmed)) {
+      if (!verifyToken(trimmed, result.user.totpSecret)) {
+        res.status(401).json({ error: "Incorrect code. Please try again." });
+        return;
+      }
+    } else {
+      // Treat as a one-time recovery code; single-use, disables 2FA for re-enrolment.
+      if (!result.user.totpRecoveryHash || !recoveryCodeMatches(trimmed, result.user.totpRecoveryHash)) {
+        res.status(401).json({ error: "Incorrect code. Please try again." });
+        return;
+      }
+      await db.update(usersTable)
+        .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+        .where(eq(usersTable.id, result.user.id));
+    }
   }
 
   const token = randomBytes(32).toString("hex");

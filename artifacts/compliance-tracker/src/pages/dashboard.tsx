@@ -443,6 +443,56 @@ function PestTrackCard() {
   );
 }
 
+function PremisesTrackCard() {
+  const [summary, setSummary] = useState<{ open: number; actioned: number; closed: number; overdue: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/premises-track/summary")
+      .then(r => r.ok ? r.json() : null)
+      .then(setSummary)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pill = !summary
+    ? { label: "No inspections", cls: "bg-muted text-muted-foreground" }
+    : summary.overdue > 0
+      ? { label: `${summary.overdue} overdue`, cls: "bg-red-100 text-red-700" }
+      : summary.open > 0
+        ? { label: `${summary.open} open`, cls: "bg-amber-100 text-amber-700" }
+        : { label: "Up to date", cls: "bg-emerald-100 text-emerald-700" };
+
+  return (
+    <Link href="/premises-track">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
+        <CardContent className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-violet-50 rounded-lg"><Building2 className="w-4 h-4 text-violet-600" /></div>
+              <span className="text-sm font-semibold">PremisesTrack</span>
+            </div>
+            <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", pill.cls)}>{pill.label}</span>
+          </div>
+          {loading ? (
+            <div className="h-2 bg-muted rounded-full animate-pulse" />
+          ) : (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (summary?.open ?? 0) > 0 ? "text-amber-600" : "text-foreground")}>{summary?.open ?? 0}</p>
+                <p className="text-muted-foreground">Open</p>
+              </div>
+              <div className="text-center">
+                <p className={cn("text-lg font-display font-bold", (summary?.overdue ?? 0) > 0 ? "text-red-600" : "text-foreground")}>{summary?.overdue ?? 0}</p>
+                <p className="text-muted-foreground">Overdue</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
 // ── Module status board definition ────────────────────────────────────────────
 
 const ALL_MODULE_CARDS: { key: string; label: string; node: React.ReactNode }[] = [
@@ -454,6 +504,7 @@ const ALL_MODULE_CARDS: { key: string; label: string; node: React.ReactNode }[] 
   { key: "pooltrack",       label: "PoolTrack",       node: <PoolTrackCard /> },
   { key: "pattrack",        label: "PATtrack",        node: <PATTrackCard /> },
   { key: "pesttrack",       label: "PestTrack",       node: <PestTrackCard /> },
+  { key: "premisestrack",   label: "PremisesTrack",   node: <PremisesTrackCard /> },
 ];
 
 function ModuleTrackRow({ hasService, activeClientId }: { hasService: (key: string) => boolean; activeClientId: number | null }) {

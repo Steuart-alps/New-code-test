@@ -101,8 +101,9 @@ function UserDialog({
         active: form.active,
         clientId,
       };
+      // Password is optional. When creating a user and leaving it blank, the
+      // server emails an invite link so they can set their own password.
       if (form.password) body.password = form.password;
-      if (!user) body.password = form.password;
 
       const path = user ? `/users/${user.id}` : "/users";
       const method = user ? "PUT" : "POST";
@@ -145,10 +146,14 @@ function UserDialog({
               type="password"
               value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              required={!user}
               minLength={8}
               placeholder={user ? "Leave blank to keep current" : "Min. 8 characters"}
             />
+            {!user && (
+              <p className="text-xs text-muted-foreground">
+                Leave blank to email the user a link to set their own password
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Role</Label>

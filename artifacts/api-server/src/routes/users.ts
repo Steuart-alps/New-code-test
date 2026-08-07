@@ -1,22 +1,69 @@
 import { Router } from "express";
 import { z } from "zod";
+import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
+import { sendSystemEmail } from "../lib/email";
 
 const router = Router();
 
 const CreateUserBody = z.object({
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(8).optional(),
   name: z.string().min(1),
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).default("client_viewer"),
   clientId: z.number().nullable().optional(),
   departmentId: z.number().nullable().optional(),
   active: z.boolean().default(true),
 });
+
+/**
+ * Mint a password-reset token for a freshly-created user and email them an
+ * "invitation" link that reuses the forgot/reset-password token machinery.
+ * Best-effort: never throws — invite creation must not fail if email is down.
+ */
+async function sendInviteEmail(user: { id: number; email: string; name: string }, log?: { error: (o: unknown, m?: string) => void }) {
+  try {
+    const token = randomBytes(32).toString("hex");
+    // Invitation links live a little longer than a routine reset (24 hours)
+    // so a newly-added user has time to act on the email.
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+
+    await db.insert(passwordResetTokensTable).values({
+      userId: user.id,
+      token,
+      expiresAt,
+    });
+
+    const appUrl = process.env.APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    const setupUrl = `${appUrl}/reset-password?token=${token}`;
+
+    await sendSystemEmail({
+      to: user.email,
+      subject: "You've been invited to ComplyTrack",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #1e293b;">You've been invited to ComplyTrack</h2>
+          <p>Hi ${user.name},</p>
+          <p>An administrator has created a ComplyTrack account for you. Click the button below to set your password and get started. This link will expire in <strong>24 hours</strong>.</p>
+          <p style="margin: 24px 0;">
+            <a href="${setupUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Set Your Password</a>
+          </p>
+          <p>Or copy and paste this link into your browser:</p>
+          <p style="word-break: break-all; color: #2563eb;">${setupUrl}</p>
+          <p>If you weren't expecting this invitation, you can safely ignore this email.</p>
+          <p>Best regards,<br><strong>ComplyTrack</strong></p>
+        </div>
+      `,
+      text: `Hi ${user.name},\n\nAn administrator has created a ComplyTrack account for you. Use the link below to set your password (expires in 24 hours):\n\n${setupUrl}\n\nIf you weren't expecting this invitation, you can safely ignore this email.\n\nBest regards,\nComplyTrack`,
+    });
+  } catch (err) {
+    log?.error({ err }, "Failed to send invite email");
+  }
+}
 
 const UpdateUserBody = z.object({
   email: z.string().email().optional(),
@@ -84,7 +131,11 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
     }
   }
 
-  const passwordHash = await hashPassword(body.password);
+  // When no password is supplied, the admin is inviting the user: create the
+  // account with an unusable random password and email them a link to set
+  // their own via the existing reset-password token machinery.
+  const invite = !body.password;
+  const passwordHash = await hashPassword(body.password ?? randomBytes(32).toString("hex"));
   const rows = await db
     .insert(usersTable)
     .values({
@@ -97,6 +148,10 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
       passwordHash,
     })
     .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+
+  if (invite) {
+    await sendInviteEmail(rows[0], req.log);
+  }
 
   res.status(201).json(rows[0]);
 });

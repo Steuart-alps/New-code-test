@@ -17,6 +17,7 @@ import {
   Upload, Download, X, Users, CheckCircle2, Clock, Loader2, CheckSquare,
 } from "lucide-react";
 import { SignaturePad } from "@/components/signature-pad";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -574,6 +575,14 @@ export default function SafeTrackPage() {
   type TabKey = keyof typeof tabConfig;
   const currentTab = tabConfig[tab as TabKey];
 
+  // Photo entity type keyed by tab — follows the shared photos API convention
+  // (recordType + recordId), matching KitchenTrack/BikeTrack usage.
+  const PHOTO_ENTITY_TYPE: Record<TabKey, string> = {
+    risk: "safe_risk_assessment",
+    sops: "safe_sop",
+    handbook: "safe_handbook",
+  };
+
   function openAck(id: number, title: string) {
     setAckTarget({ id, title, sub: currentTab.sub });
   }
@@ -671,6 +680,20 @@ export default function SafeTrackPage() {
             )}
 
             <FileUploadField form={form} setForm={setForm} />
+
+            {/* Photos — only available once the record exists (needs a real id) */}
+            {editing?.id ? (
+              <div className="pt-1 border-t">
+                <CheckPhotoUploader
+                  entityType={PHOTO_ENTITY_TYPE[tab as TabKey]}
+                  entityId={editing.id}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground pt-1 border-t">
+                Save this record first, then re-open it to attach photos.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} type="button">Cancel</Button>

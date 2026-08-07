@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
-  Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3,
+  Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -90,6 +90,8 @@ interface Issue {
   resolvedDate?: string | null;
   solutionNotes?: string | null;
   completionDocumentPath?: string | null;
+  emailRequestMode?: string | null;
+  emailRequestedAt?: string | null;
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -552,6 +554,86 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
   );
 }
 
+// ── Priority board ────────────────────────────────────────────────────────────
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue) => void }) {
+  // Open issues only, grouped by trade area (issueType).
+  const open = issues.filter(i => i.status === "reported" || i.status === "in_progress");
+
+  const columns = Object.entries(ISSUE_TYPES)
+    .map(([key, meta]) => ({
+      key,
+      meta,
+      items: open
+        .filter(i => i.issueType === key)
+        .sort((a, b) => {
+          const pr = (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99);
+          if (pr !== 0) return pr;
+          // Older first (by reported date)
+          return new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
+        }),
+    }))
+    .filter(c => c.items.length > 0);
+
+  if (columns.length === 0) {
+    return (
+      <div className="py-20 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
+        <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+        <p className="text-sm font-medium">No open issues — nothing to action right now 🎉</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-4 overflow-x-auto pb-4">
+      {columns.map(({ key, meta, items }) => (
+        <div key={key} className="flex-shrink-0 w-72">
+          <div className="flex items-center justify-between mb-2 px-1">
+            <span className={cn("inline-flex items-center text-xs px-2 py-0.5 rounded-md border font-medium", meta.color)}>
+              {meta.label}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium tabular-nums">{items.length}</span>
+          </div>
+          <div className="space-y-2">
+            {items.map(issue => {
+              const priorityMeta = PRIORITIES[issue.priority] ?? PRIORITIES.medium;
+              const statusMeta   = STATUSES[issue.status] ?? STATUSES.reported;
+              const overdue = issue.targetDate && new Date(issue.targetDate) < new Date()
+                && (issue.status === "reported" || issue.status === "in_progress");
+              return (
+                <button
+                  key={issue.id}
+                  onClick={() => onEdit(issue)}
+                  className={cn(
+                    "w-full text-left bg-card border rounded-lg p-3 transition-shadow hover:shadow-md",
+                    issue.priority === "urgent" ? "border-l-4 border-l-rose-500" : "border-border",
+                  )}
+                >
+                  <div className="font-medium text-sm mb-1.5 line-clamp-2">{issue.title}</div>
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
+                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    {issue.siteName && <div className="truncate">📍 {issue.siteName}</div>}
+                    {issue.targetDate && (
+                      <div className={cn(overdue && "text-rose-600 font-medium")}>
+                        Target {format(new Date(issue.targetDate), "dd/MM/yyyy")}{overdue ? " · overdue" : ""}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FixTrackPage() {
@@ -560,7 +642,7 @@ export default function FixTrackPage() {
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab]         = useState<"dashboard" | "issues">("dashboard");
+  const [activeTab, setActiveTab]         = useState<"dashboard" | "board" | "issues">("dashboard");
   const [issues, setIssues]               = useState<Issue[]>([]);
   const [loading, setLoading]             = useState(true);
   const [search, setSearch]               = useState("");
@@ -665,11 +747,11 @@ export default function FixTrackPage() {
     await load();
   }
 
-  async function handleNotify(issue: Issue, force = false) {
+  async function handleNotify(issue: Issue, force = false, mode: "assign" | "quote" = "assign") {
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
       const url = `/fix-track/issues/${issue.id}/send-to-contractor${force ? "?force=true" : ""}`;
-      const res = await apiFetch(url, { method: "POST" });
+      const res = await apiFetch(url, { method: "POST", body: JSON.stringify({ mode }) });
       const body = await res.json();
       if (res.status === 409 && body.alreadySent) {
         // Ask the manager to confirm before resending
@@ -677,11 +759,48 @@ export default function FixTrackPage() {
         return;
       }
       if (!res.ok) throw new Error(body.error ?? "Failed to send");
-      toast({ title: "Email sent", description: `Contractor notified for "${issue.title}"` });
+      toast({
+        title: mode === "quote" ? "Quote request sent" : "Email sent",
+        description: mode === "quote"
+          ? `Quote requested from ${issue.contractorName ?? "contractor"} for "${issue.title}"`
+          : `Contractor notified for "${issue.title}"`,
+      });
+      await load();
     } catch (err: any) {
       toast({ title: "Could not send email", description: err.message, variant: "destructive" });
     } finally {
       setNotifying(n => ({ ...n, [issue.id]: false }));
+    }
+  }
+
+  async function handleRequestSend(issue: Issue, mode: "assign" | "quote") {
+    setNotifying(n => ({ ...n, [issue.id]: true }));
+    try {
+      const res = await apiFetch(`/fix-track/issues/${issue.id}/request-send`, {
+        method: "POST", body: JSON.stringify({ mode }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Failed to request approval");
+      toast({
+        title: "Approval requested",
+        description: `A manager will review your request to ${mode === "quote" ? "get a quote from" : "assign the job to"} ${issue.contractorName ?? "the contractor"}.`,
+      });
+      await load();
+    } catch (err: any) {
+      toast({ title: "Could not request approval", description: err.message, variant: "destructive" });
+    } finally {
+      setNotifying(n => ({ ...n, [issue.id]: false }));
+    }
+  }
+
+  async function handleRejectSend(issue: Issue) {
+    try {
+      const res = await apiFetch(`/fix-track/issues/${issue.id}/reject-send`, { method: "POST" });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
+      toast({ title: "Request dismissed" });
+      await load();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     }
   }
 
@@ -751,6 +870,15 @@ export default function FixTrackPage() {
             <BarChart3 className="w-4 h-4" />Dashboard
           </button>
           <button
+            onClick={() => setActiveTab("board")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+              activeTab === "board" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <LayoutGrid className="w-4 h-4" />Board
+          </button>
+          <button
             onClick={() => setActiveTab("issues")}
             className={cn(
               "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
@@ -767,6 +895,13 @@ export default function FixTrackPage() {
           loading
             ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
             : <FixTrackDashboard issues={issues} />
+        )}
+
+        {/* Board tab — priority board grouped by trade area */}
+        {activeTab === "board" && (
+          loading
+            ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
+            : <FixTrackBoard issues={issues} onEdit={openEdit} />
         )}
 
         {/* Issues tab — Filters */}
@@ -889,20 +1024,76 @@ export default function FixTrackPage() {
                           className="text-xs h-7 px-2 whitespace-nowrap">Close</Button>
                       )}
 
-                      {/* Notify contractor */}
+                      {/* Contractor emails — managers send, staff request approval */}
                       {issue.contractorId && canAdmin && (
-                        <Button
-                          variant="outline" size="sm"
-                          onClick={() => handleNotify(issue)}
-                          disabled={notifying[issue.id]}
-                          className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
-                          title={`Notify ${issue.contractorName ?? "contractor"}`}
-                        >
-                          {notifying[issue.id]
-                            ? <Loader2 className="w-3 h-3 animate-spin" />
-                            : <Send className="w-3 h-3" />}
-                          Notify
-                        </Button>
+                        <>
+                          {issue.emailRequestMode && (
+                            <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                              Approval requested: {issue.emailRequestMode === "quote" ? "quote" : "assign"}
+                            </span>
+                          )}
+                          <Button
+                            variant="outline" size="sm"
+                            onClick={() => handleNotify(issue, false, "assign")}
+                            disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
+                            title={issue.emailRequestMode ? "Approve & assign the job by email" : `Notify ${issue.contractorName ?? "contractor"}`}
+                          >
+                            {notifying[issue.id]
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Send className="w-3 h-3" />}
+                            {issue.emailRequestMode === "assign" ? "Approve & send" : "Assign job"}
+                          </Button>
+                          <Button
+                            variant="outline" size="sm"
+                            onClick={() => handleNotify(issue, false, "quote")}
+                            disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
+                            title={`Ask ${issue.contractorName ?? "contractor"} for a quotation (no assignment)`}
+                          >
+                            {issue.emailRequestMode === "quote" ? "Approve quote req." : "Request quote"}
+                          </Button>
+                          {issue.emailRequestMode && (
+                            <Button
+                              variant="ghost" size="sm"
+                              onClick={() => handleRejectSend(issue)}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-muted-foreground"
+                            >
+                              Dismiss request
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {issue.contractorId && !canAdmin && (
+                        issue.emailRequestMode ? (
+                          <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                            Awaiting manager approval
+                          </span>
+                        ) : (
+                          <>
+                            <Button
+                              variant="outline" size="sm"
+                              onClick={() => handleRequestSend(issue, "assign")}
+                              disabled={notifying[issue.id]}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
+                              title="Ask a manager to approve assigning this job by email"
+                            >
+                              {notifying[issue.id]
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <Send className="w-3 h-3" />}
+                              Request assign
+                            </Button>
+                            <Button
+                              variant="outline" size="sm"
+                              onClick={() => handleRequestSend(issue, "quote")}
+                              disabled={notifying[issue.id]}
+                              className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
+                              title="Ask a manager to approve requesting a quote"
+                            >
+                              Request quote
+                            </Button>
+                          </>
+                        )
                       )}
 
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(issue)}>

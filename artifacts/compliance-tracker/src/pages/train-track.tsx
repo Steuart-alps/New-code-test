@@ -51,6 +51,8 @@ import {
   BookOpen,
   ShieldCheck,
   FileText,
+  Printer,
+  Grid3x3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SignaturePad } from "@/components/signature-pad";
@@ -170,9 +172,20 @@ function SiteName({ record }: { record: TrainingRecord }) {
   );
 }
 
-function ActionsCell({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit: () => void; onDelete: () => void; onPrint?: () => void }) {
   return (
     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {onPrint && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-sm"
+          onClick={onPrint}
+          title="Print induction record for the personnel file"
+        >
+          <Printer className="w-3.5 h-3.5" />
+        </Button>
+      )}
       <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={onEdit}>
         <Pencil className="w-3.5 h-3.5" />
       </Button>
@@ -187,7 +200,7 @@ function ActionsCell({ onEdit, onDelete }: { onEdit: () => void; onDelete: () =>
 
 export default function TrainTrackPage() {
   const { toast } = useToast();
-  const { activeClientId } = useAuth();
+  const { activeClientId, client, user } = useAuth();
   const qc = useQueryClient();
 
   const [tab, setTab]           = useState<RecordType>("certificate");
@@ -401,6 +414,155 @@ export default function TrainTrackPage() {
     }
   }
 
+  // ── Printable exports ──────────────────────────────────────────────────────
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const companyName = client?.name ?? "";
+  const todayLabel = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+  function openPrintWindow(html: string) {
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to print.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  }
+
+  // Single staff member — induction record for the personnel file
+  function handlePrintInduction(staffName: string) {
+    const rows = allRecords
+      .filter(r => r.staff_name === staffName)
+      .sort((a, b) => (a.completed_date < b.completed_date ? 1 : -1));
+
+    const typeLabel = (r: TrainingRecord) =>
+      r.record_type === "certificate" ? "Certificate"
+      : r.record_type === "signoff" ? "Document sign-off"
+      : "Internal training";
+
+    const rowTitle = (r: TrainingRecord) =>
+      r.record_type === "signoff" ? (r.document_title ?? "—") : (r.training_type ?? "—");
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Induction Record — ${esc(staffName)}</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  .staff { font-size: 15px; margin: 12px 0 4px; }
+  .staff strong { font-size: 17px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  .sign { margin-top: 48px; font-size: 12px; }
+  .sign-row { display: flex; gap: 48px; margin-top: 32px; }
+  .sign-line { flex: 1; border-top: 1px solid #333; padding-top: 4px; font-size: 11px; color: #555; }
+  .footer { margin-top: 40px; font-size: 10.5px; color: #777; border-top: 1px solid #ccc; padding-top: 6px; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Staff Induction &amp; Training Record</h1>
+<div class="meta">${esc(companyName)} — for the personnel file — generated ${esc(todayLabel)}</div>
+<div class="staff">Staff member: <strong>${esc(staffName)}</strong></div>
+
+<h2>Training &amp; induction records</h2>
+${rows.length === 0 ? `<p class="empty">No training records held for this staff member.</p>` : `<table>
+<tr><th>Category</th><th>Training / Document</th><th>Provider / Trainer</th><th>Completed</th><th>Expiry</th></tr>
+${rows.map(r => `<tr>
+  <td>${esc(typeLabel(r))}</td>
+  <td>${esc(rowTitle(r))}</td>
+  <td>${esc(r.provider ?? r.trainer ?? "—")}</td>
+  <td>${esc(formatDate(r.completed_date))}</td>
+  <td>${esc(r.expiry_date ? formatDate(r.expiry_date) : "—")}</td>
+</tr>`).join("")}
+</table>`}
+
+<div class="sign">
+  <p>I confirm that the training and induction records shown above are accurate and that this staff member has received the induction training listed.</p>
+  <div class="sign-row">
+    <div class="sign-line">Staff member signature</div>
+    <div class="sign-line">Date</div>
+  </div>
+  <div class="sign-row">
+    <div class="sign-line">Manager signature</div>
+    <div class="sign-line">Date</div>
+  </div>
+</div>
+
+<div class="footer">${esc(companyName)} · Generated by ${esc(user?.name ?? "")} on ${esc(todayLabel)}</div>
+</body></html>`;
+    openPrintWindow(html);
+  }
+
+  // Training matrix — rows = staff, columns = training types, cells = status
+  function handlePrintMatrix() {
+    // Build from certificates (the records with expiry-based status).
+    const staffNames = Array.from(new Set(certs.map(r => r.staff_name))).sort((a, b) => a.localeCompare(b));
+    const types = Array.from(new Set(certs.map(r => r.training_type ?? "Other"))).sort((a, b) => a.localeCompare(b));
+
+    // Latest cert per staff+type (by completed date).
+    const cellMap = new Map<string, TrainingRecord>();
+    for (const r of certs) {
+      const key = `${r.staff_name}||${r.training_type ?? "Other"}`;
+      const existing = cellMap.get(key);
+      if (!existing || r.completed_date > existing.completed_date) cellMap.set(key, r);
+    }
+
+    const cell = (staff: string, type: string) => {
+      const r = cellMap.get(`${staff}||${type}`);
+      if (!r) return `<td style="background:#f7f7f7;color:#999;text-align:center">Missing</td>`;
+      const status = getCertStatus(r.expiry_date);
+      const cfg = {
+        expired:       { bg: "#fdecec", fg: "#b42318", label: "Expired" },
+        expiring_soon: { bg: "#fdf3e0", fg: "#b25f00", label: "Expiring" },
+        valid:         { bg: "#e9f7ef", fg: "#1a7f4b", label: "Valid" },
+        no_expiry:     { bg: "#f1f1f1", fg: "#555",    label: "No expiry" },
+      }[status];
+      const dates = r.expiry_date
+        ? `${esc(formatDate(r.completed_date))} → ${esc(formatDate(r.expiry_date))}`
+        : esc(formatDate(r.completed_date));
+      return `<td style="background:${cfg.bg};color:${cfg.fg}"><strong>${cfg.label}</strong><br><span style="font-size:9px;color:#555">${dates}</span></td>`;
+    };
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Training Matrix</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 12px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  th.staff, td.staff { background: #f0ede2; font-weight: bold; white-space: nowrap; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  .legend { font-size: 10px; color: #555; margin-top: 12px; }
+  .legend span { display: inline-block; margin-right: 12px; padding: 1px 6px; border: 1px solid #ccc; }
+  @media print { body { margin: 10mm; } @page { size: landscape; } }
+</style></head><body>
+<h1>Training Matrix</h1>
+<div class="meta">${esc(companyName)} — training certificate status — generated ${esc(todayLabel)}</div>
+${staffNames.length === 0 || types.length === 0
+  ? `<p class="empty">No training certificates recorded.</p>`
+  : `<table>
+<tr><th class="staff">Staff member</th>${types.map(t => `<th>${esc(t)}</th>`).join("")}</tr>
+${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell(s, t)).join("")}</tr>`).join("")}
+</table>
+<div class="legend">
+  <span style="background:#e9f7ef;color:#1a7f4b">Valid</span>
+  <span style="background:#fdf3e0;color:#b25f00">Expiring (≤30 days)</span>
+  <span style="background:#fdecec;color:#b42318">Expired</span>
+  <span style="background:#f1f1f1;color:#555">No expiry</span>
+  <span style="background:#f7f7f7;color:#999">Missing / not held</span>
+</div>`}
+<div style="margin-top:24px;font-size:10.5px;color:#777;border-top:1px solid #ccc;padding-top:6px">${esc(companyName)} · Generated by ${esc(user?.name ?? "")} on ${esc(todayLabel)}</div>
+</body></html>`;
+    openPrintWindow(html);
+  }
+
   // ── Render helpers ─────────────────────────────────────────────────────────
 
   const tabDef = [
@@ -477,9 +639,19 @@ export default function TrainTrackPage() {
         <p className="text-sm text-muted-foreground mt-1">
           Training certificates, document sign-offs, and internal training records
         </p>
-        <Button onClick={openAdd} className="gap-2 rounded-sm">
-          <Plus className="w-4 h-4" /> Add Record
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handlePrintMatrix}
+            className="gap-2 rounded-sm"
+            title="Print a training matrix showing every staff member's certificate status"
+          >
+            <Grid3x3 className="w-4 h-4" /> Training matrix
+          </Button>
+          <Button onClick={openAdd} className="gap-2 rounded-sm">
+            <Plus className="w-4 h-4" /> Add Record
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -610,7 +782,7 @@ export default function TrainTrackPage() {
                     </td>
                     <td className="px-4 py-3">
                       <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                      <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                      <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
                     </td>
                   </tr>
                 );
@@ -671,7 +843,7 @@ export default function TrainTrackPage() {
                   </td>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
                   </td>
                 </tr>
               ))}
@@ -720,7 +892,7 @@ export default function TrainTrackPage() {
                   </td>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
                   </td>
                 </tr>
               ))}

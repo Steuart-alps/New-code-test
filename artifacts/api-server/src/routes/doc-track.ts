@@ -252,7 +252,21 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
 
 // ── Record acknowledgements ───────────────────────────────────────────────────
 
-const ackCreate = z.object({
+// Manager roles may acknowledge on behalf of other staff (bulk sign-off).
+// Everyone else can only acknowledge as themselves — identity is derived
+// server-side and any client-supplied roster id/name is ignored.
+const MANAGER_ROLES = new Set(["client_admin", "consultant"]);
+
+// A single acknowledgement to persist. staffRosterId may be null when the
+// authenticated staff member has no matching staff_roster row.
+interface ResolvedAck {
+  staffRosterId: number | null;
+  staffName: string;
+  signature: string | null;
+}
+
+// Manager bulk-ack payload: they supply the roster entries to sign off.
+const ackBulkCreate = z.object({
   acknowledgements: z.array(z.object({
     staffRosterId: z.number().int(),
     staffName: z.string().min(1).max(300),
@@ -260,15 +274,19 @@ const ackCreate = z.object({
   })).min(1),
 });
 
+// Self-ack payload: only an optional signature is honored. Any staffRosterId /
+// staffName in the body is deliberately ignored — identity comes from the
+// authenticated session.
+const ackSelfCreate = z.object({
+  signature: z.string().max(300).nullable().optional(),
+}).passthrough();
+
 router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const docId = parseInt(req.params.id as string);
   if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
-
-  const parsed = ackCreate.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   // Verify document belongs to this client
   const docResult = await db.execute(sql`
@@ -279,17 +297,83 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   const doc = (docResult.rows ?? [])[0] as any;
   if (!doc) return res.status(404).json({ error: "Not found" });
 
-  const userId = (req.session as any).userId ?? null;
+  const user = req.currentUser!;
+  const userId = user.id;
+  const isManager = MANAGER_ROLES.has(user.role);
+
+  // Resolve the acknowledgements we will actually persist. Non-managers can
+  // only ever acknowledge as themselves, regardless of request body.
+  let toCreate: ResolvedAck[] = [];
+
+  if (isManager) {
+    const parsed = ackBulkCreate.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+
+    for (const ack of parsed.data.acknowledgements) {
+      // Every supplied roster row must belong to this client (defense in depth
+      // against forged / cross-tenant roster ids).
+      const rosterCheck = await db.execute(sql`
+        SELECT id, (first_name || ' ' || last_name) AS name
+        FROM staff_roster
+        WHERE id = ${ack.staffRosterId} AND client_id = ${clientId}
+        LIMIT 1
+      `);
+      const roster = (rosterCheck.rows ?? [])[0] as any;
+      if (!roster) continue; // ignore roster ids not in this tenant
+      toCreate.push({
+        staffRosterId: roster.id,
+        // Use the roster's real name, not the client-supplied one.
+        staffName: roster.name,
+        signature: ack.signature ?? null,
+      });
+    }
+  } else {
+    // Self-acknowledgement — derive identity from the authenticated user.
+    const parsed = ackSelfCreate.safeParse(req.body ?? {});
+    const signature = parsed.success ? (parsed.data.signature ?? null) : null;
+
+    // Match the current user to a staff_roster row by email (case-insensitive)
+    // within this client. staff_roster has no user_id column, so email is the
+    // authoritative link; fall back to the user's own name with no roster link.
+    let rosterId: number | null = null;
+    let staffName = user.name;
+    if (user.email) {
+      const rosterMatch = await db.execute(sql`
+        SELECT id, (first_name || ' ' || last_name) AS name
+        FROM staff_roster
+        WHERE client_id = ${clientId}
+          AND email IS NOT NULL
+          AND lower(email) = lower(${user.email})
+        LIMIT 1
+      `);
+      const roster = (rosterMatch.rows ?? [])[0] as any;
+      if (roster) {
+        rosterId = roster.id;
+        staffName = roster.name;
+      }
+    }
+    toCreate = [{ staffRosterId: rosterId, staffName, signature: signature ?? staffName }];
+  }
+
   const today = new Date().toISOString().split("T")[0];
   const created: any[] = [];
 
-  for (const ack of parsed.data.acknowledgements) {
-    // Skip if already acknowledged
-    const existing = await db.execute(sql`
-      SELECT id FROM doc_acknowledgements
-      WHERE document_id = ${docId} AND staff_roster_id = ${ack.staffRosterId}
-      LIMIT 1
-    `);
+  for (const ack of toCreate) {
+    // Skip if already acknowledged. When there is no roster link (staff without
+    // a roster row) dedupe by the acknowledging user instead.
+    const existing = ack.staffRosterId !== null
+      ? await db.execute(sql`
+          SELECT id FROM doc_acknowledgements
+          WHERE document_id = ${docId} AND client_id = ${clientId}
+            AND staff_roster_id = ${ack.staffRosterId}
+          LIMIT 1
+        `)
+      : await db.execute(sql`
+          SELECT id FROM doc_acknowledgements
+          WHERE document_id = ${docId} AND client_id = ${clientId}
+            AND staff_roster_id IS NULL AND acknowledged_by = ${userId}
+          LIMIT 1
+        `);
     if ((existing.rows ?? []).length > 0) continue;
 
     // Create TrainTrack signoff record

@@ -58,6 +58,35 @@ const MODULES: CheckModule[] = [
     iconColor: '#eab308',
     checks: ['Temperature log', 'Delivery check', 'Corrective actions'],
   },
+  {
+    id: 'cleaning',
+    label: 'Cleaning',
+    subtitle: 'Kitchen cleaning schedule',
+    icon: 'check-circle',
+    iconColor: '#14b8a6',
+    checks: ['Tick off today\u2019s cleaning tasks'],
+  },
+  {
+    id: 'incident',
+    label: 'IncidentTrack',
+    subtitle: 'Accident & incident log',
+    icon: 'alert-octagon',
+    iconColor: '#ef4444',
+    checks: [
+      'Accident',
+      'Near miss',
+      'Dangerous occurrence',
+      'RIDDOR reportable',
+    ],
+  },
+  {
+    id: 'pat',
+    label: 'PATtrack',
+    subtitle: 'Portable appliance testing',
+    icon: 'zap',
+    iconColor: '#6366f1',
+    checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
+  },
 ];
 
 export default function ChecksScreen() {

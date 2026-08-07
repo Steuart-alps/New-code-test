@@ -22,3 +22,4 @@ export * from "./bike-track";
 export * from "./incidents";
 export * from "./pat-track";
 export * from "./pest-track";
+export * from "./premises-track";

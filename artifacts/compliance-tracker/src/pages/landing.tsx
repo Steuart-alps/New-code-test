@@ -114,10 +114,27 @@ const MODULES = [
     ],
   },
   {
-    // Backend service key is "safetrack" (see api-server/src/lib/services.ts
-    // and ADDON_KEYS) even though the product is branded "PremisesTrack" —
-    // this key must match exactly or checkout/signup rejects the selection.
     key: "safetrack",
+    label: "SafeTrack",
+    price: 10,
+    icon: ShieldCheck,
+    color: "text-indigo-700",
+    bg: "bg-indigo-50",
+    border: "border-indigo-200",
+    activeBorder: "border-indigo-500",
+    activeBg: "bg-indigo-50",
+    required: false,
+    description: "Safety document management — risk assessments, safe operating procedures, and the staff handbook in one controlled library.",
+    features: [
+      "Risk assessment register with review dates",
+      "Safe operating procedures (SOPs)",
+      "Staff handbook with versioning",
+      "Assign documents to specific sites",
+      "Full revision history",
+    ],
+  },
+  {
+    key: "premisestrack",
     label: "PremisesTrack",
     price: 10,
     icon: Building2,

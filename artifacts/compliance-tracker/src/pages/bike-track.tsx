@@ -30,7 +30,7 @@ import {
 import {
   Bike, Plus, AlertTriangle, CheckCircle2, Clock, Wrench, Lock,
   User, Phone, Calendar, ChevronRight, ChevronLeft, Pencil, Trash2,
-  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings,
+  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -1104,6 +1104,69 @@ export default function BikeTrackPage() {
   const activeHires = useMemo(() => hires.filter(h => h.status === "active"), [hires]);
   const overdueHires = useMemo(() => activeHires.filter(h => h.returnDateExpected && (daysUntil(h.returnDateExpected) ?? 1) < 0), [activeHires]);
 
+  // ── Export hire register (for insurance / liability) ──────────────────────────
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExportRegister() {
+    setExporting(true);
+    try {
+      // Fetch the full register regardless of the current tab filter
+      const allHires: HireRow[] = await apiFetch("/bike-track/hires?status=all");
+      const rows = [...allHires].sort((a, b) => (a.hireDate < b.hireDate ? 1 : -1));
+
+      const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bike Hire Register</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Bike Hire Register</h1>
+<div class="meta">Generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for insurance &amp; liability records</div>
+<div class="meta">Total hires: ${rows.length}</div>
+
+<h2>Hire records</h2>
+${rows.length === 0 ? `<p class="empty">No hire records.</p>` : `<table>
+<tr><th>Guest name</th><th>Contact</th><th>Bike ref</th><th>Bike</th><th>Hire date</th><th>Expected return</th><th>Actual return</th><th>Status</th></tr>
+${rows.map(h => `<tr>
+  <td>${esc(h.guestName)}</td>
+  <td>${esc(h.guestContact)}</td>
+  <td>${esc(h.bikeRef)}</td>
+  <td>${esc([h.bikeName, BIKE_TYPES[h.bikeType] ?? h.bikeType].filter(Boolean).join(" · "))}</td>
+  <td>${fmt(h.hireDate)}</td>
+  <td>${fmt(h.returnDateExpected)}</td>
+  <td>${fmt(h.returnDateActual)}</td>
+  <td>${esc(statusLabel(h.status))}</td>
+</tr>`).join("")}
+</table>`}
+</body></html>`;
+      const win = window.open("", "_blank");
+      if (!win) {
+        toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the register.", variant: "destructive" });
+        return;
+      }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 250);
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // ── Upsell ───────────────────────────────────────────────────────────────────
 
   if (!hasBikeTrack) {
@@ -1147,6 +1210,11 @@ export default function BikeTrackPage() {
           Bike hire logbook — fleet management, guest hires, safety checks &amp; annual servicing
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" onClick={handleExportRegister} disabled={exporting}
+            className="gap-2 rounded-sm"
+            title="Print or save the bike hire register for insurance & liability records">
+            <Printer className="w-4 h-4" /> {exporting ? "Preparing…" : "Export hire register"}
+          </Button>
           {canAdmin && <BikeConfigDialog />}
           <Button onClick={() => setShowNewHire(true)} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> New Hire
