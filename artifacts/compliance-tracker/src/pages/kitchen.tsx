@@ -25,11 +25,12 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
+import CleaningScheduleTab from "./kitchen-cleaning";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -76,7 +77,7 @@ type SousVideRow = {
   notes: string;
 };
 
-type ActiveTab = "diary" | "weekly" | "probe";
+type ActiveTab = "diary" | "weekly" | "probe" | "cleaning";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
@@ -1088,9 +1089,10 @@ function DailyDiaryTab() {
 // ── Page shell ────────────────────────────────────────────────────────────────
 
 const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] = [
-  { id: "diary",  label: "Daily Diary",    icon: Calendar,       description: "Daily temperature records, deliveries and corrective actions" },
-  { id: "weekly", label: "Weekly Review",  icon: ClipboardList,  description: "Combined CookSafe house rules + management review" },
-  { id: "probe",  label: "Probe Check",    icon: Thermometer,    description: "Monthly probe thermometer calibration record" },
+  { id: "diary",    label: "Daily Diary",         icon: Calendar,      description: "Daily temperature records, deliveries and corrective actions" },
+  { id: "weekly",   label: "Weekly Review",        icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
+  { id: "probe",    label: "Probe Check",          icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
+  { id: "cleaning", label: "Cleaning Schedule",    icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
 ];
 
 export default function KitchenPage() {
@@ -1180,9 +1182,10 @@ export default function KitchenPage() {
         </div>
 
         {/* Tab content */}
-        {activeTab === "diary"  && <DailyDiaryTab />}
-        {activeTab === "weekly" && <WeeklyReviewTab />}
-        {activeTab === "probe"  && <ProbeCheckTab />}
+        {activeTab === "diary"    && <DailyDiaryTab />}
+        {activeTab === "weekly"   && <WeeklyReviewTab />}
+        {activeTab === "probe"    && <ProbeCheckTab />}
+        {activeTab === "cleaning" && <CleaningScheduleTab />}
       </div>
     </AppLayout>
   );

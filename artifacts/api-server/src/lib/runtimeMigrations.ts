@@ -269,6 +269,7 @@ export async function runRuntimeMigrations() {
     await migrateSousVide();
     await migratePATtrack();
     await migratePestTrack();
+    await migrateKitchenCleaning();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1117,6 +1118,48 @@ async function migratePestTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
+}
+
+async function migrateKitchenCleaning() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_cleaning_tasks" (
+      "id"          serial PRIMARY KEY,
+      "client_id"   integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"     integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "area"        text NOT NULL DEFAULT '',
+      "task"        text NOT NULL DEFAULT '',
+      "frequency"   text NOT NULL DEFAULT 'daily',
+      "method"      text,
+      "product"     text,
+      "responsible" text,
+      "sort_order"  integer NOT NULL DEFAULT 0,
+      "active"      boolean NOT NULL DEFAULT true,
+      "created_at"  timestamp NOT NULL DEFAULT now(),
+      "updated_at"  timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_tasks_client" ON "kitchen_cleaning_tasks" ("client_id")`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_cleaning_logs" (
+      "id"           serial PRIMARY KEY,
+      "client_id"    integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"      integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "log_date"     date NOT NULL,
+      "frequency"    text NOT NULL DEFAULT 'daily',
+      "completions"  jsonb NOT NULL DEFAULT '[]',
+      "signed_by"    text,
+      "submitted_at" timestamp,
+      "created_by"   integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"   timestamp NOT NULL DEFAULT now(),
+      "updated_at"   timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_client" ON "kitchen_cleaning_logs" ("client_id")`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_unique"
+    ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency")
+  `);
 }
 
 async function migrateMobileSessions() {

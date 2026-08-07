@@ -32,6 +32,7 @@ import photosRouter from "./photos";
 import staffRosterRouter from "./staff-roster";
 import signOffRouter from "./sign-off";
 import kitchenWeeklyRouter from "./kitchen-weekly";
+import kitchenCleaningRouter from "./kitchen-cleaning";
 import dailyTrackAmRouter from "./daily-track-am";
 import dailyTrackPmRouter from "./daily-track-pm";
 import checklistTemplatesRouter from "./checklist-templates";
@@ -79,6 +80,7 @@ router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrac
 router.use("/swim-track",   requireAuth, requireService("swimtrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
+router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kitchenCleaningRouter);
 // The AM/PM checklists cover both kitchen (kitchentrack) and premises
 // (safetrack) opening/closing items, so the router-level gate only requires
 // SOME purchased branch; each handler additionally checks the specific
