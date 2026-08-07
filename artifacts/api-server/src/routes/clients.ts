@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
 
@@ -90,7 +90,7 @@ router.put("/clients/:id", requireAuth, requireClientAdmin, async (req, res) => 
 // POST /api/starter-pack/load — let an existing user re-seed their business
 // with the starter categories and example checks. Useful for accounts that
 // were created before automatic seeding was wired into registration.
-router.post("/starter-pack/load", requireAuth, async (req, res) => {
+router.post("/starter-pack/load", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
 
   let clientId = user.clientId;

@@ -905,6 +905,216 @@ paths:
                     type: boolean
                 required: [ok]
 
+  /fire-safety/config:
+    get:
+      operationId: getFireSafetyConfig
+      tags: [fire-safety]
+      summary: Get Fire safety configuration
+      responses:
+        "200":
+          description: Fire safety configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyConfig"
+    put:
+      operationId: updateFireSafetyConfig
+      tags: [fire-safety]
+      summary: Update Fire safety configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FireSafetyConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FireSafetyConfig"
+
+  /legionella/config:
+    get:
+      operationId: getLegionellaConfig
+      tags: [legionella]
+      summary: Get Water safety configuration
+      responses:
+        "200":
+          description: Water safety configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaConfig"
+    put:
+      operationId: updateLegionellaConfig
+      tags: [legionella]
+      summary: Update Water safety configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegionellaConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegionellaConfig"
+
+  /bike-track/config:
+    get:
+      operationId: getBikeTrackConfig
+      tags: [bike-track]
+      summary: Get Bike hire configuration
+      responses:
+        "200":
+          description: Bike hire configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeTrackConfig"
+    put:
+      operationId: updateBikeTrackConfig
+      tags: [bike-track]
+      summary: Update Bike hire configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BikeTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BikeTrackConfig"
+
+  /green-track/config:
+    get:
+      operationId: getGreenTrackConfig
+      tags: [green-track]
+      summary: Get GreenTrack configuration
+      responses:
+        "200":
+          description: GreenTrack configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackConfig"
+    put:
+      operationId: updateGreenTrackConfig
+      tags: [green-track]
+      summary: Update GreenTrack configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GreenTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GreenTrackConfig"
+
+  /incidents/config:
+    get:
+      operationId: getIncidentConfig
+      tags: [incidents]
+      summary: Get Incident configuration
+      responses:
+        "200":
+          description: Incident configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentConfig"
+    put:
+      operationId: updateIncidentConfig
+      tags: [incidents]
+      summary: Update Incident configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentConfig"
+
+  /pat-track/config:
+    get:
+      operationId: getPATTrackConfig
+      tags: [pat-track]
+      summary: Get PAT testing configuration
+      responses:
+        "200":
+          description: PAT testing configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTrackConfig"
+    put:
+      operationId: updatePATTrackConfig
+      tags: [pat-track]
+      summary: Update PAT testing configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PATTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PATTrackConfig"
+
+  /pool-track/config:
+    get:
+      operationId: getPoolTrackConfig
+      tags: [pool-track]
+      summary: Get Pool configuration
+      responses:
+        "200":
+          description: Pool configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoolTrackConfig"
+    put:
+      operationId: updatePoolTrackConfig
+      tags: [pool-track]
+      summary: Update Pool configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoolTrackConfig"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoolTrackConfig"
+
   /food-safety:
     get:
       operationId: listFoodSafetyRecords
@@ -1143,6 +1353,9 @@ components:
     Site:
       type: object
       properties:
+        departmentId:
+          type: integer
+          nullable: true
         id:
           type: integer
         clientId:
@@ -1174,6 +1387,9 @@ components:
     CreateSiteRequest:
       type: object
       properties:
+        departmentId:
+          type: integer
+          nullable: true
         name:
           type: string
         responsiblePerson:
@@ -1191,6 +1407,9 @@ components:
     UpdateSiteRequest:
       type: object
       properties:
+        departmentId:
+          type: integer
+          nullable: true
         name:
           type: string
         responsiblePerson:
@@ -1740,9 +1959,115 @@ components:
         - frequencyDays
         - status
 
+    FireSafetyConfig:
+      type: object
+      properties:
+        fire_alarm_zones:
+          type: string
+        fire_extinguisher_points:
+          type: string
+        fire_show_drill:
+          type: string
+        fire_default_performer:
+          type: string
+        fire_escape_routes:
+          type: string
+
+    LegionellaConfig:
+      type: object
+      properties:
+        water_non_sentinel_outlets:
+          type: string
+        water_default_performer:
+          type: string
+        water_sentinel_outlets:
+          type: string
+
+    BikeTrackConfig:
+      type: object
+      properties:
+        bike_default_deposit_pence:
+          type: string
+        bike_hire_duration_hours:
+          type: string
+        bike_require_helmet:
+          type: string
+
+    GreenTrackConfig:
+      type: object
+      properties:
+        green_show_fuel:
+          type: string
+        green_default_operators:
+          type: string
+
+    IncidentConfig:
+      type: object
+      properties:
+        incident_departments:
+          type: string
+        incident_default_reporter:
+          type: string
+        incident_show_investigation:
+          type: string
+        incident_locations:
+          type: string
+
+    PATTrackConfig:
+      type: object
+      properties:
+        pat_show_earth_bond:
+          type: string
+        pat_show_insulation:
+          type: string
+        pat_default_tester:
+          type: string
+        pat_retest_months:
+          type: string
+        pat_locations:
+          type: string
+
+    PoolTrackConfig:
+      type: object
+      properties:
+        pool_name:
+          type: string
+        pool_ph_min:
+          type: string
+        pool_ph_max:
+          type: string
+        pool_free_chlor_min:
+          type: string
+        pool_free_chlor_max:
+          type: string
+        pool_temp_min:
+          type: string
+        pool_temp_max:
+          type: string
+        pool_track_air_temp:
+          type: string
+        pool_default_performer:
+          type: string
+
     FoodSafetyConfig:
       type: object
       properties:
+        food_cold_units:
+          type: string
+        food_default_hot_items:
+          type: string
+        food_default_holding_items:
+          type: string
+        food_default_sv_items:
+          type: string
+        food_show_deliveries:
+          type: string
+        food_show_hot_temperature:
+          type: string
+        food_show_hot_holding:
+          type: string
+        food_show_sous_vide:
+          type: string
         food_num_fridges:
           type: string
         food_num_freezers:
@@ -1890,7 +2215,7 @@ components:
 
     LegionellaCheckType:
       type: string
-      enum: [cold_water_temp, hot_water_temp, sentinel_flush, shower_clean, tank_inspection, risk_assessment]
+      enum: [calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, cold_nonsent_temp, cold_tank_inspection, cold_tank_clean, calorifier_inspection, calorifier_clean, shower_clean, tmv_service, outlet_flush]
 
     LegionellaCheck:
       type: object

@@ -7,6 +7,7 @@
  */
 
 export interface Site {
+  departmentId?: number | null;
   id: number;
   clientId: number;
   name: string;

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
 
 const router = Router();
@@ -10,7 +10,7 @@ const storage = new ObjectStorageService();
 
 // ── Request presigned upload URL ──────────────────────────────────────────────
 // POST /photos/request-upload
-router.post("/request-upload", requireAuth, async (req, res) => {
+router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -38,7 +38,7 @@ router.post("/request-upload", requireAuth, async (req, res) => {
 
 // ── Save photo record after upload ────────────────────────────────────────────
 // POST /photos
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -89,7 +89,7 @@ router.get("/", requireAuth, async (req, res) => {
 
 // ── Delete a photo ────────────────────────────────────────────────────────────
 // DELETE /photos/:id
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -121,7 +121,7 @@ router.get("/requirements", requireAuth, async (req, res) => {
 });
 
 // PUT /photos/requirements — upsert all at once
-router.put("/requirements", requireAuth, async (req, res) => {
+router.put("/requirements", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

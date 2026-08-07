@@ -9,6 +9,8 @@ import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./l
 import { sendSystemEmail } from "./lib/email";
 import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
+import { runDocAckReminderJob } from "./lib/docAckReminders";
+import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -81,6 +83,30 @@ function startScheduler() {
     }
   });
   logger.info("Check reminder scheduler started (daily at 08:45)");
+
+  // Remind managers about outstanding document acknowledgements (daily at
+  // 08:50; each client gets at most one email per 7 days).
+  cron.schedule("50 8 * * *", async () => {
+    logger.info("Running doc acknowledgement reminder job...");
+    try {
+      const result = await runDocAckReminderJob();
+      logger.info({ result }, "Doc acknowledgement reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "Doc acknowledgement reminder job failed");
+    }
+  });
+  logger.info("Doc acknowledgement reminder scheduler started (daily at 08:50)");
+
+  // Notify staff about overdue bike hires (hourly; each hire notified once).
+  cron.schedule("5 * * * *", async () => {
+    try {
+      const result = await runBikeOverdueJob();
+      if (result.hiresFound > 0) logger.info({ result }, "Bike overdue job complete");
+    } catch (err) {
+      logger.error({ err }, "Bike overdue job failed");
+    }
+  });
+  logger.info("Bike overdue notification scheduler started (hourly at :05)");
 }
 
 async function runTrialReminders() {

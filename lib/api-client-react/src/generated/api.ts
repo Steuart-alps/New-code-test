@@ -18,6 +18,7 @@ import type {
 
 import type {
   AppSettings,
+  BikeTrackConfig,
   Category,
   Certificate,
   ComplianceItem,
@@ -33,18 +34,24 @@ import type {
   DashboardStats,
   ErrorResponse,
   FireSafetyCheck,
+  FireSafetyConfig,
   FireSafetyStatus,
   FoodSafetyConfig,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
   GetFireSafetyStatusParams,
   GetLegionellaStatusParams,
+  GreenTrackConfig,
   HealthStatus,
+  IncidentConfig,
   LegionellaCheck,
+  LegionellaConfig,
   LegionellaStatus,
   ListComplianceItemsParams,
   ListFireSafetyChecksParams,
   ListLegionellaChecksParams,
+  PATTrackConfig,
+  PoolTrackConfig,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SendRemindersResponse,
@@ -3830,6 +3837,1133 @@ export const useUpdateFoodSafetyConfig = <
   TContext
 > => {
   return useMutation(getUpdateFoodSafetyConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get Fire safety configuration
+ */
+export const getGetFireSafetyConfigUrl = () => {
+  return `/api/fire-safety/config`;
+};
+
+export const getFireSafetyConfig = async (
+  options?: RequestInit,
+): Promise<FireSafetyConfig> => {
+  return customFetch<FireSafetyConfig>(getGetFireSafetyConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetFireSafetyConfigQueryKey = () => {
+  return [`/api/fire-safety/config`] as const;
+};
+
+export const getGetFireSafetyConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFireSafetyConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFireSafetyConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetFireSafetyConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFireSafetyConfig>>
+  > = ({ signal }) => getFireSafetyConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFireSafetyConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFireSafetyConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFireSafetyConfig>>
+>;
+export type GetFireSafetyConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get Fire safety configuration
+ */
+
+export function useGetFireSafetyConfig<
+  TData = Awaited<ReturnType<typeof getFireSafetyConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFireSafetyConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFireSafetyConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update Fire safety configuration
+ */
+export const getUpdateFireSafetyConfigUrl = () => {
+  return `/api/fire-safety/config`;
+};
+
+export const updateFireSafetyConfig = async (
+  fireSafetyConfig: FireSafetyConfig,
+  options?: RequestInit,
+): Promise<FireSafetyConfig> => {
+  return customFetch<FireSafetyConfig>(getUpdateFireSafetyConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(fireSafetyConfig),
+  });
+};
+
+export const getUpdateFireSafetyConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFireSafetyConfig>>,
+    TError,
+    { data: BodyType<FireSafetyConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateFireSafetyConfig>>,
+  TError,
+  { data: BodyType<FireSafetyConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateFireSafetyConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateFireSafetyConfig>>,
+    { data: BodyType<FireSafetyConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateFireSafetyConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateFireSafetyConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateFireSafetyConfig>>
+>;
+export type UpdateFireSafetyConfigMutationBody = BodyType<FireSafetyConfig>;
+export type UpdateFireSafetyConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update Fire safety configuration
+ */
+export const useUpdateFireSafetyConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFireSafetyConfig>>,
+    TError,
+    { data: BodyType<FireSafetyConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateFireSafetyConfig>>,
+  TError,
+  { data: BodyType<FireSafetyConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateFireSafetyConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get Water safety configuration
+ */
+export const getGetLegionellaConfigUrl = () => {
+  return `/api/legionella/config`;
+};
+
+export const getLegionellaConfig = async (
+  options?: RequestInit,
+): Promise<LegionellaConfig> => {
+  return customFetch<LegionellaConfig>(getGetLegionellaConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLegionellaConfigQueryKey = () => {
+  return [`/api/legionella/config`] as const;
+};
+
+export const getGetLegionellaConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLegionellaConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLegionellaConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLegionellaConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLegionellaConfig>>
+  > = ({ signal }) => getLegionellaConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLegionellaConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLegionellaConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLegionellaConfig>>
+>;
+export type GetLegionellaConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get Water safety configuration
+ */
+
+export function useGetLegionellaConfig<
+  TData = Awaited<ReturnType<typeof getLegionellaConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLegionellaConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLegionellaConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update Water safety configuration
+ */
+export const getUpdateLegionellaConfigUrl = () => {
+  return `/api/legionella/config`;
+};
+
+export const updateLegionellaConfig = async (
+  legionellaConfig: LegionellaConfig,
+  options?: RequestInit,
+): Promise<LegionellaConfig> => {
+  return customFetch<LegionellaConfig>(getUpdateLegionellaConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(legionellaConfig),
+  });
+};
+
+export const getUpdateLegionellaConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateLegionellaConfig>>,
+    TError,
+    { data: BodyType<LegionellaConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateLegionellaConfig>>,
+  TError,
+  { data: BodyType<LegionellaConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateLegionellaConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateLegionellaConfig>>,
+    { data: BodyType<LegionellaConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateLegionellaConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateLegionellaConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateLegionellaConfig>>
+>;
+export type UpdateLegionellaConfigMutationBody = BodyType<LegionellaConfig>;
+export type UpdateLegionellaConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update Water safety configuration
+ */
+export const useUpdateLegionellaConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateLegionellaConfig>>,
+    TError,
+    { data: BodyType<LegionellaConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateLegionellaConfig>>,
+  TError,
+  { data: BodyType<LegionellaConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateLegionellaConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get Bike hire configuration
+ */
+export const getGetBikeTrackConfigUrl = () => {
+  return `/api/bike-track/config`;
+};
+
+export const getBikeTrackConfig = async (
+  options?: RequestInit,
+): Promise<BikeTrackConfig> => {
+  return customFetch<BikeTrackConfig>(getGetBikeTrackConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBikeTrackConfigQueryKey = () => {
+  return [`/api/bike-track/config`] as const;
+};
+
+export const getGetBikeTrackConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBikeTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBikeTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBikeTrackConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBikeTrackConfig>>
+  > = ({ signal }) => getBikeTrackConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBikeTrackConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBikeTrackConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBikeTrackConfig>>
+>;
+export type GetBikeTrackConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get Bike hire configuration
+ */
+
+export function useGetBikeTrackConfig<
+  TData = Awaited<ReturnType<typeof getBikeTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBikeTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBikeTrackConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update Bike hire configuration
+ */
+export const getUpdateBikeTrackConfigUrl = () => {
+  return `/api/bike-track/config`;
+};
+
+export const updateBikeTrackConfig = async (
+  bikeTrackConfig: BikeTrackConfig,
+  options?: RequestInit,
+): Promise<BikeTrackConfig> => {
+  return customFetch<BikeTrackConfig>(getUpdateBikeTrackConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bikeTrackConfig),
+  });
+};
+
+export const getUpdateBikeTrackConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBikeTrackConfig>>,
+    TError,
+    { data: BodyType<BikeTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateBikeTrackConfig>>,
+  TError,
+  { data: BodyType<BikeTrackConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateBikeTrackConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateBikeTrackConfig>>,
+    { data: BodyType<BikeTrackConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateBikeTrackConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateBikeTrackConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateBikeTrackConfig>>
+>;
+export type UpdateBikeTrackConfigMutationBody = BodyType<BikeTrackConfig>;
+export type UpdateBikeTrackConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update Bike hire configuration
+ */
+export const useUpdateBikeTrackConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBikeTrackConfig>>,
+    TError,
+    { data: BodyType<BikeTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateBikeTrackConfig>>,
+  TError,
+  { data: BodyType<BikeTrackConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateBikeTrackConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get GreenTrack configuration
+ */
+export const getGetGreenTrackConfigUrl = () => {
+  return `/api/green-track/config`;
+};
+
+export const getGreenTrackConfig = async (
+  options?: RequestInit,
+): Promise<GreenTrackConfig> => {
+  return customFetch<GreenTrackConfig>(getGetGreenTrackConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetGreenTrackConfigQueryKey = () => {
+  return [`/api/green-track/config`] as const;
+};
+
+export const getGetGreenTrackConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getGreenTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGreenTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetGreenTrackConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getGreenTrackConfig>>
+  > = ({ signal }) => getGreenTrackConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getGreenTrackConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetGreenTrackConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getGreenTrackConfig>>
+>;
+export type GetGreenTrackConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get GreenTrack configuration
+ */
+
+export function useGetGreenTrackConfig<
+  TData = Awaited<ReturnType<typeof getGreenTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getGreenTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetGreenTrackConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update GreenTrack configuration
+ */
+export const getUpdateGreenTrackConfigUrl = () => {
+  return `/api/green-track/config`;
+};
+
+export const updateGreenTrackConfig = async (
+  greenTrackConfig: GreenTrackConfig,
+  options?: RequestInit,
+): Promise<GreenTrackConfig> => {
+  return customFetch<GreenTrackConfig>(getUpdateGreenTrackConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(greenTrackConfig),
+  });
+};
+
+export const getUpdateGreenTrackConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGreenTrackConfig>>,
+    TError,
+    { data: BodyType<GreenTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateGreenTrackConfig>>,
+  TError,
+  { data: BodyType<GreenTrackConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateGreenTrackConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateGreenTrackConfig>>,
+    { data: BodyType<GreenTrackConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateGreenTrackConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateGreenTrackConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateGreenTrackConfig>>
+>;
+export type UpdateGreenTrackConfigMutationBody = BodyType<GreenTrackConfig>;
+export type UpdateGreenTrackConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update GreenTrack configuration
+ */
+export const useUpdateGreenTrackConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateGreenTrackConfig>>,
+    TError,
+    { data: BodyType<GreenTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateGreenTrackConfig>>,
+  TError,
+  { data: BodyType<GreenTrackConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateGreenTrackConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get Incident configuration
+ */
+export const getGetIncidentConfigUrl = () => {
+  return `/api/incidents/config`;
+};
+
+export const getIncidentConfig = async (
+  options?: RequestInit,
+): Promise<IncidentConfig> => {
+  return customFetch<IncidentConfig>(getGetIncidentConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetIncidentConfigQueryKey = () => {
+  return [`/api/incidents/config`] as const;
+};
+
+export const getGetIncidentConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getIncidentConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getIncidentConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetIncidentConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getIncidentConfig>>
+  > = ({ signal }) => getIncidentConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getIncidentConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetIncidentConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getIncidentConfig>>
+>;
+export type GetIncidentConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get Incident configuration
+ */
+
+export function useGetIncidentConfig<
+  TData = Awaited<ReturnType<typeof getIncidentConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getIncidentConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetIncidentConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update Incident configuration
+ */
+export const getUpdateIncidentConfigUrl = () => {
+  return `/api/incidents/config`;
+};
+
+export const updateIncidentConfig = async (
+  incidentConfig: IncidentConfig,
+  options?: RequestInit,
+): Promise<IncidentConfig> => {
+  return customFetch<IncidentConfig>(getUpdateIncidentConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(incidentConfig),
+  });
+};
+
+export const getUpdateIncidentConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateIncidentConfig>>,
+    TError,
+    { data: BodyType<IncidentConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateIncidentConfig>>,
+  TError,
+  { data: BodyType<IncidentConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateIncidentConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateIncidentConfig>>,
+    { data: BodyType<IncidentConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateIncidentConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateIncidentConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateIncidentConfig>>
+>;
+export type UpdateIncidentConfigMutationBody = BodyType<IncidentConfig>;
+export type UpdateIncidentConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update Incident configuration
+ */
+export const useUpdateIncidentConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateIncidentConfig>>,
+    TError,
+    { data: BodyType<IncidentConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateIncidentConfig>>,
+  TError,
+  { data: BodyType<IncidentConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateIncidentConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get PAT testing configuration
+ */
+export const getGetPATTrackConfigUrl = () => {
+  return `/api/pat-track/config`;
+};
+
+export const getPATTrackConfig = async (
+  options?: RequestInit,
+): Promise<PATTrackConfig> => {
+  return customFetch<PATTrackConfig>(getGetPATTrackConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPATTrackConfigQueryKey = () => {
+  return [`/api/pat-track/config`] as const;
+};
+
+export const getGetPATTrackConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPATTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPATTrackConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPATTrackConfig>>
+  > = ({ signal }) => getPATTrackConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPATTrackConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPATTrackConfig>>
+>;
+export type GetPATTrackConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get PAT testing configuration
+ */
+
+export function useGetPATTrackConfig<
+  TData = Awaited<ReturnType<typeof getPATTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPATTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPATTrackConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update PAT testing configuration
+ */
+export const getUpdatePATTrackConfigUrl = () => {
+  return `/api/pat-track/config`;
+};
+
+export const updatePATTrackConfig = async (
+  pATTrackConfig: PATTrackConfig,
+  options?: RequestInit,
+): Promise<PATTrackConfig> => {
+  return customFetch<PATTrackConfig>(getUpdatePATTrackConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(pATTrackConfig),
+  });
+};
+
+export const getUpdatePATTrackConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATTrackConfig>>,
+    TError,
+    { data: BodyType<PATTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePATTrackConfig>>,
+  TError,
+  { data: BodyType<PATTrackConfig> },
+  TContext
+> => {
+  const mutationKey = ["updatePATTrackConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePATTrackConfig>>,
+    { data: BodyType<PATTrackConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updatePATTrackConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePATTrackConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePATTrackConfig>>
+>;
+export type UpdatePATTrackConfigMutationBody = BodyType<PATTrackConfig>;
+export type UpdatePATTrackConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update PAT testing configuration
+ */
+export const useUpdatePATTrackConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePATTrackConfig>>,
+    TError,
+    { data: BodyType<PATTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePATTrackConfig>>,
+  TError,
+  { data: BodyType<PATTrackConfig> },
+  TContext
+> => {
+  return useMutation(getUpdatePATTrackConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get Pool configuration
+ */
+export const getGetPoolTrackConfigUrl = () => {
+  return `/api/pool-track/config`;
+};
+
+export const getPoolTrackConfig = async (
+  options?: RequestInit,
+): Promise<PoolTrackConfig> => {
+  return customFetch<PoolTrackConfig>(getGetPoolTrackConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPoolTrackConfigQueryKey = () => {
+  return [`/api/pool-track/config`] as const;
+};
+
+export const getGetPoolTrackConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPoolTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPoolTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPoolTrackConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPoolTrackConfig>>
+  > = ({ signal }) => getPoolTrackConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPoolTrackConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPoolTrackConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPoolTrackConfig>>
+>;
+export type GetPoolTrackConfigQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get Pool configuration
+ */
+
+export function useGetPoolTrackConfig<
+  TData = Awaited<ReturnType<typeof getPoolTrackConfig>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPoolTrackConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPoolTrackConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update Pool configuration
+ */
+export const getUpdatePoolTrackConfigUrl = () => {
+  return `/api/pool-track/config`;
+};
+
+export const updatePoolTrackConfig = async (
+  poolTrackConfig: PoolTrackConfig,
+  options?: RequestInit,
+): Promise<PoolTrackConfig> => {
+  return customFetch<PoolTrackConfig>(getUpdatePoolTrackConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(poolTrackConfig),
+  });
+};
+
+export const getUpdatePoolTrackConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePoolTrackConfig>>,
+    TError,
+    { data: BodyType<PoolTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePoolTrackConfig>>,
+  TError,
+  { data: BodyType<PoolTrackConfig> },
+  TContext
+> => {
+  const mutationKey = ["updatePoolTrackConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePoolTrackConfig>>,
+    { data: BodyType<PoolTrackConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updatePoolTrackConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePoolTrackConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePoolTrackConfig>>
+>;
+export type UpdatePoolTrackConfigMutationBody = BodyType<PoolTrackConfig>;
+export type UpdatePoolTrackConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update Pool configuration
+ */
+export const useUpdatePoolTrackConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePoolTrackConfig>>,
+    TError,
+    { data: BodyType<PoolTrackConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePoolTrackConfig>>,
+  TError,
+  { data: BodyType<PoolTrackConfig> },
+  TContext
+> => {
+  return useMutation(getUpdatePoolTrackConfigMutationOptions(options));
 };
 
 /**

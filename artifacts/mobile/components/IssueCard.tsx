@@ -20,6 +20,7 @@ export interface FixTrackIssue {
   siteId: number | null;
   siteName: string | null;
   notes: string | null;
+  solutionNotes: string | null;
   assignedTo: string | null;
   createdAt: string;
   updatedAt: string;

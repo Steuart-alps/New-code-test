@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -36,7 +36,7 @@ router.get("/sessions", async (req, res) => {
   }
 });
 
-router.post("/sessions", async (req, res) => {
+router.post("/sessions", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -68,7 +68,7 @@ router.post("/sessions", async (req, res) => {
   }
 });
 
-router.put("/sessions/:id", async (req, res) => {
+router.put("/sessions/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -134,7 +134,7 @@ router.get("/surveillance", async (req, res) => {
   }
 });
 
-router.post("/surveillance", async (req, res) => {
+router.post("/surveillance", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, result } = req.body;
@@ -157,7 +157,7 @@ router.post("/surveillance", async (req, res) => {
   }
 });
 
-router.put("/surveillance/:id", async (req, res) => {
+router.put("/surveillance/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, result } = req.body;
@@ -212,7 +212,7 @@ router.get("/first-aid", async (req, res) => {
   }
 });
 
-router.post("/first-aid", async (req, res) => {
+router.post("/first-aid", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -247,7 +247,7 @@ router.post("/first-aid", async (req, res) => {
   }
 });
 
-router.put("/first-aid/:id", async (req, res) => {
+router.put("/first-aid/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -313,7 +313,7 @@ router.get("/incidents", async (req, res) => {
   }
 });
 
-router.post("/incidents", async (req, res) => {
+router.post("/incidents", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -344,7 +344,7 @@ router.post("/incidents", async (req, res) => {
   }
 });
 
-router.put("/incidents/:id", async (req, res) => {
+router.put("/incidents/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {

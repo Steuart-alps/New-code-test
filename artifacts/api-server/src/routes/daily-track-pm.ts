@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { requireAnyEntitlement, SERVICES } from "../lib/services";
 
 const router = Router();
@@ -74,7 +74,7 @@ router.get("/signoffs", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-router.post("/signoffs", requireAuth, async (req, res) => {
+router.post("/signoffs", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = signoffCreateSchema.safeParse(req.body);
@@ -90,7 +90,7 @@ router.post("/signoffs", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/signoffs/:id", requireAuth, async (req, res) => {
+router.put("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
@@ -110,7 +110,7 @@ router.put("/signoffs/:id", requireAuth, async (req, res) => {
   res.json(row);
 });
 
-router.delete("/signoffs/:id", requireAuth, async (req, res) => {
+router.delete("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
@@ -157,7 +157,7 @@ router.get("/:id", requireAuth, async (req, res) => {
   res.json(row);
 });
 
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = createSchema.safeParse(req.body);
@@ -182,7 +182,7 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
@@ -208,7 +208,7 @@ router.put("/:id", requireAuth, async (req, res) => {
   res.json(row);
 });
 
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);

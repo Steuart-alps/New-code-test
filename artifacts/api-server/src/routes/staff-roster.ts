@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -44,7 +44,7 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
 
 // ── Create staff member ───────────────────────────────────────────────────────
 
-router.post("/staff-roster", requireAuth, async (req, res) => {
+router.post("/staff-roster", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -65,7 +65,7 @@ router.post("/staff-roster", requireAuth, async (req, res) => {
 
 // ── Bulk import (CSV-style array) ─────────────────────────────────────────────
 
-router.post("/staff-roster/bulk", requireAuth, async (req, res) => {
+router.post("/staff-roster/bulk", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -88,7 +88,7 @@ router.post("/staff-roster/bulk", requireAuth, async (req, res) => {
 
 // ── Update staff member ───────────────────────────────────────────────────────
 
-router.patch("/staff-roster/:id", requireAuth, async (req, res) => {
+router.patch("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -131,7 +131,7 @@ router.patch("/staff-roster/:id", requireAuth, async (req, res) => {
 
 // ── Delete staff member ───────────────────────────────────────────────────────
 
-router.delete("/staff-roster/:id", requireAuth, async (req, res) => {
+router.delete("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

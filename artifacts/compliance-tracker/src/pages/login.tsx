@@ -236,7 +236,8 @@ export default function LoginPage() {
                   </div>
                   <h2 className="text-2xl font-display text-[#162D42] mb-2 text-center">Two-factor authentication</h2>
                   <p className="text-sm text-muted-foreground mb-8 text-center font-light">
-                    Open your authenticator app and enter the 6-digit code.
+                    Open your authenticator app and enter the 6-digit code — or use your recovery
+                    code if you've lost access to your device.
                   </p>
                   <form onSubmit={handleTotp} className="space-y-5">
                     <div className="space-y-2">
@@ -244,10 +245,9 @@ export default function LoginPage() {
                       <Input
                         id="totp-code"
                         type="text"
-                        inputMode="numeric"
-                        placeholder="000 000"
+                        placeholder="000 000 or recovery code"
                         value={totpCode}
-                        onChange={e => setTotpCode(e.target.value.replace(/[^0-9\s]/g, "").slice(0, 7))}
+                        onChange={e => setTotpCode(e.target.value.replace(/[^0-9A-Za-z\s-]/g, "").slice(0, 16))}
                         required
                         autoComplete="one-time-code"
                         autoFocus
@@ -263,7 +263,7 @@ export default function LoginPage() {
                         {error}
                       </motion.div>
                     )}
-                    <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading || totpCode.replace(/\s/g, "").length < 6}>
+                    <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading || totpCode.replace(/[\s-]/g, "").length < 6}>
                       {loading ? "Verifying..." : "Verify"}
                     </Button>
                     <button

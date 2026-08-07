@@ -2,10 +2,12 @@ import React from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -73,6 +75,27 @@ export default function IssueDetailScreen() {
     queryKey: ['fix-track-issue', id],
     queryFn: () => apiFetch(`/api/fix-track/issues/${id}`),
     enabled: !!id,
+  });
+
+  const [noteDraft, setNoteDraft] = React.useState('');
+
+  const { mutate: addNote, isPending: noteSaving } = useMutation({
+    mutationFn: (note: string) =>
+      apiFetch(`/api/fix-track/issues/${id}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      }),
+    onSuccess: async () => {
+      setNoteDraft('');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.invalidateQueries({ queryKey: ['fix-track-issue', id] });
+      qc.invalidateQueries({ queryKey: ['fix-track-issues-all'] });
+      qc.invalidateQueries({ queryKey: ['fix-track-issues'] });
+    },
+    onError: (err: Error) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', err.message);
+    },
   });
 
   const { mutate: updateStatus, isPending } = useMutation({
@@ -200,11 +223,11 @@ export default function IssueDetailScreen() {
         </View>
       </View>
 
-      {/* Description / notes */}
+      {/* Description */}
       {(issue.description || issue.notes) && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-            Notes
+            Description
           </Text>
           <View
             style={[
@@ -218,6 +241,58 @@ export default function IssueDetailScreen() {
           </View>
         </View>
       )}
+
+      {/* Notes */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
+          Notes
+        </Text>
+        {!!issue.solutionNotes && (
+          <View
+            style={[
+              styles.notesCard,
+              { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 8 },
+            ]}
+          >
+            <Text style={[styles.notesText, { color: colors.foreground }]}>
+              {issue.solutionNotes}
+            </Text>
+          </View>
+        )}
+        <TextInput
+          value={noteDraft}
+          onChangeText={setNoteDraft}
+          placeholder="Add a note…"
+          placeholderTextColor={colors.mutedForeground}
+          multiline
+          style={[
+            styles.noteInput,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              color: colors.foreground,
+            },
+          ]}
+        />
+        <TouchableOpacity
+          style={[
+            styles.transitionBtn,
+            { backgroundColor: colors.navy, marginTop: 8 },
+            (noteSaving || !noteDraft.trim()) && { opacity: 0.5 },
+          ]}
+          onPress={() => addNote(noteDraft.trim())}
+          disabled={noteSaving || !noteDraft.trim()}
+        >
+          {noteSaving ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <>
+              <Feather name="message-square" size={16} color="#ffffff" />
+              <Text style={styles.transitionText}>Add note</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
 
       {/* Status transitions */}
       {transitions.length > 0 && (
@@ -302,6 +377,15 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   notesText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20 },
+  noteInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 72,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    textAlignVertical: 'top',
+  },
   transitionBtn: {
     height: 50,
     borderRadius: 6,

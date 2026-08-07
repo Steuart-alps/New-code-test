@@ -12,7 +12,7 @@ import {
   UpdateComplianceItemStatusParams,
   ListComplianceItemsQueryParams,
 } from "@workspace/api-zod";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
 
@@ -304,7 +304,7 @@ router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (r
   res.status(204).send();
 });
 
-router.patch("/compliance-items/:id/status", requireAuth, async (req, res) => {
+router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (req, res) => {
   const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const { status } = UpdateComplianceItemStatusBody.parse(req.body);
   const user = req.currentUser!;

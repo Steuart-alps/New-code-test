@@ -708,6 +708,7 @@ export default function DocTrackPage() {
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [ackDoc, setAckDoc] = useState<Doc | null>(null);
+  const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [signOffToken, setSignOffToken] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -792,9 +793,14 @@ export default function DocTrackPage() {
             Document library — risk assessments, SOPs, policies &amp; more
           </p>
         </div>
-        <Button onClick={() => setUploadOpen(true)} className="gap-1.5 self-start sm:self-auto">
-          <Plus className="w-4 h-4" /> Upload Document
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button variant="outline" onClick={() => setOutstandingOpen(true)} className="gap-1.5">
+            <Users className="w-4 h-4" /> Outstanding
+          </Button>
+          <Button onClick={() => setUploadOpen(true)} className="gap-1.5">
+            <Plus className="w-4 h-4" /> Upload Document
+          </Button>
+        </div>
       </div>
 
       {/* Staff self-sign link */}
@@ -905,6 +911,9 @@ export default function DocTrackPage() {
         <AcknowledgementsDialog doc={ackDoc} open={!!ackDoc} onClose={() => setAckDoc(null)} />
       )}
 
+      {/* Outstanding acknowledgements overview */}
+      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} />
+
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
@@ -928,5 +937,129 @@ export default function DocTrackPage() {
         </AlertDialogContent>
       </AlertDialog>
     </AppLayout>
+  );
+}
+
+// ─── Outstanding acknowledgements dialog ─────────────────────────────────────
+
+interface OutstandingDoc {
+  id: number;
+  title: string;
+  category: string;
+  department: string | null;
+  staffTotal: number;
+  acknowledgedCount: number;
+  outstanding: { id: number; name: string; department: string | null }[];
+  acknowledged: { name: string; acknowledgedAt: string | null; signed: boolean }[];
+}
+
+function escapeHtml(s: string | null | undefined) {
+  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function exportAckRegister(docs: OutstandingDoc[]) {
+  const generated = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const fmtDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Document Acknowledgement Register</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; margin: 22px 0 6px; }
+  .meta { font-size: 11px; color: #555; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 4px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .out { color: #a15c00; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Document Acknowledgement Register</h1>
+<div class="meta">Generated ${generated} — for audit purposes</div>
+${docs.map(d => `
+<h2>${escapeHtml(d.title)}${d.department ? ` <span class="meta">(${escapeHtml(d.department)})</span>` : ""}</h2>
+<div class="meta">${d.acknowledgedCount}/${d.staffTotal} staff acknowledged</div>
+<table>
+<tr><th>Staff member</th><th>Status</th><th>Date</th><th>Signed</th></tr>
+${d.acknowledged.map(a => `<tr><td>${escapeHtml(a.name)}</td><td>Acknowledged</td><td>${fmtDate(a.acknowledgedAt)}</td><td>${a.signed ? "Yes" : "—"}</td></tr>`).join("")}
+${d.outstanding.map(s => `<tr class="out"><td>${escapeHtml(s.name)}</td><td>Outstanding</td><td></td><td></td></tr>`).join("")}
+</table>`).join("")}
+${docs.length === 0 ? `<p class="meta">No documents require acknowledgement.</p>` : ""}
+</body></html>`;
+  const win = window.open("", "_blank");
+  if (!win) return false;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+  return true;
+}
+
+function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [docs, setDocs] = useState<OutstandingDoc[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    apiFetch("/doc-track/acknowledgements/outstanding")
+      .then(r => (r.ok ? r.json() : { documents: [] }))
+      .then(d => setDocs(d.documents ?? []))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const withOutstanding = docs.filter(d => d.outstanding.length > 0);
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Users className="w-4 h-4" /> Outstanding acknowledgements
+          </DialogTitle>
+        </DialogHeader>
+        {!loading && docs.length > 0 && (
+          <Button variant="outline" size="sm" className="self-start gap-1.5"
+            onClick={() => exportAckRegister(docs)}>
+            <Download className="w-3.5 h-3.5" /> Export register (PDF / print)
+          </Button>
+        )}
+        {loading ? (
+          <div className="flex items-center justify-center h-24">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : docs.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">
+            No documents require acknowledgement yet. Mark a document as &ldquo;Acknowledgement required&rdquo; when uploading to track staff sign-off here.
+          </p>
+        ) : withOutstanding.length === 0 ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-emerald-700">
+            <Check className="w-4 h-4" /> All staff have acknowledged every required document.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {withOutstanding.map(d => (
+              <div key={d.id} className="border rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <p className="text-sm font-medium truncate">{d.title}</p>
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                    {d.acknowledgedCount}/{d.staffTotal} acknowledged
+                  </span>
+                </div>
+                {d.department && (
+                  <p className="text-xs text-muted-foreground mb-1.5">Department: {d.department}</p>
+                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {d.outstanding.map(s => (
+                    <span key={s.id} className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                      {s.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

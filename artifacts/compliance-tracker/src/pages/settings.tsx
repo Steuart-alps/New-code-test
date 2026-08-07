@@ -1342,6 +1342,7 @@ function TwoFactorCard() {
   const [code, setCode] = useState("");
   const [disablePassword, setDisablePassword] = useState("");
   const [error, setError] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
 
   const enabled = user?.totpEnabled ?? false;
 
@@ -1364,8 +1365,9 @@ function TwoFactorCard() {
     setError("");
     setStep("verifying");
     try {
-      await apiFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
+      const result = await apiFetch<{ ok: boolean; recoveryCode?: string }>("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
       await refresh();
+      if (result.recoveryCode) setRecoveryCode(result.recoveryCode);
       toast({ title: "Two-factor authentication enabled" });
       setStep("idle");
       setCode("");
@@ -1407,6 +1409,21 @@ function TwoFactorCard() {
       <CardContent className="pt-6">
         {enabled ? (
           <div className="space-y-4">
+            {recoveryCode && (
+              <div className="px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm space-y-2">
+                <p className="font-semibold">Save your recovery code</p>
+                <p>
+                  If you lose access to your authenticator app, this one-time code is the only way to
+                  sign back in on your own. Store it somewhere safe — it will not be shown again.
+                </p>
+                <code className="block font-mono text-base tracking-widest bg-white border border-amber-200 rounded-sm px-3 py-2 select-all">
+                  {recoveryCode}
+                </code>
+                <Button size="sm" variant="outline" className="rounded-sm" onClick={() => setRecoveryCode(null)}>
+                  I've saved my recovery code
+                </Button>
+              </div>
+            )}
             <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
               <ShieldCheck className="w-4 h-4 flex-shrink-0" />
               <span>Two-factor authentication is <strong>active</strong> on your account.</span>

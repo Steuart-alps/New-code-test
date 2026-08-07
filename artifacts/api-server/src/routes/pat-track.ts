@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { patAppliancesTable, patTestsTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -68,7 +68,7 @@ router.get("/appliances", requireAuth, async (req, res) => {
   res.json(rows.rows ?? rows);
 });
 
-router.post("/appliances", requireAuth, async (req, res) => {
+router.post("/appliances", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = applianceSchema.safeParse(req.body);
@@ -87,7 +87,7 @@ router.post("/appliances", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/appliances/:id", requireAuth, async (req, res) => {
+router.put("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -112,7 +112,7 @@ router.put("/appliances/:id", requireAuth, async (req, res) => {
   res.json(row);
 });
 
-router.delete("/appliances/:id", requireAuth, async (req, res) => {
+router.delete("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -147,7 +147,7 @@ router.get("/tests", requireAuth, async (req, res) => {
   res.json(rows.rows ?? rows);
 });
 
-router.post("/tests", requireAuth, async (req, res) => {
+router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const parsed = testSchema.safeParse(req.body);
@@ -169,7 +169,7 @@ router.post("/tests", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/tests/:id", requireAuth, async (req, res) => {
+router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -197,7 +197,7 @@ router.put("/tests/:id", requireAuth, async (req, res) => {
   res.json(row);
 });
 
-router.delete("/tests/:id", requireAuth, async (req, res) => {
+router.delete("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -274,7 +274,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;
@@ -324,7 +324,7 @@ router.get("/preset-templates", requireAuth, async (req, res) => {
   res.json(templates);
 });
 
-router.put("/preset-templates/:key", requireAuth, async (req, res) => {
+router.put("/preset-templates/:key", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const presetKey = req.params.key as ValidPresetKey;
@@ -347,7 +347,7 @@ router.put("/preset-templates/:key", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete("/preset-templates/:key", requireAuth, async (req, res) => {
+router.delete("/preset-templates/:key", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const presetKey = req.params.key as ValidPresetKey;

@@ -12,7 +12,7 @@ import {
   sitesTable,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
 
 const router = Router();
@@ -107,7 +107,7 @@ const fileFields = z.object({
 });
 
 // Shared presigned upload URL endpoint
-router.post("/request-upload", requireAuth, async (req, res) => {
+router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   try {
     const storage = new ObjectStorageService();
     const uploadUrl = await storage.getObjectEntityUploadURL();
@@ -220,7 +220,7 @@ const raCreate = z.object({
 
 router.get("/risk-assessments/:id/download-url",    requireAuth, downloadUrlRoute(safeRiskAssessmentsTable));
 router.get("/risk-assessments/:id/acknowledgements", requireAuth, ackListRoute(safeRiskAssessmentsTable, "ra"));
-router.post("/risk-assessments/:id/acknowledge",     requireAuth, ackSaveRoute(safeRiskAssessmentsTable, "ra"));
+router.post("/risk-assessments/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeRiskAssessmentsTable, "ra"));
 router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, raCreate.partial()));
 
 // ── SOPs ─────────────────────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ const sopCreate = z.object({
 
 router.get("/sops/:id/download-url",    requireAuth, downloadUrlRoute(safeSopsTable));
 router.get("/sops/:id/acknowledgements", requireAuth, ackListRoute(safeSopsTable, "sop"));
-router.post("/sops/:id/acknowledge",     requireAuth, ackSaveRoute(safeSopsTable, "sop"));
+router.post("/sops/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeSopsTable, "sop"));
 router.use("/sops", crudFor(safeSopsTable, sopCreate, sopCreate.partial()));
 
 // ── Training Records ─────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ const handbookCreate = z.object({
 
 router.get("/handbook/:id/download-url",    requireAuth, downloadUrlRoute(safeHandbookTable));
 router.get("/handbook/:id/acknowledgements", requireAuth, ackListRoute(safeHandbookTable, "handbook"));
-router.post("/handbook/:id/acknowledge",     requireAuth, ackSaveRoute(safeHandbookTable, "handbook"));
+router.post("/handbook/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeHandbookTable, "handbook"));
 router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, handbookCreate.partial()));
 
 export default router;

@@ -150,6 +150,7 @@ export default function SignupPage() {
                     <option value="nursery_school">Nursery / School</option>
                     <option value="offices_commercial">Offices / Commercial</option>
                     <option value="retail">Retail</option>
+                    <option value="pest_control">Pest Control</option>
                     <option value="other">Other</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

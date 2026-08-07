@@ -7,6 +7,7 @@
  */
 
 export * from "./appSettings";
+export * from "./bikeTrackConfig";
 export * from "./category";
 export * from "./certificate";
 export * from "./complianceItem";
@@ -30,6 +31,7 @@ export * from "./errorResponse";
 export * from "./fireCheckType";
 export * from "./fireSafetyCheck";
 export * from "./fireSafetyCheckResult";
+export * from "./fireSafetyConfig";
 export * from "./fireSafetyStatus";
 export * from "./fireSafetyStatusStatus";
 export * from "./foodSafetyConfig";
@@ -37,10 +39,13 @@ export * from "./foodSafetyRecord";
 export * from "./foodSafetyRecordSummary";
 export * from "./getFireSafetyStatusParams";
 export * from "./getLegionellaStatusParams";
+export * from "./greenTrackConfig";
 export * from "./healthStatus";
+export * from "./incidentConfig";
 export * from "./legionellaCheck";
 export * from "./legionellaCheckResult";
 export * from "./legionellaCheckType";
+export * from "./legionellaConfig";
 export * from "./legionellaStatus";
 export * from "./legionellaStatusStatus";
 export * from "./listComplianceItemsParams";
@@ -48,6 +53,8 @@ export * from "./listComplianceItemsPriority";
 export * from "./listComplianceItemsStatus";
 export * from "./listFireSafetyChecksParams";
 export * from "./listLegionellaChecksParams";
+export * from "./pATTrackConfig";
+export * from "./poolTrackConfig";
 export * from "./requestUploadUrlBody";
 export * from "./requestUploadUrlResponse";
 export * from "./sendRemindersResponse";

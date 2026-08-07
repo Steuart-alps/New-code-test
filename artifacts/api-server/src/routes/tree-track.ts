@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { treeInspectionsTable, sitesTable, TREE_CHECK_TYPES } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -144,7 +144,7 @@ router.get("/status", requireAuth, async (req, res) => {
 });
 
 // POST /api/tree-track
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -178,7 +178,7 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // PUT /api/tree-track/:id
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -216,7 +216,7 @@ router.put("/:id", requireAuth, async (req, res) => {
 });
 
 // DELETE /api/tree-track/:id
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

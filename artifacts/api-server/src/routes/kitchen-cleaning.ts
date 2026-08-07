@@ -6,7 +6,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -35,7 +35,7 @@ const taskBody = z.object({
   siteId:     z.number().int().nullable().optional(),
 });
 
-router.post("/tasks", requireAuth, async (req, res) => {
+router.post("/tasks", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -55,7 +55,7 @@ router.post("/tasks", requireAuth, async (req, res) => {
   res.status(201).json(result.rows[0]);
 });
 
-router.put("/tasks/:id", requireAuth, async (req, res) => {
+router.put("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -90,7 +90,7 @@ router.put("/tasks/:id", requireAuth, async (req, res) => {
   res.json(result.rows[0]);
 });
 
-router.delete("/tasks/:id", requireAuth, async (req, res) => {
+router.delete("/tasks/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -158,7 +158,7 @@ const logBody = z.object({
 });
 
 // POST upserts — creates or updates the log for that date+frequency
-router.post("/logs", requireAuth, async (req, res) => {
+router.post("/logs", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

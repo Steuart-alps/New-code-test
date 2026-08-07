@@ -229,6 +229,7 @@ const BUSINESS_TYPE_PRESETS: Record<string, PresetKey[]> = {
   nursery_school:         ["office", "kitchen", "reception"],
   offices_commercial:     ["office", "reception"],
   retail:                 ["retail-shop", "office", "reception"],
+  pest_control:           ["office", "reception"],
   other:                  Object.keys(ROOM_PRESETS) as PresetKey[],
 };
 
@@ -241,6 +242,7 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   nursery_school:        "Nursery / School",
   offices_commercial:    "Offices / Commercial",
   retail:                "Retail",
+  pest_control:          "Pest Control",
   other:                 "Other",
 };
 

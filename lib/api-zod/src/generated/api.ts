@@ -77,6 +77,7 @@ export const DeleteCategoryParams = zod.object({
  * @summary List sites
  */
 export const ListSitesResponseItem = zod.object({
+  departmentId: zod.number().nullish(),
   id: zod.number(),
   clientId: zod.number(),
   name: zod.string(),
@@ -92,6 +93,7 @@ export const ListSitesResponse = zod.array(ListSitesResponseItem);
  * @summary Create a site
  */
 export const CreateSiteBody = zod.object({
+  departmentId: zod.number().nullish(),
   name: zod.string(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
@@ -106,6 +108,7 @@ export const GetSiteParams = zod.object({
 });
 
 export const GetSiteResponse = zod.object({
+  departmentId: zod.number().nullish(),
   id: zod.number(),
   clientId: zod.number(),
   name: zod.string(),
@@ -124,6 +127,7 @@ export const UpdateSiteParams = zod.object({
 });
 
 export const UpdateSiteBody = zod.object({
+  departmentId: zod.number().nullish(),
   name: zod.string().optional(),
   responsiblePerson: zod.string().nullish(),
   address: zod.string().nullish(),
@@ -131,6 +135,7 @@ export const UpdateSiteBody = zod.object({
 });
 
 export const UpdateSiteResponse = zod.object({
+  departmentId: zod.number().nullish(),
   id: zod.number(),
   clientId: zod.number(),
   name: zod.string(),
@@ -798,6 +803,14 @@ export const DeleteFireSafetyCheckParams = zod.object({
  * @summary Get kitchen configuration (fridge/freezer counts, temperature limits)
  */
 export const GetFoodSafetyConfigResponse = zod.object({
+  food_cold_units: zod.string().optional(),
+  food_default_hot_items: zod.string().optional(),
+  food_default_holding_items: zod.string().optional(),
+  food_default_sv_items: zod.string().optional(),
+  food_show_deliveries: zod.string().optional(),
+  food_show_hot_temperature: zod.string().optional(),
+  food_show_hot_holding: zod.string().optional(),
+  food_show_sous_vide: zod.string().optional(),
   food_num_fridges: zod.string().optional(),
   food_num_freezers: zod.string().optional(),
   food_cooking_limit: zod.string().optional(),
@@ -810,6 +823,14 @@ export const GetFoodSafetyConfigResponse = zod.object({
  * @summary Update kitchen configuration
  */
 export const UpdateFoodSafetyConfigBody = zod.object({
+  food_cold_units: zod.string().optional(),
+  food_default_hot_items: zod.string().optional(),
+  food_default_holding_items: zod.string().optional(),
+  food_default_sv_items: zod.string().optional(),
+  food_show_deliveries: zod.string().optional(),
+  food_show_hot_temperature: zod.string().optional(),
+  food_show_hot_holding: zod.string().optional(),
+  food_show_sous_vide: zod.string().optional(),
   food_num_fridges: zod.string().optional(),
   food_num_freezers: zod.string().optional(),
   food_cooking_limit: zod.string().optional(),
@@ -820,6 +841,204 @@ export const UpdateFoodSafetyConfigBody = zod.object({
 
 export const UpdateFoodSafetyConfigResponse = zod.object({
   ok: zod.boolean(),
+});
+
+/**
+ * @summary Get Fire safety configuration
+ */
+export const GetFireSafetyConfigResponse = zod.object({
+  fire_alarm_zones: zod.string().optional(),
+  fire_extinguisher_points: zod.string().optional(),
+  fire_show_drill: zod.string().optional(),
+  fire_default_performer: zod.string().optional(),
+  fire_escape_routes: zod.string().optional(),
+});
+
+/**
+ * @summary Update Fire safety configuration
+ */
+export const UpdateFireSafetyConfigBody = zod.object({
+  fire_alarm_zones: zod.string().optional(),
+  fire_extinguisher_points: zod.string().optional(),
+  fire_show_drill: zod.string().optional(),
+  fire_default_performer: zod.string().optional(),
+  fire_escape_routes: zod.string().optional(),
+});
+
+export const UpdateFireSafetyConfigResponse = zod.object({
+  fire_alarm_zones: zod.string().optional(),
+  fire_extinguisher_points: zod.string().optional(),
+  fire_show_drill: zod.string().optional(),
+  fire_default_performer: zod.string().optional(),
+  fire_escape_routes: zod.string().optional(),
+});
+
+/**
+ * @summary Get Water safety configuration
+ */
+export const GetLegionellaConfigResponse = zod.object({
+  water_non_sentinel_outlets: zod.string().optional(),
+  water_default_performer: zod.string().optional(),
+  water_sentinel_outlets: zod.string().optional(),
+});
+
+/**
+ * @summary Update Water safety configuration
+ */
+export const UpdateLegionellaConfigBody = zod.object({
+  water_non_sentinel_outlets: zod.string().optional(),
+  water_default_performer: zod.string().optional(),
+  water_sentinel_outlets: zod.string().optional(),
+});
+
+export const UpdateLegionellaConfigResponse = zod.object({
+  water_non_sentinel_outlets: zod.string().optional(),
+  water_default_performer: zod.string().optional(),
+  water_sentinel_outlets: zod.string().optional(),
+});
+
+/**
+ * @summary Get Bike hire configuration
+ */
+export const GetBikeTrackConfigResponse = zod.object({
+  bike_default_deposit_pence: zod.string().optional(),
+  bike_hire_duration_hours: zod.string().optional(),
+  bike_require_helmet: zod.string().optional(),
+});
+
+/**
+ * @summary Update Bike hire configuration
+ */
+export const UpdateBikeTrackConfigBody = zod.object({
+  bike_default_deposit_pence: zod.string().optional(),
+  bike_hire_duration_hours: zod.string().optional(),
+  bike_require_helmet: zod.string().optional(),
+});
+
+export const UpdateBikeTrackConfigResponse = zod.object({
+  bike_default_deposit_pence: zod.string().optional(),
+  bike_hire_duration_hours: zod.string().optional(),
+  bike_require_helmet: zod.string().optional(),
+});
+
+/**
+ * @summary Get GreenTrack configuration
+ */
+export const GetGreenTrackConfigResponse = zod.object({
+  green_show_fuel: zod.string().optional(),
+  green_default_operators: zod.string().optional(),
+});
+
+/**
+ * @summary Update GreenTrack configuration
+ */
+export const UpdateGreenTrackConfigBody = zod.object({
+  green_show_fuel: zod.string().optional(),
+  green_default_operators: zod.string().optional(),
+});
+
+export const UpdateGreenTrackConfigResponse = zod.object({
+  green_show_fuel: zod.string().optional(),
+  green_default_operators: zod.string().optional(),
+});
+
+/**
+ * @summary Get Incident configuration
+ */
+export const GetIncidentConfigResponse = zod.object({
+  incident_departments: zod.string().optional(),
+  incident_default_reporter: zod.string().optional(),
+  incident_show_investigation: zod.string().optional(),
+  incident_locations: zod.string().optional(),
+});
+
+/**
+ * @summary Update Incident configuration
+ */
+export const UpdateIncidentConfigBody = zod.object({
+  incident_departments: zod.string().optional(),
+  incident_default_reporter: zod.string().optional(),
+  incident_show_investigation: zod.string().optional(),
+  incident_locations: zod.string().optional(),
+});
+
+export const UpdateIncidentConfigResponse = zod.object({
+  incident_departments: zod.string().optional(),
+  incident_default_reporter: zod.string().optional(),
+  incident_show_investigation: zod.string().optional(),
+  incident_locations: zod.string().optional(),
+});
+
+/**
+ * @summary Get PAT testing configuration
+ */
+export const GetPATTrackConfigResponse = zod.object({
+  pat_show_earth_bond: zod.string().optional(),
+  pat_show_insulation: zod.string().optional(),
+  pat_default_tester: zod.string().optional(),
+  pat_retest_months: zod.string().optional(),
+  pat_locations: zod.string().optional(),
+});
+
+/**
+ * @summary Update PAT testing configuration
+ */
+export const UpdatePATTrackConfigBody = zod.object({
+  pat_show_earth_bond: zod.string().optional(),
+  pat_show_insulation: zod.string().optional(),
+  pat_default_tester: zod.string().optional(),
+  pat_retest_months: zod.string().optional(),
+  pat_locations: zod.string().optional(),
+});
+
+export const UpdatePATTrackConfigResponse = zod.object({
+  pat_show_earth_bond: zod.string().optional(),
+  pat_show_insulation: zod.string().optional(),
+  pat_default_tester: zod.string().optional(),
+  pat_retest_months: zod.string().optional(),
+  pat_locations: zod.string().optional(),
+});
+
+/**
+ * @summary Get Pool configuration
+ */
+export const GetPoolTrackConfigResponse = zod.object({
+  pool_name: zod.string().optional(),
+  pool_ph_min: zod.string().optional(),
+  pool_ph_max: zod.string().optional(),
+  pool_free_chlor_min: zod.string().optional(),
+  pool_free_chlor_max: zod.string().optional(),
+  pool_temp_min: zod.string().optional(),
+  pool_temp_max: zod.string().optional(),
+  pool_track_air_temp: zod.string().optional(),
+  pool_default_performer: zod.string().optional(),
+});
+
+/**
+ * @summary Update Pool configuration
+ */
+export const UpdatePoolTrackConfigBody = zod.object({
+  pool_name: zod.string().optional(),
+  pool_ph_min: zod.string().optional(),
+  pool_ph_max: zod.string().optional(),
+  pool_free_chlor_min: zod.string().optional(),
+  pool_free_chlor_max: zod.string().optional(),
+  pool_temp_min: zod.string().optional(),
+  pool_temp_max: zod.string().optional(),
+  pool_track_air_temp: zod.string().optional(),
+  pool_default_performer: zod.string().optional(),
+});
+
+export const UpdatePoolTrackConfigResponse = zod.object({
+  pool_name: zod.string().optional(),
+  pool_ph_min: zod.string().optional(),
+  pool_ph_max: zod.string().optional(),
+  pool_free_chlor_min: zod.string().optional(),
+  pool_free_chlor_max: zod.string().optional(),
+  pool_temp_min: zod.string().optional(),
+  pool_temp_max: zod.string().optional(),
+  pool_track_air_temp: zod.string().optional(),
+  pool_default_performer: zod.string().optional(),
 });
 
 /**
@@ -924,12 +1143,19 @@ export const UpdateFoodSafetyRecordResponse = zod.object({
 export const ListLegionellaChecksQueryParams = zod.object({
   checkType: zod
     .enum([
-      "cold_water_temp",
-      "hot_water_temp",
-      "sentinel_flush",
+      "calorifier_temp",
+      "hot_sentinel_temp",
+      "hot_nonsent_temp",
+      "cold_tank_temp",
+      "cold_sentinel_temp",
+      "cold_nonsent_temp",
+      "cold_tank_inspection",
+      "cold_tank_clean",
+      "calorifier_inspection",
+      "calorifier_clean",
       "shower_clean",
-      "tank_inspection",
-      "risk_assessment",
+      "tmv_service",
+      "outlet_flush",
     ])
     .optional(),
   siteId: zod.coerce.number().optional(),
@@ -940,12 +1166,19 @@ export const ListLegionellaChecksResponseItem = zod.object({
   clientId: zod.number(),
   siteId: zod.number().nullish(),
   checkType: zod.enum([
-    "cold_water_temp",
-    "hot_water_temp",
-    "sentinel_flush",
+    "calorifier_temp",
+    "hot_sentinel_temp",
+    "hot_nonsent_temp",
+    "cold_tank_temp",
+    "cold_sentinel_temp",
+    "cold_nonsent_temp",
+    "cold_tank_inspection",
+    "cold_tank_clean",
+    "calorifier_inspection",
+    "calorifier_clean",
     "shower_clean",
-    "tank_inspection",
-    "risk_assessment",
+    "tmv_service",
+    "outlet_flush",
   ]),
   checkDate: zod.string(),
   result: zod.enum(["pass", "fail", "action_required"]),
@@ -965,12 +1198,19 @@ export const ListLegionellaChecksResponse = zod.array(
  */
 export const CreateLegionellaCheckBody = zod.object({
   checkType: zod.enum([
-    "cold_water_temp",
-    "hot_water_temp",
-    "sentinel_flush",
+    "calorifier_temp",
+    "hot_sentinel_temp",
+    "hot_nonsent_temp",
+    "cold_tank_temp",
+    "cold_sentinel_temp",
+    "cold_nonsent_temp",
+    "cold_tank_inspection",
+    "cold_tank_clean",
+    "calorifier_inspection",
+    "calorifier_clean",
     "shower_clean",
-    "tank_inspection",
-    "risk_assessment",
+    "tmv_service",
+    "outlet_flush",
   ]),
   checkDate: zod.string(),
   result: zod.enum(["pass", "fail", "action_required"]),
@@ -990,12 +1230,19 @@ export const GetLegionellaStatusQueryParams = zod.object({
 
 export const GetLegionellaStatusResponseItem = zod.object({
   checkType: zod.enum([
-    "cold_water_temp",
-    "hot_water_temp",
-    "sentinel_flush",
+    "calorifier_temp",
+    "hot_sentinel_temp",
+    "hot_nonsent_temp",
+    "cold_tank_temp",
+    "cold_sentinel_temp",
+    "cold_nonsent_temp",
+    "cold_tank_inspection",
+    "cold_tank_clean",
+    "calorifier_inspection",
+    "calorifier_clean",
     "shower_clean",
-    "tank_inspection",
-    "risk_assessment",
+    "tmv_service",
+    "outlet_flush",
   ]),
   frequencyDays: zod.number(),
   lastDate: zod.string().nullish(),
@@ -1029,12 +1276,19 @@ export const UpdateLegionellaCheckResponse = zod.object({
   clientId: zod.number(),
   siteId: zod.number().nullish(),
   checkType: zod.enum([
-    "cold_water_temp",
-    "hot_water_temp",
-    "sentinel_flush",
+    "calorifier_temp",
+    "hot_sentinel_temp",
+    "hot_nonsent_temp",
+    "cold_tank_temp",
+    "cold_sentinel_temp",
+    "cold_nonsent_temp",
+    "cold_tank_inspection",
+    "cold_tank_clean",
+    "calorifier_inspection",
+    "calorifier_clean",
     "shower_clean",
-    "tank_inspection",
-    "risk_assessment",
+    "tmv_service",
+    "outlet_flush",
   ]),
   checkDate: zod.string(),
   result: zod.enum(["pass", "fail", "action_required"]),

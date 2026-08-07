@@ -42,7 +42,7 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(eq(usersTable.clientId, clientId));
     } else {
@@ -54,13 +54,13 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(inArray(usersTable.clientId, allowed));
     }
   } else {
     rows = await db
-      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
       .from(usersTable)
       .where(eq(usersTable.clientId, user.clientId!));
   }
@@ -96,7 +96,7 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
       active: body.active,
       passwordHash,
     })
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
   res.status(201).json(rows[0]);
 });
@@ -142,7 +142,7 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     .update(usersTable)
     .set(updates)
     .where(eq(usersTable.id, id))
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
   res.json(rows[0]);
 });
@@ -164,6 +164,29 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
   }
 
   await db.delete(usersTable).where(eq(usersTable.id, id));
+  res.json({ ok: true });
+});
+
+// POST /users/:id/reset-2fa — admin clears a locked-out user's 2FA so they can
+// sign in with just their password and re-enrol.
+router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req, res) => {
+  const actor = req.currentUser!;
+  const id = Number(req.params.id);
+
+  const targetRows = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  const target = targetRows[0];
+  if (!target) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  if (target.id !== actor.id && !canAccessClient(req, target.clientId)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  await db.update(usersTable)
+    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+    .where(eq(usersTable.id, id));
   res.json({ ok: true });
 });
 

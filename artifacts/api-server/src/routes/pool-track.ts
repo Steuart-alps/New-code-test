@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
 
 const router = Router();
@@ -74,7 +74,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /pool-track — create check
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -111,7 +111,7 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // PUT /pool-track/:id — update check
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -148,7 +148,7 @@ router.put("/:id", requireAuth, async (req, res) => {
 });
 
 // DELETE /pool-track/:id
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -287,7 +287,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;

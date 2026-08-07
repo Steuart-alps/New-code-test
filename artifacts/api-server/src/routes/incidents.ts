@@ -6,7 +6,7 @@ import {
   INCIDENT_TYPES, INCIDENT_SEVERITIES, INCIDENT_STATUSES, EMPLOYMENT_TYPES,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -110,7 +110,7 @@ router.get("/summary", requireAuth, async (req, res) => {
 });
 
 // POST /api/incidents
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -134,7 +134,7 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // PUT /api/incidents/:id
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
@@ -156,7 +156,7 @@ router.put("/:id", requireAuth, async (req, res) => {
 });
 
 // DELETE /api/incidents/:id
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string);
@@ -199,7 +199,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;

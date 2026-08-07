@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash, timingSafeEqual } from "crypto";
 import QRCode from "qrcode";
 import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp";
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
+import { loginRateLimit } from "../middleware/loginRateLimit";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
@@ -21,12 +22,34 @@ import { nameIsClean } from "../lib/contentFilter";
 
 const router = Router();
 
+// ── 2FA recovery codes ──────────────────────────────────────────────────────
+// A single one-time recovery code (format XXXX-XXXX-XXXX, no ambiguous chars)
+// is issued when 2FA is enabled. Using it signs the user in and disables 2FA
+// so they can re-enrol with a new device.
+const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function generateRecoveryCode(): string {
+  const bytes = randomBytes(12);
+  const chars = Array.from(bytes, (b) => RECOVERY_ALPHABET[b % RECOVERY_ALPHABET.length]);
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4, 8).join("")}-${chars.slice(8, 12).join("")}`;
+}
+
+function hashRecoveryCode(code: string): string {
+  return createHash("sha256").update(code.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+}
+
+function recoveryCodeMatches(code: string, storedHash: string): boolean {
+  const a = Buffer.from(hashRecoveryCode(code), "hex");
+  const b = Buffer.from(storedHash, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const LoginBody = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", loginRateLimit, async (req, res) => {
   const body = LoginBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Invalid email or password" });
@@ -75,13 +98,14 @@ router.post("/auth/login", async (req, res) => {
 });
 
 // POST /auth/2fa/verify — complete a pending 2FA login by supplying a TOTP code
-router.post("/auth/2fa/verify", async (req, res) => {
+router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
   const pendingUserId = (req.session as any).pending2faUserId;
   if (!pendingUserId) { res.status(400).json({ error: "No pending 2FA session" }); return; }
 
   const { code } = req.body as { code?: string };
-  if (!code || !/^\d{6}$/.test(code.trim())) {
-    res.status(400).json({ error: "Please enter a 6-digit code" }); return;
+  const trimmed = (code ?? "").trim();
+  if (!trimmed) {
+    res.status(400).json({ error: "Please enter a code" }); return;
   }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, pendingUserId)).limit(1);
@@ -89,8 +113,23 @@ router.post("/auth/2fa/verify", async (req, res) => {
     res.status(400).json({ error: "Invalid session" }); return;
   }
 
-  if (!verifyToken(code.trim(), user.totpSecret)) {
-    res.status(401).json({ error: "Incorrect code. Please try again." }); return;
+  let usedRecoveryCode = false;
+  if (/^\d{6}$/.test(trimmed)) {
+    if (!verifyToken(trimmed, user.totpSecret)) {
+      res.status(401).json({ error: "Incorrect code. Please try again." }); return;
+    }
+  } else {
+    // Not a 6-digit TOTP — treat as a one-time recovery code.
+    if (!user.totpRecoveryHash || !recoveryCodeMatches(trimmed, user.totpRecoveryHash)) {
+      res.status(401).json({ error: "Incorrect code. Please try again." }); return;
+    }
+    // Recovery code is single-use: sign in and disable 2FA so the user can
+    // re-enrol with a new device.
+    usedRecoveryCode = true;
+    await db.update(usersTable)
+      .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+      .where(eq(usersTable.id, user.id));
+    user.totpEnabled = false;
   }
 
   delete (req.session as any).pending2faUserId;
@@ -106,7 +145,13 @@ router.post("/auth/2fa/verify", async (req, res) => {
       services = await getEntitledServices(user.clientId);
     } catch {}
   }
-  res.json({ user: { ...safeUser, totpEnabled: true }, client: withClient?.client ?? null, billingLocked, services });
+  res.json({
+    user: { ...safeUser, totpEnabled: !usedRecoveryCode },
+    client: withClient?.client ?? null,
+    billingLocked,
+    services,
+    ...(usedRecoveryCode ? { usedRecoveryCode: true } : {}),
+  });
 });
 
 // GET /auth/2fa/setup — generate a fresh TOTP secret + QR code for the signed-in user
@@ -135,11 +180,18 @@ router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
   if (!verifyToken(code.trim(), pendingSecret)) {
     res.status(401).json({ error: "Incorrect code — please check your authenticator app." }); return;
   }
+  const recoveryCode = generateRecoveryCode();
   await db.update(usersTable)
-    .set({ totpSecret: pendingSecret, totpEnabled: true, updatedAt: new Date() })
+    .set({
+      totpSecret: pendingSecret,
+      totpEnabled: true,
+      totpRecoveryHash: hashRecoveryCode(recoveryCode),
+      updatedAt: new Date(),
+    })
     .where(eq(usersTable.id, req.currentUser!.id));
   delete (req.session as any).pendingTotpSecret;
-  res.json({ ok: true });
+  // The plaintext recovery code is returned exactly once — it is stored hashed.
+  res.json({ ok: true, recoveryCode });
 });
 
 // POST /auth/2fa/disable — verify the user's password then clear TOTP
@@ -152,7 +204,7 @@ router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
     res.status(401).json({ error: "Incorrect password" }); return;
   }
   await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, updatedAt: new Date() })
+    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
     .where(eq(usersTable.id, user.id));
   res.json({ ok: true });
 });
@@ -301,6 +353,7 @@ const BUSINESS_TYPES = [
   "nursery_school",
   "offices_commercial",
   "retail",
+  "pest_control",
   "other",
 ] as const;
 
@@ -419,7 +472,7 @@ const MobileLoginBody = z.object({
  * Authenticates with email + password and returns a long-lived bearer token.
  * Tokens are stored in mobile_sessions (created by runRuntimeMigrations).
  */
-router.post("/auth/mobile-login", async (req, res) => {
+router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
   const body = MobileLoginBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Invalid email or password" });

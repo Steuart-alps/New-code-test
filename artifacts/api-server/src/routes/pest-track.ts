@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { pestVisitsTable, pestActivityTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, denyViewers } from "../middleware/requireAuth";
 import { z } from "zod";
 
 const router = Router();
@@ -94,7 +94,7 @@ router.get("/visits", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-router.post("/visits", requireAuth, async (req, res) => {
+router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -120,7 +120,7 @@ router.post("/visits", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/visits/:id", requireAuth, async (req, res) => {
+router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -148,7 +148,7 @@ router.put("/visits/:id", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete("/visits/:id", requireAuth, async (req, res) => {
+router.delete("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -183,7 +183,7 @@ router.get("/activity", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-router.post("/activity", requireAuth, async (req, res) => {
+router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -208,7 +208,7 @@ router.post("/activity", requireAuth, async (req, res) => {
   res.status(201).json(row);
 });
 
-router.put("/activity/:id", requireAuth, async (req, res) => {
+router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -235,7 +235,7 @@ router.put("/activity/:id", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete("/activity/:id", requireAuth, async (req, res) => {
+router.delete("/activity/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
@@ -262,7 +262,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

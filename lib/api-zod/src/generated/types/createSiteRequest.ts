@@ -7,6 +7,7 @@
  */
 
 export interface CreateSiteRequest {
+  departmentId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;

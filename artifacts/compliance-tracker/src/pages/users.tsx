@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -20,6 +20,7 @@ interface User {
   clientId: number | null;
   departmentId: number | null;
   active: boolean;
+  totpEnabled?: boolean;
   isMaintenanceManager: boolean;
 }
 
@@ -238,6 +239,12 @@ export default function UsersPage() {
     load();
   }
 
+  async function resetTwoFactor(user: User) {
+    if (!confirm(`Reset two-factor authentication for ${user.name}? They will be able to sign in with just their password and set up 2FA again.`)) return;
+    await apiFetch(`/users/${user.id}/reset-2fa`, { method: "POST", body: JSON.stringify({}) });
+    load();
+  }
+
   async function reassignDept(userId: number, value: string) {
     const departmentId = value === NO_DEPT_VALUE ? null : Number(value);
     setReassigning(userId);
@@ -334,6 +341,17 @@ export default function UsersPage() {
                               title={u.isMaintenanceManager ? "Remove maintenance manager access" : "Make maintenance manager (FixTrack full access)"}
                             >
                               <Wrench className={`w-4 h-4 ${u.isMaintenanceManager ? "text-amber-600" : "text-muted-foreground"}`} />
+                            </Button>
+                          )}
+                          {canAdmin && u.totpEnabled && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => resetTwoFactor(u)}
+                              title="Reset two-factor authentication (for locked-out users)"
+                            >
+                              <ShieldOff className="w-4 h-4 text-amber-600" />
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>

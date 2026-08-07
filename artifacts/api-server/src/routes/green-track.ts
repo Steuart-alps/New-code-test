@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
-import { getClientId, requireClientAdmin, requireAuth } from "../middleware/requireAuth";
+import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
 
 const router = Router();
@@ -124,7 +124,7 @@ router.get("/pre-use-checks", async (req, res) => {
   }
 });
 
-router.post("/pre-use-checks", async (req, res) => {
+router.post("/pre-use-checks", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -160,7 +160,7 @@ router.post("/pre-use-checks", async (req, res) => {
   }
 });
 
-router.put("/pre-use-checks/:id", async (req, res) => {
+router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
@@ -319,7 +319,7 @@ router.get("/defects", async (req, res) => {
   }
 });
 
-router.post("/defects", async (req, res) => {
+router.post("/defects", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { machineId, reportDate, reportedBy, description, severity, outOfService, notes } = req.body;
@@ -347,7 +347,7 @@ router.post("/defects", async (req, res) => {
   }
 });
 
-router.put("/defects/:id", async (req, res) => {
+router.put("/defects/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { reportDate, reportedBy, description, severity, outOfService, status, resolution, resolvedDate, notes } = req.body;
@@ -499,7 +499,7 @@ router.get("/fuel-logs", async (req, res) => {
   }
 });
 
-router.post("/fuel-logs", async (req, res) => {
+router.post("/fuel-logs", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { machineId, logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, notes } = req.body;
@@ -526,7 +526,7 @@ router.post("/fuel-logs", async (req, res) => {
   }
 });
 
-router.put("/fuel-logs/:id", async (req, res) => {
+router.put("/fuel-logs/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const { logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, notes } = req.body;
@@ -642,7 +642,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;

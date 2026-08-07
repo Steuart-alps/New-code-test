@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -127,7 +127,7 @@ router.get("/records", requireAuth, async (req, res) => {
 
 // ── Create record ─────────────────────────────────────────────────────────────
 
-router.post("/records", requireAuth, async (req, res) => {
+router.post("/records", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -160,7 +160,7 @@ router.post("/records", requireAuth, async (req, res) => {
 
 // ── Update record ─────────────────────────────────────────────────────────────
 
-router.patch("/records/:id", requireAuth, async (req, res) => {
+router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -215,7 +215,7 @@ router.patch("/records/:id", requireAuth, async (req, res) => {
 
 // ── Delete record ─────────────────────────────────────────────────────────────
 
-router.delete("/records/:id", requireAuth, async (req, res) => {
+router.delete("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

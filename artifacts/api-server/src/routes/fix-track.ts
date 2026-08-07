@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { generateActionTokens, sendContractorAssignmentEmail } from "../lib/fixTrackNotifications";
 
@@ -117,9 +117,43 @@ router.get("/issues", requireAuth, async (req, res) => {
   })));
 });
 
+// ── Get one ───────────────────────────────────────────────────────────────────
+
+router.get("/issues/:id", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+
+  const [r] = await db
+    .select({ issue: fixTrackIssuesTable, site: sitesTable, contractor: contractorsTable })
+    .from(fixTrackIssuesTable)
+    .leftJoin(sitesTable,       eq(fixTrackIssuesTable.siteId,      sitesTable.id))
+    .leftJoin(contractorsTable, eq(fixTrackIssuesTable.contractorId, contractorsTable.id))
+    .where(and(...conditions))
+    .limit(1);
+  if (!r) return res.status(404).json({ error: "Not found" });
+
+  res.json({
+    ...r.issue,
+    siteName:        r.site?.name        ?? null,
+    contractorName:  r.contractor?.name  ?? null,
+    contractorEmail: r.contractor?.email ?? null,
+  });
+});
+
 // ── Create ────────────────────────────────────────────────────────────────────
 
-router.post("/issues", requireAuth, async (req, res) => {
+router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -138,7 +172,7 @@ router.post("/issues", requireAuth, async (req, res) => {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
-router.put("/issues/:id", requireAuth, async (req, res) => {
+router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -152,19 +186,65 @@ router.put("/issues/:id", requireAuth, async (req, res) => {
   if ("siteId"       in data && !(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
   if ("contractorId" in data && !(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 
+  const updateConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const updateDeptId = getActiveDepartmentId(req);
+  if (updateDeptId !== null) {
+    updateConditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, updateDeptId))) as any,
+    );
+  }
+
   const [row] = await db
     .update(fixTrackIssuesTable)
     .set({ ...data, updatedAt: new Date() })
-    .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)))
+    .where(and(...updateConditions))
     .returning();
 
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
 
+// ── Append a note (atomic — safe under concurrent writers) ───────────────────
+
+router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const noteSchema = z.object({ note: z.string().min(1).max(2000) });
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const deptId = getActiveDepartmentId(req);
+  const deptClause = deptId !== null
+    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    : sql``;
+
+  const stamp = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const entry = `[${stamp}] ${parsed.data.note.trim()}`;
+
+  // Append server-side in one statement so concurrent notes never clobber
+  // each other.
+  const result = await db.execute(sql`
+    UPDATE fix_track_issues
+    SET solution_notes = CASE
+          WHEN solution_notes IS NULL OR solution_notes = '' THEN ${entry}
+          ELSE solution_notes || E'\n\n' || ${entry}
+        END,
+        updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId}${deptClause}
+    RETURNING *
+  `);
+  const row = (result.rows ?? [])[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json(row);
+});
+
 // ── Delete ────────────────────────────────────────────────────────────────────
 
-router.delete("/issues/:id", requireAuth, async (req, res) => {
+router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -182,7 +262,7 @@ router.delete("/issues/:id", requireAuth, async (req, res) => {
 
 // ── Request media upload URL ──────────────────────────────────────────────────
 
-router.post("/issues/:id/request-upload", requireAuth, async (req, res) => {
+router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -246,7 +326,7 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
 
 // ── Send to contractor ────────────────────────────────────────────────────────
 
-router.post("/issues/:id/send-to-contractor", requireAuth, async (req, res) => {
+router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

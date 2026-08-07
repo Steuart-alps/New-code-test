@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -95,7 +95,7 @@ router.get("/config", requireAuth, async (req, res) => {
 });
 
 // PUT /api/food-safety/config
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -168,7 +168,7 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 // POST /api/food-safety
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -212,8 +212,58 @@ router.post("/", requireAuth, async (req, res) => {
   res.status(201).json(inserted);
 });
 
+// POST /api/food-safety/append — atomically append one row to a section of
+// the given date's diary, creating the record if needed. Safe under
+// concurrent writers (mobile + web) unlike GET-then-PUT of whole arrays.
+const SECTION_KEYS = ["deliveries", "coldFood", "hotTemperature", "cooling", "reheating", "hotHolding", "sousVide"] as const;
+const SECTION_COLUMNS: Record<(typeof SECTION_KEYS)[number], string> = {
+  deliveries: "deliveries",
+  coldFood: "cold_food",
+  hotTemperature: "hot_temperature",
+  cooling: "cooling",
+  reheating: "reheating",
+  hotHolding: "hot_holding",
+  sousVide: "sous_vide",
+};
+
+router.post("/append", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const appendSchema = z.object({
+    recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    section: z.enum(SECTION_KEYS),
+    row: rowSchema,
+  });
+  const parsed = appendSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+
+  const { recordDate, section, row } = parsed.data;
+  const column = SECTION_COLUMNS[section];
+  const rowJson = JSON.stringify(row);
+
+  // Ensure the day's record exists (ignore the race where another writer
+  // creates it first), then append in a single UPDATE.
+  await db.execute(sql`
+    INSERT INTO food_safety_records (client_id, record_date, created_by)
+    VALUES (${clientId}, ${recordDate}, ${(req.session as any).userId ?? null})
+    ON CONFLICT (client_id, record_date) DO NOTHING
+  `);
+
+  const result = await db.execute(sql`
+    UPDATE food_safety_records
+    SET ${sql.raw(`"${column}"`)} = COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb) || ${rowJson}::jsonb,
+        updated_at = now()
+    WHERE client_id = ${clientId} AND record_date = ${recordDate}
+    RETURNING *
+  `);
+  const updated = (result.rows ?? [])[0];
+  if (!updated) return res.status(500).json({ error: "Could not append record" });
+  res.status(201).json(updated);
+});
+
 // PUT /api/food-safety/:id
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

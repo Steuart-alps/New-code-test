@@ -193,6 +193,144 @@ function Legend() {
   );
 }
 
+// ── Month overview ────────────────────────────────────────────────────────────
+
+interface HistoryChecklist { checkDate: string; siteId: number | null; checklistType: string; submittedAt: string | null }
+interface HistorySignoff { signoffDate: string; siteId: number | null; submittedAt: string | null }
+
+type DayStatus = "complete" | "partial" | "missing" | "future";
+
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+}
+
+function shiftMonth(ym: string, delta: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: string) => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const lastMonth = shiftMonth(today.slice(0, 7), -1);
+  const [month, setMonth] = useState(lastMonth);
+  const [rows, setRows] = useState<{ checklists: HistoryChecklist[]; signoffs: HistorySignoff[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [y, m] = month.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const from = `${month}-01`;
+  const to = `${month}-${String(daysInMonth).padStart(2, "0")}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const res = await apiFetch(`/daily-track-am/history?from=${from}&to=${to}`);
+      if (!cancelled) {
+        setRows(res.ok ? await res.json() : { checklists: [], signoffs: [] });
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [from, to]);
+
+  const expectedPerDay = sites.length * COLUMNS.length;
+  const siteIds = new Set(sites.map(s => s.id));
+
+  const dayStatuses: { date: string; status: DayStatus; submitted: number }[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2, "0")}`;
+    if (date >= today) { dayStatuses.push({ date, status: "future", submitted: 0 }); continue; }
+    // Count distinct (site, requirement) pairs so duplicate or site-less rows
+    // can't make an incomplete day look complete.
+    const done = new Set<string>();
+    for (const c of rows?.checklists ?? []) {
+      if (c.checkDate === date && c.submittedAt && c.siteId != null && siteIds.has(c.siteId)) {
+        done.add(`${c.siteId}:${c.checklistType}`);
+      }
+    }
+    for (const s of rows?.signoffs ?? []) {
+      if (s.signoffDate === date && s.submittedAt && s.siteId != null && siteIds.has(s.siteId)) {
+        done.add(`${s.siteId}:signoff`);
+      }
+    }
+    const submitted = done.size;
+    const status: DayStatus =
+      expectedPerDay === 0 ? "missing"
+      : submitted >= expectedPerDay ? "complete"
+      : submitted > 0 ? "partial"
+      : "missing";
+    dayStatuses.push({ date, status, submitted });
+  }
+
+  const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday = 0
+  const incompleteDays = dayStatuses.filter(d => d.status === "partial" || d.status === "missing").length;
+
+  return (
+    <Card className="mt-8 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h3 className="font-semibold text-sm">Month overview</h3>
+          <p className="text-xs text-muted-foreground">
+            Spot patterns — days where checklists were incomplete or missing. Click a day to inspect it.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setMonth(shiftMonth(month, -1))}>←</Button>
+          <span className="text-sm font-medium min-w-[130px] text-center">{monthLabel(month)}</span>
+          <Button variant="outline" size="sm" className="h-8 px-2"
+            disabled={month >= today.slice(0, 7)}
+            onClick={() => setMonth(shiftMonth(month, 1))}>→</Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-7 gap-1.5 max-w-xl">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
+              <div key={d} className="text-[10px] text-muted-foreground text-center font-medium">{d}</div>
+            ))}
+            {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
+            {dayStatuses.map(({ date, status, submitted }) => (
+              <button
+                key={date}
+                disabled={status === "future"}
+                onClick={() => onPickDay(date)}
+                title={status === "future" ? "" : `${date} — ${submitted}/${expectedPerDay} submitted`}
+                className={cn(
+                  "aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-transform",
+                  status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-105",
+                  status === "partial" && "bg-amber-100 text-amber-700 hover:scale-105",
+                  status === "missing" && "bg-red-100 text-red-700 hover:scale-105",
+                  status === "future" && "bg-muted/30 text-muted-foreground/40",
+                )}
+              >
+                {parseInt(date.slice(8), 10)}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-4 mt-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> All submitted</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Partially complete</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 border border-red-300" /> Nothing submitted</span>
+            {sites.length > 0 && (
+              <span className="ml-auto font-medium text-foreground">
+                {incompleteDays} day{incompleteDays !== 1 ? "s" : ""} with gaps in {monthLabel(month)}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DailyTrackStatusPage() {
@@ -437,6 +575,10 @@ export default function DailyTrackStatusPage() {
             <Legend />
           </div>
         </Card>
+      )}
+
+      {sites.length > 0 && (
+        <MonthOverview sites={sites} onPickDay={d => { setDate(d); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
       )}
     </AppLayout>
   );

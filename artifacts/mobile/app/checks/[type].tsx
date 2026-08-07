@@ -173,28 +173,7 @@ export default function CheckFormScreen() {
   const moduleColor = isFire ? '#f97316' : isWater ? '#0ea5e9' : '#eab308';
 
   if (isKitchen) {
-    return (
-      <View
-        style={[styles.root, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', padding: 32 }]}
-      >
-        <Feather name="thermometer" size={48} color={moduleColor} />
-        <Text style={[styles.kitchenTitle, { color: colors.foreground }]}>
-          KitchenTrack
-        </Text>
-        <Text style={[styles.kitchenBody, { color: colors.mutedForeground }]}>
-          Full temperature diary logging — including fridge, freezer, delivery,
-          and hot-holding records — is available on the web app.
-        </Text>
-        <TouchableOpacity
-          style={[styles.backBtn, { backgroundColor: colors.navy }]}
-          onPress={() => router.back()}
-        >
-          <Text style={{ color: '#ffffff', fontFamily: 'Inter_600SemiBold', fontSize: 15 }}>
-            Go back
-          </Text>
-        </TouchableOpacity>
-      </View>
-    );
+    return <KitchenTempForm />;
   }
 
   return (
@@ -447,6 +426,247 @@ export default function CheckFormScreen() {
             </>
           )}
         </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
+
+// ─── KitchenTrack: quick temperature record ──────────────────────────────────
+//
+// Appends a single row to today's food-safety diary record (creating the
+// day's record if it doesn't exist yet). Field keys match the web diary.
+
+type KitchenSectionKey =
+  | 'coldFood'
+  | 'deliveries'
+  | 'hotTemperature'
+  | 'cooling'
+  | 'reheating'
+  | 'hotHolding';
+
+interface KitchenField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  keyboard?: 'decimal-pad' | 'default';
+  optional?: boolean;
+}
+
+const KITCHEN_SECTIONS: {
+  value: KitchenSectionKey;
+  label: string;
+  icon: React.ComponentProps<typeof Feather>['name'];
+  fields: KitchenField[];
+}[] = [
+  {
+    value: 'coldFood',
+    label: 'Fridge / Freezer',
+    icon: 'box',
+    fields: [
+      { key: 'unit', label: 'Unit', placeholder: 'e.g. Fridge 1' },
+      { key: 'tempAm', label: 'AM temp (°C)', keyboard: 'decimal-pad', optional: true },
+      { key: 'tempPm', label: 'PM temp (°C)', keyboard: 'decimal-pad', optional: true },
+      { key: 'correctiveAction', label: 'Corrective action', optional: true },
+    ],
+  },
+  {
+    value: 'deliveries',
+    label: 'Delivery',
+    icon: 'truck',
+    fields: [
+      { key: 'supplier', label: 'Supplier' },
+      { key: 'items', label: 'Items', optional: true },
+      { key: 'tempChilled', label: 'Chilled temp (°C)', keyboard: 'decimal-pad', optional: true },
+      { key: 'tempFrozen', label: 'Frozen temp (°C)', keyboard: 'decimal-pad', optional: true },
+      { key: 'correctiveActions', label: 'Corrective actions', optional: true },
+    ],
+  },
+  {
+    value: 'hotTemperature',
+    label: 'Cooking',
+    icon: 'thermometer',
+    fields: [
+      { key: 'item', label: 'Food item' },
+      { key: 'timeStart', label: 'Start time', placeholder: 'HH:mm', optional: true },
+      { key: 'timeFinish', label: 'Finish time', placeholder: 'HH:mm', optional: true },
+      { key: 'coreTemp', label: 'Core temp (°C)', keyboard: 'decimal-pad' },
+    ],
+  },
+  {
+    value: 'cooling',
+    label: 'Cooling',
+    icon: 'wind',
+    fields: [
+      { key: 'item', label: 'Food item' },
+      { key: 'timeStart', label: 'Start time', placeholder: 'HH:mm', optional: true },
+      { key: 'timeFinish', label: 'Finish time', placeholder: 'HH:mm', optional: true },
+      { key: 'coreTemp', label: 'Core temp (°C)', keyboard: 'decimal-pad' },
+    ],
+  },
+  {
+    value: 'reheating',
+    label: 'Reheating',
+    icon: 'rotate-cw',
+    fields: [
+      { key: 'item', label: 'Food item' },
+      { key: 'timeStart', label: 'Start time', placeholder: 'HH:mm', optional: true },
+      { key: 'timeFinish', label: 'Finish time', placeholder: 'HH:mm', optional: true },
+      { key: 'coreTemp', label: 'Core temp (°C)', keyboard: 'decimal-pad' },
+    ],
+  },
+  {
+    value: 'hotHolding',
+    label: 'Hot holding',
+    icon: 'sun',
+    fields: [
+      { key: 'item', label: 'Food item' },
+      { key: 'coreTemp', label: 'Core temp (°C)', keyboard: 'decimal-pad' },
+      { key: 'timeOfCheck', label: 'Time of check', placeholder: 'HH:mm', optional: true },
+    ],
+  },
+];
+
+function KitchenTempForm() {
+  const colors = useColors();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const moduleColor = '#eab308';
+
+  const [section, setSection] = useState<KitchenSectionKey>('coldFood');
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const sectionDef = KITCHEN_SECTIONS.find((s) => s.value === section)!;
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: async () => {
+      const date = today();
+      const row: Record<string, string> = {};
+      for (const f of sectionDef.fields) row[f.key] = (values[f.key] ?? '').trim();
+
+      // Atomic server-side append — safe even if someone is editing the
+      // diary on the web at the same time.
+      return apiFetch('/api/food-safety/append', {
+        method: 'POST',
+        body: JSON.stringify({ recordDate: date, section, row }),
+      });
+    },
+    onSuccess: async () => {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.invalidateQueries({ queryKey: ['food-safety'] });
+      setValues({});
+      Alert.alert('Logged', 'Temperature record added to today\u2019s diary.', [
+        { text: 'Done', onPress: () => router.back() },
+        { text: 'Log another', style: 'default' },
+      ]);
+    },
+    onError: (err: Error) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', err.message);
+    },
+  });
+
+  const missingRequired = sectionDef.fields.some(
+    (f) => !f.optional && !(values[f.key] ?? '').trim(),
+  );
+
+  return (
+    <ScrollView
+      style={[styles.root, { backgroundColor: colors.background }]}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View
+        style={[
+          styles.moduleBadge,
+          { backgroundColor: moduleColor + '1a', borderColor: moduleColor + '44' },
+        ]}
+      >
+        <Feather name="thermometer" size={14} color={moduleColor} />
+        <Text style={[styles.moduleBadgeText, { color: moduleColor }]}>KitchenTrack</Text>
+      </View>
+
+      {/* Section */}
+      <View style={styles.field}>
+        <Text style={[styles.label, { color: colors.foreground }]}>Record type</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {KITCHEN_SECTIONS.map((s) => (
+              <TouchableOpacity
+                key={s.value}
+                style={[
+                  styles.typeChip,
+                  {
+                    borderColor: section === s.value ? colors.primary : colors.border,
+                    backgroundColor: section === s.value ? colors.primary + '1a' : colors.card,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                  },
+                ]}
+                onPress={() => { setSection(s.value); setValues({}); }}
+              >
+                <Feather
+                  name={s.icon}
+                  size={13}
+                  color={section === s.value ? colors.primary : colors.mutedForeground}
+                />
+                <Text
+                  style={[
+                    styles.typeChipText,
+                    { color: section === s.value ? colors.primary : colors.mutedForeground },
+                  ]}
+                >
+                  {s.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* Fields */}
+      {sectionDef.fields.map((f) => (
+        <View key={f.key} style={styles.field}>
+          <Text style={[styles.label, { color: colors.foreground }]}>
+            {f.label}
+            {f.optional && <Text style={{ color: colors.mutedForeground }}> (optional)</Text>}
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card },
+            ]}
+            value={values[f.key] ?? ''}
+            onChangeText={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+            placeholder={f.placeholder ?? (f.keyboard === 'decimal-pad' ? 'e.g. 4.5' : '')}
+            placeholderTextColor={colors.mutedForeground}
+            keyboardType={f.keyboard ?? 'default'}
+          />
+        </View>
+      ))}
+
+      <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+        <TouchableOpacity
+          style={[
+            styles.submitBtn,
+            { backgroundColor: colors.navy },
+            (isPending || missingRequired) && { opacity: 0.6 },
+          ]}
+          onPress={() => mutate()}
+          disabled={isPending || missingRequired}
+        >
+          {isPending ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <>
+              <Feather name="check" size={18} color="#ffffff" />
+              <Text style={styles.submitText}>Add to today&apos;s diary</Text>
+            </>
+          )}
+        </TouchableOpacity>
+        <Text style={{ fontSize: 12, color: colors.mutedForeground, textAlign: 'center', marginTop: 10, fontFamily: 'Inter_400Regular' }}>
+          Entries are added to today&apos;s temperature diary — the full diary can be reviewed and signed off on the web app.
+        </Text>
       </View>
     </ScrollView>
   );

@@ -31,6 +31,7 @@ export interface UpdateCategoryRequest {
 }
 
 export interface Site {
+  departmentId?: number | null;
   id: number;
   clientId: number;
   name: string;
@@ -42,6 +43,7 @@ export interface Site {
 }
 
 export interface CreateSiteRequest {
+  departmentId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;
@@ -49,6 +51,7 @@ export interface CreateSiteRequest {
 }
 
 export interface UpdateSiteRequest {
+  departmentId?: number | null;
   name?: string;
   responsiblePerson?: string | null;
   address?: string | null;
@@ -376,7 +379,67 @@ export interface FireSafetyStatus {
   status: FireSafetyStatusStatus;
 }
 
+export interface FireSafetyConfig {
+  fire_alarm_zones?: string;
+  fire_extinguisher_points?: string;
+  fire_show_drill?: string;
+  fire_default_performer?: string;
+  fire_escape_routes?: string;
+}
+
+export interface LegionellaConfig {
+  water_non_sentinel_outlets?: string;
+  water_default_performer?: string;
+  water_sentinel_outlets?: string;
+}
+
+export interface BikeTrackConfig {
+  bike_default_deposit_pence?: string;
+  bike_hire_duration_hours?: string;
+  bike_require_helmet?: string;
+}
+
+export interface GreenTrackConfig {
+  green_show_fuel?: string;
+  green_default_operators?: string;
+}
+
+export interface IncidentConfig {
+  incident_departments?: string;
+  incident_default_reporter?: string;
+  incident_show_investigation?: string;
+  incident_locations?: string;
+}
+
+export interface PATTrackConfig {
+  pat_show_earth_bond?: string;
+  pat_show_insulation?: string;
+  pat_default_tester?: string;
+  pat_retest_months?: string;
+  pat_locations?: string;
+}
+
+export interface PoolTrackConfig {
+  pool_name?: string;
+  pool_ph_min?: string;
+  pool_ph_max?: string;
+  pool_free_chlor_min?: string;
+  pool_free_chlor_max?: string;
+  pool_temp_min?: string;
+  pool_temp_max?: string;
+  pool_track_air_temp?: string;
+  pool_default_performer?: string;
+}
+
 export interface FoodSafetyConfig {
+  food_cold_units?: string;
+  food_default_hot_items?: string;
+  food_default_holding_items?: string;
+  food_default_sv_items?: string;
+  food_show_deliveries?: string;
+  food_show_hot_temperature?: string;
+  food_show_hot_holding?: string;
+  food_show_sous_vide?: string;
   food_num_fridges?: string;
   food_num_freezers?: string;
   food_cooking_limit?: string;
@@ -443,12 +506,19 @@ export type LegionellaCheckType =
   (typeof LegionellaCheckType)[keyof typeof LegionellaCheckType];
 
 export const LegionellaCheckType = {
-  cold_water_temp: "cold_water_temp",
-  hot_water_temp: "hot_water_temp",
-  sentinel_flush: "sentinel_flush",
+  calorifier_temp: "calorifier_temp",
+  hot_sentinel_temp: "hot_sentinel_temp",
+  hot_nonsent_temp: "hot_nonsent_temp",
+  cold_tank_temp: "cold_tank_temp",
+  cold_sentinel_temp: "cold_sentinel_temp",
+  cold_nonsent_temp: "cold_nonsent_temp",
+  cold_tank_inspection: "cold_tank_inspection",
+  cold_tank_clean: "cold_tank_clean",
+  calorifier_inspection: "calorifier_inspection",
+  calorifier_clean: "calorifier_clean",
   shower_clean: "shower_clean",
-  tank_inspection: "tank_inspection",
-  risk_assessment: "risk_assessment",
+  tmv_service: "tmv_service",
+  outlet_flush: "outlet_flush",
 } as const;
 
 export type LegionellaCheckResult =

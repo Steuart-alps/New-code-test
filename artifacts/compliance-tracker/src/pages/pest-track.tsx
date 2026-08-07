@@ -25,7 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   Bug, Plus, AlertTriangle, CheckCircle2, Clock, Pencil, Trash2,
-  Lock, Search, Settings, X, CalendarDays, ShieldAlert,
+  Lock, Search, Settings, X, CalendarDays, ShieldAlert, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
@@ -578,6 +578,76 @@ export default function PestTrackPage() {
   const openActivity = activity.filter(a => !a.resolved);
   const today = new Date().toISOString().slice(0, 10);
 
+  // ── Export printable log (for environmental health inspections) ───────────
+
+  const siteName = (id: number | null) =>
+    id == null ? "All sites" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
+
+  const esc = (s: string | null | undefined) =>
+    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const handleExportLog = () => {
+    const sortedVisits = [...visits].sort((a, b) => (a.visit_date < b.visit_date ? 1 : -1));
+    const sortedActivity = [...activity].sort((a, b) => (a.recorded_date < b.recorded_date ? 1 : -1));
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Pest Control Log</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
+  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .empty { font-size: 11px; color: #777; font-style: italic; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Pest Control Log</h1>
+<div class="meta">${esc(user?.name ?? "")} — generated ${format(new Date(), "dd MMM yyyy")} — for environmental health inspection</div>
+<div class="meta">Contractor visits: ${sortedVisits.length} · Activity records: ${sortedActivity.length} (${openActivity.length} unresolved)</div>
+
+<h2>Contractor visits</h2>
+${sortedVisits.length === 0 ? `<p class="empty">No contractor visits recorded.</p>` : `<table>
+<tr><th>Date</th><th>Site</th><th>Contractor</th><th>Areas inspected</th><th>Findings</th><th>Treatments applied</th><th>Recommendations</th><th>Next visit</th><th>Signed off by</th></tr>
+${sortedVisits.map(v => `<tr>
+  <td>${fmt(v.visit_date) ?? esc(v.visit_date)}</td>
+  <td>${esc(siteName(v.site_id))}</td>
+  <td>${esc([v.contractor_name, v.contractor_company].filter(Boolean).join(", "))}</td>
+  <td>${esc(v.areas_inspected)}</td>
+  <td>${esc(v.findings)}</td>
+  <td>${esc(v.treatments_applied)}</td>
+  <td>${esc(v.recommendations)}</td>
+  <td>${fmt(v.next_visit_date) ?? ""}</td>
+  <td>${esc(v.signed_off_by)}</td>
+</tr>`).join("")}
+</table>`}
+
+<h2>Pest activity &amp; sightings</h2>
+${sortedActivity.length === 0 ? `<p class="empty">No pest activity recorded.</p>` : `<table>
+<tr><th>Date</th><th>Site</th><th>Pest</th><th>Evidence</th><th>Location</th><th>Severity</th><th>Action taken</th><th>Recorded by</th><th>Status</th></tr>
+${sortedActivity.map(a => `<tr>
+  <td>${fmt(a.recorded_date) ?? esc(a.recorded_date)}</td>
+  <td>${esc(siteName(a.site_id))}</td>
+  <td>${esc(PEST_TYPE_LABELS[a.pest_type] ?? a.pest_type)}</td>
+  <td>${esc(EVIDENCE_LABELS[a.evidence_type] ?? a.evidence_type)}</td>
+  <td>${esc(a.location)}</td>
+  <td>${esc(SEVERITY_LABELS[a.severity] ?? a.severity)}</td>
+  <td>${esc(a.action_taken)}</td>
+  <td>${esc(a.recorded_by)}</td>
+  <td>${a.resolved ? `Resolved${a.resolved_at ? ` ${fmt(a.resolved_at)}` : ""}` : "Open"}</td>
+</tr>`).join("")}
+</table>`}
+</body></html>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the log.", variant: "destructive" });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  };
+
   // ── Status cards ───────────────────────────────────────────────────────────
 
   const nextVisitOverdue = status?.next_visit_overdue;
@@ -600,6 +670,11 @@ export default function PestTrackPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="rounded-sm gap-1.5 h-8 text-xs"
+              onClick={handleExportLog}
+              title="Print or save the full pest control log for environmental health inspections">
+              <Printer className="w-3.5 h-3.5" /> Export log
+            </Button>
             {canAdmin && (
               <Button variant="outline" size="sm" className="rounded-sm gap-1.5 h-8 text-xs"
                 onClick={() => setConfigDialog(true)}>

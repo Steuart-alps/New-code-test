@@ -79,6 +79,10 @@ export async function runRuntimeMigrations() {
     await db.execute(
       sql`CREATE INDEX IF NOT EXISTS "IDX_food_safety_client_date" ON "food_safety_records" ("client_id", "record_date")`
     );
+    // One diary record per client per day — required for atomic append upserts.
+    await db.execute(
+      sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_food_safety_client_date" ON "food_safety_records" ("client_id", "record_date")`
+    );
 
     // ---- Legionella water safety table ----
     await db.execute(sql`
@@ -424,6 +428,7 @@ async function migrateBikeTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_hire_client" ON "bike_hire_records" ("client_id")`);
+  await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notified_at" timestamp`);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_checks" (
@@ -945,6 +950,16 @@ async function migrateCheckPhotos() {
   `);
 
   // Deduplication log for daily check-reminder emails (one digest per client per day)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "doc_ack_reminder_log" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "sent_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_doc_ack_reminder_client" ON "doc_ack_reminder_log" ("client_id")
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "check_reminder_log" (
       "id"         serial PRIMARY KEY,

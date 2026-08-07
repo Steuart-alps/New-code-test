@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -75,7 +75,7 @@ const weeklyBody = z.object({
   siteId: z.number().int().nullable().optional(),
 });
 
-router.post("/weekly", requireAuth, async (req, res) => {
+router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -109,7 +109,7 @@ router.post("/weekly", requireAuth, async (req, res) => {
 
 // ── Weekly Review: update ─────────────────────────────────────────────────────
 
-router.put("/weekly/:id", requireAuth, async (req, res) => {
+router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -194,7 +194,7 @@ const probeBody = z.object({
   siteId: z.number().int().nullable().optional(),
 });
 
-router.post("/probe", requireAuth, async (req, res) => {
+router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -222,7 +222,7 @@ router.post("/probe", requireAuth, async (req, res) => {
 
 // ── Probe Checks: update ──────────────────────────────────────────────────────
 
-router.put("/probe/:id", requireAuth, async (req, res) => {
+router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

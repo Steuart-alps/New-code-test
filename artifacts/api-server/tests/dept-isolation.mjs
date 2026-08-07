@@ -425,6 +425,33 @@ async function main() {
     );
   }
 
+  // Viewers must be rejected on representative mutations in every module.
+  const viewerMutationAttempts = [
+    ["POST /food-safety", "POST", "/food-safety", { recordDate: uniqueDate(0) }],
+    ["PUT /food-safety/config", "PUT", "/food-safety/config", { food_num_fridges: "2" }],
+    ["POST /incidents", "POST", "/incidents", { siteId: siteAlphaId, incidentDate: uniqueDate(0), description: "x" }],
+    ["POST /hot-tub/tubs", "POST", "/hot-tub/tubs", { name: "Tub" }],
+    ["POST /pat-track/appliances", "POST", "/pat-track/appliances", { name: "Kettle" }],
+    ["POST /pest-track/visits", "POST", "/pest-track/visits", { visitDate: uniqueDate(0) }],
+    ["POST /pool-track", "POST", "/pool-track", { checkDate: uniqueDate(0) }],
+    ["POST /tree-track", "POST", "/tree-track", { checkDate: uniqueDate(0) }],
+    ["POST /bike-track/bikes", "POST", "/bike-track/bikes", { name: "Bike 1" }],
+    ["POST /train-track/records", "POST", "/train-track/records", { staffName: "X", courseName: "Y" }],
+    ["POST /doc-track/documents", "POST", "/doc-track/documents", { title: "Doc" }],
+    ["POST /staff-roster", "POST", "/staff-roster", { name: "Someone" }],
+    ["POST /photos/request-upload", "POST", "/photos/request-upload", { fileName: "a.jpg" }],
+    ["POST /kitchen-cleaning/tasks", "POST", "/kitchen-cleaning/tasks", { name: "Wipe" }],
+    ["POST /swim-track/sessions", "POST", "/swim-track/sessions", { sessionDate: uniqueDate(0) }],
+    ["POST /green-track/pre-use-checks", "POST", "/green-track/pre-use-checks", { checkDate: uniqueDate(0) }],
+    ["POST /daily-track-am", "POST", "/daily-track-am", { recordDate: uniqueDate(0) }],
+    ["POST /fix-track/issues", "POST", "/fix-track/issues", { title: "Leak" }],
+    ["PATCH /compliance-items/:id/status", "PATCH", `/compliance-items/${alphaItem ? alphaItem.id : 0}/status`, { status: "compliant" }],
+    ["POST /storage/uploads/request-url", "POST", "/storage/uploads/request-url", { fileName: "a.pdf" }],
+  ];
+  for (const [label, method, path, body] of viewerMutationAttempts) {
+    expectBlocked(`viewer: ${label} rejected`, (await viewer(method, path, body)).status);
+  }
+
   // ── 9. Admin bypasses all department filtering ────────────────────────────────
   expectOk(
     "admin: GET /sites/:id (alpha)",

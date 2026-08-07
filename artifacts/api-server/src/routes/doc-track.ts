@@ -2,8 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { getObjectAclPolicy } from "../lib/objectAcl";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -65,7 +66,7 @@ router.get("/documents", requireAuth, async (req, res) => {
 
 // ── Create document record ────────────────────────────────────────────────────
 
-router.post("/documents", requireAuth, async (req, res) => {
+router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -74,6 +75,27 @@ router.post("/documents", requireAuth, async (req, res) => {
 
   const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, department } = parsed.data;
   const createdBy = (req.session as any).userId ?? null;
+
+  // Tag the uploaded object with a tenant-scoped ACL so the private object
+  // route (/storage/objects/*) allows this client's users to read it. Without
+  // this, documents uploaded via DocTrack have no ACL policy and downloads get
+  // blocked by the storage security check.
+  //
+  // Security: never re-tag an object that already belongs to another tenant —
+  // otherwise a caller who learns a foreign object path could claim it.
+  try {
+    const file = await storage.getObjectEntityFile(objectPath);
+    const existingAcl = await getObjectAclPolicy(file);
+    if (existingAcl?.owner && existingAcl.owner !== String(clientId)) {
+      return res.status(403).json({ error: "Object does not belong to this account" });
+    }
+    await storage.trySetObjectEntityAclPolicy(objectPath, {
+      owner: String(clientId),
+      visibility: "private",
+    });
+  } catch (err) {
+    req.log.warn({ err, objectPath }, "Could not set ACL policy on DocTrack upload");
+  }
 
   const result = await db.execute(sql`
     INSERT INTO doc_track_documents
@@ -92,7 +114,7 @@ router.post("/documents", requireAuth, async (req, res) => {
 
 // ── Update document metadata ───────────────────────────────────────────────────
 
-router.patch("/documents/:id", requireAuth, async (req, res) => {
+router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -134,7 +156,7 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
 
 // ── Delete document ───────────────────────────────────────────────────────────
 
-router.delete("/documents/:id", requireAuth, async (req, res) => {
+router.delete("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -176,6 +198,58 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
   res.json(result.rows ?? []);
 });
 
+// ── Outstanding acknowledgements overview (managers) ────────────────────────
+// For every document that requires acknowledgement, list the roster staff who
+// have NOT yet acknowledged it.
+router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const docsResult = await db.execute(sql`
+    SELECT d.id, d.title, d.category, d.department, d.created_at
+    FROM doc_track_documents d
+    WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+    ORDER BY d.title ASC
+  `);
+  const docs = (docsResult.rows ?? []) as any[];
+  if (docs.length === 0) return res.json({ documents: [] });
+
+  const staffResult = await db.execute(sql`
+    SELECT id, (first_name || ' ' || last_name) AS name, department FROM staff_roster
+    WHERE client_id = ${clientId} AND active = true
+    ORDER BY first_name ASC, last_name ASC
+  `);
+  const staff = (staffResult.rows ?? []) as any[];
+
+  const acksResult = await db.execute(sql`
+    SELECT document_id, staff_roster_id, staff_name, acknowledged_at, signature
+    FROM doc_acknowledgements
+    WHERE client_id = ${clientId}
+  `);
+  const ackRows = (acksResult.rows ?? []) as any[];
+  const acked = new Set(ackRows.map((r) => `${r.document_id}:${r.staff_roster_id}`));
+
+  const documents = docs.map((d) => {
+    // Documents scoped to a department only need acknowledgement from that department.
+    const relevant = d.department ? staff.filter((s) => s.department === d.department) : staff;
+    const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
+    return {
+      id: d.id,
+      title: d.title,
+      category: d.category,
+      department: d.department,
+      staffTotal: relevant.length,
+      acknowledgedCount: relevant.length - outstanding.length,
+      outstanding: outstanding.map((s) => ({ id: s.id, name: s.name, department: s.department })),
+      acknowledged: ackRows
+        .filter((r) => r.document_id === d.id)
+        .map((r) => ({ name: r.staff_name, acknowledgedAt: r.acknowledged_at, signed: !!r.signature })),
+    };
+  });
+
+  res.json({ documents });
+});
+
 // ── Record acknowledgements ───────────────────────────────────────────────────
 
 const ackCreate = z.object({
@@ -186,7 +260,7 @@ const ackCreate = z.object({
   })).min(1),
 });
 
-router.post("/documents/:id/acknowledge", requireAuth, async (req, res) => {
+router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -265,7 +339,7 @@ router.get("/sign-off-info", requireAuth, async (req, res) => {
 
 // ── Request presigned upload URL ──────────────────────────────────────────────
 
-router.post("/documents/request-upload", requireAuth, async (req, res) => {
+router.post("/documents/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 

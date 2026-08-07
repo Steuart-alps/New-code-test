@@ -13,3 +13,4 @@
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.
 - [Viewer role enforcement](viewer-role-enforcement.md) — client_viewer is only read-only if mutation routes mount denyViewers; requireAuth alone lets viewers write.
 - [API server type patterns](api-server-type-patterns.md) — req.params typed string|string[], db.execute returns QueryResult (use .rows), noImplicitReturns disabled, dynamic import TDZ pitfall.
+- [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
