@@ -12,6 +12,16 @@ type View = "login" | "totp" | "forgot" | "forgot-sent";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
+const DEMO_ACCOUNTS = [
+  { email: "consultant@demo.complytrack.app", label: "Consultant",           desc: "Manages multiple clients" },
+  { email: "admin@demo.complytrack.app",      label: "Client Admin",          desc: "Full account control" },
+  { email: "staff@demo.complytrack.app",      label: "Staff Member",          desc: "Day-to-day compliance" },
+  { email: "viewer@demo.complytrack.app",     label: "Viewer",               desc: "Read-only access" },
+  { email: "maintenance@demo.complytrack.app",label: "Maintenance Manager",  desc: "FixTrack full access" },
+] as const;
+
+const DEMO_PASSWORD = "Demo1234!";
+
 export default function LoginPage() {
   const { login, refresh } = useAuth();
   const [, navigate] = useLocation();
@@ -22,6 +32,19 @@ export default function LoginPage() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState<string | null>(null);
+
+  async function tryDemo(demoEmail: string) {
+    setDemoLoading(demoEmail);
+    setError("");
+    try {
+      await login(demoEmail, DEMO_PASSWORD);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Demo login failed");
+    } finally {
+      setDemoLoading(null);
+    }
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -164,6 +187,37 @@ export default function LoginPage() {
                       {loading ? "Signing in..." : "Sign in"}
                     </Button>
                   </form>
+
+                  {/* Demo accounts */}
+                  <div className="mt-8">
+                    <div className="relative flex items-center gap-3 mb-4">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">or try a demo account</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      {DEMO_ACCOUNTS.map(acct => (
+                        <button
+                          key={acct.email}
+                          type="button"
+                          onClick={() => tryDemo(acct.email)}
+                          disabled={!!demoLoading}
+                          className="flex items-center justify-between w-full px-4 py-2.5 rounded-[2px] border border-border/60 bg-[#F7F2E4]/30 hover:bg-[#F7F2E4]/80 hover:border-[#162D42]/30 transition-all text-left group disabled:opacity-50"
+                        >
+                          <div>
+                            <div className="text-sm font-medium text-[#162D42]">{acct.label}</div>
+                            <div className="text-xs text-muted-foreground">{acct.desc}</div>
+                          </div>
+                          <span className="text-xs text-muted-foreground group-hover:text-[#162D42] transition-colors flex-shrink-0 ml-2">
+                            {demoLoading === acct.email ? "Signing in…" : "Try →"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-center text-xs text-muted-foreground/50 mt-3">
+                      Password for all demo accounts: <span className="font-mono">{DEMO_PASSWORD}</span>
+                    </p>
+                  </div>
                 </motion.div>
               )}
 
