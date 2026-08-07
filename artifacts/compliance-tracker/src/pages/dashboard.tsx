@@ -22,6 +22,16 @@ import { cn } from "@/lib/utils";
 
 type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
 
+function pillCardCls(pillCls: string) {
+  if (pillCls.includes("red") || pillCls.includes("rose"))
+    return "border-l-4 border-l-rose-500 bg-rose-50/70";
+  if (pillCls.includes("amber"))
+    return "border-l-4 border-l-amber-400 bg-amber-50/70";
+  if (pillCls.includes("emerald"))
+    return "border-l-4 border-l-emerald-500 bg-emerald-50/70";
+  return "";
+}
+
 function statusPill(overdue: number, dueSoon: number, ok: number, never: number) {
   if (overdue > 0) return { label: `${overdue} overdue`, cls: "bg-red-100 text-red-700" };
   if (dueSoon > 0) return { label: `${dueSoon} due soon`, cls: "bg-amber-100 text-amber-700" };
@@ -68,7 +78,7 @@ function FireTrackCard() {
 
   return (
     <Link href="/fire-safety">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -101,7 +111,7 @@ function LegionellaTrackCard() {
 
   return (
     <Link href="/legionella">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -144,7 +154,7 @@ function KitchenTrackCard() {
 
   return (
     <Link href="/kitchen">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -205,7 +215,7 @@ function SafeTrackCard() {
 
   return (
     <Link href="/safe-track">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -259,7 +269,7 @@ function FixTrackCard() {
 
   return (
     <Link href="/fix-track">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -309,7 +319,7 @@ function PoolTrackCard() {
 
   return (
     <Link href="/pool-track">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -348,7 +358,7 @@ function PATTrackCard() {
 
   return (
     <Link href="/pat-track">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -404,7 +414,7 @@ function PestTrackCard() {
 
   return (
     <Link href="/pest-track">
-      <Card className="shadow-lg shadow-black/5 border-border/50 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full">
+      <Card className={cn("shadow-lg shadow-black/5 hover:-translate-y-1 transition-transform duration-300 cursor-pointer hover:shadow-xl h-full", pillCardCls(pill.cls) || "border-border/50")}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
