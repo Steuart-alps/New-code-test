@@ -321,7 +321,8 @@ function RecordCheckDialog({
   const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
   const [temperature, setTemperature] = useState("");
   const [location, setLocation] = useState("");
-  const [performedBy, setPerformedBy] = useState("");
+  const { user } = useAuth();
+  const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
 
@@ -361,7 +362,7 @@ function RecordCheckDialog({
           setOpen(false);
           setTemperature("");
           setLocation("");
-          setPerformedBy("");
+          setPerformedBy(user?.name ?? "");
           setNotes("");
           setCheckDate(format(new Date(), "yyyy-MM-dd"));
         },

@@ -364,8 +364,9 @@ function NewHireDialog({
   const [depositPence, setDepositPence] = useState("");
 
   // Step 3 — pre-hire checklist
+  const { user } = useAuth();
   const [checkItems, setCheckItems] = useState(emptyCheckItems());
-  const [performedBy, setPerformedBy] = useState("");
+  const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [checkNotes, setCheckNotes] = useState("");
   const [skipCheck, setSkipCheck] = useState(false);
 
@@ -598,8 +599,9 @@ function ReturnDialog({
   onReturned: () => void;
 }) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [checkItems, setCheckItems] = useState(emptyCheckItems());
-  const [performedBy, setPerformedBy] = useState("");
+  const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [checkNotes, setCheckNotes] = useState("");
   const [skipCheck, setSkipCheck] = useState(false);
   const [depositReturned, setDepositReturned] = useState(false);

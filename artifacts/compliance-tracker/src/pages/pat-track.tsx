@@ -1046,6 +1046,7 @@ interface TestDialogProps {
 function TestDialog({ test, appliances, onSaved, onClose, open, config, presetApplianceId }: TestDialogProps) {
   const isEdit = !!test;
   const { toast } = useToast();
+  const { user } = useAuth();
   const [saving, setSaving] = useState(false);
 
   const retestMonths = parseInt(config?.pat_retest_months ?? "12", 10) || 12;
@@ -1063,7 +1064,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
   const blank = {
     applianceId: presetApplianceId ? String(presetApplianceId) : "",
     testDate: todayIso(), result: "pass", nextTestDate: computeNextDate(todayIso()),
-    testedBy: config?.pat_default_tester ?? "",
+    testedBy: config?.pat_default_tester || user?.name || "",
     visualInspection: "pass", earthContinuityOhms: "", insulationMohms: "",
     operatingCurrent: "", notes: "",
   };
@@ -1077,7 +1078,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
     insulationMohms: test.insulation_mohms ?? "",
     operatingCurrent: test.operating_current ?? "",
     notes: test.notes ?? "",
-  } : { ...blank, applianceId: presetApplianceId ? String(presetApplianceId) : "", testedBy: config?.pat_default_tester ?? "" });
+  } : { ...blank, applianceId: presetApplianceId ? String(presetApplianceId) : "", testedBy: config?.pat_default_tester || user?.name || "" });
 
   useEffect(() => { if (open) reset(); }, [open, config]);
 

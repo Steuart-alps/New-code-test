@@ -211,7 +211,7 @@ const emptyForm = () => ({
 
 export default function HotTubPage() {
   const { toast } = useToast();
-  const { activeClientId, hasService } = useAuth();
+  const { activeClientId, hasService, user } = useAuth();
   const canAdmin = useCanAdmin();
   const qc = useQueryClient();
   const hasHotTub = hasService("hottubtrack");
@@ -297,7 +297,7 @@ export default function HotTubPage() {
 
   function openAdd() {
     setEditItem(null);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
     setShowDialog(true);
   }
 

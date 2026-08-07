@@ -421,7 +421,8 @@ function RecordCheckDialog({
   const [checkDate, setCheckDate] = useState(todayIso());
   const [result, setResult] = useState<"pass" | "fail">("pass");
   const [location, setLocation] = useState("");
-  const [performedBy, setPerformedBy] = useState("");
+  const { user } = useAuth();
+  const [performedBy, setPerformedBy] = useState(user?.name ?? "");
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
 
@@ -487,7 +488,7 @@ function RecordCheckDialog({
   }
 
   function reset() {
-    setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(""); setNotes("");
+    setCheckDate(todayIso()); setResult("pass"); setLocation(""); setPerformedBy(user?.name ?? ""); setNotes("");
     setRoutes([]); setPanelStatus("normal"); setFaultsFound(""); setZonesTested(""); setActionsTaken("");
   }
 

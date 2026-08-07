@@ -185,15 +185,16 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     ? templateItems.map(i => ({ ...i, checked: false }))
     : (TEMPLATES[type] ?? []);
 
+  const { user } = useAuth();
   const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
-  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? "");
+  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
   const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
   const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
 
   useEffect(() => {
     setItems(existing?.items ?? effectiveDefault);
-    setCompletedBy(existing?.completedBy ?? "");
+    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
     setManagerNote(existing?.managerNote ?? "");
   }, [existing, type, templateItems]);
 

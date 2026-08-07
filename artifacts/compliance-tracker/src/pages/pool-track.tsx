@@ -328,6 +328,7 @@ function RecordDialog({
   defaultCheckType?: string;
 }) {
   const isEdit = !!existing;
+  const { user } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = (v: boolean) => {
@@ -350,7 +351,7 @@ function RecordDialog({
   const [airTemp, setAirTemp] = useState(existing?.air_temp_c ?? "");
   const [turbidity, setTurbidity] = useState<string>(existing?.turbidity ?? "clear");
   const [poolOpen, setPoolOpen] = useState(existing?.pool_open ?? true);
-  const [performedBy, setPerformedBy] = useState(existing?.performed_by ?? "");
+  const [performedBy, setPerformedBy] = useState(existing?.performed_by ?? user?.name ?? "");
   const [actionsTaken, setActionsTaken] = useState(existing?.actions_taken ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [overrideResult, setOverrideResult] = useState<string | null>(null);
