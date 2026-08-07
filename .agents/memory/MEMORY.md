@@ -16,4 +16,5 @@
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
+- [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
 - [Food-safety site scoping](foodsafety-site-scoping.md) — site.<id>.* app_settings overrides + nullable site_id diary with partial unique indexes; site saves must diff, not dump.
