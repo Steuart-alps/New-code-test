@@ -84,7 +84,7 @@ function StaffDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? "Edit Staff Member" : "Add Staff Member"}</DialogTitle>
         </DialogHeader>
@@ -259,7 +259,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !importing) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Upload className="w-4 h-4" /> Bulk Import Staff</DialogTitle>
         </DialogHeader>

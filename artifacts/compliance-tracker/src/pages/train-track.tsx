@@ -703,7 +703,7 @@ export default function TrainTrackPage() {
 
       {/* ── ADD / EDIT DIALOG ── */}
       <Dialog open={showDialog} onOpenChange={v => { if (!saving) setShowDialog(v); }}>
-        <DialogContent className="max-w-lg rounded-sm">
+        <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editRecord

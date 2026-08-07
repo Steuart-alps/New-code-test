@@ -594,7 +594,7 @@ export default function TreeTrackPage() {
 
       {/* Add/Edit dialog */}
       <Dialog open={showDialog} onOpenChange={v => { if (!saving) setShowDialog(v); }}>
-        <DialogContent className="max-w-lg rounded-sm">
+        <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editItem ? "Edit Inspection Record" : "Record Tree Inspection"}</DialogTitle>
           </DialogHeader>

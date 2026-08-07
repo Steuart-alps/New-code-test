@@ -558,7 +558,7 @@ function UploadDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !uploading) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="w-4 h-4" /> Upload Document

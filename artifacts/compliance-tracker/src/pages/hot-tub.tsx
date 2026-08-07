@@ -688,7 +688,7 @@ export default function HotTubPage() {
 
       {/* Add/Edit dialog */}
       <Dialog open={showDialog} onOpenChange={v => { if (!saving) setShowDialog(v); }}>
-        <DialogContent className="max-w-lg rounded-sm">
+        <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editItem ? "Edit Record" : "Record Tub / Spa Check"}</DialogTitle>
           </DialogHeader>
@@ -987,7 +987,7 @@ function ManageTubsDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) { setAdding(false); onClose(); } }}>
-      <DialogContent className="max-w-lg rounded-sm">
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Waves className="w-4 h-4 text-cyan-600" /> Manage Hot Tubs & Spas

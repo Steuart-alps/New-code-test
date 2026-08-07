@@ -213,7 +213,7 @@ export default function SitesPage() {
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">{editingId ? "Edit Site" : "Add Site"}</DialogTitle>
           </DialogHeader>

@@ -927,7 +927,7 @@ export default function FixTrackPage() {
 
       {/* Re-notify confirmation dialog */}
       <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>
-        <DialogContent className="sm:max-w-[420px]">
+        <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Already sent — send again?</DialogTitle>
           </DialogHeader>

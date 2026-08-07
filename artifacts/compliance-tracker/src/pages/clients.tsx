@@ -85,7 +85,7 @@ function ClientDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{client ? "Edit Client" : "Add Client"}</DialogTitle>
         </DialogHeader>

@@ -112,7 +112,7 @@ function GreenConfigDialog() {
           Template
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>GreenTrack Template</DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">Configure defaults for pre-use checks.</p>
@@ -429,7 +429,7 @@ function MachineDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) { onClose(); } }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Machine" : "Add Machine to Fleet"}</DialogTitle>
         </DialogHeader>
@@ -590,7 +590,7 @@ function PreUseDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{check ? "Edit Pre-use Check" : "Record Pre-use Check"}</DialogTitle>
         </DialogHeader>
@@ -724,7 +724,7 @@ function ServiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{record ? "Edit Service Record" : "Log Service"}</DialogTitle>
         </DialogHeader>
@@ -860,7 +860,7 @@ function DefectDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{defect ? "Update Defect Report" : "Report a Defect"}</DialogTitle>
         </DialogHeader>
@@ -1023,7 +1023,7 @@ function PuwerDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{inspection ? "Edit Inspection Record" : "Log PUWER Inspection"}</DialogTitle>
         </DialogHeader>
@@ -1157,7 +1157,7 @@ function FuelLogDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{log ? "Edit Fuel / Oil Log" : "Log Fuel / Oil"}</DialogTitle>
         </DialogHeader>

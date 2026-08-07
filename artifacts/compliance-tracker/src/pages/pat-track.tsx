@@ -401,7 +401,7 @@ function PATConfigDialog() {
           <Settings className="w-3.5 h-3.5" /> Template
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-lg rounded-sm">
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="w-4 h-4" /> PATtrack Template Settings
@@ -556,7 +556,7 @@ function ApplianceDialog({ appliance, onSaved, onClose, open, sites, config }: A
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Appliance" : "Add Appliance"}</DialogTitle>
         </DialogHeader>
@@ -809,7 +809,7 @@ function PresetDialog({ open, onClose, onSaved, sites, config, businessType }: {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
-      <DialogContent className="max-w-2xl rounded-sm">
+      <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Library className="w-4 h-4" />
@@ -1121,7 +1121,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-yellow-600" />

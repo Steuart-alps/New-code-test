@@ -332,7 +332,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm">
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4" />
@@ -450,7 +450,7 @@ function ConfigDialog({ open, onClose, config, onSaved }: {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving && !v) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm">
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="w-4 h-4" />

@@ -299,7 +299,7 @@ function BikeConfigDialog() {
           Template
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>BikeTrack Template</DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">Configure defaults for new bike hire records.</p>
@@ -433,7 +433,7 @@ function NewHireDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !saving) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-lg rounded-sm">
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Bike className="w-4 h-4 text-primary" />
@@ -648,7 +648,7 @@ function ReturnDialog({
 
   return (
     <Dialog open={!!hire} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm">
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RotateCcw className="w-4 h-4 text-primary" /> Return Bike
@@ -779,7 +779,7 @@ function BikeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm">
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{bike ? "Edit Bike" : "Add Bike"}</DialogTitle>
         </DialogHeader>
@@ -909,7 +909,7 @@ function LogServiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm">
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wrench className="w-4 h-4 text-primary" />

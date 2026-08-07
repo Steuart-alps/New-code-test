@@ -381,7 +381,7 @@ function RecordCheckDialog({
           Record Check
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display">Record Legionella Check</DialogTitle>
         </DialogHeader>
@@ -529,7 +529,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm"><Pencil className="w-3.5 h-3.5" /></Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display">Edit Check</DialogTitle>
         </DialogHeader>
