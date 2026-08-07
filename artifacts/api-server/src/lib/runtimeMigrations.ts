@@ -303,6 +303,26 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" timestamp`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_check_date" timestamp`);
 
+    // Deduplication log for contractor compliance-expiry reminders. One row per
+    // (client, contractor, milestone), where milestone encodes the reminder
+    // target it was sent for (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
+    // so a fresh expiry/renewal date produces a new milestone and re-alerts,
+    // while the same milestone is never re-sent.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "contractor_compliance_reminder_log" (
+        "id"            serial PRIMARY KEY,
+        "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "contractor_id" integer NOT NULL REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "milestone"     text NOT NULL,
+        "sent_at"       timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("client_id", "contractor_id", "milestone")
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_contractor_compliance_reminder_client"
+      ON "contractor_compliance_reminder_log" ("client_id")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

@@ -526,6 +526,27 @@ const KITCHEN_SECTIONS: {
   },
 ];
 
+// Map each mobile diary section to the config visibility key that controls it.
+// Cooling/reheating fall back to the grouped hot-temperature toggle for
+// templates saved before they became independent sections (matches web).
+const SECTION_SHOW_KEY: Record<
+  KitchenSectionKey,
+  { key: string; fallbackKey?: string }
+> = {
+  deliveries: { key: 'food_show_deliveries' },
+  coldFood: { key: 'food_show_cold_food' },
+  hotTemperature: { key: 'food_show_hot_temperature' },
+  cooling: { key: 'food_show_cooling', fallbackKey: 'food_show_hot_temperature' },
+  reheating: { key: 'food_show_reheating', fallbackKey: 'food_show_hot_temperature' },
+  hotHolding: { key: 'food_show_hot_holding' },
+};
+
+// Build the ?siteId=N query string for a diary scope. null → whole-org diary
+// (no param), matching the original single-diary behaviour byte-for-byte.
+function siteQuery(siteId: number | null): string {
+  return siteId != null ? `?siteId=${siteId}` : '';
+}
+
 function KitchenTempForm() {
   const colors = useColors();
   const router = useRouter();
@@ -534,8 +555,42 @@ function KitchenTempForm() {
 
   const [section, setSection] = useState<KitchenSectionKey>('coldFood');
   const [values, setValues] = useState<Record<string, string>>({});
+  // Which site's diary we're filling. null = "All sites" = the whole-org diary
+  // (records with no site), matching the original single-diary behaviour.
+  const [siteId, setSiteId] = useState<number | null>(null);
 
-  const sectionDef = KITCHEN_SECTIONS.find((s) => s.value === section)!;
+  const { data: sites = [] } = useQuery<Site[]>({
+    queryKey: ['sites'],
+    queryFn: () => apiFetch('/api/sites'),
+  });
+
+  // The diary is scoped to the selected site: it loads that site's effective
+  // config (defaults ← client ← site) AND that site's records. When no site is
+  // chosen, both fall back to the whole-organisation diary. Query keys are
+  // scoped by site so switching sites reads/writes independent caches.
+  const { data: config } = useQuery<Record<string, string>>({
+    queryKey: ['food-safety', 'config', siteId],
+    queryFn: () => apiFetch(`/api/food-safety/config${siteQuery(siteId)}`),
+  });
+  useQuery<unknown>({
+    queryKey: ['food-safety', 'records', siteId],
+    queryFn: () => apiFetch(`/api/food-safety${siteQuery(siteId)}`),
+  });
+
+  // Sections the selected site's template keeps enabled. A section shows unless
+  // its visibility key is explicitly "false" (default on).
+  const visibleSections = KITCHEN_SECTIONS.filter((s) => {
+    const { key, fallbackKey } = SECTION_SHOW_KEY[s.value];
+    const raw = config?.[key] ?? (fallbackKey ? config?.[fallbackKey] : undefined);
+    return raw !== 'false';
+  });
+
+  // If the current section gets hidden after switching site, fall back to the
+  // first visible one so the form always targets a live section.
+  const sectionDef =
+    visibleSections.find((s) => s.value === section) ??
+    visibleSections[0] ??
+    KITCHEN_SECTIONS.find((s) => s.value === section)!;
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
@@ -544,10 +599,11 @@ function KitchenTempForm() {
       for (const f of sectionDef.fields) row[f.key] = (values[f.key] ?? '').trim();
 
       // Atomic server-side append — safe even if someone is editing the
-      // diary on the web at the same time.
-      return apiFetch('/api/food-safety/append', {
+      // diary on the web at the same time. siteId scopes the row to the
+      // selected site's diary (absent = whole-org).
+      return apiFetch(`/api/food-safety/append${siteQuery(siteId)}`, {
         method: 'POST',
-        body: JSON.stringify({ recordDate: date, section, row }),
+        body: JSON.stringify({ recordDate: date, section: sectionDef.value, row }),
       });
     },
     onSuccess: async () => {
@@ -585,19 +641,61 @@ function KitchenTempForm() {
         <Text style={[styles.moduleBadgeText, { color: moduleColor }]}>KitchenTrack</Text>
       </View>
 
+      {/* Site */}
+      {sites.length > 0 && (
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.foreground }]}>Site</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                style={[
+                  styles.typeChip,
+                  {
+                    borderColor: siteId === null ? colors.primary : colors.border,
+                    backgroundColor: siteId === null ? colors.primary + '1a' : colors.card,
+                  },
+                ]}
+                onPress={() => { setSiteId(null); setValues({}); }}
+              >
+                <Text style={[styles.typeChipText, { color: siteId === null ? colors.primary : colors.mutedForeground }]}>
+                  All sites
+                </Text>
+              </TouchableOpacity>
+              {sites.map((s) => (
+                <TouchableOpacity
+                  key={s.id}
+                  style={[
+                    styles.typeChip,
+                    {
+                      borderColor: siteId === s.id ? colors.primary : colors.border,
+                      backgroundColor: siteId === s.id ? colors.primary + '1a' : colors.card,
+                    },
+                  ]}
+                  onPress={() => { setSiteId(s.id); setValues({}); }}
+                >
+                  <Text style={[styles.typeChipText, { color: siteId === s.id ? colors.primary : colors.mutedForeground }]}>
+                    {s.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      )}
+
       {/* Section */}
       <View style={styles.field}>
         <Text style={[styles.label, { color: colors.foreground }]}>Record type</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            {KITCHEN_SECTIONS.map((s) => (
+            {visibleSections.map((s) => (
               <TouchableOpacity
                 key={s.value}
                 style={[
                   styles.typeChip,
                   {
-                    borderColor: section === s.value ? colors.primary : colors.border,
-                    backgroundColor: section === s.value ? colors.primary + '1a' : colors.card,
+                    borderColor: sectionDef.value === s.value ? colors.primary : colors.border,
+                    backgroundColor: sectionDef.value === s.value ? colors.primary + '1a' : colors.card,
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 6,
@@ -608,12 +706,12 @@ function KitchenTempForm() {
                 <Feather
                   name={s.icon}
                   size={13}
-                  color={section === s.value ? colors.primary : colors.mutedForeground}
+                  color={sectionDef.value === s.value ? colors.primary : colors.mutedForeground}
                 />
                 <Text
                   style={[
                     styles.typeChipText,
-                    { color: section === s.value ? colors.primary : colors.mutedForeground },
+                    { color: sectionDef.value === s.value ? colors.primary : colors.mutedForeground },
                   ]}
                 >
                   {s.label}

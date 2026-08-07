@@ -12,6 +12,7 @@ import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
+import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -63,6 +64,19 @@ function startScheduler() {
     }
   });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
+
+  // Alert managers when contractor insurance is expiring/expired or a DBS
+  // check is out of date (daily at 08:55; each contractor+milestone once).
+  cron.schedule("55 8 * * *", async () => {
+    logger.info("Running contractor compliance reminder job...");
+    try {
+      const result = await runContractorComplianceReminderJob();
+      logger.info({ result }, "Contractor compliance reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "Contractor compliance reminder job failed");
+    }
+  });
+  logger.info("Contractor compliance reminder scheduler started (daily at 08:55)");
 
   // Reconcile Stripe subscription quantities daily so any billing drift from
   // missed webhooks or transient Stripe failures self-heals.
