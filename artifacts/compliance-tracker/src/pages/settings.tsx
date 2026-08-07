@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
 interface DomainRecord {
   record?: string;
@@ -90,6 +91,7 @@ function DepartmentsCard() {
   const [newName, setNewName] = useState("");
 
   const [busy, setBusy] = useState(false);
+  const [deptToDelete, setDeptToDelete] = useState<{ id: number; name: string } | null>(null);
 
   const refresh = async () => {
     try {
@@ -151,11 +153,12 @@ function DepartmentsCard() {
     }
   };
 
-  const deleteDept = async (id: number, name: string) => {
-    if (!confirm(`Delete "${name}"? Users and sites assigned to it will become unassigned.`)) return;
+  const confirmDeleteDept = async () => {
+    if (!deptToDelete) return;
     setBusy(true);
     try {
-      await apiFetch(`/departments/${id}`, { method: "DELETE" });
+      await apiFetch(`/departments/${deptToDelete.id}`, { method: "DELETE" });
+      setDeptToDelete(null);
       await refresh();
     } catch (err: any) {
       toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
@@ -188,7 +191,12 @@ function DepartmentsCard() {
     }
   };
 
+  const deleteAffectedUsers = deptToDelete ? users.filter(u => u.departmentId === deptToDelete.id) : [];
+  const deleteAffectedSites = deptToDelete ? sites.filter(s => s.departmentId === deptToDelete.id) : [];
+  const deleteHasAssignments = deleteAffectedUsers.length > 0 || deleteAffectedSites.length > 0;
+
   return (
+    <>
     <Card className="shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
@@ -284,7 +292,7 @@ function DepartmentsCard() {
                           size="sm" variant="ghost"
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                           title="Delete"
-                          onClick={() => deleteDept(dept.id, dept.name)}
+                          onClick={() => setDeptToDelete({ id: dept.id, name: dept.name })}
                           disabled={busy}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -420,6 +428,79 @@ function DepartmentsCard() {
         )}
       </CardContent>
     </Card>
+
+    {/* Delete department confirmation dialog */}
+    <Dialog open={!!deptToDelete} onOpenChange={(open) => { if (!open) setDeptToDelete(null); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="w-4 h-4 text-destructive" />
+            Delete "{deptToDelete?.name}"?
+          </DialogTitle>
+          {deleteHasAssignments ? (
+            <DialogDescription asChild>
+              <div className="mt-2 space-y-2">
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                  <span>
+                    Deleting this department will <strong>unassign</strong> the following — they won't be deleted, but will lose their department association.
+                  </span>
+                </div>
+                {deleteAffectedUsers.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                      Staff ({deleteAffectedUsers.length})
+                    </p>
+                    <ul className="space-y-0.5">
+                      {deleteAffectedUsers.slice(0, 5).map((u) => (
+                        <li key={u.id} className="text-sm text-foreground flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                          {u.name || u.email}
+                        </li>
+                      ))}
+                      {deleteAffectedUsers.length > 5 && (
+                        <li className="text-xs text-muted-foreground pl-3">+{deleteAffectedUsers.length - 5} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+                {deleteAffectedSites.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                      Sites ({deleteAffectedSites.length})
+                    </p>
+                    <ul className="space-y-0.5">
+                      {deleteAffectedSites.slice(0, 5).map((s) => (
+                        <li key={s.id} className="text-sm text-foreground flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                          {s.name}
+                        </li>
+                      ))}
+                      {deleteAffectedSites.length > 5 && (
+                        <li className="text-xs text-muted-foreground pl-3">+{deleteAffectedSites.length - 5} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </DialogDescription>
+          ) : (
+            <DialogDescription className="text-sm text-muted-foreground mt-1">
+              This department has no members or sites assigned. It will be permanently removed.
+            </DialogDescription>
+          )}
+        </DialogHeader>
+        <DialogFooter className="gap-2 mt-2">
+          <Button variant="outline" onClick={() => setDeptToDelete(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={confirmDeleteDept} disabled={busy}>
+            {busy ? "Deleting…" : "Delete Department"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

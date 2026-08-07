@@ -33,7 +33,6 @@ export interface UpdateCategoryRequest {
 export interface Site {
   id: number;
   clientId: number;
-  departmentId?: number | null;
   name: string;
   responsiblePerson?: string | null;
   address?: string | null;
@@ -44,7 +43,6 @@ export interface Site {
 
 export interface CreateSiteRequest {
   name: string;
-  departmentId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
@@ -52,28 +50,9 @@ export interface CreateSiteRequest {
 
 export interface UpdateSiteRequest {
   name?: string;
-  departmentId?: number | null;
   responsiblePerson?: string | null;
   address?: string | null;
   phone?: string | null;
-}
-
-export interface Department {
-  id: number;
-  clientId: number;
-  name: string;
-  description?: string | null;
-  createdAt: string;
-}
-
-export interface CreateDepartmentRequest {
-  name: string;
-  description?: string | null;
-}
-
-export interface UpdateDepartmentRequest {
-  name?: string;
-  description?: string | null;
 }
 
 export interface Contractor {
@@ -319,8 +298,6 @@ export const FireCheckType = {
   extinguishers: "extinguishers",
   fire_doors: "fire_doors",
   fire_drill: "fire_drill",
-  fire_walk: "fire_walk",
-  alarm_panel: "alarm_panel",
 } as const;
 
 export type FireSafetyCheckResult =
@@ -394,6 +371,7 @@ export interface FireSafetyStatus {
   checkType: FireCheckType;
   frequencyDays: number;
   lastDate?: string | null;
+  lastResult?: string | null;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
 }
@@ -405,18 +383,6 @@ export interface FoodSafetyConfig {
   food_cooling_limit?: string;
   food_reheating_limit?: string;
   food_hot_holding_limit?: string;
-  /** JSON-encoded [{name:string, type:"fridge"|"freezer"}] */
-  food_cold_units?: string;
-  /** JSON-encoded string[] — default items for hot temperature rows */
-  food_default_hot_items?: string;
-  /** JSON-encoded string[] — default items for hot holding rows */
-  food_default_holding_items?: string;
-  /** JSON-encoded string[] — default items for sous vide rows */
-  food_default_sv_items?: string;
-  food_show_deliveries?: string;
-  food_show_hot_temperature?: string;
-  food_show_hot_holding?: string;
-  food_show_sous_vide?: string;
 }
 
 export interface FoodSafetyRecordSummary {
@@ -433,7 +399,6 @@ export interface FoodSafetyRecord {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
-  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;
@@ -451,7 +416,6 @@ export interface CreateFoodSafetyRecordRequest {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
-  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;
@@ -466,7 +430,6 @@ export interface UpdateFoodSafetyRecordRequest {
   coldFood?: unknown[];
   hotTemperature?: unknown[];
   hotHolding?: unknown[];
-  sousVide?: unknown[];
   cookingLimit?: string;
   coolingLimit?: string;
   reheatingLimit?: string;
@@ -476,73 +439,99 @@ export interface UpdateFoodSafetyRecordRequest {
   submittedAt?: string | null;
 }
 
-export interface FireSafetyConfig {
-  /** JSON: [{name:string, location:string}] */
-  fire_escape_routes?: string;
-  /** JSON: string[] */
-  fire_alarm_zones?: string;
-  /** JSON: string[] */
-  fire_extinguisher_points?: string;
-  fire_show_drill?: string;
-  fire_default_performer?: string;
-}
-export type UpdateFireSafetyConfig200 = { ok: boolean };
+export type LegionellaCheckType =
+  (typeof LegionellaCheckType)[keyof typeof LegionellaCheckType];
 
-export interface LegionellaConfig {
-  /** JSON: [{name:string, type:"hot"|"cold", location?:string}] */
-  water_sentinel_outlets?: string;
-  /** JSON: string[] */
-  water_non_sentinel_outlets?: string;
-  water_default_performer?: string;
-}
-export type UpdateLegionellaConfig200 = { ok: boolean };
+export const LegionellaCheckType = {
+  cold_water_temp: "cold_water_temp",
+  hot_water_temp: "hot_water_temp",
+  sentinel_flush: "sentinel_flush",
+  shower_clean: "shower_clean",
+  tank_inspection: "tank_inspection",
+  risk_assessment: "risk_assessment",
+} as const;
 
-export interface PoolTrackConfig {
-  pool_name?: string;
-  pool_ph_min?: string;
-  pool_ph_max?: string;
-  pool_free_chlor_min?: string;
-  pool_free_chlor_max?: string;
-  pool_temp_min?: string;
-  pool_temp_max?: string;
-  pool_track_air_temp?: string;
-  pool_default_performer?: string;
-}
-export type UpdatePoolTrackConfig200 = { ok: boolean };
+export type LegionellaCheckResult =
+  (typeof LegionellaCheckResult)[keyof typeof LegionellaCheckResult];
 
-export interface BikeTrackConfig {
-  bike_default_deposit_pence?: string;
-  bike_hire_duration_hours?: string;
-  bike_require_helmet?: string;
-}
-export type UpdateBikeTrackConfig200 = { ok: boolean };
+export const LegionellaCheckResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
 
-export interface IncidentConfig {
-  /** JSON: string[] */
-  incident_locations?: string;
-  /** JSON: string[] */
-  incident_departments?: string;
-  incident_default_reporter?: string;
-  incident_show_investigation?: string;
+export interface LegionellaCheck {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  checkType: LegionellaCheckType;
+  checkDate: string;
+  result: LegionellaCheckResult;
+  temperature?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
-export type UpdateIncidentConfig200 = { ok: boolean };
 
-export interface GreenTrackConfig {
-  /** JSON: string[] */
-  green_default_operators?: string;
-  green_show_fuel?: string;
-}
-export type UpdateGreenTrackConfig200 = { ok: boolean };
+export type CreateLegionellaCheckRequestResult =
+  (typeof CreateLegionellaCheckRequestResult)[keyof typeof CreateLegionellaCheckRequestResult];
 
-export interface PATTrackConfig {
-  pat_default_tester?: string;
-  pat_retest_months?: string;
-  /** JSON: string[] */
-  pat_locations?: string;
-  pat_show_earth_bond?: string;
-  pat_show_insulation?: string;
+export const CreateLegionellaCheckRequestResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
+
+export interface CreateLegionellaCheckRequest {
+  checkType: LegionellaCheckType;
+  checkDate: string;
+  result: CreateLegionellaCheckRequestResult;
+  temperature?: number | null;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
 }
-export type UpdatePATTrackConfig200 = { ok: boolean };
+
+export type UpdateLegionellaCheckRequestResult =
+  (typeof UpdateLegionellaCheckRequestResult)[keyof typeof UpdateLegionellaCheckRequestResult];
+
+export const UpdateLegionellaCheckRequestResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
+
+export interface UpdateLegionellaCheckRequest {
+  checkDate?: string;
+  result?: UpdateLegionellaCheckRequestResult;
+  temperature?: number | null;
+  siteId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type LegionellaStatusStatus =
+  (typeof LegionellaStatusStatus)[keyof typeof LegionellaStatusStatus];
+
+export const LegionellaStatusStatus = {
+  ok: "ok",
+  due_soon: "due_soon",
+  overdue: "overdue",
+  never: "never",
+} as const;
+
+export interface LegionellaStatus {
+  checkType: LegionellaCheckType;
+  frequencyDays: number;
+  lastDate?: string | null;
+  lastResult?: string | null;
+  dueDate?: string | null;
+  status: LegionellaStatusStatus;
+}
 
 export type ListComplianceItemsParams = {
   status?: ListComplianceItemsStatus;
@@ -580,90 +569,9 @@ export type GetFireSafetyStatusParams = {
   siteId?: number;
 };
 
-// ---- LegionellaTrack ----
-
-export type LegionellaCheckType =
-  (typeof LegionellaCheckType)[keyof typeof LegionellaCheckType];
-
-// HSG274 Part 2 Table 2.1
-export const LegionellaCheckType = {
-  calorifier_temp:       "calorifier_temp",
-  hot_sentinel_temp:     "hot_sentinel_temp",
-  hot_nonsent_temp:      "hot_nonsent_temp",
-  cold_tank_temp:        "cold_tank_temp",
-  cold_sentinel_temp:    "cold_sentinel_temp",
-  cold_nonsent_temp:     "cold_nonsent_temp",
-  cold_tank_inspection:  "cold_tank_inspection",
-  cold_tank_clean:       "cold_tank_clean",
-  calorifier_inspection: "calorifier_inspection",
-  calorifier_clean:      "calorifier_clean",
-  shower_clean:          "shower_clean",
-  tmv_service:           "tmv_service",
-  outlet_flush:          "outlet_flush",
-} as const;
-
-export type LegionellaCheckResult =
-  (typeof LegionellaCheckResult)[keyof typeof LegionellaCheckResult];
-
-export const LegionellaCheckResult = {
-  pass: "pass",
-  fail: "fail",
-  action_required: "action_required",
-} as const;
-
-export interface LegionellaCheck {
-  id: number;
-  clientId: number;
-  siteId?: number | null;
-  checkType: LegionellaCheckType;
-  checkDate: string;
-  result: LegionellaCheckResult;
-  temperature?: string | null;
-  location?: string | null;
-  notes?: string | null;
-  performedBy?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateLegionellaCheckRequest {
-  checkType: LegionellaCheckType;
-  checkDate: string;
-  result: LegionellaCheckResult;
-  temperature?: number | null;
-  siteId?: number | null;
-  location?: string | null;
-  notes?: string | null;
-  performedBy?: string | null;
-}
-
-export interface UpdateLegionellaCheckRequest {
-  checkDate?: string;
-  result?: LegionellaCheckResult;
-  temperature?: number | null;
-  siteId?: number | null;
-  location?: string | null;
-  notes?: string | null;
-  performedBy?: string | null;
-}
-
-export type LegionellaStatusStatus =
-  (typeof LegionellaStatusStatus)[keyof typeof LegionellaStatusStatus];
-
-export const LegionellaStatusStatus = {
-  ok: "ok",
-  due_soon: "due_soon",
-  overdue: "overdue",
-  never: "never",
-} as const;
-
-export interface LegionellaStatus {
-  checkType: LegionellaCheckType;
-  frequencyDays: number;
-  lastDate?: string | null;
-  dueDate?: string | null;
-  status: LegionellaStatusStatus;
-}
+export type UpdateFoodSafetyConfig200 = {
+  ok: boolean;
+};
 
 export type ListLegionellaChecksParams = {
   checkType?: LegionellaCheckType;
@@ -672,8 +580,4 @@ export type ListLegionellaChecksParams = {
 
 export type GetLegionellaStatusParams = {
   siteId?: number;
-};
-
-export type UpdateFoodSafetyConfig200 = {
-  ok: boolean;
 };

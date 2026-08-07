@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Link, useRoute } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useGetSite, useListComplianceItems } from "@workspace/api-client-react";
+import { useGetSite, getGetSiteQueryKey, useListComplianceItems } from "@workspace/api-client-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -54,7 +54,7 @@ async function apiFetch(url: string, opts?: RequestInit) {
 export default function SiteDetailPage() {
   const [, params] = useRoute("/sites/:id");
   const id = params ? Number(params.id) : NaN;
-  const { data: site, isLoading, error } = useGetSite(id, { query: { enabled: Number.isFinite(id) } });
+  const { data: site, isLoading, error } = useGetSite(id, { query: { enabled: Number.isFinite(id), queryKey: getGetSiteQueryKey(id) } });
   const { data: allItems = [] } = useListComplianceItems();
   const canAdmin = useCanAdmin();
   const { toast } = useToast();

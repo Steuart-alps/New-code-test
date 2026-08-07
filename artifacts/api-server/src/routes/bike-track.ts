@@ -124,7 +124,7 @@ router.post("/bikes", requireAuth, async (req, res) => {
 router.put("/bikes/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const parsed = bikeSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -139,10 +139,11 @@ router.put("/bikes/:id", requireAuth, async (req, res) => {
 router.delete("/bikes/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   // Block if active hire records exist
-  const [usage] = await db.execute(sql`SELECT COUNT(*) AS cnt FROM bike_hire_records WHERE bike_id = ${id} AND client_id = ${clientId} AND status = 'active'`);
+  const usageResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM bike_hire_records WHERE bike_id = ${id} AND client_id = ${clientId} AND status = 'active'`);
+  const usage = ((usageResult as any).rows ?? [])[0];
   if (parseInt((usage as any)?.cnt ?? "0") > 0)
     return res.status(409).json({ error: "Bike is currently on hire — return it first." });
   await db.delete(bikesTable).where(and(eq(bikesTable.id, id), eq(bikesTable.clientId, clientId)));
@@ -238,7 +239,7 @@ router.post("/hires", requireAuth, async (req, res) => {
 router.put("/hires/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const updateSchema = hireSchema.omit({ bikeId: true, preHireCheck: true }).partial();
   const parsed = updateSchema.safeParse(req.body);
@@ -255,7 +256,7 @@ router.put("/hires/:id", requireAuth, async (req, res) => {
 router.post("/hires/:id/return", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const parsed = returnSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -314,7 +315,7 @@ router.post("/hires/:id/return", requireAuth, async (req, res) => {
 router.delete("/hires/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const [hire] = await db.select().from(bikeHireRecordsTable)
     .where(and(eq(bikeHireRecordsTable.id, id), eq(bikeHireRecordsTable.clientId, clientId)))
@@ -406,12 +407,13 @@ router.post("/services", requireAuth, async (req, res) => {
   const d = parsed.data;
 
   // Verify bike belongs to this client
-  const [bike] = await db.execute(sql`SELECT id FROM bikes WHERE id = ${d.bikeId} AND client_id = ${clientId} LIMIT 1`);
+  const bikeCheckResult = await db.execute(sql`SELECT id FROM bikes WHERE id = ${d.bikeId} AND client_id = ${clientId} LIMIT 1`);
+  const bike = ((bikeCheckResult as any).rows ?? [])[0];
   if (!bike) return res.status(400).json({ error: "Bike not found" });
 
   const userId = (req.session as any).userId ?? null;
 
-  const [row] = await db.execute(sql`
+  const insertResult = await db.execute(sql`
     INSERT INTO bike_services
       (client_id, bike_id, service_date, service_type, serviced_by, next_service_date, cost_pence, notes, created_by)
     VALUES
@@ -419,13 +421,14 @@ router.post("/services", requireAuth, async (req, res) => {
        ${d.nextServiceDate ?? null}, ${d.costPence ?? null}, ${d.notes ?? null}, ${userId})
     RETURNING *
   `);
+  const row = ((insertResult as any).rows ?? [])[0];
   res.status(201).json(row);
 });
 
 router.put("/services/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const parsed = serviceSchema.omit({ bikeId: true }).partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -442,11 +445,12 @@ router.put("/services/:id", requireAuth, async (req, res) => {
 
   if (sets.length === 1) return res.status(400).json({ error: "Nothing to update" });
 
-  const [row] = await db.execute(sql`
+  const updateResult = await db.execute(sql`
     UPDATE bike_services SET ${sql.raw(sets.join(", "))}
     WHERE id = ${id} AND client_id = ${clientId}
     RETURNING *
   `);
+  const row = ((updateResult as any).rows ?? [])[0];
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
@@ -454,7 +458,7 @@ router.put("/services/:id", requireAuth, async (req, res) => {
 router.delete("/services/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   await db.execute(sql`DELETE FROM bike_services WHERE id = ${id} AND client_id = ${clientId}`);
   res.status(204).end();
@@ -467,7 +471,7 @@ router.get("/summary", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const today = todayIso();
 
-  const [counts] = await db.execute(sql`
+  const countsResult = await db.execute(sql`
     SELECT
       COUNT(*) FILTER (WHERE status = 'available')   AS available,
       COUNT(*) FILTER (WHERE status = 'hired')        AS hired,
@@ -477,17 +481,19 @@ router.get("/summary", requireAuth, async (req, res) => {
     FROM bikes
     WHERE client_id = ${clientId} AND active = true
   `);
+  const counts = ((countsResult as any).rows ?? [])[0];
 
-  const [hireCounts] = await db.execute(sql`
+  const hireCountsResult = await db.execute(sql`
     SELECT
       COUNT(*) FILTER (WHERE status = 'active')  AS active_hires,
       COUNT(*) FILTER (WHERE status = 'active' AND return_date_expected < ${today}) AS overdue
     FROM bike_hire_records
     WHERE client_id = ${clientId}
   `);
+  const hireCounts = ((hireCountsResult as any).rows ?? [])[0];
 
   // Bikes with a next_service_date that has passed
-  const [serviceCounts] = await db.execute(sql`
+  const serviceCountsResult = await db.execute(sql`
     SELECT COUNT(DISTINCT b.id) AS overdue_service
     FROM bikes b
     LEFT JOIN LATERAL (
@@ -501,6 +507,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       AND s.next_service_date IS NOT NULL
       AND s.next_service_date < ${today}
   `);
+  const serviceCounts = ((serviceCountsResult as any).rows ?? [])[0];
 
   res.json({ bikes: (counts as any), hires: (hireCounts as any), services: (serviceCounts as any) });
 });

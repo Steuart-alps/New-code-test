@@ -115,7 +115,7 @@ export async function seedDemo() {
     { clientId: client.id, departmentId: warehouse.id, categoryId: training.id, title: "Manual Handling Training", description: "All warehouse staff completed RPLT-accredited course", status: "completed", priority: "medium", dueDate: daysFromNow(-60), completedAt: daysFromNow(-58) },
     { clientId: client.id, departmentId: hq.id, categoryId: electrical.id, contractorId: sparkright.id, title: "PAT Testing — Office Equipment", description: "All office appliances tested and tagged", status: "completed", priority: "low", dueDate: daysFromNow(-15), completedAt: daysFromNow(-15), notes: "2 items failed and were removed from service." },
   ];
-  await db.insert(complianceItemsTable).values(items);
+  await db.insert(complianceItemsTable).values(items as any[]);
 
   return {
     business: client.name,

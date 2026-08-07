@@ -190,7 +190,7 @@ function SessionDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.sessionDate) return toast({ title: "Session date is required", variant: "destructive" });
+    if (!form.sessionDate) { toast({ title: "Session date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -350,7 +350,7 @@ function SurveillanceDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.checkDate) return toast({ title: "Date is required", variant: "destructive" });
+    if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -459,7 +459,7 @@ function FirstAidDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.checkDate) return toast({ title: "Date is required", variant: "destructive" });
+    if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {
@@ -572,8 +572,8 @@ function IncidentDialog({
   } : blank);
 
   const handleSave = async () => {
-    if (!form.incidentDate) return toast({ title: "Date is required", variant: "destructive" });
-    if (!form.description.trim()) return toast({ title: "Description is required", variant: "destructive" });
+    if (!form.incidentDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
+    if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const body = {

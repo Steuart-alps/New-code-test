@@ -115,7 +115,7 @@ router.put("/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const existing = await getPool(id, clientId);
@@ -152,7 +152,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const result = await db.execute(sql`
@@ -182,8 +182,9 @@ router.get("/status", requireAuth, async (req, res) => {
   `);
 
   const now = new Date();
+  const rowsArr: any[] = Array.isArray(rows) ? (rows as any) : ((rows as any).rows ?? []);
   const latestByType = Object.fromEntries(
-    ([...(rows as any)] as any[]).map((r: any) => [r.check_type, r])
+    rowsArr.map((r: any) => [r.check_type, r])
   );
 
   const status = POOL_CHECK_TYPES.map(ct => {

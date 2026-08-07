@@ -115,7 +115,7 @@ router.post("/visits", requireAuth, async (req, res) => {
     nextVisitDate:     d.nextVisitDate ?? null,
     signedOffBy:       d.signedOffBy ?? null,
     notes:             d.notes ?? null,
-    createdBy:         req.user?.id ?? null,
+    createdBy:         (req as any).user?.id ?? null,
   } as any).returning();
   res.status(201).json(row);
 });
@@ -124,7 +124,7 @@ router.put("/visits/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const body = VisitBody.safeParse(req.body);
@@ -151,7 +151,7 @@ router.put("/visits/:id", requireAuth, async (req, res) => {
 router.delete("/visits/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   await db.delete(pestVisitsTable)
     .where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId)));
@@ -203,7 +203,7 @@ router.post("/activity", requireAuth, async (req, res) => {
     recordedBy:   d.recordedBy ?? null,
     resolved:     d.resolved ?? false,
     notes:        d.notes ?? null,
-    createdBy:    req.user?.id ?? null,
+    createdBy:    (req as any).user?.id ?? null,
   } as any).returning();
   res.status(201).json(row);
 });
@@ -211,7 +211,7 @@ router.post("/activity", requireAuth, async (req, res) => {
 router.put("/activity/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const body = ActivityBody.safeParse(req.body);
@@ -238,7 +238,7 @@ router.put("/activity/:id", requireAuth, async (req, res) => {
 router.delete("/activity/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   await db.delete(pestActivityTable)
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)));

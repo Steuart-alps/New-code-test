@@ -139,6 +139,22 @@ export function requireClientAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 /**
+ * Blocks read-only users (client_viewer) from mutation routes.
+ * Mount AFTER requireAuth on POST/PUT/PATCH/DELETE handlers.
+ */
+export function denyViewers(req: Request, res: Response, next: NextFunction) {
+  if (!req.currentUser) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (req.currentUser.role === "client_viewer") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
+/**
  * Returns the department ID that should restrict what data this user can see,
  * or null if the user is unrestricted (admin / consultant / unassigned staff).
  *

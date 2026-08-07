@@ -135,7 +135,7 @@ export default function ProfileScreen() {
         >
           <InfoRow icon="mail" label="Email" value={user?.email ?? '—'} />
           <InfoRow
-            icon="building"
+            icon="briefcase"
             label="Role"
             value={ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}
           />

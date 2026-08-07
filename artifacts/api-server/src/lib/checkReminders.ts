@@ -142,7 +142,7 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
       GROUP BY check_type
     `);
     const fireByType = new Map<string, string>(
-      ((fireRows as any).rows ?? fireRows as any[]).map((r: any) => [r.check_type, r.last_date]),
+      ((fireRows as any).rows ?? []).map((r: any) => [r.check_type, r.last_date]),
     );
     for (const ct of FIRE_CHECK_TYPES) {
       const lastDate = fireByType.get(ct) ?? null;
@@ -183,7 +183,7 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
       GROUP BY check_type
     `);
     const legByType = new Map<string, string>(
-      ((legRows as any).rows ?? legRows as any[]).map((r: any) => [r.check_type, r.last_date]),
+      ((legRows as any).rows ?? []).map((r: any) => [r.check_type, r.last_date]),
     );
     for (const ct of LEGIONELLA_CHECK_TYPES) {
       const lastDate = legByType.get(ct) ?? null;
@@ -225,7 +225,7 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
       ORDER BY check_type, check_date DESC, check_time DESC NULLS LAST
     `);
     const poolByType = new Map<string, { check_date: string; check_time: string | null }>(
-      ((poolRows as any).rows ?? poolRows as any[]).map((r: any) => [r.check_type, r]),
+      ((poolRows as any).rows ?? []).map((r: any) => [r.check_type, r]),
     );
     for (const ct of POOL_CHECK_TYPES) {
       const latest = poolByType.get(ct) ?? null;

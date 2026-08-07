@@ -5,14 +5,14 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
-import type { FireCheckType } from "./fireCheckType";
-import type { FireSafetyStatusStatus } from "./fireSafetyStatusStatus";
+import type { LegionellaCheckType } from "./legionellaCheckType";
+import type { LegionellaStatusStatus } from "./legionellaStatusStatus";
 
-export interface FireSafetyStatus {
-  checkType: FireCheckType;
+export interface LegionellaStatus {
+  checkType: LegionellaCheckType;
   frequencyDays: number;
   lastDate?: string | null;
   lastResult?: string | null;
   dueDate?: string | null;
-  status: FireSafetyStatusStatus;
+  status: LegionellaStatusStatus;
 }

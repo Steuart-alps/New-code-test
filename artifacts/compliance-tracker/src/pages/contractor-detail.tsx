@@ -27,7 +27,7 @@ export default function ContractorDetailPage() {
 
   const [, navigate] = useLocation();
   const { data: contractor, isLoading: loadingContractor } = useGetContractor(id);
-  const { data: items = [] } = useListComplianceItems({ contractorId: id, type: "external" });
+  const { data: items = [] } = useListComplianceItems({ contractorId: id });
 
   const { deleteContractor, deleteItem } = useAppMutations();
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { useGetDashboardStats, useListSites } from "@workspace/api-client-react";
+import { useGetDashboardStats, getGetDashboardStatsQueryKey, useListSites } from "@workspace/api-client-react";
 import { ChecksAlertPanel } from "@/components/checks-alert-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -744,7 +744,7 @@ export default function Dashboard() {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
-  const { data: stats, isLoading } = useGetDashboardStats({ query: { enabled: !!activeClientId } });
+  const { data: stats, isLoading } = useGetDashboardStats({ query: { enabled: !!activeClientId, queryKey: getGetDashboardStatsQueryKey() } });
 
   if (isConsultant && !activeClientId) {
     return (

@@ -10,6 +10,7 @@ import {
   useUpdateFireSafetyCheck,
   useDeleteFireSafetyCheck,
   useListSites,
+  getListSitesQueryKey,
   FireCheckType,
   FireSafetyCheck,
   FireSafetyStatus as FireSafetyStatusType,
@@ -112,7 +113,12 @@ function todayIso() {
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: "ok" | "due_soon" | "overdue" | "never" }) {
+function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
+  if (lastResult === "fail" || lastResult === "action_required") return (
+    <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
+      <AlertTriangle className="w-3 h-3 mr-1" />{lastResult === "fail" ? "Failed" : "Action needed"}
+    </Badge>
+  );
   if (status === "ok") return (
     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
       <CheckCircle2 className="w-3 h-3 mr-1" />OK
@@ -889,14 +895,14 @@ export default function FireSafetyPage() {
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetFireSafetyStatus(
     { siteId: filterSite },
-    { query: { enabled: hasFiretrack, retry: (count, err: any) => err?.status !== 403 && count < 3 } }
+    { query: { enabled: hasFiretrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFireSafetyStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
   const { data: checks, isLoading: checksLoading } = useListFireSafetyChecks(
     { checkType: filterType as FireCheckType || undefined, siteId: filterSite },
-    { query: { enabled: hasFiretrack } }
+    { query: { enabled: hasFiretrack, queryKey: getListFireSafetyChecksQueryKey({ checkType: filterType as FireCheckType || undefined, siteId: filterSite }) } }
   );
-  const { data: sites } = useListSites({ query: { enabled: hasFiretrack } });
+  const { data: sites } = useListSites({ query: { enabled: hasFiretrack, queryKey: getListSitesQueryKey() } });
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -989,6 +995,8 @@ export default function FireSafetyPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                  item.lastResult === "fail" || item.lastResult === "action_required"
+                                             ? "border-l-red-600 bg-red-100/60" :
                   item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
                   item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
                   item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
@@ -1001,7 +1009,7 @@ export default function FireSafetyPage() {
                     <CardTitle className="text-xs font-medium leading-snug text-foreground">
                       {CHECK_TYPE_LABELS[item.checkType as AnyCheckType] ?? item.checkType}
                     </CardTitle>
-                    <StatusBadge status={item.status as any} />
+                    <StatusBadge status={item.status as any} lastResult={item.lastResult} />
                   </div>
                 </CardHeader>
                 <CardContent className="pb-3 px-4 space-y-0.5">

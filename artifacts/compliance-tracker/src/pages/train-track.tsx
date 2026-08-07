@@ -251,7 +251,15 @@ export default function TrainTrackPage() {
   const filteredCerts     = useMemo(() => {
     let rows = applyCommonFilters(certs);
     if (certStatus !== "all") rows = rows.filter(r => getCertStatus(r.expiry_date) === certStatus);
-    return rows;
+    // Sort urgent records to the top: expired first, then expiring soon, each by soonest expiry.
+    const rank: Record<CertStatus, number> = { expired: 0, expiring_soon: 1, valid: 2, no_expiry: 3 };
+    return [...rows].sort((a, b) => {
+      const ra = rank[getCertStatus(a.expiry_date)];
+      const rb = rank[getCertStatus(b.expiry_date)];
+      if (ra !== rb) return ra - rb;
+      if (a.expiry_date && b.expiry_date) return a.expiry_date.localeCompare(b.expiry_date);
+      return 0;
+    });
   }, [certs, siteFilter, search, certStatus]);
 
   const filteredSignoffs  = useMemo(() => applyCommonFilters(signoffs),  [signoffs,  siteFilter, search]);
@@ -500,6 +508,23 @@ export default function TrainTrackPage() {
       {/* ── CERTIFICATES TAB ── */}
       {tab === "certificate" && (
         <>
+          {/* Expiry warning banner */}
+          {(certCounts.expired > 0 || certCounts.expiring_soon > 0) && (
+            <div className={cn(
+              "rounded-sm border p-4 text-sm",
+              certCounts.expired > 0 ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"
+            )}>
+              <div className="font-semibold mb-1 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" />
+                Training certificates need attention
+              </div>
+              <div className="text-xs">
+                {certCounts.expired > 0 && `${certCounts.expired} certificate${certCounts.expired !== 1 ? "s have" : " has"} expired. `}
+                {certCounts.expiring_soon > 0 && `${certCounts.expiring_soon} certificate${certCounts.expiring_soon !== 1 ? "s" : ""} expire${certCounts.expiring_soon === 1 ? "s" : ""} within the next 30 days.`}
+              </div>
+            </div>
+          )}
+
           {/* Expiry status cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {(["expired", "expiring_soon", "valid", "no_expiry"] as const).map(s => {
@@ -550,7 +575,10 @@ export default function TrainTrackPage() {
                 const Icon = cfg.icon;
                 const days = daysUntil(r.expiry_date);
                 return (
-                  <tr key={r.id} className="bg-white hover:bg-muted/20 transition-colors group">
+                  <tr key={r.id} className={cn(
+                    "hover:bg-muted/20 transition-colors group",
+                    status === "expired" ? "bg-red-50/60" : status === "expiring_soon" ? "bg-amber-50/60" : "bg-white"
+                  )}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-[#162D42]/10 flex items-center justify-center flex-shrink-0">

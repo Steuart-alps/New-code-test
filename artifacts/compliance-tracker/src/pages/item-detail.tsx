@@ -9,7 +9,9 @@ import { CertificateFormDialog } from "@/components/certificate-form-dialog";
 import { StatusBadge, PriorityBadge, ExpiryBadge } from "@/components/badges";
 import {
   useGetComplianceItem,
+  getGetComplianceItemQueryKey,
   useListItemCertificates,
+  getListItemCertificatesQueryKey,
   useListContractors,
   useListSites,
   useListCategories,
@@ -34,8 +36,8 @@ export default function ItemDetailPage() {
   const [, params] = useRoute("/items/:id");
   const id = params ? Number(params.id) : NaN;
 
-  const { data: item, isLoading } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id) } });
-  const { data: certificates = [] } = useListItemCertificates(id, { query: { enabled: Number.isFinite(id) } });
+  const { data: item, isLoading } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id), queryKey: getGetComplianceItemQueryKey(id) } });
+  const { data: certificates = [] } = useListItemCertificates(id, { query: { enabled: Number.isFinite(id), queryKey: getListItemCertificatesQueryKey(id) } });
   const { data: contractors = [] } = useListContractors();
   const { data: sites = [] } = useListSites();
   const { data: categories = [] } = useListCategories();
@@ -141,12 +143,12 @@ export default function ItemDetailPage() {
                   </div>
                 </div>
               )}
-              {item.visitScheduledAt && (
+              {(item as any).visitScheduledAt && (
                 <div className="flex items-start gap-3">
                   <Calendar className="w-4 h-4 mt-0.5 text-emerald-600" />
                   <div>
                     <p className="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Visit Scheduled</p>
-                    <p className="text-sm font-medium">{fmt(item.visitScheduledAt)}</p>
+                    <p className="text-sm font-medium">{fmt((item as any).visitScheduledAt)}</p>
                   </div>
                 </div>
               )}

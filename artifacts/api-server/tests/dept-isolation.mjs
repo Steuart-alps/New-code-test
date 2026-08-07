@@ -141,6 +141,25 @@ async function main() {
   });
   const fireBetaId = fireBeta.status === 201 ? fireBeta.data?.id : null;
 
+  // Add legionella checks on both sites via admin
+  const legAlpha = await admin("POST", "/legionella", {
+    checkType: "calorifier_temp",
+    checkDate: uniqueDate(1),
+    result: "pass",
+    siteId: siteAlphaId,
+  });
+  const legAlphaId = [200, 201].includes(legAlpha.status) ? legAlpha.data?.id : null;
+  check("admin: create alpha legionella check", legAlphaId != null, `status=${legAlpha.status}`);
+
+  const legBeta = await admin("POST", "/legionella", {
+    checkType: "calorifier_temp",
+    checkDate: uniqueDate(2),
+    result: "pass",
+    siteId: siteBetaId,
+  });
+  const legBetaId = [200, 201].includes(legBeta.status) ? legBeta.data?.id : null;
+  check("admin: create beta legionella check", legBetaId != null, `status=${legBeta.status}`);
+
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────
   const staffEmail = `dept-staff-alpha-${ts}@test.local`;
   const staffPassword = "password-456";
@@ -264,6 +283,145 @@ async function main() {
       "staff: /fire-safety excludes beta check",
       !staffFire.some((r) => r.id === fireBetaId),
       "beta fire-safety check visible in staff list",
+    );
+  }
+
+  // ── 8b. Staff legionella access ───────────────────────────────────────────────
+  if (legAlphaId && legBetaId) {
+    const staffLegList = await staff("GET", "/legionella");
+    expectOk("staff: GET /legionella", staffLegList.status);
+    const staffLeg = Array.isArray(staffLegList.data) ? staffLegList.data : [];
+    check(
+      "staff: /legionella includes alpha check",
+      staffLeg.some((r) => r.id === legAlphaId),
+      "alpha legionella check missing from staff list",
+    );
+    check(
+      "staff: /legionella excludes beta check",
+      !staffLeg.some((r) => r.id === legBetaId),
+      "beta legionella check visible in staff list",
+    );
+    expectBlocked(
+      "staff: PUT /legionella/:id (other dept)",
+      (await staff("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
+    );
+  }
+
+  // ── 8c. Viewer (read-only) department scoping ─────────────────────────────────
+  const viewerEmail = `dept-viewer-alpha-${ts}@test.local`;
+  const viewerPassword = "password-789";
+  const createViewerRes = await admin("POST", "/users", {
+    name: "Viewer Alpha",
+    email: viewerEmail,
+    password: viewerPassword,
+    role: "client_viewer",
+    clientId,
+    departmentId: deptAlphaId,
+  });
+  expectOk("admin: create viewer user", createViewerRes.status, [200, 201]);
+
+  const viewer = makeSession();
+  const viewerLogin = await viewer("POST", "/auth/login", {
+    email: viewerEmail,
+    password: viewerPassword,
+  });
+  expectOk("viewer: login", viewerLogin.status, [200, 201]);
+
+  const viewerSiteList = await viewer("GET", "/sites");
+  expectOk("viewer: GET /sites", viewerSiteList.status);
+  const viewerSites = Array.isArray(viewerSiteList.data) ? viewerSiteList.data : [];
+  check(
+    "viewer: /sites includes alpha site",
+    viewerSites.some((s) => s.id === siteAlphaId),
+    "alpha site missing from viewer list",
+  );
+  check(
+    "viewer: /sites excludes beta site",
+    !viewerSites.some((s) => s.id === siteBetaId),
+    "beta site visible in viewer list",
+  );
+  expectOk(
+    "viewer: GET /sites/:id (own dept)",
+    (await viewer("GET", `/sites/${siteAlphaId}`)).status,
+  );
+  expectBlocked(
+    "viewer: GET /sites/:id (other dept)",
+    (await viewer("GET", `/sites/${siteBetaId}`)).status,
+  );
+
+  const viewerItemList = await viewer("GET", "/compliance-items");
+  expectOk("viewer: GET /compliance-items", viewerItemList.status);
+  const viewerItems = Array.isArray(viewerItemList.data)
+    ? viewerItemList.data
+    : viewerItemList.data?.items ?? [];
+  if (alphaItem) {
+    check(
+      "viewer: /compliance-items includes alpha item",
+      viewerItems.some((i) => i.id === alphaItem.id),
+      "alpha item missing from viewer list",
+    );
+  }
+  if (betaItem) {
+    check(
+      "viewer: /compliance-items excludes beta item",
+      !viewerItems.some((i) => i.id === betaItem.id),
+      "beta dept item visible in viewer list",
+    );
+    expectBlocked(
+      "viewer: GET /compliance-items/:id (other dept)",
+      (await viewer("GET", `/compliance-items/${betaItem.id}`)).status,
+    );
+  }
+
+  // Viewers are read-only: all mutations must be rejected, even in their own dept.
+  expectBlocked(
+    "viewer: POST /fire-safety rejected",
+    (await viewer("POST", "/fire-safety", {
+      checkType: "alarm",
+      checkDate: uniqueDate(0),
+      result: "pass",
+      siteId: siteAlphaId,
+    })).status,
+  );
+  expectBlocked(
+    "viewer: POST /legionella rejected",
+    (await viewer("POST", "/legionella", {
+      checkType: "calorifier_temp",
+      checkDate: uniqueDate(0),
+      result: "pass",
+      siteId: siteAlphaId,
+    })).status,
+  );
+  if (fireAlphaId) {
+    expectBlocked(
+      "viewer: PUT /fire-safety/:id rejected (own dept)",
+      (await viewer("PUT", `/fire-safety/${fireAlphaId}`, { result: "fail" })).status,
+    );
+    expectBlocked(
+      "viewer: DELETE /fire-safety/:id rejected (own dept)",
+      (await viewer("DELETE", `/fire-safety/${fireAlphaId}`)).status,
+    );
+  }
+  if (legAlphaId) {
+    expectBlocked(
+      "viewer: PUT /legionella/:id rejected (own dept)",
+      (await viewer("PUT", `/legionella/${legAlphaId}`, { result: "fail" })).status,
+    );
+    expectBlocked(
+      "viewer: DELETE /legionella/:id rejected (own dept)",
+      (await viewer("DELETE", `/legionella/${legAlphaId}`)).status,
+    );
+  }
+  if (fireBetaId) {
+    expectBlocked(
+      "viewer: PUT /fire-safety/:id rejected (other dept)",
+      (await viewer("PUT", `/fire-safety/${fireBetaId}`, { result: "fail" })).status,
+    );
+  }
+  if (legBetaId) {
+    expectBlocked(
+      "viewer: PUT /legionella/:id rejected (other dept)",
+      (await viewer("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
     );
   }
 

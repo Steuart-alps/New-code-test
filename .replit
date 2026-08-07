@@ -38,6 +38,10 @@ args = "test-tenant-isolation"
 task = "workflow.run"
 args = "module-routes"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -78,6 +82,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:modules:ci"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run typecheck && pnpm --filter @workspace/compliance-tracker run typecheck && pnpm --filter @workspace/mobile run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true

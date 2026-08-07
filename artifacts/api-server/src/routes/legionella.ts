@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { legionellaChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -148,16 +148,18 @@ router.get("/status", requireAuth, async (req, res) => {
     );
   }
 
-  const lastDates = await db
-    .select({
+  // Latest check per type, including its result (DISTINCT ON keeps the newest row per check_type)
+  const lastChecks = await db
+    .selectDistinctOn([legionellaChecksTable.checkType], {
       checkType: legionellaChecksTable.checkType,
-      lastDate: sql<string>`max(${legionellaChecksTable.checkDate})`,
+      lastDate: legionellaChecksTable.checkDate,
+      lastResult: legionellaChecksTable.result,
     })
     .from(legionellaChecksTable)
     .where(and(...conditions))
-    .groupBy(legionellaChecksTable.checkType);
+    .orderBy(legionellaChecksTable.checkType, desc(legionellaChecksTable.checkDate), desc(legionellaChecksTable.id));
 
-  const lastByType = new Map(lastDates.map((r) => [r.checkType, r.lastDate]));
+  const lastByType = new Map(lastChecks.map((r) => [r.checkType, { lastDate: r.lastDate, lastResult: r.lastResult }]));
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
   const now = new Date();
@@ -166,23 +168,23 @@ router.get("/status", requireAuth, async (req, res) => {
 
   const statuses = CHECK_TYPES.map((checkType) => {
     const frequencyDays = FREQUENCY_DAYS[checkType];
-    const lastDate = lastByType.get(checkType) ?? null;
-    if (!lastDate) {
-      return { checkType, frequencyDays, lastDate: null, dueDate: null, status: "never" as const };
+    const last = lastByType.get(checkType) ?? null;
+    if (!last) {
+      return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
     }
-    const dueDays = toUtcDays(lastDate) + frequencyDays;
+    const dueDays = toUtcDays(last.lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
     const daysUntilDue = dueDays - todayDays;
     const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
     const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
-    return { checkType, frequencyDays, lastDate, dueDate, status };
+    return { checkType, frequencyDays, lastDate: last.lastDate, lastResult: last.lastResult, dueDate, status };
   });
 
   res.json(statuses);
 });
 
 // POST /api/legionella
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -215,11 +217,11 @@ router.post("/", requireAuth, async (req, res) => {
 });
 
 // PUT /api/legionella/:id
-router.put("/:id", requireAuth, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const parsed = updateSchema.safeParse(req.body);
@@ -261,11 +263,11 @@ router.put("/:id", requireAuth, async (req, res) => {
 });
 
 // DELETE /api/legionella/:id
-router.delete("/:id", requireAuth, async (req, res) => {
+router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db
@@ -312,7 +314,7 @@ router.get("/config", requireAuth, async (req, res) => {
   res.json(config);
 });
 
-router.put("/config", requireAuth, async (req, res) => {
+router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;

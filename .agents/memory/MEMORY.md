@@ -11,3 +11,5 @@
 - [Mobile app plan](mobile-app-plan.md) — Expo SDK 54 app built; screens, API calls, design tokens, known gaps (KitchenTrack, 2FA, push notifs) documented.
 - [Mobile auth architecture](mobile-auth-architecture.md) — bearer token auth via mobile_sessions table; loadUser checks both session cookie and Authorization: Bearer header.
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.
+- [Viewer role enforcement](viewer-role-enforcement.md) — client_viewer is only read-only if mutation routes mount denyViewers; requireAuth alone lets viewers write.
+- [API server type patterns](api-server-type-patterns.md) — req.params typed string|string[], db.execute returns QueryResult (use .rows), noImplicitReturns disabled, dynamic import TDZ pitfall.

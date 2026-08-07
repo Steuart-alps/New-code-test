@@ -108,7 +108,7 @@ async function setupTenant(label) {
 
   // ── Legionella module ────────────────────────────────────────────────────────
   const legionellaCheck = await req("POST", "/legionella", {
-    checkType: "cold_water_temp",
+    checkType: "cold_tank_temp",
     checkDate: uniqueDate(),
     result: "pass",
     temperature: 17.5,

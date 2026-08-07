@@ -62,14 +62,15 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
-    const [row] = await db.insert(table).values({ ...data, clientId, createdBy: (req.session as any).userId ?? null }).returning();
+    const insertRows = await db.insert(table).values({ ...data, clientId, createdBy: (req.session as any).userId ?? null }).returning() as any[];
+    const row = insertRows[0];
     res.status(201).json(row);
   });
 
   sub.put("/:id", requireAuth, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -84,7 +85,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
   sub.delete("/:id", requireAuth, async (req, res) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [existing] = await db.select({ id: table.id }).from(table)
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
@@ -122,7 +123,7 @@ function downloadUrlRoute(table: any) {
   return async (req: any, res: any) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [row] = await db.select().from(table)
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
@@ -152,7 +153,7 @@ function ackListRoute(table: any, docType: string) {
   return async (req: any, res: any) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const [doc] = await db.select({ id: table.id }).from(table)
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
@@ -171,7 +172,7 @@ function ackSaveRoute(table: any, docType: string) {
   return async (req: any, res: any) => {
     const clientId = getClientId(req);
     if (!clientId) return res.status(400).json({ error: "No client context" });
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
     const parsed = ackSaveSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });

@@ -90,7 +90,7 @@ router.post("/appliances", requireAuth, async (req, res) => {
 router.put("/appliances/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
   const parsed = applianceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -115,7 +115,7 @@ router.put("/appliances/:id", requireAuth, async (req, res) => {
 router.delete("/appliances/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
   await db.delete(patAppliancesTable)
     .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)));
@@ -172,7 +172,7 @@ router.post("/tests", requireAuth, async (req, res) => {
 router.put("/tests/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
   const parsed = testSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -200,7 +200,7 @@ router.put("/tests/:id", requireAuth, async (req, res) => {
 router.delete("/tests/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
   await db.delete(patTestsTable)
     .where(and(eq(patTestsTable.id, id), eq(patTestsTable.clientId, clientId)));

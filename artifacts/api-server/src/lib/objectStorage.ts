@@ -283,6 +283,6 @@ async function signObjectURL({
     );
   }
 
-  const { signed_url: signedURL } = await response.json();
-  return signedURL;
+  const json = await response.json() as { signed_url: string };
+  return json.signed_url;
 }

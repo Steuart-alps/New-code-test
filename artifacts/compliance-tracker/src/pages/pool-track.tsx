@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   useListSites,
+  getListSitesQueryKey,
   useGetPoolTrackConfig,
   getGetPoolTrackConfigQueryKey,
   useUpdatePoolTrackConfig,
@@ -591,7 +592,7 @@ export default function PoolTrackPage() {
   const [loading, setLoading] = useState(true);
   const [statusError, setStatusError] = useState<any>(null);
 
-  const { data: sites } = useListSites({ query: { enabled: hasPool } });
+  const { data: sites } = useListSites({ query: { enabled: hasPool, queryKey: getListSitesQueryKey() } });
 
   const fetchAll = async () => {
     setLoading(true);

@@ -58,7 +58,7 @@ router.get("/weekly", requireAuth, async (req, res) => {
 router.get("/weekly/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const row = await fetchWeekly(clientId, req.params.date);
+  const row = await fetchWeekly(clientId, req.params.date as string);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
@@ -113,7 +113,7 @@ router.put("/weekly/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const existing = await fetchWeeklyById(id, clientId);
@@ -166,7 +166,7 @@ router.get("/probe", requireAuth, async (req, res) => {
 router.get("/probe/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const row = await fetchProbe(clientId, req.params.date);
+  const row = await fetchProbe(clientId, req.params.date as string);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
@@ -226,7 +226,7 @@ router.put("/probe/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const existing = await fetchProbeById(id, clientId);

@@ -226,11 +226,12 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
 
   const userId: number | null = (req.session as any)?.userId ?? null;
 
-  const [row] = await db.execute(sql`
+  const docInsertResult = await db.execute(sql`
     INSERT INTO site_documents (client_id, site_id, name, object_path, uploaded_by)
     VALUES (${clientId}, ${siteId}, ${name}, ${objectPath}, ${userId})
     RETURNING id, name, object_path, created_at
   `);
+  const row = ((docInsertResult as any).rows ?? [])[0];
   res.status(201).json((row as any) ?? {});
 });
 

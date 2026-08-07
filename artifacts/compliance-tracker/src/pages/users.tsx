@@ -162,9 +162,9 @@ function UserDialog({
               </SelectContent>
             </Select>
           </div>
-          {(form.role === "client_staff") && (
+          {(form.role === "client_staff" || form.role === "client_viewer") && (
             <div className="space-y-2">
-              <Label>Department (for staff)</Label>
+              <Label>Department scope</Label>
               <Select value={form.departmentId} onValueChange={v => setForm(f => ({ ...f, departmentId: v }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select department..." />

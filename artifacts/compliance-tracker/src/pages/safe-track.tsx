@@ -480,7 +480,7 @@ export default function SafeTrackPage() {
 
   async function handleSave(sub: string) {
     setSaving(true);
-    const payload = { ...form, siteId: form.siteId && form.siteId !== "__none__" ? Number(form.siteId) : null };
+    const payload: any = { ...form, siteId: form.siteId && form.siteId !== "__none__" ? Number(form.siteId) : null };
     delete payload.id; delete payload.clientId; delete payload.createdBy;
     delete payload.createdAt; delete payload.updatedAt;
     try {

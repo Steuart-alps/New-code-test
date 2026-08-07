@@ -10,6 +10,7 @@ import {
   useUpdateLegionellaCheck,
   useDeleteLegionellaCheck,
   useListSites,
+  getListSitesQueryKey,
   LegionellaCheckType,
   LegionellaCheck,
   LegionellaStatus as LegionellaStatusType,
@@ -118,7 +119,13 @@ function ResultBadge({ result }: { result: string }) {
   );
 }
 
-function StatusBadge({ status }: { status: "ok" | "due_soon" | "overdue" | "never" }) {
+function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
+  if (lastResult === "fail" || lastResult === "action_required")
+    return (
+      <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
+        <AlertTriangle className="w-3 h-3 mr-1" /> {lastResult === "fail" ? "Failed" : "Action needed"}
+      </Badge>
+    );
   if (status === "ok")
     return (
       <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
@@ -619,15 +626,15 @@ export default function LegionellaPage() {
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
-    { query: { enabled: hasLegionellatrack, retry: (count, err: any) => err?.status !== 403 && count < 3 } }
+    { query: { enabled: hasLegionellatrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
 
   const { data: checks, isLoading: checksLoading } = useListLegionellaChecks(
     { checkType: filterType || undefined, siteId: filterSite },
-    { query: { enabled: hasLegionellatrack } }
+    { query: { enabled: hasLegionellatrack, queryKey: getListLegionellaChecksQueryKey({ checkType: filterType || undefined, siteId: filterSite }) } }
   );
-  const { data: sites } = useListSites({ query: { enabled: hasLegionellatrack } });
+  const { data: sites } = useListSites({ query: { enabled: hasLegionellatrack, queryKey: getListSitesQueryKey() } });
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -724,7 +731,9 @@ export default function LegionellaPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
-                  item.status === "overdue"
+                  item.lastResult === "fail" || item.lastResult === "action_required"
+                    ? "border-l-red-600 bg-red-100/60"
+                    : item.status === "overdue"
                     ? "border-l-rose-500 bg-rose-50/50"
                     : item.status === "due_soon"
                     ? "border-l-amber-500 bg-amber-50/50"
@@ -739,7 +748,7 @@ export default function LegionellaPage() {
                     <CardTitle className="text-sm font-medium leading-tight">
                       {checkTypeLabel(item.checkType)}
                     </CardTitle>
-                    <StatusBadge status={item.status} />
+                    <StatusBadge status={item.status} lastResult={item.lastResult} />
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1">

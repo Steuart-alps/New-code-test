@@ -68,8 +68,9 @@ router.post("/tubs", requireAuth, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
   if (d.siteId) {
-    const [site] = await db.execute(sql`SELECT id FROM sites WHERE id = ${d.siteId} AND client_id = ${clientId} LIMIT 1`);
-    if (!(site as any)?.rows?.length && !(site as any)?.id) return res.status(400).json({ error: "Invalid site" });
+    const siteCheckResult = await db.execute(sql`SELECT id FROM sites WHERE id = ${d.siteId} AND client_id = ${clientId} LIMIT 1`);
+    const site = ((siteCheckResult as any).rows ?? [])[0];
+    if (!site?.id) return res.status(400).json({ error: "Invalid site" });
   }
   const result = await db.execute(sql`
     INSERT INTO hot_tubs (client_id, site_id, name, description, active)
@@ -83,7 +84,7 @@ router.post("/tubs", requireAuth, async (req, res) => {
 router.put("/tubs/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const parsed = tubSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -107,13 +108,13 @@ router.put("/tubs/:id", requireAuth, async (req, res) => {
 router.delete("/tubs/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   // Block deletion if records reference this tub
   const usageResult = await db.execute(sql`
     SELECT COUNT(*) AS cnt FROM hot_tub_checks WHERE hot_tub_id = ${id} AND client_id = ${clientId}
   `);
-  const cnt = parseInt((usageResult.rows ?? [])[0]?.cnt ?? "0");
+  const cnt = parseInt(String((usageResult.rows ?? [])[0]?.cnt ?? 0));
   if (cnt > 0) return res.status(409).json({ error: `Cannot delete — ${cnt} record${cnt !== 1 ? "s" : ""} reference this tub. Mark it inactive instead.` });
   await db.execute(sql`DELETE FROM hot_tubs WHERE id = ${id} AND client_id = ${clientId}`);
   res.status(204).end();
@@ -310,7 +311,7 @@ router.put("/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const parsed = updateSchema.safeParse(req.body);
@@ -355,7 +356,7 @@ router.delete("/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db

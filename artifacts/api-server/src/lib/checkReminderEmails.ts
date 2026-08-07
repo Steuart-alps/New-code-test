@@ -122,7 +122,7 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
         WHERE client_id = ${client.id} AND log_date = ${todayIso}
         LIMIT 1
       `);
-      const rows = (logged as any).rows ?? logged as any[];
+      const rows = (logged as any).rows ?? [];
       if (rows.length > 0) continue;
 
       // Get alerts (overdue + due_soon only — skip "never")

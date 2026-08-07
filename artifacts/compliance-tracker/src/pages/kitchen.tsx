@@ -111,9 +111,10 @@ function coolingMins(start: string, finish: string): number | null {
 }
 type ColdUnit = { name: string; type: "fridge" | "freezer" };
 function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"]): ColdUnit[] {
-  if (config?.food_cold_units) return parseJsonArray<ColdUnit>(config.food_cold_units);
-  const nf = Number(config?.food_num_fridges || "2");
-  const nz = Number(config?.food_num_freezers || "1");
+  const c = config as any;
+  if (c?.food_cold_units) return parseJsonArray<ColdUnit>(c.food_cold_units);
+  const nf = Number(c?.food_num_fridges || "2");
+  const nz = Number(c?.food_num_freezers || "1");
   return [
     ...Array.from({ length: nf }, (_, i) => ({ name: `Fridge ${i + 1}`, type: "fridge" as const })),
     ...Array.from({ length: nz }, (_, i) => ({ name: `Freezer ${i + 1}`, type: "freezer" as const })),
@@ -1126,6 +1127,80 @@ function DailyDiaryTab() {
         </>
       )}
 
+      {/* Missing Days Alert */}
+      {records !== undefined && (() => {
+        const hasRecord = new Set(records.map((r) => r.recordDate));
+        const submitted = new Set(records.filter((r) => r.submittedAt).map((r) => r.recordDate));
+        const missing: string[] = [];
+        const draftsOnly: string[] = [];
+        for (let i = 1; i <= 30; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const ds = format(d, "yyyy-MM-dd");
+          if (!hasRecord.has(ds)) {
+            missing.push(ds);
+          } else if (!submitted.has(ds)) {
+            draftsOnly.push(ds);
+          }
+        }
+        if (missing.length === 0 && draftsOnly.length === 0) return null;
+        const DateButton = ({ ds, variant }: { ds: string; variant: "missing" | "draft" }) => (
+          <button
+            key={ds}
+            onClick={() => setSelectedDate(ds)}
+            className={
+              variant === "missing"
+                ? "text-xs px-2 py-1 rounded-md bg-red-100 hover:bg-red-200 text-red-800 border border-red-200 transition-colors font-medium dark:bg-red-900/40 dark:text-red-300 dark:border-red-700 dark:hover:bg-red-900/60"
+                : "text-xs px-2 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 transition-colors font-medium dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-900/60"
+            }
+            title={`Open diary for ${ds}`}
+          >
+            {format(new Date(ds + "T12:00:00"), "d MMM")}
+          </button>
+        );
+        return (
+          <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20">
+            <CardHeader className="pb-3 border-b border-amber-200/60">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <CardTitle className="text-sm font-medium text-amber-800 dark:text-amber-400">
+                  {missing.length > 0 && draftsOnly.length > 0
+                    ? `${missing.length} missing + ${draftsOnly.length} draft-only ${missing.length + draftsOnly.length === 1 ? "day" : "days"} in the last 30 days`
+                    : missing.length > 0
+                      ? `${missing.length} ${missing.length === 1 ? "day" : "days"} with no food safety record in the last 30 days`
+                      : `${draftsOnly.length} ${draftsOnly.length === 1 ? "day" : "days"} with an unsubmitted draft in the last 30 days`}
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-3 pb-4 space-y-3">
+              {missing.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1.5">No record filed:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {missing.slice(0, 20).map((ds) => <DateButton key={ds} ds={ds} variant="missing" />)}
+                    {missing.length > 20 && (
+                      <span className="text-xs text-red-700 self-center pl-1">+{missing.length - 20} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {draftsOnly.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1.5">Draft not submitted:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {draftsOnly.slice(0, 20).map((ds) => <DateButton key={ds} ds={ds} variant="draft" />)}
+                    {draftsOnly.length > 20 && (
+                      <span className="text-xs text-amber-700 self-center pl-1">+{draftsOnly.length - 20} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-amber-700 dark:text-amber-400">Click a date to open the diary entry for that day.</p>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {/* History */}
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
@@ -1213,7 +1288,7 @@ export default function KitchenPage() {
   const hasKitchentrack = hasService("kitchentrack");
 
   const { error: configError } = useGetFoodSafetyConfig({
-    query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3 },
+    query: { enabled: hasKitchentrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFoodSafetyConfigQueryKey() },
   });
   const serverLocked = (configError as any)?.status === 403;
 

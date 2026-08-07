@@ -241,7 +241,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
 });
 
 router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAdmin, async (req, res) => {
-  const itemId = parseInt(req.params.itemId, 10);
+  const itemId = parseInt(req.params.itemId as string, 10);
   if (!Number.isFinite(itemId)) return res.status(400).json({ error: "Invalid item id" });
 
   const callerClientId = getClientId(req);

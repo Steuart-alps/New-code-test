@@ -182,16 +182,17 @@ async function testFireSafety(req) {
 async function testLegionella(req) {
   console.log("\n── LegionellaTrack ──");
 
+  // Actual HSG274 check types from the route
   const TYPES = [
-    "cold_water_temp",
-    "hot_water_temp",
-    "sentinel_flush",
-    "shower_clean",
-    "tank_inspection",
-    "risk_assessment",
+    "cold_tank_temp",       // Monthly cold water storage temp
+    "hot_sentinel_temp",    // Monthly hot water sentinel outlet temp
+    "outlet_flush",         // Weekly little-used outlet flush
+    "shower_clean",         // Quarterly shower head descale
+    "cold_tank_inspection", // 6-monthly cold water storage tank inspection
+    "calorifier_clean",     // Annually calorifier clean & disinfect
   ];
 
-  const TEMPERATURE_TYPES = new Set(["cold_water_temp", "hot_water_temp"]);
+  const TEMPERATURE_TYPES = new Set(["cold_tank_temp", "hot_sentinel_temp"]);
 
   const createdIds = {};
 
@@ -200,12 +201,12 @@ async function testLegionella(req) {
     const body = {
       checkType,
       checkDate: isoDate(-1),
-      result: checkType === "cold_water_temp" ? "pass" : "action_required",
+      result: checkType === "cold_tank_temp" ? "pass" : "action_required",
       notes: `Legionella test: ${checkType}`,
       performedBy: "Water Hygiene Ltd",
     };
     if (TEMPERATURE_TYPES.has(checkType)) {
-      body.temperature = checkType === "cold_water_temp" ? 17.5 : 52.3;
+      body.temperature = checkType === "cold_tank_temp" ? 17.5 : 52.3;
     }
 
     const res = await req("POST", "/legionella", body);
@@ -214,12 +215,12 @@ async function testLegionella(req) {
     check(`legionella: POST ${checkType} persists checkType`, res.data?.checkType === checkType, `got ${res.data?.checkType}`);
     check(
       `legionella: POST ${checkType} persists result`,
-      res.data?.result === (checkType === "cold_water_temp" ? "pass" : "action_required"),
+      res.data?.result === (checkType === "cold_tank_temp" ? "pass" : "action_required"),
       `got ${res.data?.result}`,
     );
 
     if (TEMPERATURE_TYPES.has(checkType)) {
-      const expected = checkType === "cold_water_temp" ? 17.5 : 52.3;
+      const expected = checkType === "cold_tank_temp" ? 17.5 : 52.3;
       // Temperature is stored as numeric string in DB; accept string or number
       const actual = parseFloat(res.data?.temperature);
       check(
@@ -245,16 +246,16 @@ async function testLegionella(req) {
   }
 
   // 3. Filter by checkType
-  const filterRes = await req("GET", "/legionella?checkType=cold_water_temp");
-  expectOk("legionella: GET /?checkType=cold_water_temp", filterRes.status);
+  const filterRes = await req("GET", "/legionella?checkType=cold_tank_temp");
+  expectOk("legionella: GET /?checkType=cold_tank_temp", filterRes.status);
   check(
-    "legionella: filter returns only cold_water_temp records",
-    (filterRes.data ?? []).every((r) => r.checkType === "cold_water_temp"),
+    "legionella: filter returns only cold_tank_temp records",
+    (filterRes.data ?? []).every((r) => r.checkType === "cold_tank_temp"),
     "unexpected check type in filtered list",
   );
 
   // 4. PUT — update notes and temperature on a temp check
-  const coldId = createdIds["cold_water_temp"];
+  const coldId = createdIds["cold_tank_temp"];
   const putRes = await req("PUT", `/legionella/${coldId}`, {
     result: "fail",
     temperature: 21.0,
@@ -265,7 +266,7 @@ async function testLegionella(req) {
   check("legionella: PUT persists notes change", putRes.data?.notes === "Remedial action taken", `got ${putRes.data?.notes}`);
   const newTemp = parseFloat(putRes.data?.temperature);
   check("legionella: PUT persists temperature change", Math.abs(newTemp - 21.0) < 0.01, `got ${putRes.data?.temperature}`);
-  check("legionella: PUT preserves checkType", putRes.data?.checkType === "cold_water_temp", `got ${putRes.data?.checkType}`);
+  check("legionella: PUT preserves checkType", putRes.data?.checkType === "cold_tank_temp", `got ${putRes.data?.checkType}`);
 
   // 5. PUT non-existent → 404
   const put404 = await req("PUT", "/legionella/999999999", { result: "pass" });
@@ -276,7 +277,7 @@ async function testLegionella(req) {
   expectOk("legionella: GET /status", statusRes.status);
   check("legionella: status returns array", Array.isArray(statusRes.data), `got ${typeof statusRes.data}`);
   check(
-    "legionella: status returns entry for all 6 check types",
+    "legionella: status returns entry for all check types",
     TYPES.every((t) => (statusRes.data ?? []).some((s) => s.checkType === t)),
     `missing: ${TYPES.filter((t) => !(statusRes.data ?? []).some((s) => s.checkType === t)).join(", ")}`,
   );
@@ -286,9 +287,9 @@ async function testLegionella(req) {
     check(`legionella: status.${entry.checkType} has valid status`, ["ok", "due_soon", "overdue", "never"].includes(entry.status), `got ${entry.status}`);
   }
 
-  // Risk assessment is annual (365 days) — a record from yesterday must be "ok"
-  const riskStatus = (statusRes.data ?? []).find((s) => s.checkType === "risk_assessment");
-  check("legionella: annual risk_assessment not overdue after recent check", riskStatus?.status === "ok", `status=${riskStatus?.status}`);
+  // calorifier_clean is annual (365 days) — a record from yesterday must be "ok"
+  const annualStatus = (statusRes.data ?? []).find((s) => s.checkType === "calorifier_clean");
+  check("legionella: annual calorifier_clean not overdue after recent check", annualStatus?.status === "ok", `status=${annualStatus?.status}`);
 
   // 7. DELETE
   const delId = createdIds["shower_clean"];
@@ -483,7 +484,7 @@ async function testSiteFiltering(req, siteId) {
 
   // Same for legionella
   const legSiteCheck = await req("POST", "/legionella", {
-    checkType: "cold_water_temp",
+    checkType: "cold_tank_temp",
     checkDate: isoDate(-2),
     result: "pass",
     temperature: 16.0,

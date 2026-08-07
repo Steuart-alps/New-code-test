@@ -128,13 +128,13 @@ export function SignaturePad({ value, onChange, label = "Signature", className }
   const onTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault(); // prevent scroll while signing
     const touch = e.touches[0];
-    startDraw(getPos(e.currentTarget, touch));
+    startDraw(getPos(e.currentTarget, touch as unknown as Touch));
   }, []);
 
   const onTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const touch = e.touches[0];
-    moveDraw(getPos(e.currentTarget, touch));
+    moveDraw(getPos(e.currentTarget, touch as unknown as Touch));
   }, []);
 
   const onTouchEnd = useCallback(() => endDraw(), []);

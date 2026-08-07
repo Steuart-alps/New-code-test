@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useGetCategory, useListComplianceItems } from "@workspace/api-client-react";
+import { useGetCategory, getGetCategoryQueryKey, useListComplianceItems } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ export default function CategoryDetailPage() {
   const [, params] = useRoute("/categories/:id");
   const [, navigate] = useLocation();
   const id = params ? Number(params.id) : NaN;
-  const { data: category, isLoading: catLoading, error } = useGetCategory(id, { query: { enabled: Number.isFinite(id) } });
+  const { data: category, isLoading: catLoading, error } = useGetCategory(id, { query: { enabled: Number.isFinite(id), queryKey: getGetCategoryQueryKey(id) } });
   const { data: allItems = [], isLoading: itemsLoading } = useListComplianceItems();
   const { deleteItem } = useAppMutations();
   const { toast } = useToast();

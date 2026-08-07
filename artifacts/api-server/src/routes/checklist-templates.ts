@@ -38,7 +38,7 @@ router.get("/checklist-templates", requireAuth, async (req, res) => {
           AND checklist_type = ${type}
         LIMIT 1
       `);
-      row = (rows as any).rows?.[0] ?? rows[0] ?? null;
+      row = (rows as any).rows?.[0] ?? (rows as any)[0] ?? null;
     }
 
     if (!row) {
@@ -49,7 +49,7 @@ router.get("/checklist-templates", requireAuth, async (req, res) => {
           AND checklist_type = ${type}
         LIMIT 1
       `);
-      row = (rows as any).rows?.[0] ?? rows[0] ?? null;
+      row = (rows as any).rows?.[0] ?? (rows as any)[0] ?? null;
     }
 
     if (!row) {

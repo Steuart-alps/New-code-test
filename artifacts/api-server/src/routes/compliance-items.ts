@@ -374,7 +374,7 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   }
 
   const { certificatesTable } = await import("@workspace/db/schema");
-  const { or, sql: dsql } = await import("drizzle-orm");
+  const { sql: dsql } = await import("drizzle-orm");
 
   // Also scope the site breakdown to the user's accessible sites
   const siteConditions: ReturnType<typeof eq>[] = [eq(sitesTable.clientId, clientId)];

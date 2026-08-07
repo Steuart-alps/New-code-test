@@ -743,6 +743,7 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   ]),
   frequencyDays: zod.number(),
   lastDate: zod.string().nullish(),
+  lastResult: zod.string().nullish(),
   dueDate: zod.string().nullish(),
   status: zod.enum(["ok", "due_soon", "overdue", "never"]),
 });
@@ -915,4 +916,139 @@ export const UpdateFoodSafetyRecordResponse = zod.object({
   submittedAt: zod.date().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
+});
+
+/**
+ * @summary List Legionella water safety logbook entries
+ */
+export const ListLegionellaChecksQueryParams = zod.object({
+  checkType: zod
+    .enum([
+      "cold_water_temp",
+      "hot_water_temp",
+      "sentinel_flush",
+      "shower_clean",
+      "tank_inspection",
+      "risk_assessment",
+    ])
+    .optional(),
+  siteId: zod.coerce.number().optional(),
+});
+
+export const ListLegionellaChecksResponseItem = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  checkType: zod.enum([
+    "cold_water_temp",
+    "hot_water_temp",
+    "sentinel_flush",
+    "shower_clean",
+    "tank_inspection",
+    "risk_assessment",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail", "action_required"]),
+  temperature: zod.string().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListLegionellaChecksResponse = zod.array(
+  ListLegionellaChecksResponseItem,
+);
+
+/**
+ * @summary Record a Legionella water safety check
+ */
+export const CreateLegionellaCheckBody = zod.object({
+  checkType: zod.enum([
+    "cold_water_temp",
+    "hot_water_temp",
+    "sentinel_flush",
+    "shower_clean",
+    "tank_inspection",
+    "risk_assessment",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail", "action_required"]),
+  temperature: zod.number().nullish(),
+  siteId: zod.number().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+});
+
+/**
+ * @summary Per-check-type due status for Legionella (last done, next due, overdue)
+ */
+export const GetLegionellaStatusQueryParams = zod.object({
+  siteId: zod.coerce.number().optional(),
+});
+
+export const GetLegionellaStatusResponseItem = zod.object({
+  checkType: zod.enum([
+    "cold_water_temp",
+    "hot_water_temp",
+    "sentinel_flush",
+    "shower_clean",
+    "tank_inspection",
+    "risk_assessment",
+  ]),
+  frequencyDays: zod.number(),
+  lastDate: zod.string().nullish(),
+  lastResult: zod.string().nullish(),
+  dueDate: zod.string().nullish(),
+  status: zod.enum(["ok", "due_soon", "overdue", "never"]),
+});
+export const GetLegionellaStatusResponse = zod.array(
+  GetLegionellaStatusResponseItem,
+);
+
+/**
+ * @summary Update a Legionella check entry
+ */
+export const UpdateLegionellaCheckParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateLegionellaCheckBody = zod.object({
+  checkDate: zod.string().optional(),
+  result: zod.enum(["pass", "fail", "action_required"]).optional(),
+  temperature: zod.number().nullish(),
+  siteId: zod.number().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+});
+
+export const UpdateLegionellaCheckResponse = zod.object({
+  id: zod.number(),
+  clientId: zod.number(),
+  siteId: zod.number().nullish(),
+  checkType: zod.enum([
+    "cold_water_temp",
+    "hot_water_temp",
+    "sentinel_flush",
+    "shower_clean",
+    "tank_inspection",
+    "risk_assessment",
+  ]),
+  checkDate: zod.string(),
+  result: zod.enum(["pass", "fail", "action_required"]),
+  temperature: zod.string().nullish(),
+  location: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  performedBy: zod.string().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Delete a Legionella check entry
+ */
+export const DeleteLegionellaCheckParams = zod.object({
+  id: zod.coerce.number(),
 });

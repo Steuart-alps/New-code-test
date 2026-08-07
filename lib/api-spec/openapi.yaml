@@ -1726,6 +1726,9 @@ components:
         lastDate:
           type: string
           nullable: true
+        lastResult:
+          type: string
+          nullable: true
         dueDate:
           type: string
           nullable: true
@@ -1995,6 +1998,9 @@ components:
         frequencyDays:
           type: integer
         lastDate:
+          type: string
+          nullable: true
+        lastResult:
           type: string
           nullable: true
         dueDate:

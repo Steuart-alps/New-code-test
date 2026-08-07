@@ -142,7 +142,7 @@ router.put("/issues/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const parsed = issueUpdate.safeParse(req.body);
@@ -168,7 +168,7 @@ router.delete("/issues/:id", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
@@ -186,7 +186,7 @@ router.post("/issues/:id/request-upload", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
@@ -250,7 +250,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const result = await db.execute(sql`
