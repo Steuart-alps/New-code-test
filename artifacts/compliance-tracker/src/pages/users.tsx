@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -20,6 +20,7 @@ interface User {
   clientId: number | null;
   departmentId: number | null;
   active: boolean;
+  isMaintenanceManager: boolean;
 }
 
 interface Department {
@@ -229,6 +230,14 @@ export default function UsersPage() {
     load();
   }
 
+  async function toggleMaintenanceManager(user: User) {
+    await apiFetch(`/users/${user.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ isMaintenanceManager: !user.isMaintenanceManager }),
+    });
+    load();
+  }
+
   async function reassignDept(userId: number, value: string) {
     const departmentId = value === NO_DEPT_VALUE ? null : Number(value);
     setReassigning(userId);
@@ -316,6 +325,17 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {canAdmin && u.role === "client_staff" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => toggleMaintenanceManager(u)}
+                              title={u.isMaintenanceManager ? "Remove maintenance manager access" : "Make maintenance manager (FixTrack full access)"}
+                            >
+                              <Wrench className={`w-4 h-4 ${u.isMaintenanceManager ? "text-amber-600" : "text-muted-foreground"}`} />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
                             {u.active ? <UserX className="w-4 h-4 text-muted-foreground" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                           </Button>

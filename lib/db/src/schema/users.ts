@@ -23,6 +23,7 @@ export const usersTable = pgTable("users", {
   gcCustomerId: text("gc_customer_id"),
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
+  isMaintenanceManager: boolean("is_maintenance_manager").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

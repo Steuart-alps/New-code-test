@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -362,7 +362,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
 export default function FixTrackPage() {
   const { hasService, user } = useAuth();
-  const canAdmin = useCanAdmin();
+  const canAdmin = useCanAdmin() || useIsMaintenanceManager();
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
 

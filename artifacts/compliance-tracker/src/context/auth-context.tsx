@@ -13,6 +13,7 @@ export interface AuthUser {
   departmentId: number | null;
   active: boolean;
   totpEnabled?: boolean;
+  isMaintenanceManager?: boolean;
 }
 
 export interface AuthClient {
@@ -231,4 +232,9 @@ export function useCanAdmin() {
 export function useIsConsultant() {
   const { user } = useAuth();
   return user?.role === "consultant";
+}
+
+export function useIsMaintenanceManager() {
+  const { user } = useAuth();
+  return user?.isMaintenanceManager === true;
 }

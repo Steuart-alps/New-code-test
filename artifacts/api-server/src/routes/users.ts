@@ -25,6 +25,7 @@ const UpdateUserBody = z.object({
   role: z.enum(userRoleEnum as unknown as [string, ...string[]]).optional(),
   departmentId: z.number().nullable().optional(),
   active: z.boolean().optional(),
+  isMaintenanceManager: z.boolean().optional(),
 });
 
 router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
@@ -41,7 +42,7 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(eq(usersTable.clientId, clientId));
     } else {
@@ -53,13 +54,13 @@ router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
         return;
       }
       rows = await db
-        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+        .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
         .from(usersTable)
         .where(inArray(usersTable.clientId, allowed));
     }
   } else {
     rows = await db
-      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
+      .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt })
       .from(usersTable)
       .where(eq(usersTable.clientId, user.clientId!));
   }
@@ -95,7 +96,7 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
       active: body.active,
       passwordHash,
     })
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
   res.status(201).json(rows[0]);
 });
@@ -134,13 +135,14 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
   if (body.role !== undefined) updates.role = body.role as typeof userRoleEnum[number];
   if (body.departmentId !== undefined) updates.departmentId = body.departmentId;
   if (body.active !== undefined) updates.active = body.active;
+  if (body.isMaintenanceManager !== undefined) updates.isMaintenanceManager = body.isMaintenanceManager;
   if (body.password) updates.passwordHash = await hashPassword(body.password);
 
   const rows = await db
     .update(usersTable)
     .set(updates)
     .where(eq(usersTable.id, id))
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, isMaintenanceManager: usersTable.isMaintenanceManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
   res.json(rows[0]);
 });

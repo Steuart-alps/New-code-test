@@ -270,6 +270,7 @@ export async function runRuntimeMigrations() {
     await migratePATtrack();
     await migratePestTrack();
     await migrateKitchenCleaning();
+    await migrateMaintenanceManager();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1187,6 +1188,13 @@ async function migrateKitchenCleaning() {
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_unique"
     ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency")
+  `);
+}
+
+async function migrateMaintenanceManager() {
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "is_maintenance_manager" boolean NOT NULL DEFAULT false
   `);
 }
 

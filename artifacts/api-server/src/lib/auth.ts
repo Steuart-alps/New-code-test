@@ -22,6 +22,7 @@ export async function getUserById(id: number): Promise<SafeUser | null> {
       clientId: usersTable.clientId,
       departmentId: usersTable.departmentId,
       active: usersTable.active,
+      isMaintenanceManager: usersTable.isMaintenanceManager,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
     })
