@@ -1,0 +1,28 @@
+A common pattern for this exact problem (frontline staff, no individual logins) is **PIN/code-based identity tied to a manager-created roster**, rather than full accounts. Here's how it typically works:
+
+**Staff identification without logins**
+- Manager/admin creates a staff roster in the app (name, role, site) — this is the only "account creation" needed
+- Each staff member gets a short PIN (4-6 digits) or a personal QR code, set once by the manager or self-set on first use
+- On a shared device (tablet at reception, office PC), staff pick their name from a list and enter their PIN to "sign" — this authenticates the action, not a session
+- No email, no password reset flows, no staff-managed credentials
+
+**Sign-off flow**
+- Staff selects name → enters PIN → sees the training module or risk assessment → ticks "I have read and understood" → PIN re-entry or single confirmation acts as the e-signature
+- Timestamp, device, and PIN-verified identity get logged against that record
+- For higher-stakes sign-offs (e.g. risk assessment acknowledgement), consider requiring the PIN entry at the moment of signing, not just at login, so it can't be "signed" by whoever's holding the tablet
+
+**Security considerations**
+- PINs should be hashed, not stored in plain text, same as passwords
+- Rate-limit PIN attempts per staff ID to stop guessing
+- Log IP/device per sign-off for audit trail
+- Consider auto-logout after each staff action on shared devices, so the next person isn't accidentally acting as the previous user
+- This is legally more like a "witnessed attestation" than a secure login — fine for internal compliance records, but be honest with clients that it's not the same evidentiary strength as a signed password login. For most H&S purposes (proving someone was trained/briefed) this is standard and accepted practice.
+
+**Management overview**
+- Manager/admin accounts are the only ones with full logins (email + password)
+- Dashboard shows: completion % by site, overdue sign-offs, individual staff training history, risk assessment acknowledgement status
+- Exportable audit trail (CSV/PDF) per staff member or per document, for inspection purposes
+
+This is essentially the model used by tools like Bob's Business, iHASCO, and most frontline-worker H&S platforms — a manager account layer for administration, and a lightweight PIN/QR identity layer for frontline staff who just need to prove "this specific person did this specific thing."
+
+Want me to sketch the database schema for staff/PIN/sign-off records, or mock up the sign-off UI flow?
