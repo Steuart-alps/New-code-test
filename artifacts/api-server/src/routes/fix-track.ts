@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { getEffectiveOptionList } from "../lib/formOptions";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 
@@ -90,7 +91,8 @@ const STATUSES   = ["reported", "in_progress", "resolved", "closed"] as const;
 
 const issueCreate = z.object({
   title:         z.string().min(1).max(300),
-  issueType:     z.enum(ISSUE_TYPES_LIST).optional(),
+  // Validated against the client's effective issue-type list at request time.
+  issueType:     z.string().min(1).max(60).optional(),
   location:      z.string().min(1).max(300),
   description:   z.string().max(5000).nullable().optional(),
   priority:      z.enum(PRIORITIES).optional(),
@@ -189,6 +191,10 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const data = parsed.data;
+  if (data.issueType !== undefined) {
+    const allowedTypes = await getEffectiveOptionList(clientId, "fixtrack_issue_types");
+    if (!allowedTypes.includes(data.issueType)) return res.status(400).json({ error: "Invalid issue type" });
+  }
   if (!(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
   if (!(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 
@@ -221,6 +227,16 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data as any;
+  if ("issueType" in data && data.issueType != null) {
+    // Allow a value unchanged from the stored record even if it is no longer in
+    // the client's effective list; reject only NEW values not in the list.
+    const [current] = await db.select({ issueType: fixTrackIssuesTable.issueType }).from(fixTrackIssuesTable)
+      .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId))).limit(1);
+    if (data.issueType !== current?.issueType) {
+      const allowedTypes = await getEffectiveOptionList(clientId, "fixtrack_issue_types");
+      if (!allowedTypes.includes(data.issueType)) return res.status(400).json({ error: "Invalid issue type" });
+    }
+  }
   if ("siteId"       in data && !(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
   if ("contractorId" in data && !(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 

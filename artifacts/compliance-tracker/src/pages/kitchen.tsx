@@ -6,6 +6,7 @@ import {
   useGetFoodSafetyConfig,
   getGetFoodSafetyConfigQueryKey,
   useUpdateFoodSafetyConfig,
+  useResetFoodSafetyConfig,
   useListFoodSafetyRecords,
   getListFoodSafetyRecordsQueryKey,
   useGetFoodSafetyRecordByDate,
@@ -128,6 +129,7 @@ function ConfigDialog() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateConfig = useUpdateFoodSafetyConfig();
+  const resetConfig = useResetFoodSafetyConfig();
 
   // Limits tab
   const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
@@ -137,7 +139,10 @@ function ConfigDialog() {
 
   // Sections tab
   const [showDeliveries, setShowDeliveries] = useState(true);
+  const [showColdFood, setShowColdFood] = useState(true);
   const [showHotTemp, setShowHotTemp] = useState(true);
+  const [showCooling, setShowCooling] = useState(true);
+  const [showReheating, setShowReheating] = useState(true);
   const [showHotHolding, setShowHotHolding] = useState(true);
   const [showSousVide, setShowSousVide] = useState(true);
 
@@ -156,7 +161,10 @@ function ConfigDialog() {
     setReheatingLimit(config.food_reheating_limit || "Above 82°C");
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
+    setShowColdFood(config.food_show_cold_food !== "false");
     setShowHotTemp(config.food_show_hot_temperature !== "false");
+    setShowCooling((config.food_show_cooling ?? config.food_show_hot_temperature) !== "false");
+    setShowReheating((config.food_show_reheating ?? config.food_show_hot_temperature) !== "false");
     setShowHotHolding(config.food_show_hot_holding !== "false");
     setShowSousVide(config.food_show_sous_vide !== "false");
     setColdUnits(parseColdUnits(config));
@@ -174,10 +182,13 @@ function ConfigDialog() {
           food_reheating_limit: reheatingLimit,
           food_hot_holding_limit: hotHoldingLimit,
           food_show_deliveries: showDeliveries ? "true" : "false",
+          food_show_cold_food: showColdFood ? "true" : "false",
           food_show_hot_temperature: showHotTemp ? "true" : "false",
+          food_show_cooling: showCooling ? "true" : "false",
+          food_show_reheating: showReheating ? "true" : "false",
           food_show_hot_holding: showHotHolding ? "true" : "false",
           food_show_sous_vide: showSousVide ? "true" : "false",
-          food_cold_units: JSON.stringify(coldUnits),
+          food_cold_units: JSON.stringify(coldUnits.map(u => ({ ...u, name: u.name.trim() })).filter(u => u.name)),
           food_default_hot_items: JSON.stringify(defaultHotItems.filter(Boolean)),
           food_default_holding_items: JSON.stringify(defaultHoldingItems.filter(Boolean)),
           food_default_sv_items: JSON.stringify(defaultSvItems.filter(Boolean)),
@@ -194,6 +205,20 @@ function ConfigDialog() {
         },
       }
     );
+  };
+
+  const handleReset = () => {
+    if (!window.confirm("Reset the diary template to the default sections and rows? This cannot be undone.")) return;
+    resetConfig.mutate(undefined as void, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetFoodSafetyConfigQueryKey() });
+        toast({ title: "Template reset", description: "The diary template is back to its defaults." });
+        setOpen(false);
+      },
+      onError: (err: any) => {
+        toast({ title: "Failed to reset", description: err.message, variant: "destructive" });
+      },
+    });
   };
 
   // Reusable string-list editor
@@ -249,7 +274,10 @@ function ConfigDialog() {
             </p>
             {([
               { label: "Deliveries", desc: "Supplier delivery checks", state: showDeliveries, set: setShowDeliveries },
-              { label: "Hot Temperature Record", desc: "Cooking / cooling / reheating", state: showHotTemp, set: setShowHotTemp },
+              { label: "Cold Food Record", desc: "Fridge / freezer temperature checks", state: showColdFood, set: setShowColdFood },
+              { label: "Cooking Record", desc: "Core temperatures when cooking", state: showHotTemp, set: setShowHotTemp },
+              { label: "Cooling Record", desc: "Cool-down times and temperatures", state: showCooling, set: setShowCooling },
+              { label: "Reheating Record", desc: "Core temperatures when reheating", state: showReheating, set: setShowReheating },
               { label: "Hot Holding / Off-Site", desc: "Food kept hot after cooking", state: showHotHolding, set: setShowHotHolding },
               { label: "Sous Vide", desc: "Low-temperature precision cooking", state: showSousVide, set: setShowSousVide },
             ] as const).map(({ label, desc, state, set }) => (
@@ -262,7 +290,7 @@ function ConfigDialog() {
               </div>
             ))}
             <p className="text-xs text-muted-foreground pt-1">
-              Cold Food Record is always shown — it's required for daily food safety compliance.
+              Cold Food temperature monitoring is required for daily food safety compliance — keep it enabled unless your kitchen has no cold storage.
             </p>
           </TabsContent>
 
@@ -363,11 +391,17 @@ function ConfigDialog() {
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleSave} disabled={updateConfig.isPending}>
-            {updateConfig.isPending ? "Saving…" : "Save template"}
+        <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2 sm:justify-between">
+          <Button variant="ghost" className="text-destructive hover:text-destructive"
+            onClick={handleReset} disabled={resetConfig.isPending || updateConfig.isPending}>
+            {resetConfig.isPending ? "Resetting…" : "Reset to defaults"}
           </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={updateConfig.isPending}>
+              {updateConfig.isPending ? "Saving…" : "Save template"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -403,7 +437,12 @@ function DailyDiaryTab() {
 
   // Section visibility — default true unless explicitly disabled
   const showDeliveries = config?.food_show_deliveries !== "false";
+  const showColdFood = config?.food_show_cold_food !== "false";
   const showHotTemp = config?.food_show_hot_temperature !== "false";
+  // Cooling/reheating fall back to the grouped hot-temperature toggle for
+  // templates saved before they became independent sections.
+  const showCooling = (config?.food_show_cooling ?? config?.food_show_hot_temperature) !== "false";
+  const showReheating = (config?.food_show_reheating ?? config?.food_show_hot_temperature) !== "false";
   const showHotHolding = config?.food_show_hot_holding !== "false";
   const showSousVide = config?.food_show_sous_vide !== "false";
 
@@ -700,7 +739,7 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* Cold Food */}
-          <Card>
+          {showColdFood && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -761,7 +800,7 @@ function DailyDiaryTab() {
                 </tbody>
               </table>
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* ── Cooking ──────────────────────────────────────────────────── */}
           {showHotTemp && <Card>
@@ -810,7 +849,7 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* ── Cooling ──────────────────────────────────────────────────── */}
-          {showHotTemp && <Card>
+          {showCooling && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -865,7 +904,7 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* ── Reheating ────────────────────────────────────────────────── */}
-          {showHotTemp && <Card>
+          {showReheating && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1353,7 +1392,7 @@ export default function KitchenPage() {
             </div>
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          {activeTab === "diary" && <ConfigDialog />}
+          {activeTab === "diary" && canAdmin && <ConfigDialog />}
         </div>
 
         {/* Check status cards */}

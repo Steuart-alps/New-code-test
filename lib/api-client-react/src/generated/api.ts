@@ -3840,6 +3840,87 @@ export const useUpdateFoodSafetyConfig = <
 };
 
 /**
+ * @summary Reset kitchen configuration to defaults
+ */
+export const getResetFoodSafetyConfigUrl = () => {
+  return `/api/food-safety/config`;
+};
+
+export const resetFoodSafetyConfig = async (
+  options?: RequestInit,
+): Promise<FoodSafetyConfig> => {
+  return customFetch<FoodSafetyConfig>(getResetFoodSafetyConfigUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getResetFoodSafetyConfigMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["resetFoodSafetyConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
+    void
+  > = () => {
+    return resetFoodSafetyConfig(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetFoodSafetyConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetFoodSafetyConfig>>
+>;
+
+export type ResetFoodSafetyConfigMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reset kitchen configuration to defaults
+ */
+export const useResetFoodSafetyConfig = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetFoodSafetyConfig>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getResetFoodSafetyConfigMutationOptions(options));
+};
+
+/**
  * @summary Get Fire safety configuration
  */
 export const getGetFireSafetyConfigUrl = () => {

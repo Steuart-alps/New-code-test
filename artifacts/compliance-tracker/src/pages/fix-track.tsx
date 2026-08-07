@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +35,16 @@ const ISSUE_TYPES: Record<string, { label: string; color: string }> = {
   cleaning:      { label: "Cleaning",      color: "bg-teal-100 text-teal-800 border-teal-200" },
   general:       { label: "General",       color: "bg-slate-100 text-slate-800 border-slate-200" },
 };
+
+// Snake_case → Title Case for client-added custom issue types.
+function humanizeType(value: string): string {
+  return value.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
+}
+
+/** Meta (label + colour) for an issue type, with a fallback for custom values. */
+function issueTypeMeta(key: string): { label: string; color: string } {
+  return ISSUE_TYPES[key] ?? { label: humanizeType(key), color: "bg-slate-100 text-slate-800 border-slate-200" };
+}
 
 /** Default priority auto-applied when an issue type is selected. */
 const AUTO_PRIORITY: Record<string, string> = {
@@ -133,6 +145,14 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 }) {
   const { data: sites = [] } = useListSites();
   const { toast } = useToast();
+  const { data: formOptions } = useFormOptions();
+  const issueTypeOptions = pickOptions(formOptions, "fixtrack_issue_types");
+  // Keep the record's current type selectable even if it was later removed from
+  // the effective list, so editing other fields doesn't force a type change.
+  const currentType = form.issueType as string | undefined;
+  const formIssueTypeOptions = currentType && !issueTypeOptions.includes(currentType)
+    ? [...issueTypeOptions, currentType]
+    : issueTypeOptions;
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading]     = useState(false);
   const [contractors, setContractors] = useState<ContractorRecord[]>([]);
@@ -206,8 +226,8 @@ function IssueForm({ form, setForm, issueId, isNew }: {
           <Select value={form.issueType ?? "general"} onValueChange={handleTypeChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {Object.entries(ISSUE_TYPES).map(([k, v]) => (
-                <SelectItem key={k} value={k}>{v.label}</SelectItem>
+              {formIssueTypeOptions.map(k => (
+                <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -400,8 +420,8 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
     key, meta: PRIORITIES[key], count: open.filter(i => i.priority === key).length,
   })).filter(p => p.count > 0);
 
-  const byType = Object.entries(ISSUE_TYPES)
-    .map(([key, meta]) => ({ key, meta, count: open.filter(i => i.issueType === key).length }))
+  const byType = [...new Set(open.map(i => i.issueType))]
+    .map(key => ({ key, meta: issueTypeMeta(key), count: open.filter(i => i.issueType === key).length }))
     .filter(t => t.count > 0)
     .sort((a, b) => b.count - a.count);
 
@@ -562,10 +582,10 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
   // Open issues only, grouped by trade area (issueType).
   const open = issues.filter(i => i.status === "reported" || i.status === "in_progress");
 
-  const columns = Object.entries(ISSUE_TYPES)
-    .map(([key, meta]) => ({
+  const columns = [...new Set(open.map(i => i.issueType))]
+    .map(key => ({
       key,
-      meta,
+      meta: issueTypeMeta(key),
       items: open
         .filter(i => i.issueType === key)
         .sort((a, b) => {
@@ -641,6 +661,8 @@ export default function FixTrackPage() {
   const canAdmin = useCanAdmin() || useIsMaintenanceManager();
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
+  const { data: formOptions } = useFormOptions();
+  const issueTypeOptions = pickOptions(formOptions, "fixtrack_issue_types");
 
   const [activeTab, setActiveTab]         = useState<"dashboard" | "board" | "issues">("dashboard");
   const [issues, setIssues]               = useState<Issue[]>([]);
@@ -853,9 +875,17 @@ export default function FixTrackPage() {
             </div>
             <p className="text-sm text-muted-foreground">Report and track maintenance issues across your sites</p>
           </div>
-          <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 w-full sm:w-auto">
-            <Plus className="w-4 h-4" /> Report Issue
-          </Button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <FormOptionsEditor
+              optionKey="fixtrack_issue_types"
+              title="Issue types"
+              triggerLabel="Customise types"
+              labelFor={v => issueTypeMeta(v).label}
+            />
+            <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
+              <Plus className="w-4 h-4" /> Report Issue
+            </Button>
+          </div>
         </div>
 
         {/* Tab switcher */}
@@ -922,7 +952,7 @@ export default function FixTrackPage() {
             <SelectTrigger className="bg-card"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {Object.entries(ISSUE_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+              {issueTypeOptions.map(k => <SelectItem key={k} value={k}>{issueTypeMeta(k).label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filterPriority || "all"} onValueChange={v => setFilterPriority(v === "all" ? "" : v)}>

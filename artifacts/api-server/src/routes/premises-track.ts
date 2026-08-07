@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { premisesInspectionsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId } from "../middleware/requireAuth";
+import { getEffectiveOptionList } from "../lib/formOptions";
 import { z } from "zod";
 
 const router = Router();
@@ -48,7 +49,8 @@ router.get("/summary", requireAuth, async (req, res) => {
 
 const InspectionBody = z.object({
   inspectionDate: z.string().min(1),
-  inspectionType: z.enum(["routine", "hazard", "fault", "housekeeping", "signage"]).default("routine"),
+  // Validated against the client's effective inspection-type list at request time.
+  inspectionType: z.string().min(1).max(60).default("routine"),
   area:           z.string().optional().nullable(),
   findings:       z.string().optional().nullable(),
   hazardDetails:  z.string().optional().nullable(),
@@ -97,6 +99,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
 
+  const allowedTypes = await getEffectiveOptionList(clientId, "premises_inspection_types");
+  if (!allowedTypes.includes(d.inspectionType))
+    return res.status(400).json({ error: "Invalid inspection type" });
+
   if (!(await siteBelongsToClient(d.siteId, clientId)))
     return res.status(400).json({ error: "Invalid siteId for this client" });
 
@@ -127,6 +133,17 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const body = InspectionBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+
+  // Allow a value unchanged from the stored record even if it is no longer in
+  // the client's effective list; reject only NEW values not in the list.
+  const [current] = await db.select({ inspectionType: premisesInspectionsTable.inspectionType })
+    .from(premisesInspectionsTable)
+    .where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId))).limit(1);
+  if (d.inspectionType !== current?.inspectionType) {
+    const allowedTypes = await getEffectiveOptionList(clientId, "premises_inspection_types");
+    if (!allowedTypes.includes(d.inspectionType))
+      return res.status(400).json({ error: "Invalid inspection type" });
+  }
 
   if (!(await siteBelongsToClient(d.siteId, clientId)))
     return res.status(400).json({ error: "Invalid siteId for this client" });

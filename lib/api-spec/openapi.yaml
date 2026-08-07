@@ -904,6 +904,17 @@ paths:
                   ok:
                     type: boolean
                 required: [ok]
+    delete:
+      operationId: resetFoodSafetyConfig
+      tags: [food-safety]
+      summary: Reset kitchen configuration to defaults
+      responses:
+        "200":
+          description: Reset to defaults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyConfig"
 
   /fire-safety/config:
     get:
@@ -2062,7 +2073,13 @@ components:
           type: string
         food_show_deliveries:
           type: string
+        food_show_cold_food:
+          type: string
         food_show_hot_temperature:
+          type: string
+        food_show_cooling:
+          type: string
+        food_show_reheating:
           type: string
         food_show_hot_holding:
           type: string

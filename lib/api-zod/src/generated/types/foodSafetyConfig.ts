@@ -12,7 +12,10 @@ export interface FoodSafetyConfig {
   food_default_holding_items?: string;
   food_default_sv_items?: string;
   food_show_deliveries?: string;
+  food_show_cold_food?: string;
   food_show_hot_temperature?: string;
+  food_show_cooling?: string;
+  food_show_reheating?: string;
   food_show_hot_holding?: string;
   food_show_sous_vide?: string;
   food_num_fridges?: string;

@@ -24,6 +24,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 import {
   useGetIncidentConfig,
   getGetIncidentConfigQueryKey,
@@ -52,8 +55,8 @@ interface Incident {
   id: number;
   clientId: number;
   siteId: number | null;
-  incidentType: IncidentType;
-  severity: Severity;
+  incidentType: string;
+  severity: string;
   status: Status;
   incidentDate: string;
   incidentTime: string | null;
@@ -90,19 +93,28 @@ interface Site { id: number; name: string; }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TYPE_LABELS: Record<IncidentType, string> = {
+// Turn an unknown option value (e.g. a client's custom entry) into a readable
+// label: snake_case → Title Case, leaving already-cased strings untouched.
+function humanize(value: string): string {
+  if (/[A-Z ]/.test(value) && !value.includes("_")) return value;
+  return value.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
+}
+
+const TYPE_LABELS: Record<string, string> = {
   accident:              "Accident",
   near_miss:             "Near Miss",
   dangerous_occurrence:  "Dangerous Occurrence",
   occupational_disease:  "Occupational Disease",
 };
+const typeLabel = (v: string) => TYPE_LABELS[v] ?? humanize(v);
 
-const SEVERITY_LABELS: Record<Severity, string> = {
+const SEVERITY_LABELS: Record<string, string> = {
   minor:    "Minor",
   moderate: "Moderate",
   serious:  "Serious",
   fatal:    "Fatal",
 };
+const severityLabel = (v: string) => SEVERITY_LABELS[v] ?? humanize(v);
 
 const STATUS_LABELS: Record<Status, string> = {
   open:                "Open",
@@ -117,19 +129,23 @@ const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {
   member_of_public: "Member of Public",
 };
 
-const TYPE_COLORS: Record<IncidentType, string> = {
+const DEFAULT_BADGE_COLOR = "bg-slate-50 text-slate-600 border-slate-200";
+
+const TYPE_COLORS: Record<string, string> = {
   accident:             "bg-rose-50 text-rose-700 border-rose-200",
   near_miss:            "bg-amber-50 text-amber-700 border-amber-200",
   dangerous_occurrence: "bg-orange-50 text-orange-700 border-orange-200",
   occupational_disease: "bg-sky-50 text-sky-700 border-sky-200",
 };
+const typeColor = (v: string) => TYPE_COLORS[v] ?? DEFAULT_BADGE_COLOR;
 
-const SEVERITY_COLORS: Record<Severity, string> = {
+const SEVERITY_COLORS: Record<string, string> = {
   minor:    "bg-emerald-50 text-emerald-700 border-emerald-200",
   moderate: "bg-amber-50 text-amber-700 border-amber-200",
   serious:  "bg-orange-50 text-orange-700 border-orange-200",
   fatal:    "bg-rose-50 text-rose-700 border-rose-200",
 };
+const severityColor = (v: string) => SEVERITY_COLORS[v] ?? DEFAULT_BADGE_COLOR;
 
 const STATUS_COLORS: Record<Status, string> = {
   open:                "bg-rose-50 text-rose-700 border-rose-200",
@@ -139,16 +155,20 @@ const STATUS_COLORS: Record<Status, string> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-    ...opts,
-  });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
-  if (res.status === 204) return null;
-  return res.json();
+// Route every request through the shared apiFetch and attach the consultant's
+// currently-selected clientId to BOTH reads and writes, so a consultant viewing
+// another client never reads or writes the wrong tenant. Matches the pattern
+// used by the other module pages (e.g. PremisesTrack).
+function useIncidentsApi() {
+  const { activeClientId } = useAuth();
+  return async function call<T = any>(path: string, opts?: RequestInit): Promise<T> {
+    const sep = path.includes("?") ? "&" : "?";
+    const suffix = activeClientId ? `${sep}clientId=${activeClientId}` : "";
+    const res = await sharedApiFetch(`${path}${suffix}`, opts);
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as any)?.error ?? `${res.status}`); }
+    if (res.status === 204) return null as T;
+    return res.json();
+  };
 }
 
 function fmt(d: string | null) {
@@ -288,8 +308,8 @@ function IncidentConfigDialog() {
 // ─── Empty form ───────────────────────────────────────────────────────────────
 
 const emptyForm = () => ({
-  incidentType: "accident" as IncidentType,
-  severity: "minor" as Severity,
+  incidentType: "accident" as string,
+  severity: "minor" as string,
   status: "open" as Status,
   incidentDate: new Date().toISOString().slice(0, 10),
   incidentTime: "",
@@ -319,11 +339,12 @@ export default function IncidentsPage() {
   const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
   const qc = useQueryClient();
+  const apiFetch = useIncidentsApi();
   const hasIncidentTrack = hasService("incidenttrack");
 
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
-  const [filterSeverity, setFilterSeverity] = useState<Severity | "all">("all");
-  const [filterType, setFilterType] = useState<IncidentType | "all">("all");
+  const [filterSeverity, setFilterSeverity] = useState<string>("all");
+  const [filterType, setFilterType] = useState<string>("all");
   const [filterRiddor, setFilterRiddor] = useState(false);
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
@@ -334,6 +355,16 @@ export default function IncidentsPage() {
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
   const { data: incidentConfig } = useGetIncidentConfig();
+  const { data: formOptions } = useFormOptions();
+  const incidentTypeOptions = pickOptions(formOptions, "incident_types");
+  const severityOptions = pickOptions(formOptions, "incident_severities");
+  // When editing a record whose stored value has since been removed from the
+  // effective list, keep that value selectable so other fields can be edited
+  // without being forced to change the type/severity.
+  const withCurrent = (opts: string[], current: string | undefined) =>
+    current && !opts.includes(current) ? [...opts, current] : opts;
+  const formTypeOptions = withCurrent(incidentTypeOptions, form.incidentType);
+  const formSeverityOptions = withCurrent(severityOptions, form.severity);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -580,6 +611,18 @@ ${rows.map(r => `<tr>
             <Printer className="w-4 h-4" /> Export register
           </Button>
           {canAdmin && <IncidentConfigDialog />}
+          <FormOptionsEditor
+            optionKey="incident_types"
+            title="Incident types"
+            triggerLabel="Customise types"
+            labelFor={typeLabel}
+          />
+          <FormOptionsEditor
+            optionKey="incident_severities"
+            title="Severities"
+            triggerLabel="Customise severities"
+            labelFor={severityLabel}
+          />
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident
           </Button>
@@ -644,22 +687,22 @@ ${rows.map(r => `<tr>
             {STATUSES.map(s => <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterSeverity} onValueChange={v => setFilterSeverity(v as Severity | "all")}>
+        <Select value={filterSeverity} onValueChange={v => setFilterSeverity(v)}>
           <SelectTrigger className="w-36 rounded-sm">
             <SelectValue placeholder="All severities" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All severities</SelectItem>
-            {SEVERITIES.map(s => <SelectItem key={s} value={s}>{SEVERITY_LABELS[s]}</SelectItem>)}
+            {severityOptions.map(s => <SelectItem key={s} value={s}>{severityLabel(s)}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={filterType} onValueChange={v => setFilterType(v as IncidentType | "all")}>
+        <Select value={filterType} onValueChange={v => setFilterType(v)}>
           <SelectTrigger className="w-48 rounded-sm">
             <SelectValue placeholder="All types" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
-            {INCIDENT_TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>)}
+            {incidentTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
           </SelectContent>
         </Select>
         <button
@@ -725,11 +768,11 @@ ${rows.map(r => `<tr>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">
-                      <Badge variant="outline" className={cn("text-xs w-fit", TYPE_COLORS[r.incidentType])}>
-                        {TYPE_LABELS[r.incidentType]}
+                      <Badge variant="outline" className={cn("text-xs w-fit", typeColor(r.incidentType))}>
+                        {typeLabel(r.incidentType)}
                       </Badge>
-                      <Badge variant="outline" className={cn("text-xs w-fit", SEVERITY_COLORS[r.severity])}>
-                        {SEVERITY_LABELS[r.severity]}
+                      <Badge variant="outline" className={cn("text-xs w-fit", severityColor(r.severity))}>
+                        {severityLabel(r.severity)}
                       </Badge>
                     </div>
                   </td>
@@ -829,19 +872,19 @@ ${rows.map(r => `<tr>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Incident Type *</Label>
-                    <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v as IncidentType }))}>
+                    <Select value={form.incidentType} onValueChange={v => setForm(f => ({ ...f, incidentType: v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {INCIDENT_TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>)}
+                        {formTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Label>Severity *</Label>
-                    <Select value={form.severity} onValueChange={v => setForm(f => ({ ...f, severity: v as Severity }))}>
+                    <Select value={form.severity} onValueChange={v => setForm(f => ({ ...f, severity: v }))}>
                       <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {SEVERITIES.map(s => <SelectItem key={s} value={s}>{SEVERITY_LABELS[s]}</SelectItem>)}
+                        {formSeverityOptions.map(s => <SelectItem key={s} value={s}>{severityLabel(s)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

@@ -33,6 +33,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
+import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 import {
   Award,
   CheckSquare,
@@ -88,22 +91,6 @@ type CertStatus = "expired" | "expiring_soon" | "valid" | "no_expiry";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TRAINING_TYPES = [
-  "Fire Safety Awareness",
-  "Food Hygiene (Level 2)",
-  "Food Hygiene (Level 3)",
-  "Manual Handling",
-  "First Aid at Work",
-  "Emergency First Aid at Work",
-  "COSHH Awareness",
-  "Health & Safety Induction",
-  "Working at Height",
-  "RIDDOR Awareness",
-  "Asbestos Awareness",
-  "Display Screen Equipment (DSE)",
-  "Other",
-];
-
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   risk_assessment: "Risk Assessment",
   sop: "SOP",
@@ -142,16 +129,20 @@ function daysUntil(d: string | null) {
   return Math.ceil((new Date(d).getTime() - today.getTime()) / 86400000);
 }
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-    ...opts,
-  });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
-  if (res.status === 204) return null;
-  return res.json();
+// Route every request through the shared apiFetch and attach the consultant's
+// currently-selected clientId to BOTH reads and writes, so a consultant viewing
+// another client never reads or writes the wrong tenant. Matches the pattern
+// used by the other module pages (e.g. PremisesTrack).
+function useTrainTrackApi() {
+  const { activeClientId } = useAuth();
+  return async function call<T = any>(path: string, opts?: RequestInit): Promise<T> {
+    const sep = path.includes("?") ? "&" : "?";
+    const suffix = activeClientId ? `${sep}clientId=${activeClientId}` : "";
+    const res = await sharedApiFetch(`${path}${suffix}`, opts);
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error((b as any)?.error ?? `${res.status}`); }
+    if (res.status === 204) return null as T;
+    return res.json();
+  };
 }
 
 // ─── Empty forms ──────────────────────────────────────────────────────────────
@@ -202,6 +193,7 @@ export default function TrainTrackPage() {
   const { toast } = useToast();
   const { activeClientId, client, user } = useAuth();
   const qc = useQueryClient();
+  const apiFetch = useTrainTrackApi();
 
   const [tab, setTab]           = useState<RecordType>("certificate");
   const [siteFilter, setSite]   = useState("all");
@@ -231,6 +223,21 @@ export default function TrainTrackPage() {
     queryFn: () => apiFetch("/sites"),
     enabled: !!activeClientId,
   });
+
+  // Effective (per-client customisable) training-type suggestions. "Other" is
+  // always offered last so the free-text fallback stays available even if a
+  // client removes it from their custom list.
+  const { data: formOptions } = useFormOptions();
+  const trainingTypeOptions = useMemo(() => {
+    const opts = pickOptions(formOptions, "traintrack_types").filter(t => t !== "Other");
+    return [...opts, "Other"];
+  }, [formOptions]);
+  // Known named types (everything except the "Other" free-text bucket) — used
+  // to decide whether a stored value is a custom entry.
+  const knownTrainingTypes = useMemo(
+    () => trainingTypeOptions.filter(t => t !== "Other"),
+    [trainingTypeOptions],
+  );
 
   // split by type
   const certs     = useMemo(() => allRecords.filter(r => r.record_type === "certificate"), [allRecords]);
@@ -301,7 +308,7 @@ export default function TrainTrackPage() {
   function openEdit(r: TrainingRecord) {
     setEditRecord(r);
     if (r.record_type === "certificate") {
-      const isCustom = r.training_type ? !TRAINING_TYPES.slice(0, -1).includes(r.training_type) : false;
+      const isCustom = r.training_type ? !knownTrainingTypes.includes(r.training_type) : false;
       setCertForm({
         staffName: r.staff_name,
         trainingType: isCustom ? "Other" : (r.training_type ?? ""),
@@ -324,7 +331,7 @@ export default function TrainTrackPage() {
         signature: (r as any).signature ?? null,
       });
     } else {
-      const isCustom = r.training_type ? !TRAINING_TYPES.slice(0, -1).includes(r.training_type) : false;
+      const isCustom = r.training_type ? !knownTrainingTypes.includes(r.training_type) : false;
       setInternalForm({
         staffName: r.staff_name,
         trainingType: isCustom ? "Other" : (r.training_type ?? ""),
@@ -640,6 +647,11 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
           Training certificates, document sign-offs, and internal training records
         </p>
         <div className="flex items-center gap-2">
+          <FormOptionsEditor
+            optionKey="traintrack_types"
+            title="Training types"
+            triggerLabel="Customise types"
+          />
           <Button
             variant="outline"
             onClick={handlePrintMatrix}
@@ -960,7 +972,7 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
                   <Select value={certForm.trainingType} onValueChange={v => setCertForm(f => ({ ...f, trainingType: v, customType: "" }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
-                      {TRAINING_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {trainingTypeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   {certForm.trainingType === "Other" && (
@@ -1078,7 +1090,7 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
                   <Select value={internalForm.trainingType} onValueChange={v => setInternalForm(f => ({ ...f, trainingType: v, customType: "" }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select or describe…" /></SelectTrigger>
                     <SelectContent>
-                      {TRAINING_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {trainingTypeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   {internalForm.trainingType === "Other" && (

@@ -15,3 +15,5 @@ The "consultant" role is overloaded: real H&S consultants manage *multiple* clie
 - Any flow that provisions a new client for a consultant (registration, client creation, self-provisioning) must insert a `consultant_clients` row or the creator locks themselves out.
 
 **Why:** self-signup owners previously could pass another account's id and read/write its data (cross-tenant IDOR); fixed app-wide via this membership model.
+
+**Web client gotcha:** the shared `@/lib/api` apiFetch only prefixes `/api` — it does NOT append activeClientId. Pages must append `clientId=<activeClientId>` themselves (see usePremisesApi/useIncidentsApi hook pattern); page-local raw fetch helpers have repeatedly caused consultant cross-tenant bugs.

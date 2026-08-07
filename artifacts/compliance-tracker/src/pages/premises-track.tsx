@@ -19,6 +19,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 import {
   Building2, Plus, CheckCircle2, Clock, Pencil, Trash2,
   Search, X, Printer, ClipboardCheck,
@@ -28,7 +30,6 @@ import { format, parseISO, isValid } from "date-fns";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const INSPECTION_TYPES = ["routine", "hazard", "fault", "housekeeping", "signage"] as const;
 const TYPE_LABELS: Record<string, string> = {
   routine:      "Routine inspection",
   hazard:       "Hazard / slip-trip-fall",
@@ -120,8 +121,16 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
 }) {
   const { toast } = useToast();
   const apiFetch = usePremisesApi();
+  const { data: formOptions } = useFormOptions();
+  const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
   const isEdit = !!inspection;
   const [saving, setSaving] = useState(false);
+  // Keep the record's stored type selectable even if it was later removed from
+  // the effective list, so editing other fields doesn't force a type change.
+  const currentType = inspection?.inspection_type;
+  const formInspectionTypes = currentType && !inspectionTypes.includes(currentType)
+    ? [...inspectionTypes, currentType]
+    : inspectionTypes;
   const [form, setForm] = useState(() => ({
     inspectionDate: inspection?.inspection_date ?? new Date().toISOString().slice(0, 10),
     inspectionType: inspection?.inspection_type ?? "routine",
@@ -185,7 +194,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {INSPECTION_TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>)}
+                {formInspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -254,6 +263,8 @@ export default function PremisesTrackPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const apiFetch = usePremisesApi();
+  const { data: formOptions } = useFormOptions();
+  const inspectionTypes = pickOptions(formOptions, "premises_inspection_types");
 
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter]     = useState<string>("all");
@@ -420,6 +431,12 @@ ${sorted.map(r => `<tr>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <FormOptionsEditor
+              optionKey="premises_inspection_types"
+              title="Inspection types"
+              triggerLabel="Customise types"
+              labelFor={v => TYPE_LABELS[v] ?? v}
+            />
             <Button variant="outline" size="sm" className="rounded-sm gap-1.5 h-8 text-xs"
               onClick={handleExportLog}
               title="Print or save the full premises safety logbook">
@@ -476,7 +493,7 @@ ${sorted.map(r => `<tr>
             <SelectTrigger className="rounded-sm h-8 text-xs w-40"><SelectValue placeholder="All types" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              {INSPECTION_TYPES.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>)}
+              {inspectionTypes.map(t => <SelectItem key={t} value={t}>{TYPE_LABELS[t] ?? t}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>

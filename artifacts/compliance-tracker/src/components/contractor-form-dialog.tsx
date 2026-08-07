@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { Contractor } from "@workspace/api-client-react";
+import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
+import { FormOptionsEditor } from "@/components/form-options-editor";
 
 // ── Trade options (must match fix-track issue types) ─────────────────────────
 
@@ -61,6 +63,19 @@ export function ContractorFormDialog({
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [trades, setTrades] = useState<string[]>([]);
+
+  // Per-client customisable trade list. Fall back to the built-in labels for
+  // known values and humanise any custom entries. Any trade already saved on
+  // this contractor is always shown so removing an option never hides an
+  // existing selection.
+  const { data: formOptions } = useFormOptions();
+  const tradeLabels: Record<string, string> = Object.fromEntries(TRADE_OPTIONS.map(o => [o.value, o.label]));
+  const humanizeTrade = (v: string) => v.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ");
+  const effectiveTradeValues = pickOptions(formOptions, "fixtrack_trades");
+  const tradeOptionList = [
+    ...effectiveTradeValues,
+    ...trades.filter(t => !effectiveTradeValues.includes(t)),
+  ].map(value => ({ value, label: tradeLabels[value] ?? humanizeTrade(value) }));
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -168,14 +183,22 @@ export function ContractorFormDialog({
 
           {/* Trades / specialisms */}
           <div className="space-y-2.5">
-            <div>
-              <Label>Trade Specialisms</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Select the types of work this contractor covers. This enables auto-matching when maintenance issues are logged.
-              </p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <Label>Trade Specialisms</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Select the types of work this contractor covers. This enables auto-matching when maintenance issues are logged.
+                </p>
+              </div>
+              <FormOptionsEditor
+                optionKey="fixtrack_trades"
+                title="Trade specialisms"
+                triggerLabel="Customise trades"
+                labelFor={v => tradeLabels[v] ?? humanizeTrade(v)}
+              />
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {TRADE_OPTIONS.map(opt => {
+              {tradeOptionList.map(opt => {
                 const checked = trades.includes(opt.value);
                 return (
                   <button

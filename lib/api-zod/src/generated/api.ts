@@ -808,7 +808,10 @@ export const GetFoodSafetyConfigResponse = zod.object({
   food_default_holding_items: zod.string().optional(),
   food_default_sv_items: zod.string().optional(),
   food_show_deliveries: zod.string().optional(),
+  food_show_cold_food: zod.string().optional(),
   food_show_hot_temperature: zod.string().optional(),
+  food_show_cooling: zod.string().optional(),
+  food_show_reheating: zod.string().optional(),
   food_show_hot_holding: zod.string().optional(),
   food_show_sous_vide: zod.string().optional(),
   food_num_fridges: zod.string().optional(),
@@ -828,7 +831,10 @@ export const UpdateFoodSafetyConfigBody = zod.object({
   food_default_holding_items: zod.string().optional(),
   food_default_sv_items: zod.string().optional(),
   food_show_deliveries: zod.string().optional(),
+  food_show_cold_food: zod.string().optional(),
   food_show_hot_temperature: zod.string().optional(),
+  food_show_cooling: zod.string().optional(),
+  food_show_reheating: zod.string().optional(),
   food_show_hot_holding: zod.string().optional(),
   food_show_sous_vide: zod.string().optional(),
   food_num_fridges: zod.string().optional(),
@@ -841,6 +847,29 @@ export const UpdateFoodSafetyConfigBody = zod.object({
 
 export const UpdateFoodSafetyConfigResponse = zod.object({
   ok: zod.boolean(),
+});
+
+/**
+ * @summary Reset kitchen configuration to defaults
+ */
+export const ResetFoodSafetyConfigResponse = zod.object({
+  food_cold_units: zod.string().optional(),
+  food_default_hot_items: zod.string().optional(),
+  food_default_holding_items: zod.string().optional(),
+  food_default_sv_items: zod.string().optional(),
+  food_show_deliveries: zod.string().optional(),
+  food_show_cold_food: zod.string().optional(),
+  food_show_hot_temperature: zod.string().optional(),
+  food_show_cooling: zod.string().optional(),
+  food_show_reheating: zod.string().optional(),
+  food_show_hot_holding: zod.string().optional(),
+  food_show_sous_vide: zod.string().optional(),
+  food_num_fridges: zod.string().optional(),
+  food_num_freezers: zod.string().optional(),
+  food_cooking_limit: zod.string().optional(),
+  food_cooling_limit: zod.string().optional(),
+  food_reheating_limit: zod.string().optional(),
+  food_hot_holding_limit: zod.string().optional(),
 });
 
 /**
