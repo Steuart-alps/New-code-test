@@ -27,6 +27,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle } from "lucide-react";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
@@ -1116,6 +1117,11 @@ function DailyDiaryTab() {
               </div>
             </CardContent>
           </Card>
+          )}
+
+          {/* Photos */}
+          {record?.id && (
+            <CheckPhotoUploader entityType="food_safety_record" entityId={record.id} />
           )}
         </>
       )}

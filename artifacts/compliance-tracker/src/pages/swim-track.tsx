@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { AppLayout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -943,6 +944,7 @@ export default function SwimTrackPage() {
                       <th className="text-right font-medium py-2 pr-4 hidden md:table-cell">Peak bathers</th>
                       <th className="text-left font-medium py-2 pr-4">Pre-session</th>
                       <th className="text-left font-medium py-2 pr-4">Status</th>
+                      <th className="w-14" />
                       <th className="w-16" />
                     </tr>
                   </thead>
@@ -976,6 +978,9 @@ export default function SwimTrackPage() {
                           {s.poolClosed
                             ? <span className="text-xs text-destructive font-medium flex items-center gap-1"><XCircle className="w-3 h-3" />Closed</span>
                             : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}
+                        </td>
+                        <td className="py-2 px-2">
+                          <CheckPhotoUploader entityType="swim_session" entityId={s.id} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"
@@ -1189,6 +1194,7 @@ export default function SwimTrackPage() {
                       <th className="text-left font-medium py-2 pr-4">Description</th>
                       <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Action taken</th>
                       <th className="text-left font-medium py-2 pr-4">Outcome</th>
+                      <th className="w-14" />
                       <th className="w-16" />
                     </tr>
                   </thead>
@@ -1221,6 +1227,9 @@ export default function SwimTrackPage() {
                           {i.outcome
                             ? <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded-full">Resolved</span>
                             : <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-full">Open</span>}
+                        </td>
+                        <td className="py-2 px-2">
+                          <CheckPhotoUploader entityType="swim_incident" entityId={i.id} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"

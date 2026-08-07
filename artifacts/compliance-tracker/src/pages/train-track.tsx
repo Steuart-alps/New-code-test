@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -579,7 +580,10 @@ export default function TrainTrackPage() {
                         <Icon className="w-3 h-3" />{cfg.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3"><ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} /></td>
+                    <td className="px-4 py-3">
+                      <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
+                      <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                    </td>
                   </tr>
                 );
               })}
@@ -637,7 +641,10 @@ export default function TrainTrackPage() {
                   <td className="px-4 py-3 text-muted-foreground text-sm max-w-[200px] truncate hidden lg:table-cell">
                     {r.notes ?? <span className="opacity-40">—</span>}
                   </td>
-                  <td className="px-4 py-3"><ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} /></td>
+                  <td className="px-4 py-3">
+                    <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
+                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                  </td>
                 </tr>
               ))}
             </TableWrap>
@@ -683,7 +690,10 @@ export default function TrainTrackPage() {
                   <td className="px-4 py-3 text-muted-foreground text-sm max-w-[180px] truncate hidden lg:table-cell">
                     {r.notes ?? <span className="opacity-40">—</span>}
                   </td>
-                  <td className="px-4 py-3"><ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} /></td>
+                  <td className="px-4 py-3">
+                    <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
+                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} />
+                  </td>
                 </tr>
               ))}
             </TableWrap>

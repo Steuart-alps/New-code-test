@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1516,6 +1517,7 @@ export default function PATTrackPage() {
                       <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Result</th>
                       <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Tested by</th>
                       <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Next due</th>
+                      <th className="px-2 py-2.5 w-14"></th>
                       <th className="px-4 py-2.5 w-20"></th>
                     </tr>
                   </thead>
@@ -1535,6 +1537,9 @@ export default function PATTrackPage() {
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell text-xs text-muted-foreground">
                           {t.next_test_date ? format(parseISO(t.next_test_date), "dd MMM yyyy") : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-2 py-3">
+                          <CheckPhotoUploader entityType="pat_test" entityId={t.id} compact />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

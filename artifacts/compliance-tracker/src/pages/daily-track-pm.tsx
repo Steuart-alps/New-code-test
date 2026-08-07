@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -281,6 +282,11 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
           </div>
         )}
         {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
+        {existing?.id && (
+          <div className="border-t mt-3 pt-3">
+            <CheckPhotoUploader entityType="daily_checklist_pm" entityId={existing.id} compact />
+          </div>
+        )}
       </Card>
 
       {canAdmin && (

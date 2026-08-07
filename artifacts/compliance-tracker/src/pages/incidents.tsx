@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -707,7 +708,8 @@ export default function IncidentsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <CheckPhotoUploader entityType="incident" entityId={r.id} compact />
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
                       <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>

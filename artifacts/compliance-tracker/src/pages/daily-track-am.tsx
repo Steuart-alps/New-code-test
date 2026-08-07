@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -311,6 +312,11 @@ function ChecklistCard({
           <div className="border-t pt-3 space-y-1">
             {existing?.completedBy && <p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p>}
             {existing?.managerNote && <p className="text-xs text-muted-foreground">Manager note: <span className="italic">{existing.managerNote}</span></p>}
+          </div>
+        )}
+        {existing?.id && (
+          <div className="border-t mt-3 pt-3">
+            <CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact />
           </div>
         )}
       </Card>

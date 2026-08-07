@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -735,6 +736,7 @@ export default function PestTrackPage() {
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden sm:table-cell">Contractor</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden md:table-cell">Findings summary</th>
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground hidden lg:table-cell">Next visit</th>
+                      <th className="px-2 py-2.5 w-14"></th>
                       <th className="px-4 py-2.5 w-16"></th>
                     </tr>
                   </thead>
@@ -763,6 +765,9 @@ export default function PestTrackPage() {
                                 {isNextOverdue && <span className="ml-1 font-bold">Overdue</span>}
                               </p>
                             ) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="px-2 py-3">
+                            <CheckPhotoUploader entityType="pest_visit" entityId={v.id} compact />
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
