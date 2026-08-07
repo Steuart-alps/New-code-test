@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
-  Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog,
+  Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -358,6 +358,200 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   );
 }
 
+// ── Dashboard helpers ─────────────────────────────────────────────────────────
+
+function StatCard({ label, value, color }: { label: string; value: number; color: "amber" | "rose" | "blue" | "emerald" | "slate" }) {
+  const bg   = { amber: "bg-amber-50 border-amber-100",   rose: "bg-rose-50 border-rose-100",   blue: "bg-blue-50 border-blue-100",   emerald: "bg-emerald-50 border-emerald-100",   slate: "bg-slate-50 border-slate-200" };
+  const val  = { amber: "text-amber-700",                  rose: "text-rose-700",                 blue: "text-blue-700",                 emerald: "text-emerald-700",                   slate: "text-slate-600" };
+  const lbl  = { amber: "text-amber-600/70",               rose: "text-rose-600/70",              blue: "text-blue-600/70",              emerald: "text-emerald-600/70",                slate: "text-slate-500" };
+  return (
+    <div className={cn("rounded-xl border p-5", bg[color])}>
+      <div className={cn("text-3xl font-bold tabular-nums", val[color])}>{value}</div>
+      <div className={cn("text-xs font-medium mt-1", lbl[color])}>{label}</div>
+    </div>
+  );
+}
+
+function MiniBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
+      <div className={cn("h-2 rounded-full transition-all", color)} style={{ width: `${Math.max(pct, 2)}%` }} />
+    </div>
+  );
+}
+
+function FixTrackDashboard({ issues }: { issues: Issue[] }) {
+  const today = new Date();
+  const thisMonth = today.toISOString().slice(0, 7);
+
+  const open            = issues.filter(i => i.status === "reported" || i.status === "in_progress");
+  const urgentOpen      = open.filter(i => i.priority === "urgent");
+  const inProgress      = issues.filter(i => i.status === "in_progress");
+  const resolvedMonth   = issues.filter(i => i.status === "resolved" && i.resolvedDate?.startsWith(thisMonth));
+
+  const byStatus = Object.entries(STATUSES).map(([key, meta]) => ({
+    key, meta, count: issues.filter(i => i.status === key).length,
+  }));
+
+  const priorityOrder = ["urgent", "high", "medium", "low"] as const;
+  const byPriority = priorityOrder.map(key => ({
+    key, meta: PRIORITIES[key], count: open.filter(i => i.priority === key).length,
+  })).filter(p => p.count > 0);
+
+  const byType = Object.entries(ISSUE_TYPES)
+    .map(([key, meta]) => ({ key, meta, count: open.filter(i => i.issueType === key).length }))
+    .filter(t => t.count > 0)
+    .sort((a, b) => b.count - a.count);
+
+  const siteMap = new Map<string, number>();
+  for (const i of open) siteMap.set(i.siteName ?? "No site", (siteMap.get(i.siteName ?? "No site") ?? 0) + 1);
+  const bySite = [...siteMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  const oldest = issues
+    .filter(i => i.status === "reported")
+    .sort((a, b) => new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime())
+    .slice(0, 6);
+
+  const daysOpen = (d: string) => Math.floor((today.getTime() - new Date(d).getTime()) / 86_400_000);
+  const maxType  = Math.max(...byType.map(t => t.count), 1);
+  const maxSite  = Math.max(...bySite.map(([, c]) => c), 1);
+
+  const statusBar:   Record<string, string> = { reported: "bg-rose-400", in_progress: "bg-amber-400", resolved: "bg-emerald-400", closed: "bg-slate-400" };
+  const priorityBar: Record<string, string> = { urgent: "bg-rose-500", high: "bg-amber-500", medium: "bg-blue-400", low: "bg-slate-400" };
+
+  return (
+    <div className="space-y-6">
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Open issues"          value={open.length}          color={open.length > 0 ? "amber" : "emerald"} />
+        <StatCard label="Urgent open"          value={urgentOpen.length}    color={urgentOpen.length > 0 ? "rose" : "slate"} />
+        <StatCard label="In progress"          value={inProgress.length}    color="blue" />
+        <StatCard label="Resolved this month"  value={resolvedMonth.length} color="emerald" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Status breakdown */}
+        <div className="bg-card border rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-sm">By status</h3>
+          {byStatus.map(({ key, meta, count }) => {
+            const Icon = meta.icon;
+            return (
+              <div key={key} className="flex items-center gap-3">
+                <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium w-28 flex-shrink-0", meta.color)}>
+                  <Icon className="w-3 h-3 flex-shrink-0" />{meta.label}
+                </span>
+                <MiniBar pct={issues.length ? (count / issues.length) * 100 : 0} color={statusBar[key] ?? "bg-muted-foreground"} />
+                <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Priority (open only) */}
+        <div className="bg-card border rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-sm">Open issues by priority</h3>
+          {byPriority.length === 0
+            ? <p className="text-sm text-muted-foreground italic">No open issues 🎉</p>
+            : byPriority.map(({ key, meta, count }) => (
+              <div key={key} className="flex items-center gap-3">
+                <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium w-20 flex-shrink-0", meta.color)}>
+                  {meta.label}
+                </span>
+                <MiniBar pct={(count / open.length) * 100} color={priorityBar[key] ?? "bg-muted-foreground"} />
+                <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
+              </div>
+            ))
+          }
+        </div>
+
+        {/* By type */}
+        {byType.length > 0 && (
+          <div className="bg-card border rounded-xl p-5 space-y-3">
+            <h3 className="font-semibold text-sm">Open issues by type</h3>
+            {byType.map(({ key, meta, count }) => (
+              <div key={key} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{meta.label}</span>
+                <MiniBar pct={(count / maxType) * 100} color="bg-primary/60" />
+                <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* By site */}
+        {bySite.length > 0 && (
+          <div className="bg-card border rounded-xl p-5 space-y-3">
+            <h3 className="font-semibold text-sm">Open issues by site</h3>
+            {bySite.map(([site, count]) => (
+              <div key={site} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-24 flex-shrink-0 truncate">{site}</span>
+                <MiniBar pct={(count / maxSite) * 100} color="bg-indigo-400" />
+                <span className="text-sm font-semibold tabular-nums w-6 text-right">{count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Oldest unactioned */}
+      {oldest.length > 0 && (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <h3 className="font-semibold text-sm">Oldest unactioned — awaiting first response</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-muted/40 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Issue</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Type</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Site</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Priority</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-medium text-muted-foreground">Days open</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {oldest.map(issue => {
+                  const days        = daysOpen(issue.reportedDate);
+                  const typeMeta    = ISSUE_TYPES[issue.issueType]  ?? ISSUE_TYPES.general;
+                  const priorityMeta = PRIORITIES[issue.priority]   ?? PRIORITIES.low;
+                  return (
+                    <tr key={issue.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-sm">{issue.title}</div>
+                        {issue.location && <div className="text-xs text-muted-foreground">{issue.location}</div>}
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <span className={cn("text-xs px-1.5 py-0.5 rounded border", typeMeta.color)}>{typeMeta.label}</span>
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-xs text-muted-foreground">{issue.siteName ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn("text-xs px-1.5 py-0.5 rounded border", priorityMeta.color)}>{priorityMeta.label}</span>
+                      </td>
+                      <td className={cn("px-4 py-3 text-right text-sm font-bold tabular-nums",
+                        days >= 14 ? "text-rose-600" : days >= 7 ? "text-amber-600" : "text-muted-foreground")}>
+                        {days}d
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {issues.length === 0 && (
+        <div className="py-20 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
+          <BarChart3 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="text-sm font-medium">No issues yet — dashboard will populate as issues are logged.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FixTrackPage() {
@@ -366,6 +560,7 @@ export default function FixTrackPage() {
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
 
+  const [activeTab, setActiveTab]         = useState<"dashboard" | "issues">("dashboard");
   const [issues, setIssues]               = useState<Issue[]>([]);
   const [loading, setLoading]             = useState(true);
   const [search, setSearch]               = useState("");
@@ -544,25 +739,38 @@ export default function FixTrackPage() {
           </Button>
         </div>
 
-        {/* Summary pills */}
-        {issues.length > 0 && (
-          <div className="flex flex-wrap gap-3">
-            <div className={cn("px-3 py-1.5 rounded-full text-xs font-medium border",
-              openCount > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
-              {openCount} open issue{openCount !== 1 ? "s" : ""}
-            </div>
-            {urgentCount > 0 && (
-              <div className="px-3 py-1.5 rounded-full text-xs font-medium border bg-rose-50 text-rose-700 border-rose-200">
-                <AlertTriangle className="w-3 h-3 inline mr-1" />{urgentCount} urgent
-              </div>
+        {/* Tab switcher */}
+        <div className="flex border-b border-border">
+          <button
+            onClick={() => setActiveTab("dashboard")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+              activeTab === "dashboard" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
             )}
-            <div className="px-3 py-1.5 rounded-full text-xs font-medium border bg-muted text-muted-foreground">
-              {issues.length} total
-            </div>
-          </div>
+          >
+            <BarChart3 className="w-4 h-4" />Dashboard
+          </button>
+          <button
+            onClick={() => setActiveTab("issues")}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+              activeTab === "issues" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Wrench className="w-4 h-4" />Issues
+            {openCount > 0 && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{openCount}</span>}
+          </button>
+        </div>
+
+        {/* Dashboard tab */}
+        {activeTab === "dashboard" && (
+          loading
+            ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
+            : <FixTrackDashboard issues={issues} />
         )}
 
-        {/* Filters */}
+        {/* Issues tab — Filters */}
+        {activeTab === "issues" && <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="relative sm:col-span-2 lg:col-span-1">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -714,6 +922,7 @@ export default function FixTrackPage() {
             })}
           </div>
         )}
+      </>}
       </div>
 
       {/* Re-notify confirmation dialog */}
