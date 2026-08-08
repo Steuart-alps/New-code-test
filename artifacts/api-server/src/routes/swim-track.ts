@@ -10,7 +10,7 @@ router.use(requireAuth);
 
 // Helper: unwrap drizzle result rows
 function rows(result: any): any[] {
-  return [...result];
+  return result.rows;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

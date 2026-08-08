@@ -70,7 +70,7 @@ router.get("/", requireAuth, async (req, res) => {
     LIMIT ${Number(limit)}
   `);
 
-  res.json([...(rows as any)]);
+  res.json((rows as any).rows);
 });
 
 // POST /pool-track — create check

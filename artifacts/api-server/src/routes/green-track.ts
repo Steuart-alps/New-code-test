@@ -24,7 +24,7 @@ export const MACHINE_TYPES = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function rows<T = any>(result: any): T[] {
-  return [...result] as T[];
+  return result.rows as T[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -343,11 +343,78 @@ export async function runRuntimeMigrations() {
       ON "training_expiry_reminder_log" ("client_id")
     `);
 
+    await migrateAuditFixes2026_08();
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
     throw err;
   }
+}
+
+// ---- 2026-08 audit fixes: schema drift between routes and migrations ----
+async function migrateAuditFixes2026_08() {
+  // StaffRoster: route reads/writes a single "name" field.
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT ''`);
+  // Some databases predate first_name/last_name (or never had them) — guard everything.
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'staff_roster' AND column_name = 'first_name'
+      ) THEN
+        UPDATE "staff_roster"
+        SET "name" = trim(concat_ws(' ', "first_name", "last_name"))
+        WHERE "name" = '' AND (coalesce("first_name", '') <> '' OR coalesce("last_name", '') <> '');
+        ALTER TABLE "staff_roster" ALTER COLUMN "first_name" DROP NOT NULL;
+        ALTER TABLE "staff_roster" ALTER COLUMN "last_name" DROP NOT NULL;
+      END IF;
+    END $$;
+  `);
+
+  // DocTrack: route stores files in object storage under "object_path".
+  await db.execute(sql`ALTER TABLE "doc_track_documents" ADD COLUMN IF NOT EXISTS "object_path" text`);
+
+  // TrainTrack: record_type (certificate/signoff/internal) is distinct from training_type.
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "record_type" text NOT NULL DEFAULT 'internal'`);
+
+  // KitchenTrack weekly review + probe checks tables (referenced by kitchen-weekly.ts and food-safety.ts).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_weekly_records" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "week_commencing" date NOT NULL,
+      "checks" jsonb NOT NULL DEFAULT '[]',
+      "deviations" jsonb NOT NULL DEFAULT '[]',
+      "additional" jsonb NOT NULL DEFAULT '[]',
+      "manager_signature" text,
+      "submitted_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_weekly_client" ON "kitchen_weekly_records" ("client_id")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "kitchen_probe_checks" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "check_date" date NOT NULL,
+      "probes" jsonb NOT NULL DEFAULT '[]',
+      "overall_result" text,
+      "checked_by" text,
+      "signature" text,
+      "notes" text,
+      "submitted_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_probe_client" ON "kitchen_probe_checks" ("client_id")`);
 }
 
 async function migrateLegacyCategories() {

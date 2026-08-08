@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { pestVisitsTable, pestActivityTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
-import { requireAuth, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, getClientId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { z } from "zod";
 
@@ -10,10 +10,6 @@ const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getClientId(req: any): number | null {
-  const id = req.session?.clientId ?? req.user?.clientId ?? null;
-  return typeof id === "number" ? id : null;
-}
 
 const CONFIG_KEYS = [
   "pest_contractor_name",

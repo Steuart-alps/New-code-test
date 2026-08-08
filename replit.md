@@ -50,12 +50,10 @@ consultants managing portfolios of clients.
 
 ## Navigation Structure
 
-- **Dashboard** — overview with external/internal split (consultant sees "select client" prompt if no client active)
-- **EXTERNAL COMPLIANCE**
+- **Dashboard** — overview (consultant sees "select client" prompt if no client active)
+- **COMPLIANCE**
   - Contractors — manage external contractors
-  - External Checks — compliance items assigned to contractors, with lead time email reminders
-- **INTERNAL COMPLIANCE**
-  - Internal Checks — staff-managed compliance tasks
+  - Compliance Checks — one unified list of compliance items (no external/internal split; the old `type` field was removed), with lead time email reminders for contractor-assigned items
 - **FIRETRACK** (fire safety branch)
   - Fire Logbook (`/fire-safety`) — status cards + check history, record/edit/delete checks
 - **KITCHENTRACK** (kitchen branch)
@@ -105,7 +103,7 @@ Consultants pass `clientId` as a query param (injected by the frontend via `cust
 - `GET/POST /api/contractors/:id/certificates`, `PUT/DELETE /api/contractors/:id/certificates/:certId`
 - `GET/POST /api/items/:itemId/certificates`, `PUT/DELETE /api/items/:itemId/certificates/:id`
 - `/items/:id` (frontend) — full compliance check detail page incl. cert management
-- `GET/POST /api/compliance-items?type=external|internal&status=...&priority=...`
+- `GET/POST /api/compliance-items?status=...&priority=...` (no `type` param — items are a single unified list)
 - `GET/PUT/DELETE /api/compliance-items/:id`
 - `PATCH /api/compliance-items/:id/status`
 - `GET /api/dashboard/stats`

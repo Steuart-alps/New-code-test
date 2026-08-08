@@ -62,7 +62,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     RETURNING *
   `);
 
-  res.status(201).json((result as any)[0]);
+  res.status(201).json((result as any).rows[0]);
 });
 
 // ── List photos for a record ──────────────────────────────────────────────────
@@ -84,7 +84,7 @@ router.get("/", requireAuth, async (req, res) => {
     ORDER BY created_at ASC
   `);
 
-  res.json([...(result as any)]);
+  res.json((result as any).rows);
 });
 
 // ── Delete a photo ────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     RETURNING id
   `);
 
-  if (!(result as any)[0]) return res.status(404).json({ error: "Not found" });
+  if (!(result as any).rows[0]) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
 });
 
@@ -117,7 +117,7 @@ router.get("/requirements", requireAuth, async (req, res) => {
     ORDER BY entity_type
   `);
 
-  res.json([...(result as any)]);
+  res.json((result as any).rows);
 });
 
 // PUT /photos/requirements — upsert all at once

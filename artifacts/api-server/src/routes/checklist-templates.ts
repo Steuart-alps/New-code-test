@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -17,7 +17,8 @@ const itemSchema = z.object({
 // Returns the custom template for the given type + site, or null if using defaults.
 // Lookup order: site-specific > client-level > null (use frontend defaults)
 router.get("/checklist-templates", requireAuth, async (req, res) => {
-  const clientId = (req as any).clientId as number;
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
   const { type, siteId } = req.query;
 
   if (!type || typeof type !== "string") {
@@ -66,7 +67,8 @@ router.get("/checklist-templates", requireAuth, async (req, res) => {
 
 // PUT /checklist-templates — save (upsert) a custom template
 router.put("/checklist-templates", requireAuth, requireClientAdmin, async (req, res) => {
-  const clientId = (req as any).clientId as number;
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
   const userId = (req as any).userId as number;
 
   const schema = z.object({
@@ -112,7 +114,8 @@ router.put("/checklist-templates", requireAuth, requireClientAdmin, async (req, 
 
 // DELETE /checklist-templates?type=kitchen_opening&siteId=123 — reset to default
 router.delete("/checklist-templates", requireAuth, requireClientAdmin, async (req, res) => {
-  const clientId = (req as any).clientId as number;
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
   const { type, siteId } = req.query;
 
   if (!type || typeof type !== "string") {
