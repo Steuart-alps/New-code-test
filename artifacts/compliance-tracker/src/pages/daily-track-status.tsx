@@ -40,7 +40,8 @@ const COLUMNS = [
     key: "kitchen_opening",
     label: "Kitchen Opening",
     short: "Kit. Open",
-    route: "/daily-track-am",
+    route: "/kitchen",
+    routeQuery: "tab=checks",
     Icon: UtensilsCrossed,
     iconClass: "text-amber-500",
     headerClass: "text-amber-700 bg-amber-50",
@@ -58,7 +59,8 @@ const COLUMNS = [
     key: "kitchen_closing",
     label: "Kitchen Closing",
     short: "Kit. Close",
-    route: "/daily-track-pm",
+    route: "/kitchen",
+    routeQuery: "tab=checks",
     Icon: UtensilsCrossed,
     iconClass: "text-orange-500",
     headerClass: "text-orange-700 bg-orange-50",
@@ -149,10 +151,11 @@ function StatusDot({ status }: { status: RecordStatus }) {
 }
 
 function StatusCell({
-  status, route, date, siteId,
-}: { status: RecordStatus; route: string; date: string; siteId: number }) {
+  status, route, routeQuery, date, siteId,
+}: { status: RecordStatus; route: string; routeQuery?: string; date: string; siteId: number }) {
+  const qs = routeQuery ? `${routeQuery}&date=${date}&siteId=${siteId}` : `date=${date}&siteId=${siteId}`;
   return (
-    <Link href={`${route}?date=${date}&siteId=${siteId}`}>
+    <Link href={`${route}?${qs}`}>
       <div
         className={cn(
           "flex items-center justify-center cursor-pointer transition-transform hover:scale-110",
@@ -537,6 +540,7 @@ export default function DailyTrackStatusPage() {
                           <StatusCell
                             status={status[col.key]}
                             route={col.route}
+                            routeQuery={"routeQuery" in col ? col.routeQuery : undefined}
                             date={date}
                             siteId={site.id}
                           />

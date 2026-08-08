@@ -28,13 +28,15 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle } from "lucide-react";
+import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2 } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
 import ProbeCheckTab from "./kitchen-probe";
 import CleaningScheduleTab from "./kitchen-cleaning";
+import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -90,7 +92,7 @@ type SousVideRow = {
   notes: string;
 };
 
-type ActiveTab = "diary" | "weekly" | "probe" | "cleaning";
+type ActiveTab = "diary" | "weekly" | "probe" | "cleaning" | "checks";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
@@ -1389,6 +1391,310 @@ function DailyDiaryTab() {
   );
 }
 
+// ── Kitchen Daily Checks tab ──────────────────────────────────────────────────
+
+interface KCLItem { label: string; checked: boolean; notes?: string; section?: string; }
+interface KCLRecord {
+  id: number; checklistType: string; checkDate: string;
+  siteId?: number | null; items: KCLItem[];
+  completedBy?: string | null; managerNote?: string | null; submittedAt?: string | null;
+}
+
+const KCL_OPENING: KCLItem[] = [
+  { section: "Security & Safety", label: "Unlock premises and disarm alarm", checked: false },
+  { label: "Check for signs of break-in or damage", checked: false },
+  { label: "Ensure emergency exits are clear and unlocked", checked: false },
+  { label: "Check fire exits, extinguishers and fire blanket are accessible", checked: false },
+  { label: "Switch on lights and ventilation/extraction", checked: false },
+  { section: "Food Safety", label: "Wash hands before starting work", checked: false },
+  { label: "Put on clean uniform and PPE (if required)", checked: false },
+  { label: "Check soap, sanitiser and paper towels are stocked", checked: false },
+  { label: "Ensure cleaning chemicals are labelled and stored correctly", checked: false },
+  { section: "Temperature Checks", label: "Walk-in fridge temperature checked (target 0–5°C)", checked: false },
+  { label: "Under-counter fridge temperature checked (target 0–5°C)", checked: false },
+  { label: "Freezer temperature checked (target -18°C or below)", checked: false },
+  { label: "Display fridge temperature checked (target 0–5°C, if applicable)", checked: false },
+  { label: "Any temperature outside safe limits reported", checked: false },
+  { section: "Equipment Checks", label: "Ovens turned on", checked: false },
+  { label: "Grills turned on", checked: false },
+  { label: "Fryers turned on", checked: false },
+  { label: "Extraction system operating correctly", checked: false },
+  { label: "Hot holding equipment turned on", checked: false },
+  { label: "Dishwasher reaches correct wash/rinse temperatures", checked: false },
+  { label: "Probe thermometer tested and sanitised before use", checked: false },
+  { section: "Food Preparation", label: "Overnight deliveries checked", checked: false },
+  { label: "Stock rotated (FIFO)", checked: false },
+  { label: "Use-by dates checked", checked: false },
+  { label: "Expired food discarded", checked: false },
+  { label: "All prepared food labelled with date/time", checked: false },
+  { label: "Prep list completed", checked: false },
+  { section: "Cleaning", label: "All food contact surfaces sanitised", checked: false },
+  { label: "Chopping boards cleaned", checked: false },
+  { label: "Knives and utensils cleaned", checked: false },
+  { label: "Bins emptied if required and fitted with clean liners", checked: false },
+  { label: "Sinks clean and ready for use", checked: false },
+  { section: "Service Readiness", label: "Cooking stations set up", checked: false },
+  { label: "Ingredients stocked", checked: false },
+  { label: "Team briefing held (menu changes, allergens, bookings)", checked: false },
+  { section: "Documentation", label: "Fridge/freezer temperatures recorded", checked: false },
+  { label: "Any maintenance issues recorded", checked: false },
+  { label: "Checklist signed and dated", checked: false },
+];
+
+const KCL_CLOSING: KCLItem[] = [
+  { section: "Food Safety & Storage", label: "All prepared food labelled and dated", checked: false },
+  { label: "Food stored in suitable, covered containers", checked: false },
+  { label: "Raw food stored below ready-to-eat food", checked: false },
+  { label: "FIFO rotation completed", checked: false },
+  { label: "Expired or out-of-date food discarded", checked: false },
+  { label: "Walk-in fridge temperature recorded", checked: false },
+  { label: "Under-counter fridge temperature recorded", checked: false },
+  { label: "Freezer temperature recorded", checked: false },
+  { section: "Equipment", label: "Ovens switched off (unless required overnight)", checked: false },
+  { label: "Hobs and grills cleaned and turned off", checked: false },
+  { label: "Fryers filtered, cleaned and switched off", checked: false },
+  { label: "Extraction canopy switched off (after cooling period)", checked: false },
+  { label: "Dishwashers drained and cleaned", checked: false },
+  { section: "Cleaning & Sanitising", label: "Food preparation surfaces cleaned and sanitised", checked: false },
+  { label: "Chopping boards cleaned and sanitised", checked: false },
+  { label: "Knives and utensils washed and stored safely", checked: false },
+  { label: "Sinks cleaned and sanitised", checked: false },
+  { label: "Floor swept and mopped", checked: false },
+  { label: "Sanitiser bottles refilled", checked: false },
+  { section: "Waste Management", label: "Kitchen bins emptied", checked: false },
+  { label: "External bins secured with lids closed", checked: false },
+  { label: "Recycling separated correctly", checked: false },
+  { section: "Health & Safety", label: "Gas isolation checked", checked: false },
+  { label: "Electrical appliances switched off where appropriate", checked: false },
+  { label: "Fire exits clear", checked: false },
+  { label: "Fire doors closed", checked: false },
+  { label: "Chemicals stored safely away from food", checked: false },
+  { section: "Pest Prevention", label: "No signs of pest activity", checked: false },
+  { label: "Food removed from floors", checked: false },
+  { label: "Doors and windows secured", checked: false },
+  { section: "Documentation", label: "Temperature logs completed", checked: false },
+  { label: "Cleaning schedule signed", checked: false },
+  { label: "Corrective actions recorded", checked: false },
+  { label: "Equipment faults reported", checked: false },
+  { section: "Security", label: "Lights switched off", checked: false },
+  { label: "Alarm set", checked: false },
+  { label: "External doors locked", checked: false },
+  { label: "Keys returned to secure location", checked: false },
+];
+
+const KCL_DEFAULTS: Record<string, KCLItem[]> = { kitchen_opening: KCL_OPENING, kitchen_closing: KCL_CLOSING };
+const KCL_LABELS: Record<string, string> = { kitchen_opening: "Kitchen Opening", kitchen_closing: "Kitchen Closing" };
+const KCL_ENDPOINT: Record<string, string> = { kitchen_opening: "/daily-track-am", kitchen_closing: "/daily-track-pm" };
+
+function KitchenChecklistCard({
+  type, siteId, siteName, date, existing, onSaved, canAdmin,
+}: { type: string; siteId: number | null; siteName?: string; date: string; existing?: KCLRecord; onSaved: () => void; canAdmin: boolean }) {
+  const [templateItems, setTemplateItems] = useState<KCLItem[] | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(true);
+  const [showEditor, setShowEditor] = useState(false);
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (existing) { setTemplateLoading(false); return; }
+    (async () => {
+      setTemplateLoading(true);
+      const params = new URLSearchParams({ type });
+      if (siteId) params.set("siteId", String(siteId));
+      const r = await apiFetch(`/checklist-templates?${params}`);
+      if (r.ok) { const data = await r.json(); setTemplateItems(data.items ?? null); }
+      setTemplateLoading(false);
+    })();
+  }, [type, siteId, existing]);
+
+  const effectiveDefault = templateItems ? templateItems.map(i => ({ ...i, checked: false })) : (KCL_DEFAULTS[type] ?? []);
+  const [items, setItems] = useState<KCLItem[]>(existing?.items ?? effectiveDefault);
+  const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
+  const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
+  const [saving, setSaving] = useState(false);
+  const submitted = !!existing?.submittedAt;
+
+  useEffect(() => {
+    setItems(existing?.items ?? effectiveDefault);
+    setCompletedBy(existing?.completedBy ?? user?.name ?? "");
+    setManagerNote(existing?.managerNote ?? "");
+  }, [existing, type, templateItems]);
+
+  const toggle = (i: number) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, checked: !item.checked } : item)); };
+  const setNote = (i: number, note: string) => { if (submitted) return; setItems(prev => prev.map((item, idx) => idx === i ? { ...item, notes: note } : item)); };
+
+  async function save(submit: boolean) {
+    setSaving(true);
+    const endpoint = KCL_ENDPOINT[type];
+    const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, managerNote: managerNote || null };
+    if (submit) payload.submittedAt = new Date().toISOString();
+    try {
+      if (existing) { await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
+      else { await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) }); }
+      onSaved();
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err?.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  }
+
+  const checkedCount = items.filter(i => i.checked).length;
+  const Icon = type === "kitchen_opening" ? Sunrise : Sunset;
+
+  return (
+    <>
+      <Card className="p-5 bg-card shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icon className="w-4 h-4 text-primary opacity-80" />
+            <h3 className="font-semibold font-display">{KCL_LABELS[type]}</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {canAdmin && !submitted && (
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setShowEditor(true)} title="Customise checklist">
+                <Settings2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground">{checkedCount}/{items.length}</span>
+            {submitted
+              ? <Badge className="bg-emerald-100 text-emerald-800 text-xs"><Lock className="w-3 h-3 mr-1" />Submitted</Badge>
+              : checkedCount === items.length && items.length > 0
+              ? <Badge className="bg-blue-100 text-blue-800 text-xs">Ready to submit</Badge>
+              : <Badge variant="secondary" className="text-xs">In progress</Badge>}
+          </div>
+        </div>
+
+        {templateLoading && !existing ? (
+          <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <div className="space-y-1 mb-4">
+            {items.map((item, i) => (
+              <div key={i}>
+                {item.section && item.section !== items[i - 1]?.section && (
+                  <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>{item.section}</p>
+                )}
+                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
+                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
+                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
+                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
+                  </div>
+                  {!submitted && item.checked && (
+                    <div className="mt-2 ml-7">
+                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
+                    </div>
+                  )}
+                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!submitted && (
+          <div className="space-y-3 border-t pt-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1"><Label className="text-xs">Completed by</Label><Input value={completedBy} onChange={e => setCompletedBy(e.target.value)} placeholder="Name" className="h-8 text-sm" /></div>
+              {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving} className="flex-1">{saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save draft"}</Button>
+              <Button size="sm" onClick={() => save(true)} disabled={saving || checkedCount === 0} className="flex-1">Submit checklist</Button>
+            </div>
+          </div>
+        )}
+        {submitted && existing?.completedBy && <div className="border-t pt-3"><p className="text-xs text-muted-foreground">Completed by: <span className="font-medium">{existing.completedBy}</span></p></div>}
+        {existing?.id && <div className="border-t mt-3 pt-3"><CheckPhotoUploader entityType="daily_checklist" entityId={existing.id} compact /></div>}
+      </Card>
+
+      {canAdmin && (
+        <ChecklistTemplateEditor
+          open={showEditor}
+          onOpenChange={setShowEditor}
+          type={type}
+          typeLabel={KCL_LABELS[type] ?? type}
+          siteId={siteId}
+          siteName={siteName}
+          defaultItems={KCL_DEFAULTS[type] ?? []}
+          onSaved={(newItems: TemplateItem[]) => {
+            const ci = newItems.map(i => ({ ...i, checked: false })) as KCLItem[];
+            setTemplateItems(ci);
+            if (!existing) setItems(ci);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function DailyChecksTab() {
+  const { activeClientId } = useAuth();
+  const canAdmin = useCanAdmin();
+  const { data: sites = [] } = useListSites();
+  const today = new Date().toISOString().slice(0, 10);
+  const _qs = new URLSearchParams(window.location.search);
+  const [date, setDate] = useState(_qs.get("date") ?? today);
+  const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
+  const [amRows, setAmRows] = useState<KCLRecord[]>([]);
+  const [pmRows, setPmRows] = useState<KCLRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
+  const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams({ date });
+    if (selectedSiteId) params.set("siteId", String(selectedSiteId));
+    const [amRes, pmRes] = await Promise.all([
+      apiFetch(`/daily-track-am?${params}`),
+      apiFetch(`/daily-track-pm?${params}`),
+    ]);
+    if (amRes.ok) setAmRows(await amRes.json());
+    if (pmRes.ok) setPmRows(await pmRes.json());
+    setLoading(false);
+  }, [date, selectedSiteId, activeClientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const getAm = (type: string) => amRows.find(c => c.checklistType === type);
+  const getPm = (type: string) => pmRows.find(c => c.checklistType === type);
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 p-4 bg-card border border-border rounded-xl">
+        <div className="space-y-1 flex-1 min-w-[140px]">
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
+        </div>
+        <div className="space-y-1 flex-1 min-w-[180px]">
+          <Label className="text-xs">Site</Label>
+          <Select value={siteId} onValueChange={setSiteId}>
+            <SelectTrigger className="h-9"><SelectValue placeholder="Select site…" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No site filter</SelectItem>
+              {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end">
+          <Button variant="outline" size="sm" onClick={load} className="h-9 gap-1.5">
+            <RotateCcw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <KitchenChecklistCard type="kitchen_opening" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getAm("kitchen_opening")} onSaved={load} canAdmin={canAdmin} />
+          <KitchenChecklistCard type="kitchen_closing" siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getPm("kitchen_closing")} onSaved={load} canAdmin={canAdmin} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page shell ────────────────────────────────────────────────────────────────
 
 // ── Kitchen check status helpers ──────────────────────────────────────────────
@@ -1421,10 +1727,11 @@ function KitchenStatusBadge({ status }: { status: KitchenCheckStatus["status"] }
 }
 
 const TABS: { id: ActiveTab; label: string; icon: any; description: string }[] = [
-  { id: "diary",    label: "Daily Diary",         icon: Calendar,      description: "Daily temperature records, deliveries and corrective actions" },
-  { id: "weekly",   label: "Weekly Review",        icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
-  { id: "probe",    label: "Probe Check",          icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
-  { id: "cleaning", label: "Cleaning Schedule",    icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
+  { id: "checks",   label: "Daily Checks",         icon: CheckSquare,   description: "Kitchen opening and closing checklists" },
+  { id: "diary",    label: "Daily Diary",           icon: Calendar,      description: "Daily temperature records, deliveries and corrective actions" },
+  { id: "weekly",   label: "Weekly Review",         icon: ClipboardList, description: "Combined CookSafe house rules + management review" },
+  { id: "probe",    label: "Probe Check",           icon: Thermometer,   description: "Monthly probe thermometer calibration record" },
+  { id: "cleaning", label: "Cleaning Schedule",     icon: Sparkles,      description: "Daily, weekly and monthly cleaning task schedule and sign-off" },
 ];
 
 export default function KitchenPage() {
@@ -1437,7 +1744,8 @@ export default function KitchenPage() {
   });
   const serverLocked = (configError as any)?.status === 403;
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("diary");
+  const _initTab = (new URLSearchParams(window.location.search).get("tab") as ActiveTab | null) ?? "diary";
+  const [activeTab, setActiveTab] = useState<ActiveTab>(TABS.some(t => t.id === _initTab) ? _initTab : "diary");
   const [checkStatus, setCheckStatus] = useState<KitchenCheckStatus[]>([]);
 
   const loadStatus = useCallback(async () => {
@@ -1553,6 +1861,7 @@ export default function KitchenPage() {
         </div>
 
         {/* Tab content */}
+        {activeTab === "checks"   && <DailyChecksTab />}
         {activeTab === "diary"    && <DailyDiaryTab />}
         {activeTab === "weekly"   && <WeeklyReviewTab />}
         {activeTab === "probe"    && <ProbeCheckTab />}
