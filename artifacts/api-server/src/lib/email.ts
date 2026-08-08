@@ -151,6 +151,7 @@ export function buildCalendarInvite(opts: {
   companyName: string;
   fromEmail: string;
   notes?: string | null;
+  extraAttendees?: { name?: string; email: string }[];
 }): string {
   const uid = randomUUID();
   const now = new Date();
@@ -180,6 +181,9 @@ export function buildCalendarInvite(opts: {
     `DESCRIPTION:${description}`,
     `ORGANIZER;CN=${escapeIcs(opts.companyName)}:MAILTO:${opts.fromEmail}`,
     `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(opts.contractorName)}:MAILTO:${opts.contractorEmail}`,
+    ...(opts.extraAttendees ?? []).map(
+      (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(a.name ?? a.email)}:MAILTO:${a.email}`,
+    ),
     "STATUS:CONFIRMED",
     "BEGIN:VALARM",
     "TRIGGER:-P1D",

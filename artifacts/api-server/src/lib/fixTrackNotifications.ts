@@ -72,6 +72,7 @@ export interface ContractorAssignmentOpts {
   siteDocuments?:   { name: string; url: string }[];
   icsAttachment?:   string;
   icsFilename?:     string;
+  cc?:              string | string[];
 }
 
 export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<void> {
@@ -79,7 +80,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
     bookedToken, completedToken, baseUrl, clientId, siteDocuments,
-    icsAttachment, icsFilename,
+    icsAttachment, icsFilename, cc,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -164,6 +165,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     clientId,
     icsAttachment,
     icsFilename,
+    cc,
   });
 }
 

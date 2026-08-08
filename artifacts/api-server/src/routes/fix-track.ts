@@ -570,6 +570,13 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
 
   const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
 
+  // CC the approving manager so they get a copy (and the calendar invite).
+  const rawManagerEmail = req.currentUser?.email?.trim() || undefined;
+  const managerEmail =
+    rawManagerEmail && rawManagerEmail.toLowerCase() !== String(issue.contractor_email).toLowerCase()
+      ? rawManagerEmail
+      : undefined;
+
   // Build a calendar invite when the issue has a target date (best-effort).
   let icsAttachment: string | undefined;
   let icsFilename: string | undefined;
@@ -597,6 +604,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
           companyName: issue.company_name ?? "ComplyTrack",
           fromEmail,
           notes: issue.description ?? null,
+          extraAttendees: managerEmail ? [{ name: req.currentUser?.name ?? undefined, email: managerEmail }] : undefined,
         });
         icsFilename = `${(issue.title as string).replace(/[^a-z0-9]/gi, "-").toLowerCase()}.ics`;
       }
@@ -646,6 +654,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     siteDocuments:    siteDocuments.length ? siteDocuments : undefined,
     icsAttachment,
     icsFilename,
+    cc:               managerEmail,
   });
 
   await clearPendingRequest();
