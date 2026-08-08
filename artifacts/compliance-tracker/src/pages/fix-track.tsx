@@ -205,7 +205,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         toast({ title: "Upload failed", description: err?.message, variant: "destructive" });
       }
     }
-    setForm({ ...form, mediaUrls: [...mediaUrls, ...newPaths] });
+    setForm((prev: any) => ({ ...prev, mediaUrls: [...(prev.mediaUrls ?? []), ...newPaths] }));
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
   }
