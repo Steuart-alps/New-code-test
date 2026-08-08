@@ -305,7 +305,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
         body: file,
       });
       if (!putRes.ok) throw new Error("Upload failed");
-      setForm({ ...form, objectPath, fileName: file.name, fileSize: file.size, mimeType: file.type || "application/octet-stream" });
+      setForm((prev: any) => ({ ...prev, objectPath, fileName: file.name, fileSize: file.size, mimeType: file.type || "application/octet-stream" }));
       toast({ title: "Document attached", description: file.name });
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
