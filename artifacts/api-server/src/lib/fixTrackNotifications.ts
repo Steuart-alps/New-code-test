@@ -70,6 +70,8 @@ export interface ContractorAssignmentOpts {
   baseUrl:          string;
   clientId:         number;
   siteDocuments?:   { name: string; url: string }[];
+  icsAttachment?:   string;
+  icsFilename?:     string;
 }
 
 export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<void> {
@@ -77,6 +79,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
     bookedToken, completedToken, baseUrl, clientId, siteDocuments,
+    icsAttachment, icsFilename,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -145,6 +148,8 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     <p style="font-size:11px;color:#94a3b8;margin:10px 0 0">Links expire in 30 days.</p>
   </div>` : ""}
 
+  ${icsAttachment ? `<p style="font-size:13px;color:#475569;margin:0 0 16px">📅 A calendar invite for the target date is attached — open it to add this job to your calendar.</p>` : ""}
+
   <p style="font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:16px">
     This job was assigned by ${safeCompany}. These links are valid for 30 days and can only be used once.
     If this email was sent in error, please ignore it.
@@ -157,6 +162,8 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     subject: `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
     html,
     clientId,
+    icsAttachment,
+    icsFilename,
   });
 }
 

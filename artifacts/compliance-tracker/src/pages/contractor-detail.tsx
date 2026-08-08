@@ -3,8 +3,10 @@ import { useParams, Link, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
 import {
   useGetContractor,
-  useListComplianceItems
+  useListComplianceItems,
+  useSendReminderForItem
 } from "@workspace/api-client-react";
+import { toast } from "sonner";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
@@ -13,7 +15,7 @@ import { Card } from "@/components/ui/card";
 import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { format } from "date-fns";
 import {
-  Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft,
+  Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft, Send,
   Plus, ShieldCheck, Flame, ShieldCheck as ShieldIcon, FileBadge
 } from "lucide-react";
 import {
@@ -30,6 +32,12 @@ export default function ContractorDetailPage() {
   const { data: items = [] } = useListComplianceItems({ contractorId: id });
 
   const { deleteContractor, deleteItem } = useAppMutations();
+  const sendReminder = useSendReminderForItem({
+    mutation: {
+      onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
+      onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
+    },
+  });
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
   const [deleteContractorConfirm, setDeleteContractorConfirm] = useState(false);
@@ -197,6 +205,17 @@ export default function ContractorDetailPage() {
                         </div>
                       </div>
                       <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                        {item.dueDate && contractor.email && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Resend reminder email"
+                            disabled={sendReminder.isPending}
+                            onClick={() => sendReminder.mutate({ itemId: item.id })}
+                          >
+                            <Send className="w-4 h-4" />
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
                           <Pencil className="w-4 h-4" />
                         </Button>

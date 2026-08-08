@@ -161,7 +161,10 @@ export function buildCalendarInvite(opts: {
     opts.notes ? opts.notes : "",
     ``,
     `Scheduled by ${opts.companyName}`,
-  ].filter(Boolean).join("\\n");
+  ]
+    .filter(Boolean)
+    .map((part) => escapeIcs(part.replace(/\r/g, "")))
+    .join("\\n");
 
   return [
     "BEGIN:VCALENDAR",

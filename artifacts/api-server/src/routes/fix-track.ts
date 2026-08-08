@@ -5,6 +5,7 @@ import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { buildCalendarInvite } from "../lib/email";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 
@@ -469,7 +470,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   const result = await db.execute(sql`
     SELECT
       fi.id, fi.title, fi.issue_type, fi.priority, fi.location, fi.description,
-      fi.contractor_id,
+      fi.target_date, fi.contractor_id,
       s.name  AS site_name,
       c.name  AS contractor_name,
       c.email AS contractor_email,
@@ -569,6 +570,41 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
 
   const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
 
+  // Build a calendar invite when the issue has a target date (best-effort).
+  let icsAttachment: string | undefined;
+  let icsFilename: string | undefined;
+  if (issue.target_date) {
+    try {
+      // pg returns date columns as Date objects (at UTC midnight); use UTC
+      // components so the calendar day never shifts with server timezone.
+      const raw = issue.target_date;
+      const targetDate = raw instanceof Date
+        ? new Date(Date.UTC(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate(), 9, 0, 0))
+        : new Date(`${raw}T09:00:00Z`);
+      if (!isNaN(targetDate.getTime())) {
+        const fromRow = await db.execute(sql`
+          SELECT value FROM app_settings
+          WHERE client_id = ${clientId} AND key = 'smtpFrom' LIMIT 1
+        `);
+        const fromEmail =
+          ((fromRow.rows as any[])[0]?.value as string | undefined) ??
+          process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+        icsAttachment = buildCalendarInvite({
+          itemTitle: `Job: ${issue.title}`,
+          dueDate: targetDate,
+          contractorName: issue.contractor_name ?? "Contractor",
+          contractorEmail: issue.contractor_email,
+          companyName: issue.company_name ?? "ComplyTrack",
+          fromEmail,
+          notes: issue.description ?? null,
+        });
+        icsFilename = `${(issue.title as string).replace(/[^a-z0-9]/gi, "-").toLowerCase()}.ics`;
+      }
+    } catch {
+      // Never block the email on invite generation
+    }
+  }
+
   // Generate 30-day signed download links for site documents (best-effort).
   const siteDocuments: { name: string; url: string }[] = [];
   const siteDocResult = await db.execute(sql`
@@ -608,6 +644,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     baseUrl,
     clientId,
     siteDocuments:    siteDocuments.length ? siteDocuments : undefined,
+    icsAttachment,
+    icsFilename,
   });
 
   await clearPendingRequest();
