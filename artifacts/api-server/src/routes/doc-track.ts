@@ -215,9 +215,9 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   if (docs.length === 0) return res.json({ documents: [] });
 
   const staffResult = await db.execute(sql`
-    SELECT id, (first_name || ' ' || last_name) AS name, department FROM staff_roster
+    SELECT id, name, department FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
-    ORDER BY first_name ASC, last_name ASC
+    ORDER BY name ASC
   `);
   const staff = (staffResult.rows ?? []) as any[];
 
@@ -313,7 +313,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
       // Every supplied roster row must belong to this client (defense in depth
       // against forged / cross-tenant roster ids).
       const rosterCheck = await db.execute(sql`
-        SELECT id, (first_name || ' ' || last_name) AS name
+        SELECT id, name
         FROM staff_roster
         WHERE id = ${ack.staffRosterId} AND client_id = ${clientId}
         LIMIT 1
@@ -339,7 +339,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
     let staffName = user.name;
     if (user.email) {
       const rosterMatch = await db.execute(sql`
-        SELECT id, (first_name || ' ' || last_name) AS name
+        SELECT id, name
         FROM staff_roster
         WHERE client_id = ${clientId}
           AND email IS NOT NULL

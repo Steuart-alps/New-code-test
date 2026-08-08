@@ -376,8 +376,16 @@ async function migrateAuditFixes2026_08() {
   // DocTrack: route stores files in object storage under "object_path".
   await db.execute(sql`ALTER TABLE "doc_track_documents" ADD COLUMN IF NOT EXISTS "object_path" text`);
 
-  // TrainTrack: record_type (certificate/signoff/internal) is distinct from training_type.
+  // TrainTrack: record_type (certificate/signoff/internal) is distinct from training_type,
+  // plus every other column the current route reads/writes that older installs may lack.
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "record_type" text NOT NULL DEFAULT 'internal'`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "document_title" text`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "document_type" text`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "provider" text`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "trainer" text`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "completed_date" date`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "expiry_date" date`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "notes" text`);
 
   // KitchenTrack weekly review + probe checks tables (referenced by kitchen-weekly.ts and food-safety.ts).
   await db.execute(sql`
