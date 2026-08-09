@@ -940,6 +940,64 @@ interface InvoiceRow {
   invoicePdf: string | null;
 }
 
+function DataExportCard() {
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+  const canAdmin = useCanAdmin();
+  if (!canAdmin) return null;
+
+  async function handleExport() {
+    setBusy(true);
+    try {
+      const res = await apiFetch("/export");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).error ?? `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `complytrack-export-${date}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Export failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Download className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display">Data Export</CardTitle>
+        </div>
+        <CardDescription>
+          Download all your compliance records as a ZIP file containing CSVs for every module — food safety, fire safety, documents, training, contractors and more. Useful before cancelling or for offline audit archives.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex-1 text-sm text-muted-foreground space-y-1">
+            <p>The export includes every record scoped to your account: sites, departments, staff, all compliance logs and contractor records.</p>
+            <p className="text-xs">File attachments (PDFs, photos) are referenced by URL in the CSV — they are not bundled into the ZIP.</p>
+          </div>
+          <Button onClick={handleExport} disabled={busy} className="shrink-0 gap-2">
+            {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {busy ? "Preparing…" : "Export all data"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function InvoicesCard() {
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1175,6 +1233,7 @@ export default function SettingsPage() {
       <div className="max-w-4xl space-y-6">
         <BillingCard />
         <InvoicesCard />
+        <DataExportCard />
         <DepartmentsCard />
         <PhotoRequirementsCard />
         <form onSubmit={handleSave}>
