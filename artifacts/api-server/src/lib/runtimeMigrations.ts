@@ -344,6 +344,7 @@ export async function runRuntimeMigrations() {
     `);
 
     await migrateAuditFixes2026_08();
+    await migrateOffboardingColumns();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1498,5 +1499,15 @@ async function migrateFoodSafetySiteScoping() {
     CREATE UNIQUE INDEX IF NOT EXISTS "UQ_food_safety_client_site_date"
     ON "food_safety_records" ("client_id", "site_id", "record_date")
     WHERE "site_id" IS NOT NULL
+  `);
+}
+
+async function migrateOffboardingColumns() {
+  await db.execute(sql`
+    ALTER TABLE "clients"
+      ADD COLUMN IF NOT EXISTS "cancelled_at"               timestamptz,
+      ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
+      ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
+      ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
   `);
 }

@@ -18,6 +18,11 @@ export const clientsTable = pgTable("clients", {
   // post-trial checkout. `["bundle"]` marks a full-bundle selection.
   selectedServices: jsonb("selected_services").$type<string[]>(),
   trialReminderSentAt: timestamp("trial_reminder_sent_at"),
+  // Offboarding / data retention
+  cancelledAt: timestamp("cancelled_at"),
+  offboardingEmailSentAt: timestamp("offboarding_email_sent_at"),
+  dataDeletionScheduledAt: timestamp("data_deletion_scheduled_at"),
+  dataDeletedAt: timestamp("data_deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

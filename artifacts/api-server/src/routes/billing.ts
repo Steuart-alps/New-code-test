@@ -83,6 +83,26 @@ router.get("/config", requireAuth, async (req, res) => {
     }
     const monthlyTotal = perSiteRate * billableQuantity;
 
+    // Offboarding fields — expose so the frontend can warn about pending deletion.
+    let cancelledAt: string | null = null;
+    let dataDeletionScheduledAt: string | null = null;
+    let dataDeletedAt: string | null = null;
+    if (clientId) {
+      const [offRow] = await db.execute(sql`
+        SELECT cancelled_at, data_deletion_scheduled_at, data_deleted_at
+          FROM clients WHERE id = ${clientId}
+      `).then((r) => r.rows as Array<{
+        cancelled_at: string | null;
+        data_deletion_scheduled_at: string | null;
+        data_deleted_at: string | null;
+      }>);
+      if (offRow) {
+        cancelledAt = offRow.cancelled_at;
+        dataDeletionScheduledAt = offRow.data_deletion_scheduled_at;
+        dataDeletedAt = offRow.data_deleted_at;
+      }
+    }
+
     res.json({
       publishableKey,
       subscription,
@@ -90,6 +110,9 @@ router.get("/config", requireAuth, async (req, res) => {
       perSite,
       billableQuantity,
       monthlyTotal,
+      cancelledAt,
+      dataDeletionScheduledAt,
+      dataDeletedAt,
       services: {
         entitled,
         addons: activeAddons,

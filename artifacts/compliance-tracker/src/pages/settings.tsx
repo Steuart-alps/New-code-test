@@ -707,6 +707,9 @@ interface BillingConfig {
   perSite: { priceId: string; unitAmount: number; currency: string } | null;
   billableQuantity: number;
   monthlyTotal: number | null;
+  cancelledAt?: string | null;
+  dataDeletionScheduledAt?: string | null;
+  dataDeletedAt?: string | null;
   services?: {
     entitled: "all" | string[];
     addons: string[];
@@ -839,6 +842,24 @@ function BillingCard() {
                   <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
                 </Button>
               </div>
+
+              {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (
+                <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/30">
+                  <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-orange-800 dark:text-orange-300">Your data is scheduled for deletion</p>
+                    <p className="text-orange-700 dark:text-orange-400 mt-0.5">
+                      All compliance records will be permanently deleted on{" "}
+                      <strong>
+                        {new Date(config.dataDeletionScheduledAt).toLocaleDateString("en-GB", {
+                          weekday: "long", year: "numeric", month: "long", day: "numeric",
+                        })}
+                      </strong>{" "}
+                      — 12 months after your subscription ended. Resubscribe before this date to keep your records, or download them now.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <p className="text-xs text-muted-foreground border-t border-border/50 pt-3">
                 Each billing period is one month. Added sites and services are charged a full month up front; removed sites and cancellations take effect at the end of the paid month — no refunds or part-month credits.

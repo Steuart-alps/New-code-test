@@ -14,6 +14,7 @@ import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
+import { runCancellationDetectionJob, runDataDeletionJob } from "./lib/offboarding";
 
 const rawPort = process.env["PORT"];
 
@@ -149,6 +150,32 @@ function startScheduler() {
     }
   });
   logger.info("Bike overdue notification scheduler started (hourly at :05)");
+
+  // Detect newly cancelled subscriptions and start the 12-month retention clock
+  // (daily at 07:00; sends one offboarding email per client).
+  cron.schedule("0 7 * * *", async () => {
+    logger.info("Running cancellation detection job...");
+    try {
+      const result = await runCancellationDetectionJob();
+      logger.info({ result }, "Cancellation detection job complete");
+    } catch (err) {
+      logger.error({ err }, "Cancellation detection job failed");
+    }
+  });
+  logger.info("Cancellation detection scheduler started (daily at 07:00)");
+
+  // Hard-delete compliance data for clients whose 12-month window has passed
+  // (daily at 03:00; irreversible — runs only after data_deletion_scheduled_at).
+  cron.schedule("0 3 * * *", async () => {
+    logger.info("Running data deletion job...");
+    try {
+      const result = await runDataDeletionJob();
+      if (result.clientsDeleted > 0) logger.info({ result }, "Data deletion job complete");
+    } catch (err) {
+      logger.error({ err }, "Data deletion job failed");
+    }
+  });
+  logger.info("Data deletion scheduler started (daily at 03:00)");
 }
 
 async function runTrialReminders() {
