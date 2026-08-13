@@ -28,7 +28,6 @@ import ItemDetailPage from "@/pages/item-detail";
 import FireSafetyPage from "@/pages/fire-safety";
 import KitchenPage from "@/pages/kitchen";
 import LegionellaPage from "@/pages/legionella";
-import SafeTrackPage from "@/pages/safe-track";
 import FixTrackPage from "@/pages/fix-track";
 import DocTrackPage from "@/pages/doc-track";
 import TrainTrackPage from "@/pages/train-track";
@@ -118,7 +117,7 @@ function ProtectedRoutes() {
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
       <Route path="/legionella" component={LegionellaPage} />
-      <Route path="/safe-track" component={SafeTrackPage} />
+      <Route path="/safe-track" component={() => { window.location.replace("/doc-track"); return null; }} />
       <Route path="/fix-track" component={FixTrackPage} />
       <Route path="/doc-track" component={DocTrackPage} />
       <Route path="/train-track" component={TrainTrackPage} />

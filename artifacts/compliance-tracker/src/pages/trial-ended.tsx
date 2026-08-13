@@ -44,15 +44,6 @@ const ADDONS = [
     activeBg: "bg-orange-50/60",
   },
   {
-    key: "safetrack",
-    label: "SafeTrack",
-    desc: "Risk assessments, SOPs & staff handbook",
-    icon: ShieldCheck,
-    iconColor: "text-indigo-700",
-    activeBorder: "border-indigo-500",
-    activeBg: "bg-indigo-50/60",
-  },
-  {
     key: "premisestrack",
     label: "PremisesTrack",
     desc: "Premises safety logbook",
@@ -64,7 +55,7 @@ const ADDONS = [
   {
     key: "doctrack",
     label: "DocTrack",
-    desc: "Document library",
+    desc: "Documents, risk assessments, SOPs & handbook",
     icon: FolderOpen,
     iconColor: "text-cyan-700",
     activeBorder: "border-cyan-500",

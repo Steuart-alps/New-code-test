@@ -74,7 +74,8 @@ router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRou
 router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
 router.use(staffRosterRouter);
 router.use("/sign-off", signOffRouter); // public — no auth
-router.use("/doc-track", requireAuth, requireService("doctrack"), docTrackRouter);
+// safetrack and doctrack are now the same module; either key grants access.
+router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
 router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);

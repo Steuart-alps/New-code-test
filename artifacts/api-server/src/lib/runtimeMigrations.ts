@@ -345,6 +345,7 @@ export async function runRuntimeMigrations() {
 
     await migrateAuditFixes2026_08();
     await migrateOffboardingColumns();
+    await migrateDoctrackSafetrackMerge();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1510,4 +1511,122 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
   `);
+}
+
+// ---- SafeTrack → DocTrack data migration ----
+// Copies existing safe_risk_assessments, safe_sops, and safe_handbook rows into
+// doc_track_documents (which already has the matching categories).  Uses a
+// migrated_doc_id tracking column on each source table so the migration is
+// fully idempotent and can be re-run safely.
+async function migrateDoctrackSafetrackMerge() {
+  // 1. Add tracking columns to source tables.
+  await db.execute(sql`ALTER TABLE safe_risk_assessments ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
+  await db.execute(sql`ALTER TABLE safe_sops            ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
+  await db.execute(sql`ALTER TABLE safe_handbook        ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
+
+  // 2. Migrate risk assessments.
+  {
+    const rows = await db.execute(sql`SELECT * FROM safe_risk_assessments WHERE migrated_doc_id IS NULL`);
+    for (const ra of (rows.rows ?? []) as any[]) {
+      const desc = [
+        ra.hazard           ? `Hazard: ${ra.hazard}` : null,
+        ra.likelihood       ? `Likelihood: ${ra.likelihood}` : null,
+        ra.severity         ? `Severity: ${ra.severity}` : null,
+        ra.control_measures ? `Control measures: ${ra.control_measures}` : null,
+        ra.notes            || null,
+      ].filter(Boolean).join("\n") || null;
+
+      const ins = await db.execute(sql`
+        INSERT INTO doc_track_documents
+          (client_id, site_id, title, category, description,
+           object_path, file_name, file_size, mime_type,
+           requires_acknowledgement, reviewed_by, review_date,
+           next_review_date, status, created_at, updated_at)
+        VALUES
+          (${ra.client_id}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
+           ${ra.object_path ?? null}, ${ra.file_name ?? null}, ${ra.file_size ?? null}, ${ra.mime_type ?? null},
+           ${ra.requires_acknowledgement ?? false}, ${ra.reviewed_by ?? null}, ${ra.review_date ?? null},
+           ${ra.next_review_date ?? null}, ${ra.status ?? "active"}, ${ra.created_at ?? sql`now()`}, ${ra.updated_at ?? sql`now()`})
+        RETURNING id
+      `);
+      const newId = ((ins.rows ?? [])[0] as any)?.id;
+      if (newId) {
+        await db.execute(sql`UPDATE safe_risk_assessments SET migrated_doc_id = ${newId} WHERE id = ${ra.id}`);
+      }
+    }
+  }
+
+  // 3. Migrate SOPs.
+  {
+    const rows = await db.execute(sql`SELECT * FROM safe_sops WHERE migrated_doc_id IS NULL`);
+    for (const sop of (rows.rows ?? []) as any[]) {
+      const desc = [sop.content || null, sop.notes || null].filter(Boolean).join("\n") || null;
+      const ins = await db.execute(sql`
+        INSERT INTO doc_track_documents
+          (client_id, site_id, title, category, description,
+           object_path, file_name, file_size, mime_type,
+           requires_acknowledgement, reviewed_by, review_date,
+           next_review_date, status, created_at, updated_at)
+        VALUES
+          (${sop.client_id}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
+           ${sop.object_path ?? null}, ${sop.file_name ?? null}, ${sop.file_size ?? null}, ${sop.mime_type ?? null},
+           ${sop.requires_acknowledgement ?? false}, ${sop.reviewed_by ?? null}, ${sop.review_date ?? null},
+           ${sop.next_review_date ?? null}, ${sop.status ?? "active"}, ${sop.created_at ?? sql`now()`}, ${sop.updated_at ?? sql`now()`})
+        RETURNING id
+      `);
+      const newId = ((ins.rows ?? [])[0] as any)?.id;
+      if (newId) {
+        await db.execute(sql`UPDATE safe_sops SET migrated_doc_id = ${newId} WHERE id = ${sop.id}`);
+      }
+    }
+  }
+
+  // 4. Migrate handbook entries.
+  {
+    const rows = await db.execute(sql`SELECT * FROM safe_handbook WHERE migrated_doc_id IS NULL`);
+    for (const hb of (rows.rows ?? []) as any[]) {
+      const desc = [hb.content || null, hb.notes || null].filter(Boolean).join("\n") || null;
+      const ins = await db.execute(sql`
+        INSERT INTO doc_track_documents
+          (client_id, site_id, title, category, description,
+           object_path, file_name, file_size, mime_type,
+           requires_acknowledgement, reviewed_by, review_date,
+           next_review_date, status, created_at, updated_at)
+        VALUES
+          (${hb.client_id}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
+           ${hb.object_path ?? null}, ${hb.file_name ?? null}, ${hb.file_size ?? null}, ${hb.mime_type ?? null},
+           ${hb.requires_acknowledgement ?? false}, ${hb.reviewed_by ?? null}, ${hb.review_date ?? null},
+           ${hb.next_review_date ?? null}, ${hb.status ?? "active"}, ${hb.created_at ?? sql`now()`}, ${hb.updated_at ?? sql`now()`})
+        RETURNING id
+      `);
+      const newId = ((ins.rows ?? [])[0] as any)?.id;
+      if (newId) {
+        await db.execute(sql`UPDATE safe_handbook SET migrated_doc_id = ${newId} WHERE id = ${hb.id}`);
+      }
+    }
+  }
+
+  // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
+  {
+    const acks = await db.execute(sql`
+      SELECT a.*,
+        COALESCE(r.migrated_doc_id, s.migrated_doc_id, h.migrated_doc_id) AS new_doc_id
+      FROM safe_track_acknowledgements a
+      LEFT JOIN safe_risk_assessments r ON a.document_type = 'risk_assessment' AND a.document_id = r.id
+      LEFT JOIN safe_sops             s ON a.document_type = 'sop'             AND a.document_id = s.id
+      LEFT JOIN safe_handbook         h ON a.document_type = 'handbook'        AND a.document_id = h.id
+      WHERE COALESCE(r.migrated_doc_id, s.migrated_doc_id, h.migrated_doc_id) IS NOT NULL
+    `);
+    for (const ack of (acks.rows ?? []) as any[]) {
+      if (!ack.new_doc_id) continue;
+      await db.execute(sql`
+        INSERT INTO doc_acknowledgements
+          (document_id, client_id, staff_roster_id, staff_name, signature, acknowledged_at, acknowledged_by)
+        VALUES
+          (${ack.new_doc_id}, ${ack.client_id}, ${ack.staff_roster_id ?? null},
+           ${ack.staff_name}, ${ack.signature ?? null}, ${ack.acknowledged_at}, ${ack.acknowledged_by ?? null})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
 }
