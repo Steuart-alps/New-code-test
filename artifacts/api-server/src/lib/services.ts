@@ -98,6 +98,8 @@ export async function getEntitledServices(clientId: number): Promise<Entitlement
         }
         // safetrack is merged into doctrack — either key grants doctrack access.
         if (keys.has("safetrack")) keys.add("doctrack");
+        // doctrack is included free for all paying clients (site-visit subscribers).
+        if (keys.has("core")) keys.add("doctrack");
         services = hasBundle || perSiteTotal >= SERVICE_CAP_PENCE ? "all" : Array.from(keys);
       }
     } catch (err) {

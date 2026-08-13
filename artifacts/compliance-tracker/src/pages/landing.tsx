@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
-  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, FolderOpen, BookOpen, Waves, TreePine, Bug,
+  BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, BookOpen, Waves, TreePine, Bug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -29,6 +29,7 @@ const MODULES = [
       "Multi-site management",
       "Role-based team access",
       "Automated email reminders",
+      "DocTrack document portal included free — share risk assessments, SOPs & handbook with staff",
     ],
   },
   {
@@ -131,28 +132,6 @@ const MODULES = [
       "Maintenance fault & repair logging",
       "Signage & housekeeping audits",
       "Timestamped inspection history",
-    ],
-  },
-  {
-    key: "doctrack",
-    label: "DocTrack",
-    price: 10,
-    icon: FolderOpen,
-    color: "text-cyan-700",
-    bg: "bg-cyan-50",
-    border: "border-cyan-200",
-    activeBorder: "border-cyan-500",
-    activeBg: "bg-cyan-50",
-    required: false,
-    description: "Centralised document and safety library — risk assessments, SOPs, policies, staff handbook, and all compliance documents in one controlled place.",
-    features: [
-      "Risk assessment register with review dates",
-      "Safe operating procedures (SOPs) and staff handbook",
-      "Upload PDF, Word, Excel, PowerPoint, photos & videos",
-      "Categorise as risk assessment, SOP, policy or procedure",
-      "Staff acknowledgement sign-off and tracking",
-      "Assign documents to specific sites",
-      "Instant download with short-lived secure links",
     ],
   },
   {
