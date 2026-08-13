@@ -346,6 +346,7 @@ export async function runRuntimeMigrations() {
     await migrateAuditFixes2026_08();
     await migrateOffboardingColumns();
     await migrateDoctrackSafetrackMerge();
+    await migrateLegionellaOutlets();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -1511,6 +1512,60 @@ async function migrateOffboardingColumns() {
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
   `);
+}
+
+// ---- LegionellaTrack sentinel outlets table ----
+// Moves sentinel outlet definitions from app_settings JSON into a proper table
+// so each outlet can be tracked individually per calendar month.
+async function migrateLegionellaOutlets() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS legionella_sentinel_outlets (
+      id         serial PRIMARY KEY,
+      client_id  integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      site_id    integer REFERENCES sites(id) ON DELETE SET NULL,
+      name       text NOT NULL,
+      type       text NOT NULL DEFAULT 'hot',
+      location   text,
+      sort_order integer NOT NULL DEFAULT 0,
+      active     boolean NOT NULL DEFAULT true,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_leg_sentinel_outlets_client"
+    ON legionella_sentinel_outlets (client_id)
+  `);
+  // Add outlet FK to checks so tests can be linked back to a specific outlet.
+  await db.execute(sql`
+    ALTER TABLE legionella_checks
+    ADD COLUMN IF NOT EXISTS outlet_id integer
+    REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
+  `);
+  // Migrate existing JSON from app_settings (idempotent — skips clients already migrated).
+  const settings = await db.execute(sql`
+    SELECT client_id, value FROM app_settings
+    WHERE key = 'water_sentinel_outlets'
+      AND value IS NOT NULL
+      AND value NOT IN ('', '[]')
+  `);
+  for (const row of (settings.rows ?? []) as any[]) {
+    const already = await db.execute(sql`
+      SELECT id FROM legionella_sentinel_outlets WHERE client_id = ${row.client_id} LIMIT 1
+    `);
+    if ((already.rows ?? []).length > 0) continue;
+    try {
+      const outlets = JSON.parse(row.value) as { name: string; type: string; location?: string }[];
+      for (let i = 0; i < outlets.length; i++) {
+        const o = outlets[i];
+        if (!o.name) continue;
+        await db.execute(sql`
+          INSERT INTO legionella_sentinel_outlets (client_id, name, type, location, sort_order)
+          VALUES (${row.client_id}, ${o.name}, ${o.type || "hot"}, ${o.location ?? null}, ${i})
+        `);
+      }
+    } catch { /* invalid JSON, skip */ }
+  }
 }
 
 // ---- SafeTrack → DocTrack data migration ----

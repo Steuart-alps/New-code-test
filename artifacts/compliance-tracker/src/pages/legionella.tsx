@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
+import { apiFetch } from "@/lib/api";
 import {
   useListLegionellaChecks,
   getListLegionellaChecksQueryKey,
@@ -158,8 +159,6 @@ function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): 
   try { return JSON.parse(raw) as T[]; } catch { return fallback; }
 }
 
-type OutletEntry = { name: string; type: string; location: string };
-
 function LegionellaConfigDialog() {
   const [open, setOpen] = useState(false);
   const { data: config } = useGetLegionellaConfig();
@@ -168,13 +167,11 @@ function LegionellaConfigDialog() {
   const updateConfig = useUpdateLegionellaConfig();
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
-  const [sentinelOutlets, setSentinelOutlets] = useState<OutletEntry[]>([]);
   const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
 
   useEffect(() => {
     if (!config || !open) return;
     setDefaultPerformer(config.water_default_performer ?? "");
-    setSentinelOutlets(parseJsonArray<OutletEntry>(config.water_sentinel_outlets));
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
   }, [config, open]);
 
@@ -183,7 +180,6 @@ function LegionellaConfigDialog() {
       {
         data: {
           water_default_performer: defaultPerformer,
-          water_sentinel_outlets: JSON.stringify(sentinelOutlets.filter(o => o.name)),
           water_non_sentinel_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
         },
       },
@@ -213,9 +209,8 @@ function LegionellaConfigDialog() {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="shrink-0 w-full grid grid-cols-3">
+          <TabsList className="shrink-0 w-full grid grid-cols-2">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
-            <TabsTrigger value="sentinel">Sentinel Outlets</TabsTrigger>
             <TabsTrigger value="nonsent">Non-sentinel</TabsTrigger>
           </TabsList>
 
@@ -225,43 +220,6 @@ function LegionellaConfigDialog() {
               <Input value={defaultPerformer} onChange={e => setDefaultPerformer(e.target.value)}
                 placeholder="e.g. Responsible person" className="rounded-sm" />
               <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="sentinel" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
-            <p className="text-xs text-muted-foreground">
-              Sentinel outlets are the first or last outlets on a hot or cold water circuit (HSG274 Part 2, Table 2.1). List them here as location suggestions.
-            </p>
-            <div className="space-y-2">
-              {sentinelOutlets.map((o, i) => (
-                <div key={i} className="flex gap-2 items-start">
-                  <div className="flex-1 space-y-1">
-                    <Input value={o.name} placeholder="Outlet name (e.g. HWS sentinel — 2nd floor bathroom)"
-                      className="h-8 text-sm rounded-sm"
-                      onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], name: e.target.value }; setSentinelOutlets(n); }} />
-                    <div className="flex gap-1.5">
-                      <select value={o.type}
-                        onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], type: e.target.value }; setSentinelOutlets(n); }}
-                        className="h-7 rounded-sm border border-input bg-background px-2 text-xs flex-1">
-                        <option value="">Type</option>
-                        <option value="hot">Hot</option>
-                        <option value="cold">Cold</option>
-                        <option value="calorifier">Calorifier</option>
-                      </select>
-                      <Input value={o.location} placeholder="Location (optional)"
-                        className="h-7 text-xs rounded-sm flex-1"
-                        onChange={e => { const n = [...sentinelOutlets]; n[i] = { ...n[i], location: e.target.value }; setSentinelOutlets(n); }} />
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 mt-0.5"
-                    onClick={() => setSentinelOutlets(sentinelOutlets.filter((_, x) => x !== i))}>
-                    <X className="w-3.5 h-3.5 text-destructive" />
-                  </Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setSentinelOutlets([...sentinelOutlets, { name: "", type: "", location: "" }])}>
-                <Plus className="w-3.5 h-3.5 mr-1.5" /> Add sentinel outlet
-              </Button>
             </div>
           </TabsContent>
 
@@ -296,6 +254,395 @@ function LegionellaConfigDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Sentinel Outlet types & helpers ──────────────────────────────────────────
+
+type OutletStatus = {
+  id: number;
+  name: string;
+  type: "hot" | "cold" | "calorifier";
+  location: string | null;
+  siteId: number | null;
+  sortOrder: number;
+  testedThisMonth: boolean;
+  checkTypeForOutlet: LegionellaCheckType;
+  lastCheck: {
+    id: number;
+    checkDate: string;
+    result: string;
+    temperature: string | null;
+    performedBy: string | null;
+    notes: string | null;
+  } | null;
+};
+
+const OUTLET_TYPE_LABEL: Record<string, string> = { hot: "Hot", cold: "Cold", calorifier: "Calorifier" };
+const OUTLET_TYPE_CLS: Record<string, string> = {
+  hot:        "bg-orange-100 text-orange-700 border-orange-200",
+  cold:       "bg-sky-100 text-sky-700 border-sky-200",
+  calorifier: "bg-amber-100 text-amber-700 border-amber-200",
+};
+
+// ── Add Outlet Dialog ─────────────────────────────────────────────────────────
+
+function AddOutletDialog({ open, onClose, onSuccess }: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<"hot" | "cold" | "calorifier">("hot");
+  const [location, setLocation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    const r = await apiFetch("/legionella/outlets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), type, location: location.trim() || null }),
+    });
+    setBusy(false);
+    if (r.ok) {
+      toast({ title: "Outlet added" });
+      setName(""); setType("hot"); setLocation("");
+      onSuccess();
+    } else {
+      toast({ title: "Failed to add outlet", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="font-display">Add Sentinel Outlet</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label>Outlet name</Label>
+            <Input value={name} onChange={e => setName(e.target.value)}
+              placeholder="e.g. HWS sentinel — 2nd floor bathroom" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Type</Label>
+            <Select value={type} onValueChange={v => setType(v as any)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hot">Hot water</SelectItem>
+                <SelectItem value="cold">Cold water</SelectItem>
+                <SelectItem value="calorifier">Calorifier</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Location (optional)</Label>
+            <Input value={location} onChange={e => setLocation(e.target.value)}
+              placeholder="e.g. Male toilets, ground floor" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={!name.trim() || busy}>
+            {busy ? "Adding…" : "Add Outlet"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Outlet test dialog ─────────────────────────────────────────────────────────
+
+function OutletTestDialog({ outlet, onClose, onSuccess }: {
+  outlet: OutletStatus;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const checkType = outlet.checkTypeForOutlet;
+  const [checkDate, setCheckDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
+  const [temperature, setTemperature] = useState("");
+  const [performedBy, setPerformedBy] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  const { data: config } = useGetLegionellaConfig();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const fallback = config?.water_default_performer || user?.name || "";
+    if (!performedBy && fallback) setPerformedBy(fallback);
+  }, [config, user]);
+
+  const isTemperature = TEMPERATURE_TYPES.has(checkType);
+  const locationStr = outlet.name + (outlet.location ? ` — ${outlet.location}` : "");
+
+  const handleSubmit = async () => {
+    setBusy(true);
+    const r = await apiFetch("/legionella", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        checkType,
+        checkDate,
+        result,
+        temperature: isTemperature && temperature ? parseFloat(temperature) : undefined,
+        location: locationStr,
+        performedBy: performedBy || undefined,
+        notes: notes || undefined,
+        siteId: outlet.siteId ?? undefined,
+        outletId: outlet.id,
+      }),
+    });
+    setBusy(false);
+    if (r.ok) {
+      queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
+      const label = result === "pass" ? "Pass" : result === "fail" ? "Fail" : "Action required";
+      toast({ title: "Test recorded", description: `${outlet.name} — ${label}` });
+      onSuccess();
+    } else {
+      toast({ title: "Failed to record test", variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-display">Log Sentinel Test</DialogTitle>
+          <p className="text-sm text-muted-foreground">{locationStr}</p>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="rounded-md bg-muted/50 px-3 py-2 space-y-0.5">
+            <p className="text-sm font-medium">{CHECK_TYPE_LABELS[checkType]}</p>
+            <p className="text-xs text-muted-foreground italic">{CHECK_TYPE_HINTS[checkType]}</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Date</Label>
+            <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Result</Label>
+            <Select value={result} onValueChange={v => setResult(v as any)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pass">Pass</SelectItem>
+                <SelectItem value="fail">Fail</SelectItem>
+                <SelectItem value="action_required">Action Required</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {isTemperature && (
+            <div className="space-y-1.5">
+              <Label>Temperature (°C)</Label>
+              <div className="relative">
+                <ThermometerSun className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input type="number" step="0.1" value={temperature}
+                  onChange={e => setTemperature(e.target.value)}
+                  placeholder={TEMP_PLACEHOLDER[checkType] ?? "°C"}
+                  className="pl-9" />
+              </div>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>Performed By</Label>
+            <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Name" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Notes</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={busy}>
+            {busy ? "Saving…" : "Record Test"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Sentinel Outlets Panel ─────────────────────────────────────────────────────
+
+function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
+  const [outlets, setOutlets] = useState<OutletStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [logOutlet, setLogOutlet] = useState<OutletStatus | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const { toast } = useToast();
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch("/legionella/outlet-status");
+      setOutlets(r.ok ? await r.json() : []);
+    } catch {
+      setOutlets([]);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Remove this outlet? This won't delete historical test records.")) return;
+    const r = await apiFetch(`/legionella/outlets/${id}`, { method: "DELETE" });
+    if (r.ok || r.status === 204) {
+      toast({ title: "Outlet removed" });
+      refresh();
+    } else {
+      toast({ title: "Failed to remove outlet", variant: "destructive" });
+    }
+  };
+
+  const now = new Date();
+  const monthName = now.toLocaleString("en-GB", { month: "long", year: "numeric" });
+  const total = outlets.length;
+  const done = outlets.filter(o => o.testedThisMonth).length;
+
+  // Hide panel entirely if there are no outlets and user can't add any
+  if (!loading && total === 0 && !canAdmin) return null;
+
+  return (
+    <Card>
+      <CardHeader className="border-b border-border/50 pb-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <CardTitle className="font-display text-base flex items-center gap-2">
+              Sentinel Outlets
+              {total > 0 && (
+                <span className={cn(
+                  "text-xs px-2 py-0.5 rounded-full font-semibold border",
+                  done === total
+                    ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                    : "bg-amber-100 text-amber-700 border-amber-200"
+                )}>
+                  {done}/{total} tested — {monthName}
+                </span>
+              )}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">Monthly temperature tests per HSG274 Part 2 Table 2.1</p>
+          </div>
+          {canAdmin && (
+            <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> Add Outlet
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : total === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Droplets className="w-10 h-10 mx-auto mb-3 opacity-20" />
+            <p className="text-sm">No sentinel outlets defined yet.</p>
+            {canAdmin && (
+              <Button variant="link" size="sm" className="mt-1 h-auto p-0 text-primary"
+                onClick={() => setAddOpen(true)}>
+                Add your first outlet →
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {outlets.map(outlet => (
+              <div key={outlet.id} className={cn(
+                "rounded-lg border p-4 space-y-3 transition-all",
+                outlet.testedThisMonth
+                  ? outlet.lastCheck?.result === "fail" || outlet.lastCheck?.result === "action_required"
+                    ? "border-red-200 bg-red-50/40"
+                    : "border-emerald-200 bg-emerald-50/40"
+                  : "border-amber-200 bg-amber-50/40"
+              )}>
+                {/* Header row */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm leading-snug">{outlet.name}</div>
+                    {outlet.location && (
+                      <div className="text-xs text-muted-foreground mt-0.5">{outlet.location}</div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className={cn(
+                      "text-xs px-1.5 py-0.5 rounded border font-medium",
+                      OUTLET_TYPE_CLS[outlet.type] ?? "bg-muted text-muted-foreground border-border"
+                    )}>
+                      {OUTLET_TYPE_LABEL[outlet.type] ?? outlet.type}
+                    </span>
+                    {canAdmin && (
+                      <Button variant="ghost" size="sm"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(outlet.id)}>
+                        <X className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status row */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  {outlet.testedThisMonth ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className={cn(
+                        "font-medium",
+                        outlet.lastCheck?.result === "pass" ? "text-emerald-700" : "text-red-700"
+                      )}>
+                        {outlet.lastCheck?.result === "pass" ? "Passed" : outlet.lastCheck?.result === "fail" ? "Failed" : "Action required"}
+                        {outlet.lastCheck?.temperature && ` (${outlet.lastCheck.temperature}°C)`}
+                        {outlet.lastCheck?.checkDate && ` — ${format(new Date(outlet.lastCheck.checkDate), "dd MMM")}`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="text-amber-700 font-medium">Not tested this month</span>
+                    </>
+                  )}
+                </div>
+
+                {/* Action */}
+                <Button size="sm"
+                  variant={outlet.testedThisMonth ? "outline" : "default"}
+                  className="w-full"
+                  onClick={() => setLogOutlet(outlet)}>
+                  <Plus className="w-3 h-3 mr-1.5" />
+                  {outlet.testedThisMonth ? "Log another" : "Log Test"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      {logOutlet && (
+        <OutletTestDialog
+          outlet={logOutlet}
+          onClose={() => setLogOutlet(null)}
+          onSuccess={() => { setLogOutlet(null); refresh(); }}
+        />
+      )}
+
+      {canAdmin && addOpen && (
+        <AddOutletDialog
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          onSuccess={() => { setAddOpen(false); refresh(); }}
+        />
+      )}
+    </Card>
   );
 }
 
@@ -778,6 +1125,9 @@ export default function LegionellaPage() {
             ))}
           </div>
         )}
+
+        {/* Sentinel Outlets — per-outlet monthly tracking */}
+        <SentinelOutletsPanel canAdmin={canAdmin} />
 
         {(overdueStatuses.length > 0 || dueSoonStatuses.length > 0) && (
           <div className="space-y-3">

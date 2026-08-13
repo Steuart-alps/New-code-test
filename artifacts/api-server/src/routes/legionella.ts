@@ -53,6 +53,8 @@ const createSchema = z.object({
   location: z.string().max(500).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   performedBy: z.string().max(200).nullable().optional(),
+  /** FK back to legionella_sentinel_outlets — links this check to a specific outlet. */
+  outletId: z.number().int().nullable().optional(),
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
@@ -213,7 +215,163 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     })
     .returning();
 
+  // Link to sentinel outlet if provided (column added via runtime migration).
+  if (inserted && data.outletId) {
+    await db.execute(sql`
+      UPDATE legionella_checks SET outlet_id = ${data.outletId}
+      WHERE id = ${inserted.id} AND client_id = ${clientId}
+    `);
+  }
+
   res.status(201).json(inserted);
+});
+
+// ── Sentinel outlet CRUD ──────────────────────────────────────────────────────
+
+/** Maps outlet type to the HSG274 check type used when logging a test. */
+const OUTLET_CHECK_TYPE_MAP: Record<string, string> = {
+  hot:        "hot_sentinel_temp",
+  cold:       "cold_sentinel_temp",
+  calorifier: "calorifier_temp",
+};
+
+const outletCreateSchema = z.object({
+  name:      z.string().min(1).max(500),
+  type:      z.enum(["hot", "cold", "calorifier"]),
+  location:  z.string().max(500).nullable().optional(),
+  siteId:    z.number().int().nullable().optional(),
+  sortOrder: z.number().int().optional(),
+});
+
+const outletUpdateSchema = outletCreateSchema.partial();
+
+// GET /api/legionella/outlets
+router.get("/outlets", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const rows = await db.execute(sql`
+    SELECT id, client_id, site_id, name, type, location, sort_order, active, created_at, updated_at
+    FROM legionella_sentinel_outlets
+    WHERE client_id = ${clientId} AND active = true
+    ORDER BY sort_order ASC, id ASC
+  `);
+  res.json(rows.rows ?? []);
+});
+
+// GET /api/legionella/outlet-status — per-outlet monthly completion status
+router.get("/outlet-status", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const rows = await db.execute(sql`
+    SELECT
+      o.id, o.name, o.type, o.location, o.site_id, o.sort_order,
+      c.id          AS check_id,
+      c.check_date,
+      c.result,
+      c.temperature,
+      c.performed_by,
+      c.notes
+    FROM legionella_sentinel_outlets o
+    LEFT JOIN legionella_checks c
+      ON  c.outlet_id = o.id
+      AND c.client_id = ${clientId}
+      AND c.check_date >= ${monthStart}
+      AND c.check_date <  ${monthEnd}
+    WHERE o.client_id = ${clientId} AND o.active = true
+    ORDER BY o.sort_order ASC, o.id ASC, c.check_date DESC
+  `);
+
+  // Collapse rows per outlet (multiple checks possible in the same month).
+  const outletMap = new Map<number, any>();
+  for (const row of (rows.rows ?? []) as any[]) {
+    if (!outletMap.has(row.id)) {
+      outletMap.set(row.id, {
+        id: row.id, name: row.name, type: row.type,
+        location: row.location, siteId: row.site_id,
+        sortOrder: row.sort_order, thisMonthChecks: [],
+      });
+    }
+    if (row.check_id) {
+      outletMap.get(row.id).thisMonthChecks.push({
+        id: row.check_id, checkDate: row.check_date, result: row.result,
+        temperature: row.temperature, performedBy: row.performed_by, notes: row.notes,
+      });
+    }
+  }
+
+  const result = Array.from(outletMap.values()).map(o => ({
+    ...o,
+    testedThisMonth: o.thisMonthChecks.length > 0,
+    lastCheck: o.thisMonthChecks[0] ?? null,
+    checkTypeForOutlet: OUTLET_CHECK_TYPE_MAP[o.type] ?? "hot_sentinel_temp",
+  }));
+
+  res.json(result);
+});
+
+// POST /api/legionella/outlets
+router.post("/outlets", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = outletCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const d = parsed.data;
+  const rows = await db.execute(sql`
+    INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
+    VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.type}, ${d.location ?? null}, ${d.sortOrder ?? 0})
+    RETURNING *
+  `);
+  res.status(201).json((rows.rows ?? [])[0]);
+});
+
+// PUT /api/legionella/outlets/:id — must appear before PUT /:id
+router.put("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const parsed = outletUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const existing = await db.execute(sql`
+    SELECT * FROM legionella_sentinel_outlets WHERE id = ${id} AND client_id = ${clientId}
+  `);
+  const cur = (existing.rows ?? [])[0] as any;
+  if (!cur) return res.status(404).json({ error: "Not found" });
+  const d = parsed.data;
+  const name     = d.name     ?? cur.name;
+  const type     = d.type     ?? cur.type;
+  const location = d.location !== undefined ? d.location : cur.location;
+  const siteId   = d.siteId   !== undefined ? d.siteId   : cur.site_id;
+  const sortOrd  = d.sortOrder ?? cur.sort_order;
+  const rows = await db.execute(sql`
+    UPDATE legionella_sentinel_outlets
+    SET name = ${name}, type = ${type}, location = ${location},
+        site_id = ${siteId}, sort_order = ${sortOrd}, updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId}
+    RETURNING *
+  `);
+  res.json((rows.rows ?? [])[0]);
+});
+
+// DELETE /api/legionella/outlets/:id — soft-delete; must appear before DELETE /:id
+router.delete("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const rows = await db.execute(sql`
+    UPDATE legionella_sentinel_outlets SET active = false, updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId}
+    RETURNING id
+  `);
+  if (!(rows.rows ?? []).length) return res.status(404).json({ error: "Not found" });
+  res.status(204).end();
 });
 
 // PUT /api/legionella/:id
