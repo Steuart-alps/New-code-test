@@ -43,6 +43,12 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
+  // Forward the server-side SENTRY_DSN secret to the client bundle under the
+  // VITE_ prefix.  The Sentry DSN is intentionally public (it's designed to
+  // be embedded in client code) so this is safe.
+  define: {
+    "import.meta.env.VITE_SENTRY_DSN": JSON.stringify(process.env.SENTRY_DSN ?? ""),
+  },
   plugins: [
     react(),
     tailwindcss(),

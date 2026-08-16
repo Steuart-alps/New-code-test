@@ -9,6 +9,7 @@ import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
 import { WebhookHandlers } from "./lib/webhookHandlers";
+import { Sentry } from "./lib/sentry";
 
 const app: Express = express();
 
@@ -93,6 +94,12 @@ app.use("/api", enforceTrialLock);
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 
 app.use("/api", router);
+
+// Sentry error handler — must come after all routes and before other error
+// handlers so it has access to the full request context and error details.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // JSON error handler for /api/* — keeps responses copy-pasteable for users
 // instead of returning Express's default HTML stack page.

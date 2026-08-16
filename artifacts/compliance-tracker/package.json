@@ -76,6 +76,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
-    "@e965/xlsx": "^0.20.3"
+    "@e965/xlsx": "^0.20.3",
+    "@sentry/react": "^10.70.0"
   }
 }
