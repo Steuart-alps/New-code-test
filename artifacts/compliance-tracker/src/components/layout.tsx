@@ -72,7 +72,7 @@ function useNavGroups() {
         { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
         { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
         { href: "/pool-track",     label: "PoolTrack",       icon: WavesIcon,       serviceKey: "pooltrack" },
-        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
+        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack", comingSoon: true },
         { href: "/swim-track",     label: "SwimTrack",       icon: Anchor,          serviceKey: "swimtrack" },
         { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
@@ -144,31 +144,39 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 {group.items.map((item) => {
                   const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
                   const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
-                  return (
-                    <Link key={item.href} href={item.href} className="block">
-                      <div className={cn(
-                        "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
-                        isActive 
-                          ? "text-sidebar-foreground" 
-                          : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
-                        isLocked && "opacity-70"
+                  const isComingSoon = (item as any).comingSoon === true;
+                  const inner = (
+                    <div className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
+                      isActive 
+                        ? "text-sidebar-foreground" 
+                        : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+                      (isLocked || isComingSoon) && "opacity-70"
+                    )}
+                    >
+                      {isActive && !isComingSoon && (
+                        <motion.div 
+                          layoutId="sidebar-active" 
+                          className="absolute inset-0 rounded-sm z-0"
+                          style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
+                          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                        />
                       )}
-                      >
-                        {isActive && (
-                          <motion.div 
-                            layoutId="sidebar-active" 
-                            className="absolute inset-0 rounded-sm z-0"
-                            style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
-                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                          />
-                        )}
-                        <item.icon className={cn("w-4 h-4 z-10 relative", isActive ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive ? { color: primaryColor } : {}} />
-                        <span className="z-10 relative text-sm tracking-wide flex-1">{item.label}</span>
-                        {isLocked && (
-                          <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
-                        )}
-                      </div>
-                    </Link>
+                      <item.icon className={cn("w-4 h-4 z-10 relative", isActive && !isComingSoon ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive && !isComingSoon ? { color: primaryColor } : {}} />
+                      <span className="z-10 relative text-sm tracking-wide flex-1">{item.label}</span>
+                      {isComingSoon ? (
+                        <span className="z-10 relative text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sidebar-foreground/10 text-sidebar-foreground/50 tracking-wide">
+                          Soon
+                        </span>
+                      ) : isLocked ? (
+                        <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
+                      ) : null}
+                    </div>
+                  );
+                  return isComingSoon ? (
+                    <div key={item.href} className="cursor-default">{inner}</div>
+                  ) : (
+                    <Link key={item.href} href={item.href} className="block">{inner}</Link>
                   );
                 })}
               </div>

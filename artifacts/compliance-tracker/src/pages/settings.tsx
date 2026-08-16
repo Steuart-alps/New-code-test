@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
 import { useGetSettings } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
@@ -701,6 +702,188 @@ function SenderDomainCard() {
   );
 }
 
+// ── Email Setup Guide ─────────────────────────────────────────────────────────
+// Shown once to paid client admins who haven't yet configured their sender domain
+// and From address. Auto-hides when both steps are complete; permanently hidden
+// after dismissal (stored server-side as emailSetupGuideDismissed).
+
+function EmailSetupGuide({
+  settings,
+  onDismiss,
+}: {
+  settings: Record<string, string | null>;
+  onDismiss: () => void;
+}) {
+  const [domainStatus, setDomainStatus] = useState<{ verified: boolean; loading: boolean }>({
+    verified: false,
+    loading: true,
+  });
+
+  useEffect(() => {
+    apiFetch<DomainState>("/email-domain")
+      .then(d => setDomainStatus({ verified: !!(d.configured && d.status === "verified"), loading: false }))
+      .catch(() => setDomainStatus({ verified: false, loading: false }));
+  }, []);
+
+  const domainVerified = domainStatus.verified;
+  const fromSet = !!(settings.smtpFrom?.trim());
+
+  // Auto-hide once setup is complete — no need to nag
+  if (domainVerified && fromSet) return null;
+
+  const scrollTo = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const focusLater = (selector: string) =>
+    setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 450);
+
+  const steps: {
+    id: string;
+    num: number;
+    label: string;
+    detail: string;
+    done: boolean;
+    loading?: boolean;
+    cta: string;
+    onClick: () => void;
+  }[] = [
+    {
+      id: "domain",
+      num: 1,
+      label: "Verify your sender domain",
+      detail: "Add DNS records so compliance emails land in inboxes, not spam folders.",
+      done: domainVerified,
+      loading: domainStatus.loading,
+      cta: "Set up domain →",
+      onClick: () => scrollTo("email-sender-section"),
+    },
+    {
+      id: "from",
+      num: 2,
+      label: "Set your From address",
+      detail: "Choose the email address recipients see — ideally on your verified domain.",
+      done: fromSet,
+      loading: false,
+      cta: "Set From address →",
+      onClick: () => { scrollTo("email-settings-section"); focusLater('[name="smtpFrom"]'); },
+    },
+    {
+      id: "test",
+      num: 3,
+      label: "Send a test email",
+      detail: "Confirm delivery works before sending reminders to contractors.",
+      done: false,
+      loading: false,
+      cta: "Send test →",
+      onClick: () => { scrollTo("email-settings-section"); focusLater('[placeholder="Test recipient email"]'); },
+    },
+  ];
+
+  const doneCount = steps.filter(s => s.done).length;
+
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/70 to-blue-50/40 p-5 space-y-4 mb-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+            <Mail className="w-5 h-5 text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="font-display font-semibold text-base text-foreground leading-snug">
+              Email sender setup
+            </h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Send compliance emails from your own brand, not a generic sender. Complete these steps once.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 mt-0.5">
+          <span className={cn(
+            "text-xs font-semibold px-2.5 py-1 rounded-full",
+            doneCount === 2
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-indigo-100 text-indigo-700",
+          )}>
+            {doneCount}/2 done
+          </span>
+          <Button
+            variant="ghost" size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={onDismiss}
+            type="button"
+            title="Dismiss this guide"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Step cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {steps.map(step => (
+          <button
+            key={step.id}
+            type="button"
+            onClick={step.onClick}
+            disabled={step.loading}
+            className={cn(
+              "text-left rounded-lg border p-4 space-y-2.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+              step.done
+                ? "border-emerald-200 bg-emerald-50/70 cursor-default"
+                : "border-indigo-200/60 bg-white/60 hover:bg-white/90 hover:border-indigo-300 hover:shadow-sm",
+            )}
+          >
+            {/* Step number / tick */}
+            <div className="flex items-center justify-between">
+              <div className={cn(
+                "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
+                step.done
+                  ? "bg-emerald-500 text-white"
+                  : step.loading
+                  ? "bg-muted text-muted-foreground animate-pulse"
+                  : "bg-indigo-100 text-indigo-700",
+              )}>
+                {step.done
+                  ? <CheckCircle2 className="w-3.5 h-3.5" />
+                  : <span>{step.num}</span>
+                }
+              </div>
+              {step.done && (
+                <span className="text-xs font-semibold text-emerald-600">Complete ✓</span>
+              )}
+            </div>
+
+            {/* Label + detail */}
+            <div>
+              <p className={cn(
+                "text-sm font-semibold leading-snug",
+                step.done && "line-through text-muted-foreground",
+              )}>
+                {step.label}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1 leading-snug">{step.detail}</p>
+            </div>
+
+            {/* CTA link */}
+            {!step.done && !step.loading && (
+              <p className="text-xs font-semibold text-indigo-600">{step.cta}</p>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <p className="text-xs text-center text-muted-foreground/60">
+        This banner disappears automatically once your domain is verified and From address is set.{" "}
+        <button type="button" onClick={onDismiss} className="underline hover:text-muted-foreground">
+          Dismiss now.
+        </button>
+      </p>
+    </div>
+  );
+}
+
 interface BillingConfig {
   subscription?: { status?: string } | null;
   siteCount: number;
@@ -1215,6 +1398,29 @@ function PhotoRequirementsCard() {
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
+  const { user, billingLocked } = useAuth();
+  const canAdmin = useCanAdmin();
+
+  // Guide is shown once to paying client admins — hidden permanently after dismiss
+  // or auto-hidden once both domain and From address are configured.
+  const [guideDismissedLocally, setGuideDismissedLocally] = useState(false);
+  const serverDismissed = (settings as any)?.emailSetupGuideDismissed === "true";
+  const showEmailGuide =
+    canAdmin &&
+    user?.role === "client_admin" && // exclude consultants
+    !billingLocked &&
+    !serverDismissed &&
+    !guideDismissedLocally;
+
+  const handleDismissGuide = async () => {
+    setGuideDismissedLocally(true); // immediate hide
+    try {
+      await apiFetch<void>("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ emailSetupGuideDismissed: "true" }),
+      });
+    } catch { /* non-critical */ }
+  };
 
   const [formData, setFormData] = useState({
     companyName: "",
@@ -1350,8 +1556,18 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <SenderDomainCard />
+          {showEmailGuide && (
+            <EmailSetupGuide
+              settings={(settings as any) ?? {}}
+              onDismiss={handleDismissGuide}
+            />
+          )}
 
+          <div id="email-sender-section">
+            <SenderDomainCard />
+          </div>
+
+          <div id="email-settings-section">
           <Card className="shadow-lg border-border/50 bg-card">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
               <div className="flex items-center gap-2">
@@ -1414,6 +1630,7 @@ export default function SettingsPage() {
               </Button>
             </CardFooter>
           </Card>
+          </div>
         </form>
 
         {/* Two-Factor Authentication */}

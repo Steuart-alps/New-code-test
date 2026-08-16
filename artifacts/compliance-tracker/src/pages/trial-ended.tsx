@@ -114,6 +114,7 @@ const ADDONS = [
     iconColor: "text-green-600",
     activeBorder: "border-green-400",
     activeBg: "bg-green-50/60",
+    comingSoon: true,
   },
   {
     key: "swimtrack",
@@ -290,7 +291,26 @@ export default function TrialEndedPage() {
             {/* Add-ons */}
             {ADDONS.map(addon => {
               const Icon = addon.icon;
-              const active = selectedAddons.has(addon.key) || bundle;
+              const isComingSoon = (addon as any).comingSoon === true;
+              const active = !isComingSoon && (selectedAddons.has(addon.key) || bundle);
+              if (isComingSoon) {
+                return (
+                  <div
+                    key={addon.key}
+                    className="flex items-center gap-3 p-3 border-2 border-border opacity-50 cursor-not-allowed"
+                  >
+                    <div className="w-5 h-5 border-2 border-border bg-white flex-shrink-0" />
+                    <Icon className={`w-4 h-4 flex-shrink-0 ${addon.iconColor}`} />
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-sm text-[#162D42]">{addon.label}</span>
+                      <span className="text-xs text-muted-foreground ml-1.5 font-light">{addon.desc}</span>
+                    </div>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 border border-border text-muted-foreground tracking-wide uppercase">
+                      Coming soon
+                    </span>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={addon.key}

@@ -18,6 +18,8 @@ const SETTING_KEYS = [
   "resendApiKey",
   // FixTrack: days an open issue may sit unactioned before managers are chased.
   "fixTrackStaleDays",
+  // One-time email setup guide — "true" once the admin has dismissed it.
+  "emailSetupGuideDismissed",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {

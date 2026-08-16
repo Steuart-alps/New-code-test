@@ -1226,7 +1226,7 @@ function FuelLogDialog({
 
 type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel";
 
-export default function GreenTrackPage() {
+function GreenTrackPageInternal() {
   const { user } = useAuth();
   const canAdmin = useCanAdmin();
   const queryClient = useQueryClient();
@@ -2057,6 +2057,31 @@ export default function GreenTrackPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </AppLayout>
+  );
+}
+
+// ─── Coming Soon wrapper ───────────────────────────────────────────────────────
+export default function GreenTrackPage() {
+  return (
+    <AppLayout title="GreenTrack">
+      <div className="flex flex-col items-center justify-center py-32 text-center space-y-6 max-w-sm mx-auto">
+        <div className="w-20 h-20 rounded-2xl bg-green-100 flex items-center justify-center">
+          <Tractor className="w-10 h-10 text-green-600" />
+        </div>
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-1.5 bg-green-100 text-green-700 text-xs font-semibold px-3 py-1 rounded-full">
+            <span>Coming soon</span>
+          </div>
+          <h2 className="text-2xl font-display font-semibold text-foreground">GreenTrack</h2>
+          <p className="text-muted-foreground leading-relaxed">
+            Grounds &amp; landscaping maintenance records — machinery pre-use checks, service logs, PUWER inspections, defect tracking, and fuel usage — are coming to ComplyTrack shortly.
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground/60">
+          Your account manager will be in touch when it's ready to activate.
+        </p>
+      </div>
     </AppLayout>
   );
 }
