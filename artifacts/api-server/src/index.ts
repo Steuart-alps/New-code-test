@@ -6,6 +6,7 @@ import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
+import { ensureServicePrices } from "./lib/services";
 import { sendSystemEmail } from "./lib/email";
 import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
@@ -49,6 +50,19 @@ async function initStripe() {
     stripeSync.syncBackfill()
       .then(() => logger.info("Stripe data synced"))
       .catch((err: any) => logger.error({ err }, "Stripe backfill error"));
+
+    // Ensure every module in the service catalogue has a Stripe product + price.
+    // Idempotent — only creates what's missing. Runs after syncBackfill kicks
+    // off so newly synced prices are visible before we check for gaps.
+    ensureServicePrices()
+      .then((r) => {
+        if (r.created.length > 0) {
+          logger.info({ created: r.created }, "Created missing Stripe service prices");
+        } else {
+          logger.info("All Stripe service prices already exist");
+        }
+      })
+      .catch((err: any) => logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually"));
   } catch (err) {
     logger.error({ err }, "Failed to initialize Stripe — continuing without it");
   }
