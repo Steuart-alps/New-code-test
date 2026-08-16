@@ -190,7 +190,7 @@ export default function TrialEndedPage() {
       setSelectedAddons(new Set());
     } else {
       setBundle(true);
-      setSelectedAddons(new Set(ADDONS.map(a => a.key)));
+      setSelectedAddons(new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key)));
     }
   };
 
@@ -217,9 +217,9 @@ export default function TrialEndedPage() {
     if (!picked || picked.length === 0) return;
     if (picked.includes("bundle")) {
       setBundle(true);
-      setSelectedAddons(new Set(ADDONS.map(a => a.key)));
+      setSelectedAddons(new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key)));
     } else {
-      const known = new Set(ADDONS.map(a => a.key));
+      const known = new Set(ADDONS.filter(a => !(a as any).comingSoon).map(a => a.key));
       setSelectedAddons(new Set(picked.filter(k => known.has(k))));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

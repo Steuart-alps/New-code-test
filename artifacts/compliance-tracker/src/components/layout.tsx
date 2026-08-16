@@ -48,7 +48,7 @@ function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
 
-  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string }[] }[] = [
+  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string; comingSoon?: boolean }[] }[] = [
     {
       title: "COMPLYTRACK",
       items: [

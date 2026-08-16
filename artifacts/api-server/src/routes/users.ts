@@ -6,7 +6,7 @@ import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/d
 import { eq, and, inArray } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
-import { sendSystemEmail } from "../lib/email";
+import { sendSystemEmail, getPublicAppUrl } from "../lib/email";
 
 const router = Router();
 
@@ -38,7 +38,7 @@ async function sendInviteEmail(user: { id: number; email: string; name: string }
       expiresAt,
     });
 
-    const appUrl = process.env.APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    const appUrl = getPublicAppUrl();
     const setupUrl = `${appUrl}/reset-password?token=${token}`;
 
     await sendSystemEmail({

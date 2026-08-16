@@ -11,7 +11,7 @@ import { loginRateLimit, makeLoginRateLimit } from "../lib/loginRateLimit";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
-import { sendSystemEmail } from "../lib/email";
+import { sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { getPerSitePrice, getServicePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
 import { ADDON_KEYS, BUNDLE_KEY, getEntitledServices } from "../lib/services";
@@ -269,7 +269,7 @@ router.post("/auth/forgot-password", async (req, res) => {
       expiresAt,
     });
 
-    const appUrl = process.env.APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    const appUrl = getPublicAppUrl();
     const resetUrl = `${appUrl}/reset-password?token=${token}`;
 
     try {
@@ -446,7 +446,7 @@ router.post("/auth/register", async (req, res) => {
 
   // Send a branded welcome email — best-effort, never blocks signup.
   try {
-    const appUrl = process.env.APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    const appUrl = getPublicAppUrl();
     await sendSystemEmail({
       to: user.email,
       subject: "Welcome to ComplyTrack",

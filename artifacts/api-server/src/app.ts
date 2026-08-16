@@ -88,6 +88,10 @@ app.use(loadUser);
 app.use(enforceClientAccess);
 app.use("/api", enforceTrialLock);
 
+// Root-level health check — matches the deployment probe path and is exempt
+// from the /api prefix so load balancers / Replit can reach it directly.
+app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+
 app.use("/api", router);
 
 // JSON error handler for /api/* — keeps responses copy-pasteable for users
