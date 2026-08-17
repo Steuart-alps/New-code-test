@@ -35,6 +35,7 @@ import {
   Anchor,
   Zap,
   Bug,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -53,6 +54,7 @@ function useNavGroups() {
       title: "COMPLYTRACK",
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/reports",   label: "Reports",   icon: BarChart2 },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
         { href: "/categories", label: "Categories", icon: Tags },

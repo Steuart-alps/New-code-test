@@ -46,6 +46,7 @@ import premisesTrackRouter from "./premises-track";
 import formOptionsRouter from "./form-options";
 import mobileRouter from "./mobile";
 import exportRouter from "./export";
+import reportsRouter from "./reports";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -102,6 +103,7 @@ router.use("/premises-track", requireAuth, requireService("premisestrack"), prem
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);
+router.use(reportsRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);
 
