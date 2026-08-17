@@ -21,6 +21,7 @@ import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 import { runCancellationDetectionJob, runDataDeletionJob } from "./lib/offboarding";
+import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 
 const rawPort = process.env["PORT"];
 
@@ -195,6 +196,19 @@ function startScheduler() {
     }
   });
   logger.info("Data deletion scheduler started (daily at 03:00)");
+
+  // Email all client admins a monthly compliance summary on the 1st of each
+  // month at 08:05 — covers the previous calendar month.
+  cron.schedule("5 8 1 * *", async () => {
+    logger.info("Running monthly compliance summary job...");
+    try {
+      const result = await runMonthlyComplianceSummaryJob();
+      logger.info({ result }, "Monthly compliance summary job complete");
+    } catch (err) {
+      logger.error({ err }, "Monthly compliance summary job failed");
+    }
+  });
+  logger.info("Monthly compliance summary scheduler started (1st of month at 08:05)");
 }
 
 async function runTrialReminders() {
