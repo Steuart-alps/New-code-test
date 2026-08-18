@@ -61,13 +61,14 @@ router.get("/:token", async (req, res) => {
       ORDER BY expiry_date ASC NULLS LAST, created_at DESC
     `);
 
+    // NOTE: `notes` (internal manager notes) is intentionally excluded — contractors
+    // must not see comments the client has written about them.
     return res.json({
       name: row.name,
       email: row.email,
       phone: row.phone,
       company: row.company,
       address: row.address,
-      notes: row.notes,
       gasSafeNumber: row.gas_safe_number,
       insuranceExpiry: row.public_liability_expiry,
       dbsType: row.dbs_type,
