@@ -22,6 +22,16 @@ export const CERTIFICATE_TRAINING_TYPES = [
   "RIDDOR Awareness",
   "Asbestos Awareness",
   "Display Screen Equipment (DSE)",
+  // DBS / PVG disclosure checks
+  "DBS Check (Basic)",
+  "DBS Check (Standard)",
+  "DBS Check (Enhanced)",
+  "PVG Scheme (Scotland)",
+  // Chainsaw NPTC / LANTRA certificates
+  "Chainsaw (NPTC CS30 — Maintenance & Cross-cutting)",
+  "Chainsaw (NPTC CS31 — Felling Small Trees)",
+  "Chainsaw (NPTC CS32 — Felling Medium Trees)",
+  "Chainsaw (NPTC CS38 — From Rope & Harness)",
   "Other",
 ] as const;
 

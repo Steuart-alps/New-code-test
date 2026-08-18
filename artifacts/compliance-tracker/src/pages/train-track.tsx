@@ -151,6 +151,38 @@ const emptyCert     = () => ({ staffName: "", trainingType: "", customType: "", 
 const emptySignoff  = () => ({ staffName: "", documentTitle: "", documentType: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
 const emptyInternal = () => ({ staffName: "", trainingType: "", customType: "", trainer: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
 
+// Suggested expiry periods (years) for well-known certificate types.
+// Used to auto-populate the expiry date when a type is selected.
+const CERT_EXPIRY_YEARS: Record<string, number> = {
+  "Food Hygiene (Level 2)":                            3,
+  "Food Hygiene (Level 3)":                            3,
+  "First Aid at Work":                                 3,
+  "Emergency First Aid at Work":                       3,
+  "Fire Safety Awareness":                             3,
+  "COSHH Awareness":                                   3,
+  "Manual Handling":                                   3,
+  "Working at Height":                                 3,
+  "Asbestos Awareness":                                1,
+  "DBS Check (Basic)":                                 3,
+  "DBS Check (Standard)":                              3,
+  "DBS Check (Enhanced)":                              3,
+  "PVG Scheme (Scotland)":                             5,
+  "Chainsaw (NPTC CS30 — Maintenance & Cross-cutting)": 5,
+  "Chainsaw (NPTC CS31 — Felling Small Trees)":        5,
+  "Chainsaw (NPTC CS32 — Felling Medium Trees)":       5,
+  "Chainsaw (NPTC CS38 — From Rope & Harness)":        5,
+};
+
+/** Returns YYYY-MM-DD expiry string, or "" if no suggestion available. */
+function suggestExpiry(trainingType: string, completedDate: string): string {
+  const years = CERT_EXPIRY_YEARS[trainingType];
+  if (!years || !completedDate) return "";
+  const d = new Date(completedDate);
+  if (isNaN(d.getTime())) return "";
+  d.setFullYear(d.getFullYear() + years);
+  return d.toISOString().slice(0, 10);
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function SiteName({ record }: { record: TrainingRecord }) {
@@ -969,7 +1001,10 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
               <>
                 <div>
                   <Label>Training Type *</Label>
-                  <Select value={certForm.trainingType} onValueChange={v => setCertForm(f => ({ ...f, trainingType: v, customType: "" }))}>
+                  <Select value={certForm.trainingType} onValueChange={v => setCertForm(f => {
+                    const suggested = suggestExpiry(v, f.completedDate);
+                    return { ...f, trainingType: v, customType: "", expiryDate: f.expiryDate || suggested };
+                  })}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
                       {trainingTypeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
@@ -1004,7 +1039,13 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
                   <div>
                     <Label htmlFor="completedDate">Completed *</Label>
                     <Input id="completedDate" type="date" value={certForm.completedDate}
-                      onChange={e => setCertForm(f => ({ ...f, completedDate: e.target.value }))}
+                      onChange={e => {
+                        const completedDate = e.target.value;
+                        setCertForm(f => {
+                          const suggested = suggestExpiry(f.trainingType, completedDate);
+                          return { ...f, completedDate, expiryDate: f.expiryDate || suggested };
+                        });
+                      }}
                       className="mt-1 rounded-sm" />
                   </div>
                   <div>
