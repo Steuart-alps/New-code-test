@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, MinusCircle, SlidersHorizontal, Sunrise, Sunset,
@@ -68,7 +68,6 @@ function StatusIcon({ status, className }: { status: TrackStatus; className?: st
 
 function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchenOverdueBadge?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [, navigate] = useLocation();
   const hasItems = track.items.length > 0;
   const canExpand = hasItems;
 
@@ -81,61 +80,76 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
       )}
     >
       {/* Header row */}
-      <button
-        type="button"
-        onClick={() => canExpand && setOpen((o) => !o)}
-        className={cn(
-          "w-full flex items-center gap-3 px-4 py-3 text-left",
-          canExpand ? "cursor-pointer" : "cursor-default",
-        )}
-      >
-        <StatusIcon status={track.status} className="w-4 h-4 shrink-0" />
-
-        <span className="font-medium text-sm flex-1">{track.label}</span>
-
-        {kitchenOverdueBadge}
-
-        <span
-          className={cn(
-            "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
-            STATUS_BADGE[track.status],
-          )}
+      <div className="flex items-center gap-1 px-4 py-3">
+        <Link
+          href={track.path}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          aria-label={`Open ${track.label}`}
         >
-          {track.badge}
-        </span>
+          <StatusIcon status={track.status} className="w-4 h-4 shrink-0" />
+
+          <span className="font-medium text-sm flex-1">{track.label}</span>
+
+          {kitchenOverdueBadge}
+
+          <span
+            className={cn(
+              "text-xs px-2 py-0.5 rounded-full font-medium shrink-0",
+              STATUS_BADGE[track.status],
+            )}
+          >
+            {track.badge}
+          </span>
+        </Link>
 
         {canExpand ? (
-          open ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-          )
+          <button
+            type="button"
+            onClick={() => setOpen((current) => !current)}
+            className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            aria-label={`${open ? "Collapse" : "Show"} ${track.label} checks`}
+            aria-expanded={open}
+          >
+            {open ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
         ) : (
-          /* Spacer so badge stays aligned */
-          <span className="w-4 shrink-0" />
+          <Link
+            href={track.path}
+            className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            aria-label={`Open ${track.label}`}
+          >
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         )}
-      </button>
+      </div>
 
       {/* Expanded items */}
       {open && hasItems && (
         <div className="border-t border-border/40 divide-y divide-border/30">
           {track.items.map((item, idx) => (
-            <Link key={idx} href={item.path}>
-              <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-black/5 cursor-pointer group text-sm">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground truncate">{item.label}</p>
-                  <p className="text-xs text-muted-foreground truncate">{item.detail}</p>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground shrink-0 transition-colors" />
+            <Link
+              key={idx}
+              href={item.path}
+              className="group flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-foreground truncate">{item.label}</p>
+                <p className="text-xs text-muted-foreground truncate">{item.detail}</p>
               </div>
+              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground shrink-0 transition-colors" />
             </Link>
           ))}
           {/* Link to full track page */}
-          <Link href={track.path}>
-            <div className="px-4 py-2 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer">
-              <span>Open {track.label}</span>
-              <ArrowRight className="w-3 h-3" />
-            </div>
+          <Link
+            href={track.path}
+            className="flex items-center gap-1 px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
+          >
+            <span>Open {track.label}</span>
+            <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
       )}
@@ -271,7 +285,7 @@ function SetupChecklist({
               key={step.label}
               href={step.href}
               className={cn(
-                "flex items-center gap-3 rounded-lg border px-3 py-3 transition-colors",
+                "flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                 step.done
                   ? "border-emerald-200/70 bg-emerald-50/60"
                   : "border-border/70 bg-background/80 hover:border-primary/40 hover:bg-primary/5",
@@ -370,10 +384,11 @@ function DailyTrackSnapshotCard() {
             <Sunset className="w-3.5 h-3.5 text-violet-500" />
             PM: <span className={cn("ml-0.5 font-medium", pmComplete === totalSites ? "text-emerald-600" : "text-foreground")}>{pmComplete}/{totalSites}</span>
           </span>
-          <Link href="/daily-track-status">
-            <span className="text-primary hover:underline cursor-pointer flex items-center gap-0.5">
-              View <ArrowRight className="w-3 h-3" />
-            </span>
+          <Link
+            href="/daily-track-status"
+            className="flex cursor-pointer items-center gap-0.5 rounded-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            View <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
       )}
