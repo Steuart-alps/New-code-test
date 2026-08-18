@@ -171,7 +171,9 @@ export default function ItemDetailPage() {
                 <h3 className="font-display text-lg font-bold flex items-center gap-2">
                   <FileText className="w-5 h-5 text-primary" /> Certificates
                 </h3>
-                <p className="text-sm text-muted-foreground mt-1">Documentation for this compliance check</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Documentation for this compliance check — upload the certificate that proves this requirement.
+                </p>
               </div>
               <Button size="sm" onClick={() => { setEditingCert(null); setCertOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Upload
@@ -180,7 +182,10 @@ export default function ItemDetailPage() {
             {certificates.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground">
                 <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                No certificates uploaded yet.
+                <p>No certificates uploaded yet.</p>
+                <p className="text-xs mt-1">
+                  Your upload will be labelled as a {item.title} certificate by default.
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border/50">
@@ -253,7 +258,13 @@ export default function ItemDetailPage() {
       </div>
 
       <ItemFormDialog isOpen={editOpen} onClose={() => setEditOpen(false)} item={item as any} />
-      <CertificateFormDialog isOpen={certOpen} onClose={() => setCertOpen(false)} itemId={id} certificate={editingCert} />
+      <CertificateFormDialog
+        isOpen={certOpen}
+        onClose={() => setCertOpen(false)}
+        itemId={id}
+        suggestedName={item.title}
+        certificate={editingCert}
+      />
 
       <AlertDialog open={deleteConfirm} onOpenChange={setDeleteConfirm}>
         <AlertDialogContent>

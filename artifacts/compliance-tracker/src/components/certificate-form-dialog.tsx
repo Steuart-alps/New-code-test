@@ -29,12 +29,14 @@ export function CertificateFormDialog({
   onClose,
   contractorId,
   itemId,
+  suggestedName,
   certificate = null,
 }: {
   isOpen: boolean;
   onClose: () => void;
   contractorId?: number;
   itemId?: number;
+  suggestedName?: string;
   certificate?: Certificate | null;
 }) {
   const {
@@ -45,6 +47,11 @@ export function CertificateFormDialog({
   const { toast } = useToast();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const suggestedCertificateName = suggestedName?.trim()
+    ? /certificate|licen[cs]e|registration|check/i.test(suggestedName)
+      ? suggestedName.trim()
+      : `${suggestedName.trim()} certificate`
+    : "";
   
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -67,14 +74,14 @@ export function CertificateFormDialog({
       setSelectedFile(null);
     } else {
       form.reset({
-        name: "",
+        name: suggestedCertificateName,
         issueDate: "",
         expiryDate: "",
         notes: "",
       });
       setSelectedFile(null);
     }
-  }, [certificate, isOpen, form]);
+  }, [certificate, isOpen, form, suggestedCertificateName]);
 
   const onSubmit = async (data: FormValues) => {
     try {
@@ -138,7 +145,14 @@ export function CertificateFormDialog({
 
         <form id="certificate-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 py-4">
           <div className="space-y-1.5">
-            <Label htmlFor="name">Certificate Name *</Label>
+            <Label htmlFor="name">
+              Certificate Name *
+              {suggestedCertificateName && (
+                <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                  for {suggestedName}
+                </span>
+              )}
+            </Label>
             <Input id="name" {...form.register("name")} placeholder="e.g. Liability Insurance 2025" />
             {form.formState.errors.name && (
               <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
