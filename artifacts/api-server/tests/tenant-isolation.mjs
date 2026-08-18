@@ -74,6 +74,18 @@ async function setupTenant(label) {
   });
   expectOk(`${label}: register`, reg.status, [200, 201]);
 
+  // New registrations have no session until their email address is verified.
+  // The test server exposes the token only under NODE_ENV=test, allowing this
+  // suite to exercise the same flow without depending on a mailbox.
+  const verificationToken = reg.data?.verificationToken;
+  if (!verificationToken) {
+    throw new Error(`${label}: registration did not return a test verification token`);
+  }
+  const verified = await req("GET", `/auth/verify-email?token=${encodeURIComponent(verificationToken)}`);
+  expectOk(`${label}: verify email`, verified.status);
+  const login = await req("POST", "/auth/login", { email, password: "password-123" });
+  expectOk(`${label}: login after verification`, login.status);
+
   const me = await req("GET", "/auth/me");
   expectOk(`${label}: /auth/me`, me.status);
   const user = me.data?.user ?? me.data;
@@ -94,7 +106,9 @@ async function setupTenant(label) {
 
   const itemCert = await req("POST", `/items/${itemId}/certificates`, { name: `${label} gas cert` });
   expectOk(`${label}: create item certificate`, itemCert.status, [201]);
-  const contractorCert = await req("POST", `/contractors/${contractor.data?.id}/certificates`, { name: `${label} insurance cert` });
+  const contractorCert = await req("POST", `/contractors/${contractor.data?.id}/certificates`, {
+    certificateName: `${label} insurance cert`,
+  });
   expectOk(`${label}: create contractor certificate`, contractorCert.status, [201]);
 
   // ── Fire-safety module ───────────────────────────────────────────────────────

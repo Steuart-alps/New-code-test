@@ -7,4 +7,4 @@ Self-registration no longer creates an authenticated session until the email ver
 
 **Why:** Requiring a confirmed email prevents unverified addresses from accessing tenant data or receiving compliance alerts, while preserving a realistic end-to-end test of the new onboarding contract.
 
-**How to apply:** Keep any test-only token exposure strictly limited to the non-production test environment; production responses must never return verification tokens.
+**How to apply:** Keep any test-only token exposure strictly limited to the non-production test environment; production responses must never return verification tokens. Self-booted suites must run with `NODE_ENV=test` on a private ephemeral port, then register, verify, and log in.

@@ -8,7 +8,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TEST_PORT="${TEST_PORT:-8080}"
+# Use a private ephemeral port by default so this suite never attaches to a
+# developer's already-running server (which may not be in NODE_ENV=test).
+_free_port() {
+  python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19091
+}
+TEST_PORT="${TEST_PORT:-$(_free_port)}"
 export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
 
 healthy() {
@@ -27,7 +32,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=development PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 30); do
     if healthy; then break; fi
