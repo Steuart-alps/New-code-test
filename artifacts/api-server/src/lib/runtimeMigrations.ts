@@ -396,6 +396,12 @@ export async function runRuntimeMigrations() {
     await migrateDoctrackSafetrackMerge();
     await migrateLegionellaOutlets();
 
+    // Annual-acknowledgement flag on DocTrack documents
+    await db.execute(sql`
+      ALTER TABLE doc_track_documents
+        ADD COLUMN IF NOT EXISTS "annual_acknowledgement" boolean NOT NULL DEFAULT false
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

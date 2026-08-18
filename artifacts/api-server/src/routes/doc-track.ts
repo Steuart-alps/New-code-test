@@ -22,6 +22,7 @@ const docCreate = z.object({
   siteId: z.number().int().nullable().optional(),
   uploadedBy: z.string().max(200).nullable().optional(),
   requiresAcknowledgement: z.boolean().optional(),
+  annualAcknowledgement: z.boolean().optional(),
   department: z.string().max(200).nullable().optional(),
 });
 
@@ -31,6 +32,7 @@ const docUpdate = z.object({
   description: z.string().max(5000).nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   requiresAcknowledgement: z.boolean().optional(),
+  annualAcknowledgement: z.boolean().optional(),
   department: z.string().max(200).nullable().optional(),
 });
 
@@ -73,7 +75,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   const parsed = docCreate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, department } = parsed.data;
+  const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
   const createdBy = (req.session as any).userId ?? null;
 
   // Tag the uploaded object with a tenant-scoped ACL so the private object
@@ -100,12 +102,13 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   const result = await db.execute(sql`
     INSERT INTO doc_track_documents
       (client_id, site_id, title, category, description, file_name, file_size,
-       mime_type, object_path, uploaded_by, created_by, requires_acknowledgement, department)
+       mime_type, object_path, uploaded_by, created_by, requires_acknowledgement,
+       annual_acknowledgement, department)
     VALUES
       (${clientId}, ${siteId ?? null}, ${title}, ${category}, ${description ?? null},
        ${fileName}, ${fileSize ?? null}, ${mimeType}, ${objectPath},
        ${uploadedBy ?? null}, ${createdBy}, ${requiresAcknowledgement ?? false},
-       ${department ?? null})
+       ${annualAcknowledgement ?? false}, ${department ?? null})
     RETURNING *
   `);
 
@@ -124,20 +127,22 @@ router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = docUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { title, category, description, siteId, requiresAcknowledgement, department } = parsed.data;
-  const hasDesc = description !== undefined;
-  const hasSite = siteId !== undefined;
-  const hasAck  = requiresAcknowledgement !== undefined;
-  const hasDept = department !== undefined;
+  const { title, category, description, siteId, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
+  const hasDesc   = description !== undefined;
+  const hasSite   = siteId !== undefined;
+  const hasAck    = requiresAcknowledgement !== undefined;
+  const hasAnnual = annualAcknowledgement !== undefined;
+  const hasDept   = department !== undefined;
 
   await db.execute(sql`
     UPDATE doc_track_documents
     SET title                    = COALESCE(${title ?? null}, title),
         category                 = COALESCE(${category ?? null}, category),
-        description              = CASE WHEN ${hasDesc}::boolean THEN ${description ?? null} ELSE description END,
-        site_id                  = CASE WHEN ${hasSite}::boolean THEN ${siteId ?? null} ELSE site_id END,
-        requires_acknowledgement = CASE WHEN ${hasAck}::boolean  THEN ${requiresAcknowledgement ?? false} ELSE requires_acknowledgement END,
-        department               = CASE WHEN ${hasDept}::boolean THEN ${department ?? null} ELSE department END,
+        description              = CASE WHEN ${hasDesc}::boolean   THEN ${description ?? null}              ELSE description END,
+        site_id                  = CASE WHEN ${hasSite}::boolean   THEN ${siteId ?? null}                   ELSE site_id END,
+        requires_acknowledgement = CASE WHEN ${hasAck}::boolean    THEN ${requiresAcknowledgement ?? false} ELSE requires_acknowledgement END,
+        annual_acknowledgement   = CASE WHEN ${hasAnnual}::boolean THEN ${annualAcknowledgement ?? false}   ELSE annual_acknowledgement END,
+        department               = CASE WHEN ${hasDept}::boolean   THEN ${department ?? null}               ELSE department END,
         updated_at               = now()
     WHERE id = ${id} AND client_id = ${clientId}
   `);
@@ -290,7 +295,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
 
   // Verify document belongs to this client
   const docResult = await db.execute(sql`
-    SELECT id, title, category, site_id FROM doc_track_documents
+    SELECT id, title, category, site_id, annual_acknowledgement FROM doc_track_documents
     WHERE id = ${docId} AND client_id = ${clientId}
     LIMIT 1
   `);
@@ -376,14 +381,20 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
         `);
     if ((existing.rows ?? []).length > 0) continue;
 
-    // Create TrainTrack signoff record
+    // Create TrainTrack signoff record.
+    // When annual_acknowledgement is enabled the record gets a 1-year expiry so
+    // TrainTrack's expiry reminders automatically prompt re-acknowledgement.
+    const expiryDate = doc.annual_acknowledgement
+      ? sql`(${today}::date + interval '1 year')::date`
+      : sql`NULL::date`;
     const trainResult = await db.execute(sql`
       INSERT INTO train_track_records
         (client_id, site_id, record_type, staff_name, document_title,
-         document_type, completed_date, notes, signature)
+         document_type, completed_date, expiry_date, notes, signature)
       VALUES
         (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName},
          ${doc.title}, ${doc.category}, ${today}::date,
+         ${expiryDate},
          ${'Document acknowledgement via DocTrack'},
          ${ack.signature ?? null})
       RETURNING id

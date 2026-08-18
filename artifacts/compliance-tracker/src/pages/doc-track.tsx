@@ -399,6 +399,11 @@ function DocCard({
               <CheckSquare className="w-2.5 h-2.5" /> Ack. required
             </span>
           )}
+          {doc.annual_acknowledgement && (
+            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-medium border bg-blue-50 text-blue-700 border-blue-200">
+              Annual
+            </span>
+          )}
           {doc.site_name && (
             <span className="text-[11px] text-muted-foreground truncate">{doc.site_name}</span>
           )}
@@ -472,6 +477,7 @@ function UploadDialog({
   const [siteId, setSiteId] = useState<string>("none");
   const [department, setDepartment] = useState("");
   const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(false);
+  const [annualAcknowledgement, setAnnualAcknowledgement] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<"idle" | "requesting" | "uploading" | "saving">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -484,6 +490,7 @@ function UploadDialog({
     setSiteId("none");
     setDepartment("");
     setRequiresAcknowledgement(false);
+    setAnnualAcknowledgement(false);
     setUploading(false);
     setProgress("idle");
   }
@@ -538,6 +545,7 @@ function UploadDialog({
           siteId: siteId !== "none" ? Number(siteId) : null,
           uploadedBy: user?.name ?? user?.email ?? null,
           requiresAcknowledgement,
+          annualAcknowledgement: requiresAcknowledgement ? annualAcknowledgement : false,
           department: department.trim() || null,
         }),
       });
@@ -661,15 +669,31 @@ function UploadDialog({
           </div>
 
           {/* Requires acknowledgement */}
-          <div className="flex items-center gap-3 pt-1">
+          <div className="flex items-start gap-3 pt-1">
             <Checkbox
               id="requires-ack"
               checked={requiresAcknowledgement}
-              onCheckedChange={v => setRequiresAcknowledgement(!!v)}
+              onCheckedChange={v => { setRequiresAcknowledgement(!!v); if (!v) setAnnualAcknowledgement(false); }}
+              className="mt-0.5"
             />
-            <div>
+            <div className="flex-1">
               <Label htmlFor="requires-ack" className="cursor-pointer">Requires staff acknowledgement</Label>
               <p className="text-xs text-muted-foreground mt-0.5">Staff must sign off that they have read this document. Creates TrainTrack records automatically.</p>
+
+              {requiresAcknowledgement && (
+                <div className="flex items-start gap-2.5 mt-3 pl-0.5">
+                  <Checkbox
+                    id="annual-ack"
+                    checked={annualAcknowledgement}
+                    onCheckedChange={v => setAnnualAcknowledgement(!!v)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <Label htmlFor="annual-ack" className="cursor-pointer text-sm">Annual re-acknowledgement</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">TrainTrack records will carry a 1-year expiry — staff will be reminded to re-read and re-sign each year.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
