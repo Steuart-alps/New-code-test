@@ -32,3 +32,8 @@ export function dbsNeedsReview(dbsCheckDate: unknown): boolean {
   // days is negative when in the past; older than 3 years ≈ -1095 days
   return days < -365 * 3;
 }
+
+/** Classify a DBS/PVG expiry date the same way as liability insurance. */
+export function dbsExpiryStatus(expiryDate: unknown): LiabilityStatus {
+  return liabilityStatus(expiryDate);
+}

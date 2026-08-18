@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { contractorsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   GetContractorParams,
   UpdateContractorParams,
@@ -13,16 +13,28 @@ import { filterName } from "../lib/contentFilter";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
+const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"] as const;
+
 const CreateContractorBody = z.object({
-  name:                  z.string().min(1),
-  company:               z.string().nullish(),
-  email:                 z.string().email(),
-  phone:                 z.string().nullish(),
-  address:               z.string().nullish(),
-  notes:                 z.string().nullish(),
+  name:                        z.string().min(1),
+  company:                     z.string().nullish(),
+  email:                       z.string().email(),
+  phone:                       z.string().nullish(),
+  address:                     z.string().nullish(),
+  notes:                       z.string().nullish(),
   gasSafeNumber:         z.string().max(30).nullish(),
   publicLiabilityExpiry: z.coerce.date().nullish(),
   dbsCheckDate:          z.coerce.date().nullish(),
+  dbsType:                     z.enum(DBS_TYPES).nullish(),
+  dbsExpiryDate:               z.coerce.date().nullish(),
+});
+
+const CertificateBody = z.object({
+  certificateName: z.string().min(1).max(200),
+  issuer:          z.string().max(200).nullish(),
+  completedDate:   z.coerce.date().nullish(),
+  expiryDate:      z.coerce.date().nullish(),
+  notes:           z.string().max(2000).nullish(),
 });
 
 const UpdateContractorBody = CreateContractorBody;
@@ -152,6 +164,83 @@ router.delete("/contractors/:id", requireAuth, requireClientAdmin, async (req, r
   }
 
   await db.delete(contractorsTable).where(eq(contractorsTable.id, id));
+  res.status(204).send();
+});
+
+// ── Contractor certificates ────────────────────────────────────────────────
+
+router.get("/contractors/:id/certificates", requireAuth, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!existing || !canAccessClient(req, existing.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+  const certs = await db.execute(sql`
+    SELECT id, certificate_name, issuer, completed_date, expiry_date, notes, created_at, updated_at
+    FROM contractor_certificates
+    WHERE contractor_id = ${contractorId}
+    ORDER BY expiry_date ASC NULLS LAST, certificate_name ASC
+  `);
+  res.json(certs.rows ?? []);
+});
+
+router.post("/contractors/:id/certificates", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!existing || !canAccessClient(req, existing.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+  const body = CertificateBody.parse(req.body);
+  const [cert] = (await db.execute(sql`
+    INSERT INTO contractor_certificates
+      (client_id, contractor_id, certificate_name, issuer, completed_date, expiry_date, notes)
+    VALUES
+      (${existing.clientId}, ${contractorId}, ${body.certificateName}, ${body.issuer ?? null},
+       ${body.completedDate ?? null}, ${body.expiryDate ?? null}, ${body.notes ?? null})
+    RETURNING *
+  `)).rows;
+  res.status(201).json(cert);
+});
+
+router.put("/contractors/:id/certificates/:certId", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  const certId = Number(req.params.certId);
+  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!existing || !canAccessClient(req, existing.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+  const body = CertificateBody.parse(req.body);
+  await db.execute(sql`
+    UPDATE contractor_certificates SET
+      certificate_name = ${body.certificateName},
+      issuer           = ${body.issuer ?? null},
+      completed_date   = ${body.completedDate ?? null},
+      expiry_date      = ${body.expiryDate ?? null},
+      notes            = ${body.notes ?? null},
+      updated_at       = now()
+    WHERE id = ${certId} AND contractor_id = ${contractorId}
+  `);
+  const [cert] = (await db.execute(sql`
+    SELECT * FROM contractor_certificates WHERE id = ${certId}
+  `)).rows;
+  if (!cert) { res.status(404).json({ error: "Certificate not found" }); return; }
+  res.json(cert);
+});
+
+router.delete("/contractors/:id/certificates/:certId", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  const certId = Number(req.params.certId);
+  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!existing || !canAccessClient(req, existing.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+  await db.execute(sql`
+    DELETE FROM contractor_certificates WHERE id = ${certId} AND contractor_id = ${contractorId}
+  `);
   res.status(204).send();
 });
 

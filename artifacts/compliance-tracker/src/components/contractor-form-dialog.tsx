@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
@@ -37,6 +38,13 @@ const TRADE_OPTIONS = [
 
 // ── Form schema ───────────────────────────────────────────────────────────────
 
+const DBS_TYPE_OPTIONS = [
+  "DBS Check (Basic)",
+  "DBS Check (Standard)",
+  "DBS Check (Enhanced)",
+  "PVG Scheme (Scotland)",
+] as const;
+
 const formSchema = z.object({
   name:    z.string().min(1, "Name is required"),
   company: z.string().optional(),
@@ -44,9 +52,10 @@ const formSchema = z.object({
   phone:   z.string().optional(),
   address: z.string().optional(),
   notes:   z.string().optional(),
-  gasSafeNumber:         z.string().max(30, "Max 30 characters").optional(),
+  gasSafeNumber:               z.string().max(30, "Max 30 characters").optional(),
   publicLiabilityExpiry: z.string().optional(),
-  dbsCheckDate:          z.string().optional(),
+  dbsType:                     z.string().optional(),
+  dbsExpiryDate:               z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -92,7 +101,8 @@ export function ContractorFormDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "", company: "", email: "", phone: "", address: "", notes: "",
-      gasSafeNumber: "", publicLiabilityExpiry: "", dbsCheckDate: "",
+      gasSafeNumber: "", publicLiabilityExpiry: "",
+      dbsType: "", dbsExpiryDate: "",
     },
   });
 
@@ -107,13 +117,15 @@ export function ContractorFormDialog({
         notes:   contractor.notes    || "",
         gasSafeNumber:         contractor.gasSafeNumber || "",
         publicLiabilityExpiry: toDateInput(contractor.publicLiabilityExpiry),
-        dbsCheckDate:          toDateInput(contractor.dbsCheckDate),
+        dbsType:               (contractor as any).dbsType || "",
+        dbsExpiryDate:         toDateInput((contractor as any).dbsExpiryDate),
       });
       setTrades(Array.isArray((contractor as any).trades) ? (contractor as any).trades : []);
     } else {
       form.reset({
         name: "", company: "", email: "", phone: "", address: "", notes: "",
-        gasSafeNumber: "", publicLiabilityExpiry: "", dbsCheckDate: "",
+        gasSafeNumber: "", publicLiabilityExpiry: "",
+        dbsType: "", dbsExpiryDate: "",
       });
       setTrades([]);
     }
@@ -133,7 +145,8 @@ export function ContractorFormDialog({
         trades,
         gasSafeNumber:         data.gasSafeNumber?.trim() || null,
         publicLiabilityExpiry: data.publicLiabilityExpiry || null,
-        dbsCheckDate:          data.dbsCheckDate || null,
+        dbsType:               data.dbsType || null,
+        dbsExpiryDate:         data.dbsExpiryDate || null,
       };
       if (contractor) {
         const res = await apiFetch(`/contractors/${contractor.id}`, {
@@ -225,13 +238,25 @@ export function ContractorFormDialog({
               </div>
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="publicLiabilityExpiry">Public Liability Insurance Expiry</Label>
+                <Label htmlFor="publicLiabilityExpiry">Insurance Renewal Date</Label>
+                <p className="text-xs text-muted-foreground">Covers all policies (PL, PI, etc.)</p>
                 <Input type="date" id="publicLiabilityExpiry" {...form.register("publicLiabilityExpiry")} />
               </div>
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="dbsCheckDate">DBS Check Date</Label>
-                <Input type="date" id="dbsCheckDate" {...form.register("dbsCheckDate")} />
+                <Label htmlFor="dbsType">DBS / PVG Check Type</Label>
+                <Select value={form.watch("dbsType") || ""} onValueChange={v => form.setValue("dbsType", v === "_none" ? "" : v)}>
+                  <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="None" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None</SelectItem>
+                    {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsExpiryDate">DBS / PVG Expiry Date</Label>
+                <Input type="date" id="dbsExpiryDate" {...form.register("dbsExpiryDate")} />
               </div>
             </div>
           </div>

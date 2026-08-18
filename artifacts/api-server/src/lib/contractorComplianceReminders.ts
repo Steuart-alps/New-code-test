@@ -41,8 +41,9 @@ function fmtDate(d: Date): string {
 export interface ContractorComplianceAlert {
   contractorId: number;
   contractorName: string;
+  contractorEmail: string;
   company: string | null;
-  kind: "insurance" | "dbs";
+  kind: "insurance" | "indemnity" | "dbs" | "cert";
   /** Stable milestone key for dedupe, e.g. "insurance:2025-03-01". */
   milestone: string;
   /** Human-readable detail line for the email/push. */
@@ -52,9 +53,21 @@ export interface ContractorComplianceAlert {
 interface ContractorRow {
   id: number;
   name: string;
+  email: string;
   company: string | null;
   public_liability_expiry: string | null;
-  dbs_check_date: string | null;
+  dbs_type: string | null;
+  dbs_expiry_date: string | null;
+}
+
+interface ContractorCertRow {
+  id: number;
+  contractor_id: number;
+  contractor_name: string;
+  contractor_email: string;
+  contractor_company: string | null;
+  certificate_name: string;
+  expiry_date: string | null;
 }
 
 /** Compute the compliance alerts due for a client's contractors right now. */
@@ -62,63 +75,98 @@ export async function getContractorComplianceAlerts(
   clientId: number,
   now: Date,
 ): Promise<ContractorComplianceAlert[]> {
-  const result = await db.execute(sql`
-    SELECT id, name, company, public_liability_expiry, dbs_check_date
+  const contractorResult = await db.execute(sql`
+    SELECT id, name, email, company,
+           public_liability_expiry,
+           dbs_type, dbs_expiry_date
     FROM contractors
     WHERE client_id = ${clientId}
     ORDER BY name ASC
   `);
-  const rows = (result.rows ?? []) as unknown as ContractorRow[];
+  const rows = (contractorResult.rows ?? []) as unknown as ContractorRow[];
+
+  // Also pull contractor certificates with their contractor info joined.
+  const certResult = await db.execute(sql`
+    SELECT cc.id, cc.contractor_id, cc.certificate_name, cc.expiry_date,
+           c.name AS contractor_name, c.email AS contractor_email, c.company AS contractor_company
+    FROM contractor_certificates cc
+    JOIN contractors c ON c.id = cc.contractor_id
+    WHERE cc.client_id = ${clientId}
+      AND cc.expiry_date IS NOT NULL
+    ORDER BY cc.expiry_date ASC
+  `);
+  const certRows = (certResult.rows ?? []) as unknown as ContractorCertRow[];
 
   const insuranceThreshold = new Date(now.getTime() + INSURANCE_LEAD_DAYS * 24 * 60 * 60 * 1000);
-  const dbsThreshold = new Date(now);
-  dbsThreshold.setFullYear(dbsThreshold.getFullYear() - DBS_MAX_AGE_YEARS);
 
   const alerts: ContractorComplianceAlert[] = [];
 
   for (const c of rows) {
-    // Public liability insurance: expiring within window or already expired.
+    // Insurance renewal (single date covers all policies).
     if (c.public_liability_expiry) {
       const expiry = new Date(c.public_liability_expiry);
       if (!Number.isNaN(expiry.getTime()) && expiry <= insuranceThreshold) {
         const expired = expiry < now;
-        const milestone = `insurance:${expiry.toISOString().slice(0, 10)}`;
-        const detail = expired
-          ? `Public liability insurance expired on ${fmtDate(expiry)}`
-          : `Public liability insurance expires on ${fmtDate(expiry)}`;
         alerts.push({
-          contractorId: c.id,
-          contractorName: c.name,
-          company: c.company,
+          contractorId: c.id, contractorName: c.name, contractorEmail: c.email, company: c.company,
           kind: "insurance",
-          milestone,
-          detail,
+          milestone: `insurance:${expiry.toISOString().slice(0, 10)}`,
+          detail: expired
+            ? `Insurance expired on ${fmtDate(expiry)}`
+            : `Insurance expires on ${fmtDate(expiry)}`,
         });
       }
     }
 
-    // DBS check: older than the maximum age.
-    if (c.dbs_check_date) {
-      const dbs = new Date(c.dbs_check_date);
-      if (!Number.isNaN(dbs.getTime()) && dbs < dbsThreshold) {
-        const milestone = `dbs:${dbs.toISOString().slice(0, 10)}`;
-        const detail = `DBS check dated ${fmtDate(dbs)} is over ${DBS_MAX_AGE_YEARS} years old — re-check needed`;
+    // DBS / PVG expiry date (new field — replaces the old "3 years since check" heuristic).
+    if (c.dbs_expiry_date) {
+      const expiry = new Date(c.dbs_expiry_date);
+      if (!Number.isNaN(expiry.getTime()) && expiry <= insuranceThreshold) {
+        const expired = expiry < now;
+        const label = c.dbs_type ?? "DBS/PVG check";
         alerts.push({
-          contractorId: c.id,
-          contractorName: c.name,
-          company: c.company,
+          contractorId: c.id, contractorName: c.name, contractorEmail: c.email, company: c.company,
           kind: "dbs",
-          milestone,
-          detail,
+          milestone: `dbs-expiry:${expiry.toISOString().slice(0, 10)}`,
+          detail: expired
+            ? `${label} expired on ${fmtDate(expiry)}`
+            : `${label} expires on ${fmtDate(expiry)}`,
         });
       }
     }
   }
 
+  // Contractor certificates.
+  for (const cert of certRows) {
+    if (!cert.expiry_date) continue;
+    const expiry = new Date(cert.expiry_date);
+    if (Number.isNaN(expiry.getTime()) || expiry > insuranceThreshold) continue;
+    const expired = expiry < now;
+    alerts.push({
+      contractorId: cert.contractor_id,
+      contractorName: cert.contractor_name,
+      contractorEmail: cert.contractor_email,
+      company: cert.contractor_company,
+      kind: "cert",
+      milestone: `cert:${cert.id}:${expiry.toISOString().slice(0, 10)}`,
+      detail: expired
+        ? `${cert.certificate_name} certificate expired on ${fmtDate(expiry)}`
+        : `${cert.certificate_name} certificate expires on ${fmtDate(expiry)}`,
+    });
+  }
+
   return alerts;
 }
 
-function buildEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): string {
+function kindLabel(kind: ContractorComplianceAlert["kind"]): string {
+  if (kind === "insurance") return "Public liability insurance";
+  if (kind === "indemnity") return "Professional indemnity insurance";
+  if (kind === "dbs") return "DBS / PVG check";
+  return "Certificate";
+}
+
+/** Manager-facing digest: lists all contractor compliance alerts for a client. */
+function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): string {
   const rows = alerts
     .map(
       (a) => `
@@ -126,7 +174,7 @@ function buildEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): st
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
           <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(a.contractorName)}</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px;">
-            ${a.company ? `${esc(a.company)} · ` : ""}${a.kind === "insurance" ? "Insurance" : "DBS check"}
+            ${a.company ? `${esc(a.company)} · ` : ""}${kindLabel(a.kind)}
           </div>
           <div style="font-size:12px;color:#b91c1c;margin-top:4px;">${esc(a.detail)}</div>
         </td>
@@ -159,6 +207,57 @@ function buildEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): st
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
       ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Contractor-facing email: asks the contractor to send updated insurance documents. */
+function buildContractorEmailHtml(
+  contractorName: string,
+  alerts: ContractorComplianceAlert[],
+  clientName: string,
+): string {
+  const items = alerts
+    .filter((a) => a.kind === "insurance" || a.kind === "indemnity")
+    .map((a) => `<li style="margin:6px 0;color:#b91c1c;font-size:14px;">${esc(a.detail)}</li>`)
+    .join("");
+
+  if (!items) return "";
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+    <div style="background:#0f172a;padding:32px 40px;">
+      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
+      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Insurance renewal reminder</div>
+    </div>
+    <div style="padding:32px 40px;">
+      <p style="font-size:15px;color:#334155;margin:0 0 16px;">
+        Dear ${esc(contractorName)},
+      </p>
+      <p style="font-size:15px;color:#334155;margin:0 0 16px;">
+        Our records show that the following insurance document${alerts.length !== 1 ? "s" : ""} on file for
+        <strong>${esc(clientName)}</strong> will expire soon:
+      </p>
+      <ul style="margin:0 0 20px;padding-left:20px;">
+        ${items}
+      </ul>
+      <p style="font-size:15px;color:#334155;margin:0 0 20px;">
+        Please send updated certificates to your account manager at ${esc(clientName)} at your
+        earliest convenience so they can update their records.
+      </p>
+      <p style="font-size:14px;color:#64748b;margin:0;">
+        If you have already renewed, please ignore this message — your client will update
+        the records once they receive the new certificate.
+      </p>
+    </div>
+    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
+      ComplyTrack by ALPS Consulting · Sent on behalf of ${esc(clientName)}.
     </div>
   </div>
 </body>
@@ -241,20 +340,45 @@ export async function runContractorComplianceReminderJob(
         }
 
         const subject = `⚠️ ${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
-        await send({ to: emails, subject, html: buildEmailHtml(claimed, appUrl) });
+        await send({ to: emails, subject, html: buildManagerEmailHtml(claimed, appUrl) });
         sent = true;
+
+        // Also email each contractor directly about their own expiring insurance.
+        // Group by contractor so each gets one email covering all their alerts.
+        const insuranceAlerts = claimed.filter((a) => a.kind === "insurance" || a.kind === "indemnity");
+        const byContractor = new Map<number, ContractorComplianceAlert[]>();
+        for (const a of insuranceAlerts) {
+          if (!byContractor.has(a.contractorId)) byContractor.set(a.contractorId, []);
+          byContractor.get(a.contractorId)!.push(a);
+        }
+        for (const [, contractorAlerts] of byContractor) {
+          const { contractorName, contractorEmail } = contractorAlerts[0];
+          const html = buildContractorEmailHtml(contractorName, contractorAlerts, client.name);
+          if (!html || !contractorEmail) continue;
+          try {
+            await send({
+              to: [contractorEmail],
+              subject: `Insurance renewal reminder — please send updated documents`,
+              html,
+            });
+            result.emailsSent++;
+          } catch (ctrErr) {
+            // Best-effort: never fail the whole job because a contractor email bounced.
+            logger.warn({ err: ctrErr, contractorEmail }, "Failed to send contractor insurance reminder");
+          }
+        }
 
         // Push managers a matching alert (best-effort; never blocks the job).
         await sendPushToUsers(userIds, {
           title: "Contractor compliance expiring",
-          body: `${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} (insurance / DBS) need attention.`,
+          body: `${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} need attention.`,
           data: { route: "/contractors" },
         });
 
         result.clientsAlerted++;
         result.emailsSent += emails.length;
         logger.info(
-          { clientId: client.id, alerts: claimed.length, emails: emails.length },
+          { clientId: client.id, alerts: claimed.length, emails: emails.length, contractorEmails: byContractor.size },
           "Contractor compliance reminder sent",
         );
       } catch (innerErr) {

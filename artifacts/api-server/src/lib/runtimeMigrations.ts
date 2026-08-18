@@ -302,6 +302,29 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "gas_safe_number" text`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" timestamp`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_check_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "professional_indemnity_expiry" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_type" text`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_expiry_date" timestamp`);
+
+    // Time-limited certificates for contractors (IPAF, PASMA, First Aid, Chainsaw, etc.)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "contractor_certificates" (
+        "id"               serial PRIMARY KEY,
+        "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "contractor_id"    integer NOT NULL REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "certificate_name" text NOT NULL,
+        "issuer"           text,
+        "completed_date"   timestamp,
+        "expiry_date"      timestamp,
+        "notes"            text,
+        "created_at"       timestamp NOT NULL DEFAULT now(),
+        "updated_at"       timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_contractor_certificates_contractor"
+      ON "contractor_certificates" ("contractor_id")
+    `);
 
     // Deduplication log for contractor compliance-expiry reminders. One row per
     // (client, contractor, milestone), where milestone encodes the reminder

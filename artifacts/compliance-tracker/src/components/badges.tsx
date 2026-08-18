@@ -74,20 +74,28 @@ export function ExpiryBadge({ expiryDate }: { expiryDate: string | null | undefi
   return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200 shadow-none">Valid</Badge>;
 }
 
-/** Warning badge for public liability insurance that is expired or expiring within 30 days. */
-export function LiabilityBadge({ expiry, className }: { expiry: string | Date | null | undefined; className?: string }) {
+/** Warning badge for insurance that is expired or expiring within 30 days. */
+export function LiabilityBadge({
+  expiry,
+  label = "Insurance",
+  className,
+}: {
+  expiry: string | Date | null | undefined;
+  label?: string;
+  className?: string;
+}) {
   const status = liabilityStatus(expiry);
   if (status === "expired") {
     return (
       <Badge variant="outline" className={cn("gap-1.5 font-medium bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300", className)}>
-        <AlertCircle className="w-3.5 h-3.5" /> PL insurance expired
+        <AlertCircle className="w-3.5 h-3.5" /> {label} expired
       </Badge>
     );
   }
   if (status === "expiring") {
     return (
       <Badge variant="outline" className={cn("gap-1.5 font-medium bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300", className)}>
-        <Clock className="w-3.5 h-3.5" /> PL insurance expiring soon
+        <Clock className="w-3.5 h-3.5" /> {label} expiring soon
       </Badge>
     );
   }
