@@ -24,9 +24,10 @@ export const SERVICES = {
   hottubtrack: { label: "TubTrack", amountPence: 1000 },
   treetrack: { label: "TreeTrack", amountPence: 1000 },
   biketrack: { label: "BikeTrack", amountPence: 1000 },
-  pooltrack:   { label: "PoolTrack",   amountPence: 1000 },
+  aquatrack:   { label: "AquaTrack",   amountPence: 1000 },
+  pooltrack:   { label: "PoolTrack",   amountPence: 1000 },   // legacy — superseded by aquatrack
   greentrack:  { label: "GreenTrack",  amountPence: 1000 },
-  swimtrack:     { label: "SwimTrack",     amountPence: 1000 },
+  swimtrack:     { label: "SwimTrack",     amountPence: 1000 }, // legacy — superseded by aquatrack
   incidenttrack: { label: "IncidentTrack", amountPence: 1000 },
   pattrack:      { label: "PATtrack",      amountPence: 1000 },
   pesttrack:     { label: "PestTrack",     amountPence: 1000 },
@@ -36,7 +37,7 @@ export const SERVICES = {
 } as const;
 
 export type ServiceKey = keyof typeof SERVICES;
-export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack", "premisestrack", "dailytrack_am", "dailytrack_pm"] as const satisfies readonly ServiceKey[];
+export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "aquatrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack", "premisestrack", "dailytrack_am", "dailytrack_pm"] as const satisfies readonly ServiceKey[];
 
 export const BUNDLE_KEY = "bundle";
 export const BUNDLE_LABEL = "ComplyTrack Complete";
@@ -100,6 +101,10 @@ export async function getEntitledServices(clientId: number): Promise<Entitlement
         if (keys.has("safetrack")) keys.add("doctrack");
         // doctrack is included free for all paying clients (site-visit subscribers).
         if (keys.has("core")) keys.add("doctrack");
+        // aquatrack supersedes pooltrack + swimtrack. Legacy subscribers keep access;
+        // new aquatrack subscribers get both legacy routes unlocked automatically.
+        if (keys.has("pooltrack") || keys.has("swimtrack")) keys.add("aquatrack");
+        if (keys.has("aquatrack")) { keys.add("pooltrack"); keys.add("swimtrack"); }
         services = hasBundle || perSiteTotal >= SERVICE_CAP_PENCE ? "all" : Array.from(keys);
       }
     } catch (err) {

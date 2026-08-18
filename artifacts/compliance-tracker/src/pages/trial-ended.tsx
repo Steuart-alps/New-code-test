@@ -3,7 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, LifeBuoy, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -98,10 +98,10 @@ const ADDONS = [
     activeBg: "bg-lime-50/60",
   },
   {
-    key: "pooltrack",
-    label: "PoolTrack",
-    desc: "Swimming pool water quality logbook (PWTAG)",
-    icon: LifeBuoy,
+    key: "aquatrack",
+    label: "AquaTrack",
+    desc: "Pool water quality, sessions, surveillance, first-aid & incidents",
+    icon: Waves,
     iconColor: "text-blue-600",
     activeBorder: "border-blue-400",
     activeBg: "bg-blue-50/60",
@@ -115,15 +115,6 @@ const ADDONS = [
     activeBorder: "border-green-400",
     activeBg: "bg-green-50/60",
     comingSoon: true,
-  },
-  {
-    key: "swimtrack",
-    label: "SwimTrack",
-    desc: "Open water & swimming safety logbook",
-    icon: Waves,
-    iconColor: "text-teal-600",
-    activeBorder: "border-teal-400",
-    activeBg: "bg-teal-50/60",
   },
   {
     key: "pattrack",

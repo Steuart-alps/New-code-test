@@ -83,9 +83,9 @@ router.use("/train-track", requireAuth, requireService("traintrack"), trainTrack
 router.use("/hot-tub", requireAuth, requireService("hottubtrack"), hotTubRouter);
 router.use("/tree-track", requireAuth, requireService("treetrack"), treeTrackRouter);
 router.use("/bike-track", requireAuth, requireService("biketrack"), bikeTrackRouter);
-router.use("/pool-track",   requireAuth, requireService("pooltrack"),  poolTrackRouter);
+router.use("/pool-track",   requireAuth, requireAnyService("pooltrack", "aquatrack"),  poolTrackRouter);
 router.use("/green-track",  requireAuth, requireService("greentrack"), greenTrackRouter);
-router.use("/swim-track",   requireAuth, requireService("swimtrack"),  swimTrackRouter);
+router.use("/swim-track",   requireAuth, requireAnyService("swimtrack", "aquatrack"),  swimTrackRouter);
 router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
 router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kitchenCleaningRouter);

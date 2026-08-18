@@ -34,6 +34,7 @@ import TrainTrackPage from "@/pages/train-track";
 import HotTubPage from "@/pages/hot-tub";
 import TreeTrackPage from "@/pages/tree-track";
 import BikeTrackPage from "@/pages/bike-track";
+import AquaTrackPage from "@/pages/aqua-track";
 import PoolTrackPage from "@/pages/pool-track";
 import GreenTrackPage from "@/pages/green-track";
 import SwimTrackPage from "@/pages/swim-track";
@@ -127,9 +128,11 @@ function ProtectedRoutes() {
       <Route path="/hot-tub" component={HotTubPage} />
       <Route path="/tree-track" component={TreeTrackPage} />
       <Route path="/bike-track" component={BikeTrackPage} />
-      <Route path="/pool-track"  component={PoolTrackPage} />
+      <Route path="/aqua-track"  component={AquaTrackPage} />
+      {/* Legacy URLs redirect to the combined AquaTrack page */}
+      <Route path="/pool-track"  component={() => { window.location.replace("/aqua-track"); return null; }} />
+      <Route path="/swim-track"  component={() => { window.location.replace("/aqua-track"); return null; }} />
       <Route path="/green-track" component={GreenTrackPage} />
-      <Route path="/swim-track"  component={SwimTrackPage} />
       <Route path="/daily-track-am" component={DailyTrackAmPage} />
       <Route path="/daily-track-pm" component={DailyTrackPmPage} />
       <Route path="/daily-track-status" component={DailyTrackStatusPage} />
