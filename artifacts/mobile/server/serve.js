@@ -64,6 +64,13 @@ function toScriptString(value) {
 }
 
 function serveManifest(platform, res) {
+  // Allowlist: only 'ios' and 'android' are valid platform values.
+  // This prevents path traversal even if the caller check is ever relaxed.
+  if (platform !== 'ios' && platform !== 'android') {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid platform' }));
+    return;
+  }
   const manifestPath = path.join(STATIC_ROOT, platform, 'manifest.json');
 
   if (!fs.existsSync(manifestPath)) {
