@@ -42,6 +42,7 @@ import DailyTrackPmPage from "@/pages/daily-track-pm";
 import DailyTrackStatusPage from "@/pages/daily-track-status";
 import StaffRosterPage from "@/pages/staff-roster";
 import SignOffPage from "@/pages/sign-off";
+import ContractorPortalPage from "@/pages/contractor-portal";
 import IncidentsPage from "@/pages/incidents";
 import PATTrackPage  from "@/pages/pat-track";
 import PestTrackPage from "@/pages/pest-track";
@@ -76,6 +77,7 @@ function ProtectedRoutes() {
   if (location === "/privacy") return <PrivacyPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
+  if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;
 
   if (isLoading) {
     return (

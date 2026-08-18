@@ -17,6 +17,7 @@
  * concurrent runs can't double-send; the claim is released if the send fails.
  */
 
+import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
@@ -159,10 +160,32 @@ export async function getContractorComplianceAlerts(
 }
 
 function kindLabel(kind: ContractorComplianceAlert["kind"]): string {
-  if (kind === "insurance") return "Public liability insurance";
+  if (kind === "insurance") return "Insurance";
   if (kind === "indemnity") return "Professional indemnity insurance";
   if (kind === "dbs") return "DBS / PVG check";
   return "Certificate";
+}
+
+/**
+ * Generate (or refresh) a 90-day self-service portal token for a contractor.
+ * One token per contractor — refreshed on each reminder so the link in the
+ * latest email is always valid.
+ */
+export async function generateOrRefreshPortalToken(
+  clientId: number,
+  contractorId: number,
+): Promise<string> {
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  await db.execute(sql`
+    INSERT INTO contractor_portal_tokens (client_id, contractor_id, token, expires_at)
+    VALUES (${clientId}, ${contractorId}, ${token}, ${expiresAt})
+    ON CONFLICT (contractor_id) DO UPDATE SET
+      token      = EXCLUDED.token,
+      expires_at = EXCLUDED.expires_at,
+      created_at = now()
+  `);
+  return token;
 }
 
 /** Manager-facing digest: lists all contractor compliance alerts for a client. */
@@ -213,18 +236,37 @@ function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: stri
 </html>`;
 }
 
-/** Contractor-facing email: asks the contractor to send updated insurance documents. */
+/** Contractor-facing email: includes their expiring items + a link to the self-service portal. */
 function buildContractorEmailHtml(
   contractorName: string,
   alerts: ContractorComplianceAlert[],
   clientName: string,
+  portalUrl?: string,
 ): string {
   const items = alerts
-    .filter((a) => a.kind === "insurance" || a.kind === "indemnity")
     .map((a) => `<li style="margin:6px 0;color:#b91c1c;font-size:14px;">${esc(a.detail)}</li>`)
     .join("");
 
   if (!items) return "";
+
+  const portalSection = portalUrl
+    ? `
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;margin:20px 0;">
+        <p style="font-size:14px;font-weight:600;color:#166534;margin:0 0 8px;">✅ Update your records online</p>
+        <p style="font-size:14px;color:#166534;margin:0 0 14px;">
+          Use your personalised link to update your insurance renewal date, DBS details, and upload
+          certificate documents directly — no email needed.
+        </p>
+        <a href="${esc(portalUrl)}" style="display:inline-block;background:#166534;color:#ffffff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600;">
+          Update my details →
+        </a>
+        <p style="font-size:11px;color:#4ade80;margin:10px 0 0;">Link valid for 90 days · No account needed</p>
+      </div>`
+    : `
+      <p style="font-size:15px;color:#334155;margin:0 0 20px;">
+        Please send updated certificates to your account manager at ${esc(clientName)} at your
+        earliest convenience so they can update their records.
+      </p>`;
 
   return `
 <!DOCTYPE html>
@@ -234,26 +276,17 @@ function buildContractorEmailHtml(
   <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
     <div style="background:#0f172a;padding:32px 40px;">
       <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
-      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Insurance renewal reminder</div>
+      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Compliance renewal reminder</div>
     </div>
     <div style="padding:32px 40px;">
+      <p style="font-size:15px;color:#334155;margin:0 0 16px;">Dear ${esc(contractorName)},</p>
       <p style="font-size:15px;color:#334155;margin:0 0 16px;">
-        Dear ${esc(contractorName)},
+        Our records held by <strong>${esc(clientName)}</strong> show that the following item${alerts.length !== 1 ? "s are" : " is"} due for renewal soon:
       </p>
-      <p style="font-size:15px;color:#334155;margin:0 0 16px;">
-        Our records show that the following insurance document${alerts.length !== 1 ? "s" : ""} on file for
-        <strong>${esc(clientName)}</strong> will expire soon:
-      </p>
-      <ul style="margin:0 0 20px;padding-left:20px;">
-        ${items}
-      </ul>
-      <p style="font-size:15px;color:#334155;margin:0 0 20px;">
-        Please send updated certificates to your account manager at ${esc(clientName)} at your
-        earliest convenience so they can update their records.
-      </p>
+      <ul style="margin:0 0 20px;padding-left:20px;">${items}</ul>
+      ${portalSection}
       <p style="font-size:14px;color:#64748b;margin:0;">
-        If you have already renewed, please ignore this message — your client will update
-        the records once they receive the new certificate.
+        If you have already renewed, you can update the date directly via your portal link above.
       </p>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
@@ -343,28 +376,36 @@ export async function runContractorComplianceReminderJob(
         await send({ to: emails, subject, html: buildManagerEmailHtml(claimed, appUrl) });
         sent = true;
 
-        // Also email each contractor directly about their own expiring insurance.
+        // Also email each contractor directly about their own expiring items.
         // Group by contractor so each gets one email covering all their alerts.
-        const insuranceAlerts = claimed.filter((a) => a.kind === "insurance" || a.kind === "indemnity");
         const byContractor = new Map<number, ContractorComplianceAlert[]>();
-        for (const a of insuranceAlerts) {
+        for (const a of claimed) {
           if (!byContractor.has(a.contractorId)) byContractor.set(a.contractorId, []);
           byContractor.get(a.contractorId)!.push(a);
         }
-        for (const [, contractorAlerts] of byContractor) {
+        for (const [contractorId, contractorAlerts] of byContractor) {
           const { contractorName, contractorEmail } = contractorAlerts[0];
-          const html = buildContractorEmailHtml(contractorName, contractorAlerts, client.name);
-          if (!html || !contractorEmail) continue;
+          if (!contractorEmail) continue;
+          // Generate / refresh the contractor's self-service portal token.
+          let portalUrl: string | undefined;
+          try {
+            const portalToken = await generateOrRefreshPortalToken(client.id, contractorId);
+            portalUrl = `${appUrl}/contractor-portal/${portalToken}`;
+          } catch (tokenErr) {
+            logger.warn({ err: tokenErr, contractorId }, "Failed to generate contractor portal token — sending email without link");
+          }
+          const html = buildContractorEmailHtml(contractorName, contractorAlerts, client.name, portalUrl);
+          if (!html) continue;
           try {
             await send({
               to: [contractorEmail],
-              subject: `Insurance renewal reminder — please send updated documents`,
+              subject: `Compliance renewal reminder — please update your details`,
               html,
             });
             result.emailsSent++;
           } catch (ctrErr) {
             // Best-effort: never fail the whole job because a contractor email bounced.
-            logger.warn({ err: ctrErr, contractorEmail }, "Failed to send contractor insurance reminder");
+            logger.warn({ err: ctrErr, contractorEmail }, "Failed to send contractor compliance reminder");
           }
         }
 

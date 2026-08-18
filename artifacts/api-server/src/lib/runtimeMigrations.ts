@@ -346,6 +346,31 @@ export async function runRuntimeMigrations() {
       ON "contractor_compliance_reminder_log" ("client_id")
     `);
 
+    // Object path for contractor certificate uploads (added when portal introduced).
+    await db.execute(sql`
+      ALTER TABLE "contractor_certificates"
+        ADD COLUMN IF NOT EXISTS "object_path" text
+    `);
+
+    // Contractor self-service portal tokens. One active token per contractor
+    // (UNIQUE on contractor_id). The token is refreshed each time a reminder
+    // fires so the link in the latest email is always valid.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "contractor_portal_tokens" (
+        "id"            serial PRIMARY KEY,
+        "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "contractor_id" integer NOT NULL REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "token"         text NOT NULL UNIQUE,
+        "expires_at"    timestamp NOT NULL,
+        "created_at"    timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("contractor_id")
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_tokens_token"
+      ON "contractor_portal_tokens" ("token")
+    `);
+
     // Deduplication log for TrainTrack staff-training-expiry reminders. One row
     // per (client, record, milestone), where milestone encodes the expiry date
     // it was sent for (e.g. "expiry:2025-03-01"), so a renewed certificate
