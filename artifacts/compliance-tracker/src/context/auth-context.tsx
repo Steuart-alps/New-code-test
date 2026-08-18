@@ -31,7 +31,7 @@ interface AuthContextValue {
   client: AuthClient | null;
   billingLocked: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ requires2fa: boolean }>;
+  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requiresEmailVerification?: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   activeClientId: number | null;
@@ -176,14 +176,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setIsLoading(false));
   }, []);
 
-  async function login(email: string, password: string): Promise<{ requires2fa: boolean }> {
+  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requiresEmailVerification?: boolean }> {
     const res = await apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error ?? "Login failed");
+      const error = new Error(data.error ?? "Login failed") as Error & { requiresEmailVerification?: boolean };
+      error.requiresEmailVerification = data.requiresEmailVerification;
+      throw error;
     }
     const data = await res.json();
     if (data.requires2fa) return { requires2fa: true };

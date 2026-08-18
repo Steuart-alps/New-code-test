@@ -134,6 +134,12 @@ export function makeLoginRateLimit(opts?: {
 /** Default limiter for login / 2FA / mobile-login (counts 401s, clears on 2xx). */
 export const loginRateLimit = makeLoginRateLimit();
 
+/** Registration limiter: slow down account-enumeration and signup abuse. */
+export const registrationRateLimit = makeLoginRateLimit({
+  failureStatuses: [400, 409],
+  clearOnSuccess: false,
+});
+
 /** Test-only helper: reset all counters. */
 export function _resetLoginRateLimit() {
   failures.clear();

@@ -24,6 +24,7 @@ import TwoFaRecoverPage from "@/pages/two-fa-recover";
 import TrialEndedPage from "@/pages/trial-ended";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
+import VerifyEmailPage from "@/pages/verify-email";
 import SchedulePage from "@/pages/schedule";
 import ItemDetailPage from "@/pages/item-detail";
 import FireSafetyPage from "@/pages/fire-safety";
@@ -78,6 +79,7 @@ function ProtectedRoutes() {
   if (location === "/signup") return <SignupPage />;
   if (location === "/terms") return <TermsPage />;
   if (location === "/privacy") return <PrivacyPage />;
+  if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
   if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;

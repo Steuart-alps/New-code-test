@@ -7,7 +7,7 @@ import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
-import { loginRateLimit, makeLoginRateLimit } from "../lib/loginRateLimit";
+import { loginRateLimit, makeLoginRateLimit, registrationRateLimit } from "../lib/loginRateLimit";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
@@ -65,6 +65,18 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
   const valid = await verifyPassword(body.data.password, result.user.passwordHash);
   if (!valid) {
     res.status(401).json({ error: "Invalid email or password" });
+    return;
+  }
+
+  const verificationStatus = await db.execute(sql`
+    SELECT email_verified FROM users WHERE id = ${result.user.id} LIMIT 1
+  `);
+  const emailVerified = (verificationStatus.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified;
+  if (emailVerified === false) {
+    res.status(403).json({
+      error: "Please verify your email address before signing in.",
+      requiresEmailVerification: true,
+    });
     return;
   }
 
@@ -425,7 +437,7 @@ const RegisterBody = z.object({
   bundle: z.boolean().optional(),
 });
 
-router.post("/auth/register", async (req, res) => {
+router.post("/auth/register", registrationRateLimit, async (req, res) => {
   const body = RegisterBody.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: "Please provide a valid name, email, and password (min 8 characters)." });
@@ -480,6 +492,19 @@ router.post("/auth/register", async (req, res) => {
     .values({ name, email, passwordHash, role: "consultant", clientId, subscriptionStatus: "trial" })
     .returning();
 
+  // New self-registrations must confirm control of their email address before
+  // receiving an authenticated session. Existing accounts remain verified via
+  // the migration default, so this is backwards-compatible.
+  const verificationToken = randomBytes(32).toString("hex");
+  const verificationHash = createHash("sha256").update(verificationToken).digest("hex");
+  await db.execute(sql`
+    UPDATE users
+    SET email_verified = false,
+        email_verification_token = ${verificationHash},
+        email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
+    WHERE id = ${user.id}
+  `);
+
   // Link the new owner to their auto-provisioned business so tenant access
   // checks (consultant_clients membership) recognise it.
   if (clientId !== null) {
@@ -496,32 +521,30 @@ router.post("/auth/register", async (req, res) => {
     await seedStarterContent(clientId);
   }
 
-  // Send a branded welcome email — best-effort, never blocks signup.
+  // Send the verification email — best-effort, never blocks account creation.
   try {
     const appUrl = getPublicAppUrl();
+    const verifyUrl = `${appUrl.replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
     await sendSystemEmail({
       to: user.email,
-      subject: "Welcome to ComplyTrack",
+      subject: "Verify your ComplyTrack email address",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1e293b;">Welcome to ComplyTrack</h2>
+          <h2 style="color: #1e293b;">Verify your email address</h2>
           <p>Hi ${name},</p>
-          <p>Thanks for signing up — your 14-day free trial has started. Your account is ready to go and we've pre-populated some starter compliance content so you can hit the ground running.</p>
+          <p>Thanks for signing up for ComplyTrack. Please confirm your email address to activate your account.</p>
           <p style="margin: 24px 0;">
-            <a href="${appUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Go to your dashboard</a>
+            <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
           </p>
-          <p>If you have any questions, just reply to this email — we're happy to help.</p>
+          <p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>
           <p>Best regards,<br><strong>ComplyTrack</strong></p>
         </div>
       `,
-      text: `Hi ${name},\n\nThanks for signing up — your 14-day free trial has started. Your account is ready to go.\n\nGo to your dashboard: ${appUrl}\n\nIf you have any questions, just reply to this email.\n\nBest regards,\nComplyTrack`,
+      text: `Hi ${name},\n\nPlease verify your ComplyTrack email address by opening this link:\n${verifyUrl}\n\nThis link expires in 24 hours. If you did not create this account, you can ignore this email.\n\nBest regards,\nComplyTrack`,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to send welcome email");
   }
-
-  // Log the user in immediately — trial has started, no card needed.
-  (req.session as any).userId = user.id;
 
   // Create a Stripe customer in the background so billing setup later is
   // seamless. Failure here never blocks account creation.
@@ -544,7 +567,89 @@ router.post("/auth/register", async (req, res) => {
   }
 
   const safeUser = { id: user.id, email: user.email, name: user.name, role: user.role };
-  res.json({ user: safeUser });
+  res.json({
+    user: safeUser,
+    requiresEmailVerification: true,
+    // The integration suite has no mailbox, so expose the one-time token only
+    // in the non-production test environment. Never expose it in production.
+    ...(process.env.NODE_ENV === "test" ? { verificationToken } : {}),
+  });
+});
+
+// GET /auth/verify-email?token=... — confirm a new self-registered address.
+router.get("/auth/verify-email", async (req, res) => {
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  if (!/^[a-f0-9]{64}$/i.test(token)) {
+    res.status(400).json({ error: "Invalid verification link." });
+    return;
+  }
+
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const result = await db.execute(sql`
+    SELECT id
+    FROM users
+    WHERE email_verification_token = ${tokenHash}
+      AND email_verification_expires_at > now()
+      AND email_verified = false
+    LIMIT 1
+  `);
+  const user = (result.rows ?? [])[0] as { id: number } | undefined;
+  if (!user) {
+    res.status(400).json({ error: "This verification link is invalid or has expired." });
+    return;
+  }
+
+  await db.execute(sql`
+    UPDATE users
+    SET email_verified = true,
+        email_verification_token = NULL,
+        email_verification_expires_at = NULL,
+        updated_at = now()
+    WHERE id = ${user.id}
+  `);
+  res.json({ verified: true });
+});
+
+// POST /auth/resend-verification — generic response prevents email enumeration.
+router.post("/auth/resend-verification", registrationRateLimit, async (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (email) {
+    const result = await db.execute(sql`
+      SELECT id, name, email, email_verified
+      FROM users
+      WHERE lower(email) = ${email}
+      LIMIT 1
+    `);
+    const user = (result.rows ?? [])[0] as {
+      id: number;
+      name: string;
+      email: string;
+      email_verified: boolean;
+    } | undefined;
+
+    if (user && !user.email_verified) {
+      const verificationToken = randomBytes(32).toString("hex");
+      const verificationHash = createHash("sha256").update(verificationToken).digest("hex");
+      await db.execute(sql`
+        UPDATE users
+        SET email_verification_token = ${verificationHash},
+            email_verification_expires_at = ${new Date(Date.now() + 24 * 60 * 60 * 1000)}
+        WHERE id = ${user.id}
+      `);
+      try {
+        const verifyUrl = `${getPublicAppUrl().replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
+        await sendSystemEmail({
+          to: user.email,
+          subject: "Verify your ComplyTrack email address",
+          html: `<p>Hi ${user.name},</p><p><a href="${verifyUrl}">Verify your email address</a></p><p>This link expires in 24 hours.</p>`,
+          text: `Verify your ComplyTrack email address: ${verifyUrl}\n\nThis link expires in 24 hours.`,
+        });
+      } catch (err) {
+        logger.warn({ err }, "Failed to resend verification email");
+      }
+    }
+  }
+  res.json({ sent: true });
 });
 
 // ─── Mobile auth ─────────────────────────────────────────────────────────────
@@ -578,6 +683,18 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
   const valid = await verifyPassword(body.data.password, result.user.passwordHash);
   if (!valid) {
     res.status(401).json({ error: "Invalid email or password" });
+    return;
+  }
+
+  const verificationStatus = await db.execute(sql`
+    SELECT email_verified FROM users WHERE id = ${result.user.id} LIMIT 1
+  `);
+  const emailVerified = (verificationStatus.rows?.[0] as { email_verified?: boolean } | undefined)?.email_verified;
+  if (emailVerified === false) {
+    res.status(403).json({
+      error: "Please verify your email address before signing in.",
+      requiresEmailVerification: true,
+    });
     return;
   }
 

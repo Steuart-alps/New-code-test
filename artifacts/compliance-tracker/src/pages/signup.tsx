@@ -53,8 +53,8 @@ export default function SignupPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Registration failed.");
-      toast({ title: "Account created!", description: "Welcome to ComplyTrack." });
-      navigate("/dashboard");
+      toast({ title: "Check your email", description: "We sent you a verification link." });
+      navigate(`/verify-email?email=${encodeURIComponent(email)}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

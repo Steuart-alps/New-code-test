@@ -1724,6 +1724,22 @@ async function migrateDoctrackSafetrackMerge() {
     }
   }
 
+  // ── Email verification columns on users ──────────────────────────────────────
+  // DEFAULT TRUE so every existing account stays accessible after the migration.
+  // Only new self-registrations set email_verified = false until confirmed.
+  await db.execute(sql`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE
+  `);
+  await db.execute(sql`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS email_verification_token TEXT
+  `);
+  await db.execute(sql`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ
+  `);
+
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
   {
     const acks = await db.execute(sql`

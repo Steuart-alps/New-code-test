@@ -1,6 +1,7 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { ZodError } from "zod";
 import cors from "cors";
+import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
@@ -60,6 +61,16 @@ app.use(
       }
     },
     credentials: true,
+  }),
+);
+
+// HTTP security headers — applied to all responses.
+// crossOriginEmbedderPolicy is disabled because Replit's proxy/iframe chain
+// sets its own COEP headers; enabling ours would conflict and break previews.
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // API-only server — no HTML is served here.
   }),
 );
 

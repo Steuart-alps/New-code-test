@@ -7,12 +7,12 @@ import { Link, useLocation } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, MinusCircle, SlidersHorizontal, Sunrise, Sunset,
-  UtensilsCrossed,
+  UtensilsCrossed, MapPin, UserPlus, Mail, Settings2,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -191,6 +191,112 @@ function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   );
 }
 
+// ── Setup checklist ──────────────────────────────────────────────────────────
+
+function SetupChecklist({
+  siteCount,
+  teamCount,
+  notificationEmail,
+  hasModules,
+}: {
+  siteCount: number;
+  teamCount: number;
+  notificationEmail: string;
+  hasModules: boolean;
+}) {
+  const steps = [
+    {
+      label: "Add your first site",
+      detail: "Create the place where checks and records will be tracked.",
+      done: siteCount > 0,
+      href: "/sites",
+      icon: MapPin,
+    },
+    {
+      label: "Invite your team",
+      detail: "Give staff and managers their own access to ComplyTrack.",
+      done: teamCount > 1,
+      href: "/users",
+      icon: UserPlus,
+    },
+    {
+      label: "Set the admin alert email",
+      detail: "Choose where overdue and compliance alerts should be sent.",
+      done: Boolean(notificationEmail.trim()),
+      href: "/settings",
+      icon: Mail,
+    },
+    {
+      label: "Review your modules",
+      detail: "Make sure the tracks you need are enabled for this account.",
+      done: hasModules,
+      href: "/settings",
+      icon: Settings2,
+    },
+  ];
+  const completed = steps.filter((step) => step.done).length;
+  if (completed === steps.length) return null;
+
+  return (
+    <section className="rounded-xl border border-primary/25 bg-gradient-to-br from-primary/10 via-background to-amber-50/60 p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary mb-1">
+            Getting started
+          </p>
+          <h2 className="text-lg font-display font-semibold text-foreground">
+            Finish setting up your account
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Complete these steps so your team can start recording compliance confidently.
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-background/80 border border-primary/20 px-2.5 py-1 text-xs font-semibold text-primary">
+          {completed}/{steps.length} complete
+        </span>
+      </div>
+
+      <div className="h-1.5 rounded-full bg-primary/10 overflow-hidden mb-4">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${(completed / steps.length) * 100}%` }}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {steps.map((step) => {
+          const Icon = step.icon;
+          return (
+            <Link
+              key={step.label}
+              href={step.href}
+              className={cn(
+                "flex items-center gap-3 rounded-lg border px-3 py-3 transition-colors",
+                step.done
+                  ? "border-emerald-200/70 bg-emerald-50/60"
+                  : "border-border/70 bg-background/80 hover:border-primary/40 hover:bg-primary/5",
+              )}
+            >
+              {step.done ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              ) : (
+                <Icon className="w-5 h-5 text-primary shrink-0" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className={cn("block text-sm font-medium", step.done && "text-emerald-800")}>
+                  {step.label}
+                </span>
+                <span className="block text-xs text-muted-foreground mt-0.5">{step.detail}</span>
+              </span>
+              {!step.done && <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ── DailyTrack snapshot card ──────────────────────────────────────────────────
 
 function DailyTrackSnapshotCard() {
@@ -309,14 +415,36 @@ function KitchenTrackOverdueBadge() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { hasService } = useAuth();
+  const { hasService, services } = useAuth();
+  const canAdmin = useCanAdmin();
   const hasDailytrack = hasService("dailytrack_am");
   const hasKitchentrack = hasService("kitchentrack");
   const { data: sites = [] } = useListSites();
+  const [teamCount, setTeamCount] = useState(0);
+  const [notificationEmail, setNotificationEmail] = useState("");
   const [siteId, setSiteId] = useState<string>("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canAdmin) return;
+    let cancelled = false;
+    Promise.all([
+      apiFetch("/users").then((res) => (res.ok ? res.json() : [])),
+      apiFetch("/settings").then((res) => (res.ok ? res.json() : {})),
+    ])
+      .then(([users, settings]) => {
+        if (cancelled) return;
+        setTeamCount(Array.isArray(users) ? users.length : 0);
+        const settingsRecord = settings as { notificationEmail?: unknown };
+        setNotificationEmail(typeof settingsRecord.notificationEmail === "string" ? settingsRecord.notificationEmail : "");
+      })
+      .catch(() => {
+        // The dashboard remains usable if setup metadata is unavailable.
+      });
+    return () => { cancelled = true; };
+  }, [canAdmin]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -379,6 +507,15 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {canAdmin && (
+          <SetupChecklist
+            siteCount={sites.length}
+            teamCount={teamCount}
+            notificationEmail={notificationEmail}
+            hasModules={services === "all" || (Array.isArray(services) && services.length > 0)}
+          />
+        )}
 
         {/* Loading */}
         {loading && (

@@ -55,8 +55,15 @@ export default function LoginPage() {
       if (result.requires2fa) {
         setView("totp");
       }
+      if (result.requiresEmailVerification) {
+        navigate("/verify-email");
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      if (err instanceof Error && (err as Error & { requiresEmailVerification?: boolean }).requiresEmailVerification) {
+        navigate("/verify-email");
+      } else {
+        setError(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
       setLoading(false);
     }

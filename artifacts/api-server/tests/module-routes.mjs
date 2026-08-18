@@ -530,6 +530,21 @@ async function main() {
     process.exit(1);
   }
 
+  // New self-registrations require email verification. In the test instance
+  // the API returns the one-time token because there is no test mailbox.
+  if (regRes.data?.verificationToken) {
+    const verifyRes = await req("GET", `/auth/verify-email?token=${encodeURIComponent(regRes.data.verificationToken)}`);
+    if (verifyRes.status !== 200) {
+      console.error("FATAL: email verification failed", verifyRes.status, verifyRes.data);
+      process.exit(1);
+    }
+    const loginRes = await req("POST", "/auth/login", { email, password: "password-123" });
+    if (loginRes.status !== 200) {
+      console.error("FATAL: login after verification failed", loginRes.status, loginRes.data);
+      process.exit(1);
+    }
+  }
+
   // Create a site (needed for site-scoped filter tests)
   const siteRes = await req("POST", "/sites", { name: "Module Test HQ" });
   if (siteRes.status !== 201) {
