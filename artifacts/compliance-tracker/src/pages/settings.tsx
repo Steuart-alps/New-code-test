@@ -589,16 +589,7 @@ function SenderDomainCard() {
           <CardTitle className="font-display">Sender Domain</CardTitle>
         </div>
         <CardDescription>
-          Send emails from your own verified domain (e.g. <code className="text-xs bg-muted px-1.5 py-0.5 rounded">noreply@yourcompany.co.uk</code>) instead of the default sender.
-          You'll need access to your domain's DNS settings.{" "}
-          <a
-            href="https://resend.com/docs/dashboard/domains/introduction"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-0.5 text-primary hover:underline font-medium"
-          >
-            Domain setup guide <ExternalLink className="w-3 h-3" />
-          </a>
+          Use your own business email address instead of the default sender. We’ll show you the small setup step needed for your domain.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -619,7 +610,7 @@ function SenderDomainCard() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Enter the root domain (without <code>www</code> or <code>@</code>). After adding it you'll receive DNS records to copy into your domain provider.
+              Enter your website domain, such as <code>yourcompany.co.uk</code>. We’ll then show you what to add to your domain provider.
             </p>
           </div>
         ) : (
@@ -642,7 +633,7 @@ function SenderDomainCard() {
             {state.status !== "verified" && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 <div className="font-semibold mb-1 flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Action required</div>
-                Add the records below to your domain's DNS settings, then click <strong>Check status</strong>. DNS changes can take up to 24 hours to propagate.
+                Add the records below to your domain provider, then click <strong>Check status</strong>. Changes can take up to 24 hours.
               </div>
             )}
 
@@ -692,7 +683,7 @@ function SenderDomainCard() {
             {state.status === "verified" && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                 <div className="font-semibold mb-1 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Domain verified</div>
-                Set the <em>From Email Address</em> below to anything ending in <strong>@{state.domainName}</strong> and emails will be sent from your domain.
+                Set the sender email below to an address ending in <strong>@{state.domainName}</strong>.
               </div>
             )}
           </div>
@@ -751,7 +742,7 @@ function EmailSetupGuide({
       id: "domain",
       num: 1,
       label: "Verify your sender domain",
-      detail: "Add DNS records so compliance emails land in inboxes, not spam folders.",
+        detail: "Connect your business email address so messages look familiar to your team.",
       done: domainVerified,
       loading: domainStatus.loading,
       cta: "Set up domain →",
@@ -760,8 +751,8 @@ function EmailSetupGuide({
     {
       id: "from",
       num: 2,
-      label: "Set your From address",
-      detail: "Choose the email address recipients see — ideally on your verified domain.",
+        label: "Choose your sender address",
+        detail: "Choose the email address contractors and staff will see.",
       done: fromSet,
       loading: false,
       cta: "Set From address →",
@@ -771,11 +762,11 @@ function EmailSetupGuide({
       id: "test",
       num: 3,
       label: "Send a test email",
-      detail: "Confirm delivery works before sending reminders to contractors.",
+        detail: "Check that everything is working before sending reminders.",
       done: false,
       loading: false,
       cta: "Send test →",
-      onClick: () => { scrollTo("email-settings-section"); focusLater('[placeholder="Test recipient email"]'); },
+        onClick: () => { scrollTo("email-settings-section"); focusLater('[placeholder="Send a test to…"]'); },
     },
   ];
 
@@ -794,7 +785,7 @@ function EmailSetupGuide({
               Email sender setup
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Send compliance emails from your own brand, not a generic sender. Complete these steps once.
+              Choose how your emails appear to contractors and staff. Complete this once.
             </p>
           </div>
         </div>
@@ -1592,54 +1583,56 @@ export default function SettingsPage() {
                 <CardTitle className="font-display">Email Settings</CardTitle>
               </div>
               <CardDescription>
-                Configure the sender name and address for outgoing emails. All emails are delivered via Resend.
+                Choose the sender name and email address your recipients will see. We handle delivery for you.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
-                <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                Resend is configured as your email provider. No additional credentials are required.
+              <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
+                <Mail className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                Add your sender details below, then send a test email to confirm everything is working.
               </div>
               <div className="grid grid-cols-2 gap-6 pt-2">
                 <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>From Email Address</Label>
-                  <p className="text-xs text-muted-foreground">Must be a verified sender domain in your Resend account.</p>
+                  <Label>Sender email address</Label>
+                  <p className="text-xs text-muted-foreground">This is the address contractors and staff will see.</p>
                   <Input name="smtpFrom" value={formData.smtpFrom} onChange={handleChange} placeholder="compliance@yourcompany.com" />
                 </div>
                 <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                  <Label>From Name</Label>
+                  <Label>Sender name</Label>
                   <Input name="smtpFromName" value={formData.smtpFromName} onChange={handleChange} placeholder="Acme Compliance Team" />
                 </div>
               </div>
 
-              <div className="space-y-1.5 pt-2 border-t border-border/50 mt-2">
-                <Label>Your Own Resend API Key (optional)</Label>
-                <p className="text-xs text-muted-foreground">
-                  Leave blank to send through the shared ComplyTrack account. To send under your own Resend account
-                  (your own billing, your own verified domain), paste an API key from{" "}
-                  <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="underline">resend.com/api-keys</a>.
-                  Stored privately and used only for emails from this account.
-                </p>
-                <Input
-                  name="resendApiKey"
-                  type="password"
-                  autoComplete="off"
-                  value={formData.resendApiKey}
-                  onChange={handleChange}
-                  placeholder="re_********************"
-                />
-              </div>
+              <details className="pt-2 border-t border-border/50 mt-2">
+                <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                  Advanced email settings
+                </summary>
+                <div className="space-y-1.5 pt-3">
+                  <Label>Use your own email provider account</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Most clients can leave this blank. Only use this if your administrator has asked you to connect a separate email account.
+                  </p>
+                  <Input
+                    name="resendApiKey"
+                    type="password"
+                    autoComplete="off"
+                    value={formData.resendApiKey}
+                    onChange={handleChange}
+                    placeholder="Optional provider key"
+                  />
+                </div>
+              </details>
             </CardContent>
             <CardFooter className="bg-muted/10 border-t border-border/50 p-6 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <Input
-                  placeholder="Test recipient email"
+                  placeholder="Send a test to…"
                   value={testEmail}
                   onChange={(e) => setTestEmail(e.target.value)}
                   className="w-64"
                 />
                 <Button type="button" variant="secondary" onClick={handleTestEmail} disabled={triggerTestEmail.isPending || !testEmail}>
-                  <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send Test"}
+                  <Send className="w-4 h-4 mr-2" /> {triggerTestEmail.isPending ? "Sending..." : "Send test email"}
                 </Button>
               </div>
               <Button type="submit" disabled={updateSettings.isPending} className="shadow-lg shadow-primary/20">
