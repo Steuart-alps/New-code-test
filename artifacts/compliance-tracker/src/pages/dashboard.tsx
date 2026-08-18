@@ -201,7 +201,7 @@ export default function Dashboard() {
     setError(null);
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
-      const res = await apiFetch(`/api/dashboard/summary${params}`);
+      const res = await apiFetch(`/dashboard/summary${params}`);
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
       setTracks(json.tracks ?? []);
