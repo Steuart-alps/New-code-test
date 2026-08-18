@@ -10,7 +10,7 @@ import {
 import { z } from "zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
-import { sendSystemEmail } from "../lib/email";
+import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
@@ -322,10 +322,11 @@ router.post("/contractors/:id/send-reminder", requireAuth, requireClientAdmin, a
 </body>
 </html>`;
 
-  await sendSystemEmail({
+  await sendEmail({
     to: contractor.email,
     subject: `Compliance reminder — please update your details`,
     html,
+    clientId,
   });
 
   res.json({ success: true, message: `Reminder sent to ${contractor.email}` });
