@@ -180,9 +180,11 @@ export default function TrialEndedPage() {
 
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
+  const [discountCode, setDiscountCode] = useState("");
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
   const total = bundle ? 50 : 10 + selectedAddons.size * 10;
+  const hasAlpsDiscount = discountCode.trim().toUpperCase() === "ALPS50";
 
   const toggleAddon = (key: string) => {
     setBundle(false);
@@ -246,6 +248,7 @@ export default function TrialEndedPage() {
           ...(clientId ? { clientId } : {}),
           bundle,
           services: services.length > 0 ? services : undefined,
+          ...(discountCode.trim() ? { discountCode: discountCode.trim() } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -367,9 +370,31 @@ export default function TrialEndedPage() {
             <div className="bg-[#162D42] text-white px-4 py-3 flex items-center justify-between">
               <span className="text-sm text-white/70">Per site per month</span>
               <div className="flex items-baseline gap-1">
-                <span className="text-xl font-display">£{total}</span>
+                {hasAlpsDiscount && (
+                  <span className="text-sm text-white/50 line-through">£{total}</span>
+                )}
+                <span className="text-xl font-display">£{hasAlpsDiscount ? total / 2 : total}</span>
                 <span className="text-xs text-white/50">+ VAT</span>
               </div>
+            </div>
+
+            <div className="border border-border bg-white px-4 py-3">
+              <label htmlFor="alps-discount-code" className="block text-sm font-medium text-[#162D42]">
+                ALPS client discount code
+              </label>
+              <input
+                id="alps-discount-code"
+                value={discountCode}
+                onChange={(event) => setDiscountCode(event.target.value.toUpperCase())}
+                placeholder="Enter code"
+                autoCapitalize="characters"
+                className="mt-2 h-10 w-full border border-input bg-background px-3 text-sm uppercase tracking-wide outline-none transition-colors placeholder:normal-case placeholder:tracking-normal focus-visible:ring-2 focus-visible:ring-primary/60"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                {hasAlpsDiscount
+                  ? "50% ALPS discount selected — it will be checked before Checkout opens and applies to future monthly invoices."
+                  : "Enter your ALPS code to receive 50% off this subscription, including future monthly invoices."}
+              </p>
             </div>
           </div>
         )}

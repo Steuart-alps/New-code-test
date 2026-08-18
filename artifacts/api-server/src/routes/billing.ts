@@ -22,6 +22,15 @@ import {
   invalidateEntitlements,
   type ServiceKey,
 } from "../lib/services";
+import {
+  ALPS_DISCOUNT_CODE,
+  attachDiscountCheckoutSession,
+  getAlpsDiscountCouponId,
+  normaliseAlpsDiscountCode,
+  releaseAlpsDiscountReservation,
+  reserveAlpsDiscount,
+} from "../lib/alpsDiscount";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -186,10 +195,11 @@ router.get("/plans", async (_req, res) => {
 // Consultants AND client admins may pay: when a trial expires the client's
 // own admin must be able to set up billing, not just the consultant.
 router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
-  const { clientId: bodyClientId, services: requestedServices, bundle } = req.body as {
+  const { clientId: bodyClientId, services: requestedServices, bundle, discountCode: rawDiscountCode } = req.body as {
     clientId?: number;
     services?: string[];
     bundle?: boolean;
+    discountCode?: unknown;
   };
   const clientId = bodyClientId ?? getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -197,6 +207,14 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
 
+  const discountCode = normaliseAlpsDiscountCode(rawDiscountCode);
+  const codeWasEntered = typeof rawDiscountCode === "string" && rawDiscountCode.trim().length > 0;
+  if (codeWasEntered && discountCode !== ALPS_DISCOUNT_CODE) {
+    return res.status(400).json({ error: "That discount code is not valid." });
+  }
+
+  let discountReservation: { code: string; token: string; expiresAt: Date } | null = null;
+  let checkoutSessionCreated = false;
   try {
     const stripe = await getUncachableStripeClient();
     const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
@@ -262,6 +280,17 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       }
     }
 
+    let couponId: string | undefined;
+    if (discountCode === ALPS_DISCOUNT_CODE) {
+      discountReservation = await reserveAlpsDiscount(clientId, discountCode, stripe);
+      if (!discountReservation) {
+        return res.status(409).json({
+          error: "This ALPS discount code has already been used for this account.",
+        });
+      }
+      couponId = await getAlpsDiscountCouponId(stripe);
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
@@ -269,13 +298,54 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       mode: "subscription",
       success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
       cancel_url: `${baseUrl}/?billing=cancel`,
-      metadata: { clientId: String(clientId) },
+      metadata: {
+        clientId: String(clientId),
+        ...(discountReservation
+          ? {
+              discountCode: discountReservation.code,
+              discountReservationToken: discountReservation.token,
+            }
+          : {}),
+      },
+      ...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
+      ...(discountReservation
+        ? { expires_at: Math.floor(discountReservation.expiresAt.getTime() / 1000) }
+        : {}),
       automatic_tax: { enabled: true },
       customer_update: { address: "auto" },
     });
+    checkoutSessionCreated = true;
 
-    res.json({ url: session.url });
+    if (discountReservation) {
+      try {
+        await attachDiscountCheckoutSession(clientId, discountReservation, session.id);
+      } catch (err) {
+        // If the session ID was not persisted, we cannot safely reconcile it
+        // later. Invalidate the live Stripe session before releasing the code.
+        try {
+          await stripe.checkout.sessions.expire(session.id);
+          await releaseAlpsDiscountReservation(clientId, discountReservation);
+        } catch (cleanupError) {
+          // Leave the reservation in place rather than risk allowing a code
+          // that may still be attached to a live Checkout session.
+          logger.error(
+            { err: cleanupError, clientId, checkoutSessionId: session.id },
+            "Could not safely cancel an unattached ALPS discount checkout session",
+          );
+        }
+        throw err;
+      }
+    }
+
+    res.json({ url: session.url, discountApplied: Boolean(discountReservation) });
   } catch (err: any) {
+    if (discountReservation && !checkoutSessionCreated) {
+      try {
+        await releaseAlpsDiscountReservation(clientId, discountReservation);
+      } catch {
+        // Preserve the original checkout failure; a stale reservation expires.
+      }
+    }
     res.status(500).json({ error: err.message });
   }
 });

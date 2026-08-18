@@ -12,6 +12,7 @@ import { enforceTrialLock } from "./middleware/trialLock";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
 import { sendCancellationWarningEmail } from "./lib/offboarding";
+import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 
 const app: Express = express();
 
@@ -84,8 +85,17 @@ app.post(
     const signature = req.headers["stripe-signature"];
     if (!signature) return res.status(400).json({ error: "Missing stripe-signature" });
     const sig = Array.isArray(signature) ? signature[0] : signature;
+    let event: {
+      type?: string;
+      data?: { object?: Record<string, any> };
+    };
     try {
       await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      event = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        type?: string;
+        data?: { object?: Record<string, any> };
+      };
+      await recordAlpsDiscountCheckoutEvent(event);
       res.status(200).json({ received: true });
     } catch (err: any) {
       logger.error({ err }, "Stripe webhook error");
@@ -98,11 +108,6 @@ app.post(
     // Must happen AFTER processWebhook so the DB is already updated.
     // Never throws — a failure must not affect the 200 already sent.
     try {
-      // Re-parse the raw buffer as JSON to inspect the event type and data.
-      const event = JSON.parse((req.body as Buffer).toString("utf8")) as {
-        type?: string;
-        data?: { object?: Record<string, any> };
-      };
       const sub = event?.data?.object ?? {};
       const isCancelled = event.type === "customer.subscription.deleted";
       const isCancelAtPeriodEnd =

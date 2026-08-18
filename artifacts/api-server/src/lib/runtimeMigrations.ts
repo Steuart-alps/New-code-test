@@ -19,6 +19,41 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
 
+    // ---- Billing discount redemptions ----
+    // A client can reserve a code while Stripe Checkout is open, then it is
+    // permanently redeemed once the Checkout completion webhook arrives.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "billing_discount_redemptions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "code" text NOT NULL,
+        "status" text NOT NULL DEFAULT 'reserved',
+        "reservation_token" text,
+        "checkout_session_id" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "expires_at" timestamp,
+        "redeemed_at" timestamp,
+        CONSTRAINT "UQ_billing_discount_redemption_client_code" UNIQUE ("client_id", "code")
+      )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "billing_discount_redemptions"
+      ADD COLUMN IF NOT EXISTS "reservation_token" text
+    `);
+    await db.execute(sql`
+      ALTER TABLE "billing_discount_redemptions"
+      ADD COLUMN IF NOT EXISTS "expires_at" timestamp
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_billing_discount_redemption_token"
+      ON "billing_discount_redemptions" ("reservation_token")
+      WHERE "reservation_token" IS NOT NULL
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_billing_discount_redemptions_status"
+      ON "billing_discount_redemptions" ("status", "created_at")
+    `);
+
     // ---- Sites table ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "sites" (

@@ -1,4 +1,5 @@
 - [Billing architecture](billing-architecture.md) — per-site Stripe pricing, account = client, subscription looked up dynamically; billing endpoints bypass openapi.
+- [Stripe discount redemptions](stripe-discount-redemptions.md) — recurring code uses token-bound Checkout reservations; reconcile Stripe before releasing any timed-out claim.
 - [No-proration billing outbox](billing-no-proration.md) — added sites billed via per-site event outbox + idempotent claiming; never charge from quantity deltas; skip only strictly pre-subscription rows.
 - [Multi-tenant authz](multitenant-authz.md) — tenant access enforced via consultant_clients membership + canAccessClient/enforceClientAccess; never trust client-supplied clientId.
 - [Typecheck vs build](typecheck-vs-build.md) — `tsc` typecheck fails repo-wide (codegen/db dist absent); dev workflows use esbuild/vite, which is the real build signal.
@@ -13,6 +14,7 @@
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.
 - [Viewer role enforcement](viewer-role-enforcement.md) — client_viewer is only read-only if mutation routes mount denyViewers; requireAuth alone lets viewers write.
 - [API server type patterns](api-server-type-patterns.md) — req.params typed string|string[], db.execute returns QueryResult (use .rows), noImplicitReturns disabled, dynamic import TDZ pitfall.
+- [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.

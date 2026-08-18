@@ -134,7 +134,10 @@ const CHECK_ITEMS: { key: string; label: string; icon?: string }[] = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+// BikeTrack uses several hand-written API calls alongside generated hooks.
+// Keep them under the artifact's API prefix rather than asking the SPA server
+// for routes such as /bike-track/bikes.
+const baseUrl = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/api`;
 async function apiFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${baseUrl}${path}`, {
     credentials: "include",

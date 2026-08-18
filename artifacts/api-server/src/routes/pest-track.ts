@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { pestVisitsTable, pestActivityTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, inArray, lte, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { z } from "zod";
@@ -280,7 +280,7 @@ router.get("/config", requireAuth, async (req, res) => {
   const rows = await db.select().from(appSettingsTable)
     .where(and(
       eq(appSettingsTable.clientId, clientId),
-      sql`${appSettingsTable.key} = ANY(${CONFIG_KEYS})`,
+      inArray(appSettingsTable.key, CONFIG_KEYS),
     ));
 
   const config: Record<string, string> = {};
