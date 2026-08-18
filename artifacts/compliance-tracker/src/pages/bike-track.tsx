@@ -1500,6 +1500,7 @@ ${rows.map(h => `<tr>
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Return</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Checks</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider hidden sm:table-cell">Photos</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
@@ -1543,6 +1544,9 @@ ${rows.map(h => `<tr>
                           )}>
                             {h.status.charAt(0).toUpperCase() + h.status.slice(1)}
                           </Badge>
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <CheckPhotoUploader entityType="bike_hire" entityId={h.id} compact />
                         </td>
                         <td className="px-4 py-3">
                           {h.status === "active" && (

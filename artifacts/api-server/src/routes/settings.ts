@@ -20,6 +20,9 @@ const SETTING_KEYS = [
   "fixTrackStaleDays",
   // One-time email setup guide — "true" once the admin has dismissed it.
   "emailSetupGuideDismissed",
+  // Client-defined notification email — all automated digest/alert emails for
+  // this client go here instead of to individual admin user addresses.
+  "notificationEmail",
 ] as const;
 
 router.get("/settings", requireAuth, async (req, res) => {

@@ -8,12 +8,12 @@
  */
 
 import { db } from "@workspace/db";
-import { clientsTable, usersTable } from "@workspace/db/schema";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { and, eq, sql } from "drizzle-orm";
+import { clientsTable } from "@workspace/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
+import { getNotificationEmails } from "./getNotificationEmails";
 
 // ── Email HTML builder ────────────────────────────────────────────────────────
 
@@ -130,16 +130,8 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const actionable = alerts.filter(a => a.status === "overdue" || a.status === "due_soon");
       if (actionable.length === 0) continue;
 
-      // Get active users for this client
-      const users = await db
-        .select({ email: usersTable.email, name: usersTable.name })
-        .from(usersTable)
-        .where(and(eq(usersTable.clientId, client.id), eq(usersTable.active, true)))
-        .limit(20);
-
-      if (users.length === 0) continue;
-
-      const emails = users.map(u => u.email).filter(Boolean) as string[];
+      // Resolve notification recipients (client-level email or admin users).
+      const { emails } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
       const html = buildEmailHtml(actionable, appUrl);

@@ -10,6 +10,7 @@ import { loadUser, enforceClientAccess } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
+import { sendCancellationWarningEmail } from "./lib/offboarding";
 
 const app: Express = express();
 
@@ -78,6 +79,37 @@ app.post(
     } catch (err: any) {
       logger.error({ err }, "Stripe webhook error");
       res.status(400).json({ error: "Webhook processing error" });
+      return;
+    }
+
+    // Best-effort: send a cancellation warning email when a subscription is
+    // cancelled immediately or scheduled to cancel at period end.
+    // Must happen AFTER processWebhook so the DB is already updated.
+    // Never throws — a failure must not affect the 200 already sent.
+    try {
+      // Re-parse the raw buffer as JSON to inspect the event type and data.
+      const event = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        type?: string;
+        data?: { object?: Record<string, any> };
+      };
+      const sub = event?.data?.object ?? {};
+      const isCancelled = event.type === "customer.subscription.deleted";
+      const isCancelAtPeriodEnd =
+        event.type === "customer.subscription.updated" &&
+        sub.cancel_at_period_end === true;
+
+      if ((isCancelled || isCancelAtPeriodEnd) && sub.customer) {
+        const accessEndsAt: string | number | null =
+          typeof sub.cancel_at === "number" ? sub.cancel_at :
+          typeof sub.current_period_end === "number" ? sub.current_period_end :
+          null;
+        sendCancellationWarningEmail({
+          stripeCustomerId: String(sub.customer),
+          accessEndsAt,
+        }).catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
+      }
+    } catch (err) {
+      logger.warn({ err }, "Could not parse Stripe event for cancellation warning");
     }
   }
 );

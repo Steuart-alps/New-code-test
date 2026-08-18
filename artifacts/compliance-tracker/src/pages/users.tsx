@@ -244,9 +244,9 @@ export default function UsersPage() {
     load();
   }
 
-  async function resetTwoFactor(user: User) {
-    if (!confirm(`Reset two-factor authentication for ${user.name}? They will be able to sign in with just their password and set up 2FA again.`)) return;
-    await apiFetch(`/users/${user.id}/reset-2fa`, { method: "POST", body: JSON.stringify({}) });
+  async function disableTwoFactor(user: User) {
+    if (!confirm(`Disable two-factor authentication for ${user.name}? They will be able to sign in with just their password and can re-enrol with a new device.`)) return;
+    await apiFetch(`/users/${user.id}/2fa`, { method: "DELETE" });
     load();
   }
 
@@ -353,8 +353,8 @@ export default function UsersPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => resetTwoFactor(u)}
-                              title="Reset two-factor authentication (for locked-out users)"
+                              onClick={() => disableTwoFactor(u)}
+                              title="Disable two-factor authentication"
                             >
                               <ShieldOff className="w-4 h-4 text-amber-600" />
                             </Button>

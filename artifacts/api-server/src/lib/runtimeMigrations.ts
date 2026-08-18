@@ -402,6 +402,15 @@ export async function runRuntimeMigrations() {
         ADD COLUMN IF NOT EXISTS "annual_acknowledgement" boolean NOT NULL DEFAULT false
     `);
 
+    // ---- Contractor DBS/PVG expiry tracking + Gas Safe (Task #113) ----
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_issue_date" date`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_expiry_date" date`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" date`);
+    await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "gas_safe_registration" text`);
+
+    // ---- 2FA recovery code (Task #52) ----
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_code text`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

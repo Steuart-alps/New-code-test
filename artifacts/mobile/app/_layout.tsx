@@ -78,9 +78,42 @@ function RootLayoutNav() {
         name="checks/cleaning"
         options={{
           title: 'Cleaning',
-          headerStyle: { backgroundColor: '#162d42' },
-          headerTintColor: '#ffffff',
-          headerTitleStyle: { fontFamily: 'Inter_600SemiBold' },
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/kitchen"
+        options={{
+          title: 'KitchenTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/aqua"
+        options={{
+          title: 'AquaTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/incident"
+        options={{
+          title: 'IncidentTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/pat"
+        options={{
+          title: 'PATtrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="checks/safe-track"
+        options={{
+          title: 'SafeTrack',
+          headerShown: false,
         }}
       />
       <Stack.Screen

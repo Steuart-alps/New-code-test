@@ -87,6 +87,22 @@ const MODULES: CheckModule[] = [
     iconColor: '#6366f1',
     checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
   },
+  {
+    id: 'aqua',
+    label: 'AquaTrack',
+    subtitle: 'Pool checks & swim sessions',
+    icon: 'droplet',
+    iconColor: '#0ea5e9',
+    checks: ['Pool water quality', 'pH & chlorine', 'Swim sessions', 'Bather records'],
+  },
+  {
+    id: 'safe-track',
+    label: 'SafeTrack',
+    subtitle: 'Risk assessments & safety documents',
+    icon: 'shield',
+    iconColor: '#6366f1',
+    checks: ['Risk assessments', 'SOPs', 'Staff handbook', 'Acknowledge required reading'],
+  },
 ];
 
 export default function ChecksScreen() {
@@ -121,7 +137,23 @@ export default function ChecksScreen() {
               styles.card,
               { backgroundColor: colors.card, borderColor: colors.border },
             ]}
-            onPress={() => router.push(`/checks/${mod.id}` as any)}
+            onPress={() => {
+              if (mod.id === 'kitchen') {
+                router.push('/checks/kitchen' as any);
+              } else if (mod.id === 'aqua') {
+                router.push('/checks/aqua' as any);
+              } else if (mod.id === 'incident') {
+                router.push('/checks/incident' as any);
+              } else if (mod.id === 'pat') {
+                router.push('/checks/pat' as any);
+              } else if (mod.id === 'cleaning') {
+                router.push('/checks/cleaning' as any);
+              } else if (mod.id === 'safe-track') {
+                router.push('/checks/safe-track' as any);
+              } else {
+                router.push(`/checks/${mod.id}` as any);
+              }
+            }}
             activeOpacity={0.75}
           >
             <View

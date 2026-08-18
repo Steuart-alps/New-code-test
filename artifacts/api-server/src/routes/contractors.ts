@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { contractorsTable } from "@workspace/db/schema";
+import { contractorsTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import {
   GetContractorParams,
@@ -10,6 +10,8 @@ import {
 import { z } from "zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
+import { sendSystemEmail } from "../lib/email";
+import { getPublicAppUrl } from "../lib/email";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -22,9 +24,11 @@ const CreateContractorBody = z.object({
   phone:                       z.string().nullish(),
   address:                     z.string().nullish(),
   notes:                       z.string().nullish(),
-  gasSafeNumber:         z.string().max(30).nullish(),
-  publicLiabilityExpiry: z.coerce.date().nullish(),
-  dbsCheckDate:          z.coerce.date().nullish(),
+  gasSafeNumber:               z.string().max(30).nullish(),
+  gasSafeRegistration:         z.string().nullish(),
+  publicLiabilityExpiry:       z.coerce.date().nullish(),
+  dbsCheckDate:                z.coerce.date().nullish(),
+  dbsIssueDate:                z.coerce.date().nullish(),
   dbsType:                     z.enum(DBS_TYPES).nullish(),
   dbsExpiryDate:               z.coerce.date().nullish(),
 });
@@ -242,6 +246,89 @@ router.delete("/contractors/:id/certificates/:certId", requireAuth, requireClien
     DELETE FROM contractor_certificates WHERE id = ${certId} AND contractor_id = ${contractorId}
   `);
   res.status(204).send();
+});
+
+// ── Resend contractor job reminder email (Task #101) ───────────────────────
+
+router.post("/contractors/:id/send-reminder", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  if (!Number.isFinite(contractorId)) {
+    res.status(400).json({ error: "Invalid contractor id" });
+    return;
+  }
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!contractor || !canAccessClient(req, contractor.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+
+  if (!contractor.email) {
+    res.status(400).json({ error: `${contractor.name} does not have an email address on file.` });
+    return;
+  }
+
+  // Fetch client company name from app settings
+  const settingsRows = await db
+    .select()
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+  const settings: Record<string, string> = {};
+  for (const row of settingsRows) {
+    if (row.value != null) settings[row.key] = row.value;
+  }
+  const companyName = settings["companyName"] ?? "ComplyTrack";
+  const appUrl = getPublicAppUrl();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:600px;margin:40px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.07);">
+    <div style="background:#0f172a;padding:32px 40px;">
+      <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">🛡️ ComplyTrack</div>
+      <div style="font-size:14px;color:#94a3b8;margin-top:6px;">Contractor compliance reminder</div>
+    </div>
+    <div style="padding:32px 40px;">
+      <p style="font-size:15px;color:#334155;margin:0 0 16px;">Dear ${contractor.name},</p>
+      <p style="font-size:15px;color:#334155;margin:0 0 16px;">
+        This is a reminder from <strong>${companyName}</strong> to ensure your compliance records are up to date.
+      </p>
+      <p style="font-size:15px;color:#334155;margin:0 0 20px;">
+        Please check that the following are current and send updated documents to your account manager if required:
+      </p>
+      <ul style="margin:0 0 20px;padding-left:20px;color:#334155;font-size:14px;">
+        <li style="margin:6px 0;">Public liability insurance certificate</li>
+        <li style="margin:6px 0;">Gas Safe registration (if applicable)</li>
+        <li style="margin:6px 0;">DBS / PVG check (if applicable)</li>
+        <li style="margin:6px 0;">Any other relevant compliance certificates</li>
+      </ul>
+      <div style="margin-top:28px;text-align:center;">
+        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+          Open ComplyTrack →
+        </a>
+      </div>
+    </div>
+    <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
+      ComplyTrack by ALPS Consulting · Sent on behalf of ${companyName}.
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sendSystemEmail({
+    to: contractor.email,
+    subject: `Compliance reminder — please update your details`,
+    html,
+  });
+
+  res.json({ success: true, message: `Reminder sent to ${contractor.email}` });
 });
 
 export default router;

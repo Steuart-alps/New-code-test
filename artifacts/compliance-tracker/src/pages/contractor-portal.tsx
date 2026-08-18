@@ -95,6 +95,7 @@ export default function ContractorPortalPage() {
   const [insuranceExpiry, setInsuranceExpiry] = useState("");
   const [dbsType, setDbsType] = useState("");
   const [dbsExpiryDate, setDbsExpiryDate] = useState("");
+  const [gasSafeNumber, setGasSafeNumber] = useState("");
 
   // Certificate add panel
   const [showAddCert, setShowAddCert] = useState(false);
@@ -119,6 +120,7 @@ export default function ContractorPortalPage() {
         setInsuranceExpiry(toDateInput(d.insuranceExpiry));
         setDbsType(d.dbsType ?? "");
         setDbsExpiryDate(toDateInput(d.dbsExpiryDate));
+        setGasSafeNumber(d.gasSafeNumber ?? "");
       })
       .catch(e => setError(typeof e === "string" ? e : "Unable to load portal. The link may have expired."))
       .finally(() => setLoading(false));
@@ -132,7 +134,7 @@ export default function ContractorPortalPage() {
       const res = await fetch(apiUrl(token), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone || null, address: address || null, insuranceExpiry: insuranceExpiry || null, dbsType: dbsType || null, dbsExpiryDate: dbsExpiryDate || null }),
+        body: JSON.stringify({ phone: phone || null, address: address || null, insuranceExpiry: insuranceExpiry || null, dbsType: dbsType || null, dbsExpiryDate: dbsExpiryDate || null, gasSafeNumber: gasSafeNumber || null }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
       setSaved(true);
@@ -271,6 +273,17 @@ export default function ContractorPortalPage() {
             </div>
           </div>
           {dbsExpiryDate && <ExpiryChip date={dbsExpiryDate} />}
+        </div>
+
+        {/* Gas Safe registration */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <h2 className="font-semibold text-slate-900">Gas Safe registration</h2>
+          <p className="text-xs text-slate-500">Leave blank if not applicable to your trade.</p>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Gas Safe registration number</label>
+            <input type="text" value={gasSafeNumber} onChange={e => setGasSafeNumber(e.target.value)} placeholder="e.g. 123456"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+          </div>
         </div>
 
         {/* Contact details */}

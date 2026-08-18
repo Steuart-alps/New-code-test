@@ -469,6 +469,28 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   const row = (result.rows ?? [])[0] as any;
   if (!row) return res.status(404).json({ error: "Not found" });
 
+  // Backfill ACL for legacy documents that were uploaded before the ACL check
+  // was enforced. If the object has no owner set, tag it now so that the
+  // storage security check (GET /api/storage/objects/*) allows this client's
+  // users to read it. Never re-tag an object that already belongs to a
+  // different tenant.
+  try {
+    const file = await storage.getObjectEntityFile(row.object_path);
+    const existingAcl = await getObjectAclPolicy(file);
+    if (!existingAcl?.owner) {
+      // No ACL set — this is a legacy document; backfill it for this client.
+      await storage.trySetObjectEntityAclPolicy(row.object_path, {
+        owner: String(clientId),
+        visibility: "private",
+      });
+    }
+    // If an owner is set but it doesn't match, the ACL check on the storage
+    // route will return 403 as intended — don't silently override it here.
+  } catch (err) {
+    req.log.warn({ err, objectPath: row.object_path }, "Could not backfill ACL on DocTrack download");
+    // Non-fatal — attempt to generate the signed URL anyway.
+  }
+
   try {
     const downloadUrl = await storage.getSignedDownloadURL(row.object_path);
     res.json({ downloadUrl, fileName: row.file_name });

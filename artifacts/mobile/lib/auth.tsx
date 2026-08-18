@@ -20,10 +20,17 @@ export interface AuthUser {
   clientId: number | null;
 }
 
+interface MeResponse {
+  user: AuthUser;
+  services?: 'all' | string[] | null;
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  services: 'all' | string[] | null;
+  hasService: (key: string) => boolean;
   login: (email: string, password: string, code?: string) => Promise<{ requires2fa: boolean }>;
   logout: () => Promise<void>;
 }
@@ -33,11 +40,18 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [services, setServices] = useState<'all' | string[] | null>(null);
 
   const applyToken = useCallback((t: string | null) => {
     setToken(t);
     setAuthTokenGetter(t ? () => t : null);
   }, []);
+
+  function hasService(key: string): boolean {
+    if (services === null || services === undefined) return true;
+    if (services === 'all') return true;
+    return (services as string[]).includes(key);
+  }
 
   // On mount: restore token from SecureStore and validate with /api/auth/me
   useEffect(() => {
@@ -46,8 +60,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const stored = await SecureStore.getItemAsync(TOKEN_KEY);
         if (stored) {
           applyToken(stored);
-          const me = await apiFetch<AuthUser>('/api/auth/me');
-          setUser(me);
+          const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
+          // /api/auth/me returns { user, services } or just the user object
+          if (me && typeof me === 'object' && 'user' in me) {
+            const full = me as MeResponse;
+            setUser(full.user);
+            setServices(full.services ?? null);
+          } else {
+            setUser(me as AuthUser);
+            setServices(null);
+          }
           // Re-register the device for push on every authenticated app start.
           void registerForPushNotifications();
         }
@@ -76,6 +98,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await SecureStore.setItemAsync(TOKEN_KEY, ok.token);
       applyToken(ok.token);
       setUser(ok.user);
+      // Fetch services after login via /me
+      try {
+        const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
+        if (me && typeof me === 'object' && 'user' in me) {
+          setServices((me as MeResponse).services ?? null);
+        }
+      } catch {
+        setServices(null);
+      }
       // Register this device for push once the bearer token is active.
       void registerForPushNotifications();
       return { requires2fa: false };
@@ -94,11 +125,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
     applyToken(null);
     setUser(null);
+    setServices(null);
   }, [applyToken]);
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, login, logout }}
+      value={{ user, isLoading, isAuthenticated: !!user, services, hasService, login, logout }}
     >
       {children}
     </AuthContext.Provider>

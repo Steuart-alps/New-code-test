@@ -577,40 +577,54 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
       ? rawManagerEmail
       : undefined;
 
-  // Build a calendar invite when the issue has a target date (best-effort).
+  // Build a calendar invite for the job visit (best-effort). Use the issue's
+  // target date if set, otherwise fall back to 2 weeks from today so the
+  // contractor always receives a calendar placeholder they can reschedule.
   let icsAttachment: string | undefined;
   let icsFilename: string | undefined;
-  if (issue.target_date) {
-    try {
+  try {
+    // Resolve the visit date: target_date if set, else 2 weeks from now.
+    let visitDate: Date;
+    if (issue.target_date) {
       // pg returns date columns as Date objects (at UTC midnight); use UTC
       // components so the calendar day never shifts with server timezone.
       const raw = issue.target_date;
-      const targetDate = raw instanceof Date
+      const parsed = raw instanceof Date
         ? new Date(Date.UTC(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate(), 9, 0, 0))
         : new Date(`${raw}T09:00:00Z`);
-      if (!isNaN(targetDate.getTime())) {
-        const fromRow = await db.execute(sql`
-          SELECT value FROM app_settings
-          WHERE client_id = ${clientId} AND key = 'smtpFrom' LIMIT 1
-        `);
-        const fromEmail =
-          ((fromRow.rows as any[])[0]?.value as string | undefined) ??
-          process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-        icsAttachment = buildCalendarInvite({
-          itemTitle: `Job: ${issue.title}`,
-          dueDate: targetDate,
-          contractorName: issue.contractor_name ?? "Contractor",
-          contractorEmail: issue.contractor_email,
-          companyName: issue.company_name ?? "ComplyTrack",
-          fromEmail,
-          notes: issue.description ?? null,
-          extraAttendees: managerEmail ? [{ name: req.currentUser?.name ?? undefined, email: managerEmail }] : undefined,
-        });
-        icsFilename = `${(issue.title as string).replace(/[^a-z0-9]/gi, "-").toLowerCase()}.ics`;
-      }
-    } catch {
-      // Never block the email on invite generation
+      visitDate = !isNaN(parsed.getTime()) ? parsed : (() => {
+        const d = new Date(); d.setUTCDate(d.getUTCDate() + 14); d.setUTCHours(9, 0, 0, 0); return d;
+      })();
+    } else {
+      // No target date — default to 2 weeks from today at 09:00 UTC.
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + 14);
+      d.setUTCHours(9, 0, 0, 0);
+      visitDate = d;
     }
+
+    const fromRow = await db.execute(sql`
+      SELECT value FROM app_settings
+      WHERE client_id = ${clientId} AND key = 'smtpFrom' LIMIT 1
+    `);
+    const fromEmail =
+      ((fromRow.rows as any[])[0]?.value as string | undefined) ??
+      process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+
+    // Build the calendar invite using the existing rich builder.
+    icsAttachment = buildCalendarInvite({
+      itemTitle: `ComplyTrack Job Visit — ${issue.title}`,
+      dueDate: visitDate,
+      contractorName: issue.contractor_name ?? "Contractor",
+      contractorEmail: issue.contractor_email,
+      companyName: issue.company_name ?? "ComplyTrack",
+      fromEmail,
+      notes: issue.description ?? null,
+      extraAttendees: managerEmail ? [{ name: req.currentUser?.name ?? undefined, email: managerEmail }] : undefined,
+    });
+    icsFilename = `${(issue.title as string).replace(/[^a-z0-9]/gi, "-").toLowerCase()}.ics`;
+  } catch {
+    // Never block the email on invite generation
   }
 
   // Generate 30-day signed download links for site documents (best-effort).

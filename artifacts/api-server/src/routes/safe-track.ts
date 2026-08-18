@@ -202,6 +202,46 @@ function ackSaveRoute(table: any, docType: string) {
   };
 }
 
+// ── Self-acknowledge (mobile) ─────────────────────────────────────────────────
+// POST /safe-track/risk-assessments/:id/self-acknowledge  (and sops / handbook)
+// The mobile staff member acknowledges a document for themselves — no staffRosterId needed.
+
+function selfAckRoute(table: any, docType: string) {
+  return async (req: any, res: any) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const id = parseInt(req.params.id as string);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [doc] = await db.select({ id: table.id }).from(table)
+      .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
+    if (!doc) return res.status(404).json({ error: "Not found" });
+
+    const userId: number | null = (req.session as any).userId ?? null;
+    const userName: string = req.body?.staffName ?? "Unknown";
+    const signature: string | null = req.body?.signature ?? null;
+
+    // Check if already acknowledged by this user session
+    if (userId) {
+      const existing = await db.execute(sql`
+        SELECT id FROM safe_track_acknowledgements
+        WHERE document_id = ${id} AND document_type = ${docType}
+          AND client_id = ${clientId} AND acknowledged_by = ${userId}
+        LIMIT 1
+      `);
+      if (existing.rows.length) return res.json({ created: 0, alreadyAcknowledged: true });
+    }
+
+    await db.execute(sql`
+      INSERT INTO safe_track_acknowledgements
+        (client_id, document_type, document_id, staff_roster_id, staff_name, signature, acknowledged_by)
+      VALUES
+        (${clientId}, ${docType}, ${id}, NULL, ${userName}, ${signature}, ${userId})
+    `);
+    res.json({ created: 1, alreadyAcknowledged: false });
+  };
+}
+
 // ── Risk Assessments ─────────────────────────────────────────────────────────
 
 const signatureField = z.string().max(500000).nullable().optional();
@@ -221,6 +261,7 @@ const raCreate = z.object({
 router.get("/risk-assessments/:id/download-url",    requireAuth, downloadUrlRoute(safeRiskAssessmentsTable));
 router.get("/risk-assessments/:id/acknowledgements", requireAuth, ackListRoute(safeRiskAssessmentsTable, "ra"));
 router.post("/risk-assessments/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeRiskAssessmentsTable, "ra"));
+router.post("/risk-assessments/:id/self-acknowledge", requireAuth, selfAckRoute(safeRiskAssessmentsTable, "ra"));
 router.use("/risk-assessments", crudFor(safeRiskAssessmentsTable, raCreate, raCreate.partial()));
 
 // ── SOPs ─────────────────────────────────────────────────────────────────────
@@ -239,6 +280,7 @@ const sopCreate = z.object({
 router.get("/sops/:id/download-url",    requireAuth, downloadUrlRoute(safeSopsTable));
 router.get("/sops/:id/acknowledgements", requireAuth, ackListRoute(safeSopsTable, "sop"));
 router.post("/sops/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeSopsTable, "sop"));
+router.post("/sops/:id/self-acknowledge", requireAuth, selfAckRoute(safeSopsTable, "sop"));
 router.use("/sops", crudFor(safeSopsTable, sopCreate, sopCreate.partial()));
 
 // ── Training Records ─────────────────────────────────────────────────────────
@@ -296,6 +338,7 @@ const handbookCreate = z.object({
 router.get("/handbook/:id/download-url",    requireAuth, downloadUrlRoute(safeHandbookTable));
 router.get("/handbook/:id/acknowledgements", requireAuth, ackListRoute(safeHandbookTable, "handbook"));
 router.post("/handbook/:id/acknowledge",     requireAuth, denyViewers, ackSaveRoute(safeHandbookTable, "handbook"));
+router.post("/handbook/:id/self-acknowledge", requireAuth, selfAckRoute(safeHandbookTable, "handbook"));
 router.use("/handbook", crudFor(safeHandbookTable, handbookCreate, handbookCreate.partial()));
 
 export default router;

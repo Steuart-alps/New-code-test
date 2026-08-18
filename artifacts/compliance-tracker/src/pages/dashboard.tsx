@@ -6,11 +6,13 @@ import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, MinusCircle, SlidersHorizontal,
+  CheckCircle2, MinusCircle, SlidersHorizontal, Sunrise, Sunset,
+  UtensilsCrossed,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { useAuth } from "@/context/auth-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,7 +66,7 @@ function StatusIcon({ status, className }: { status: TrackStatus; className?: st
 
 // ── Track row ─────────────────────────────────────────────────────────────────
 
-function TrackRow({ track }: { track: TrackSummary }) {
+function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchenOverdueBadge?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
   const hasItems = track.items.length > 0;
@@ -90,6 +92,8 @@ function TrackRow({ track }: { track: TrackSummary }) {
         <StatusIcon status={track.status} className="w-4 h-4 shrink-0" />
 
         <span className="font-medium text-sm flex-1">{track.label}</span>
+
+        {kitchenOverdueBadge}
 
         <span
           className={cn(
@@ -187,9 +191,127 @@ function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   );
 }
 
+// ── DailyTrack snapshot card ──────────────────────────────────────────────────
+
+function DailyTrackSnapshotCard() {
+  const { data: allSites = [] } = useListSites();
+  const [amRows, setAmRows] = useState<{ siteId: number | null; submittedAt: string | null }[]>([]);
+  const [pmRows, setPmRows] = useState<{ siteId: number | null; submittedAt: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const today = new Date().toISOString().slice(0, 10);
+    (async () => {
+      setLoading(true);
+      try {
+        const [amRes, pmRes] = await Promise.all([
+          apiFetch(`/daily-track-am?date=${today}`),
+          apiFetch(`/daily-track-pm?date=${today}`),
+        ]);
+        if (!cancelled) {
+          setAmRows(amRes.ok ? await amRes.json() : []);
+          setPmRows(pmRes.ok ? await pmRes.json() : []);
+        }
+      } catch { /* silent */ }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const totalSites = allSites.length;
+  if (totalSites === 0 && !loading) return null;
+
+  // Count sites where a "premises_opening" AM checklist was submitted
+  const amComplete = allSites.filter(s =>
+    amRows.some(r => r.siteId === s.id && r.submittedAt)
+  ).length;
+  const pmComplete = allSites.filter(s =>
+    pmRows.some(r => r.siteId === s.id && r.submittedAt)
+  ).length;
+  const totalComplete = allSites.filter(s =>
+    amRows.some(r => r.siteId === s.id && r.submittedAt) &&
+    pmRows.some(r => r.siteId === s.id && r.submittedAt)
+  ).length;
+
+  const allDone = totalComplete === totalSites;
+
+  return (
+    <div className={cn(
+      "rounded-lg border border-border/60 bg-card px-4 py-3 flex items-center gap-4 flex-wrap",
+      allDone ? "border-l-4 border-l-emerald-500" : "border-l-4 border-l-amber-400",
+    )}>
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <span className="font-medium text-sm">Today's Checklists</span>
+        {loading ? (
+          <span className="text-xs text-muted-foreground animate-pulse">Loading…</span>
+        ) : (
+          <span className={cn(
+            "text-xs px-2 py-0.5 rounded-full font-medium",
+            allDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+          )}>
+            {totalComplete}/{totalSites} sites complete
+          </span>
+        )}
+      </div>
+      {!loading && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Sunrise className="w-3.5 h-3.5 text-amber-500" />
+            AM: <span className={cn("ml-0.5 font-medium", amComplete === totalSites ? "text-emerald-600" : "text-foreground")}>{amComplete}/{totalSites}</span>
+          </span>
+          <span className="flex items-center gap-1">
+            <Sunset className="w-3.5 h-3.5 text-violet-500" />
+            PM: <span className={cn("ml-0.5 font-medium", pmComplete === totalSites ? "text-emerald-600" : "text-foreground")}>{pmComplete}/{totalSites}</span>
+          </span>
+          <Link href="/daily-track-status">
+            <span className="text-primary hover:underline cursor-pointer flex items-center gap-0.5">
+              View <ArrowRight className="w-3 h-3" />
+            </span>
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── KitchenTrack overdue indicator ────────────────────────────────────────────
+
+function KitchenTrackOverdueBadge() {
+  const [missing, setMissing] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const today = new Date().toISOString().slice(0, 10);
+    (async () => {
+      try {
+        const res = await apiFetch("/food-safety");
+        if (!cancelled && res.ok) {
+          const records: { recordDate: string; submittedAt: string | null }[] = await res.json();
+          const todayRecord = records.find(r => r.recordDate === today && r.submittedAt);
+          setMissing(!todayRecord);
+        }
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (missing === null || !missing) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">
+      <UtensilsCrossed className="w-3 h-3" />
+      Today's record missing
+    </span>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const { hasService } = useAuth();
+  const hasDailytrack = hasService("dailytrack_am");
+  const hasKitchentrack = hasService("kitchentrack");
   const { data: sites = [] } = useListSites();
   const [siteId, setSiteId] = useState<string>("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
@@ -274,6 +396,9 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* DailyTrack snapshot */}
+        {hasDailytrack && <DailyTrackSnapshotCard />}
+
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
           <SummaryBar tracks={tracks} />
@@ -283,7 +408,11 @@ export default function Dashboard() {
         {!loading && !error && sorted.length > 0 && (
           <div className="space-y-2">
             {sorted.map((track) => (
-              <TrackRow key={track.trackId} track={track} />
+              <TrackRow
+                key={track.trackId}
+                track={track}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchentrack" ? <KitchenTrackOverdueBadge /> : null}
+              />
             ))}
           </div>
         )}

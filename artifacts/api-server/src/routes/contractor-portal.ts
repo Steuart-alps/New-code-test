@@ -84,11 +84,12 @@ router.get("/:token", async (req, res) => {
 // ── PUT /:token — update contact / compliance details ─────────────────────
 
 const updateSchema = z.object({
-  phone:          z.string().max(30).nullish(),
-  address:        z.string().max(500).nullish(),
+  phone:           z.string().max(30).nullish(),
+  address:         z.string().max(500).nullish(),
   insuranceExpiry: z.string().nullish(),
-  dbsType:        z.string().max(100).nullish(),
-  dbsExpiryDate:  z.string().nullish(),
+  dbsType:         z.string().max(100).nullish(),
+  dbsExpiryDate:   z.string().nullish(),
+  gasSafeNumber:   z.string().max(50).nullish(),
 });
 
 router.put("/:token", async (req, res) => {
@@ -105,6 +106,7 @@ router.put("/:token", async (req, res) => {
         public_liability_expiry = ${data.insuranceExpiry ? new Date(data.insuranceExpiry) : null},
         dbs_type            = ${data.dbsType ?? null},
         dbs_expiry_date     = ${data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
+        gas_safe_number     = ${data.gasSafeNumber ?? null},
         updated_at          = now()
       WHERE id = ${row.contractor_id}
     `);

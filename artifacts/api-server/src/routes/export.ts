@@ -4,12 +4,18 @@
  * Returns every compliance record scoped to the caller's client as CSVs
  * organised by module, plus a README. Restricted to client_admin and
  * consultant roles; rate-limited by the express-rate-limit applied in app.ts.
+ *
+ * DocTrack file attachments (stored in object storage) are bundled into the
+ * ZIP under doc-track/files/.  Total bundled attachments are capped at 500 MB
+ * to avoid timeouts.
  */
 import { Router } from "express";
 // archiver v8 is pure ESM — use ZipArchive directly, no factory function.
 import { ZipArchive } from "archiver";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
+import path from "path";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import {
   sitesTable,
   departmentsTable,
@@ -149,8 +155,11 @@ premises-track/
 staff-roster/
   staff.csv                      — staff roster
 
-Note: file attachments (PDFs, photos) are stored in cloud object storage.
-Their URLs are included in the relevant CSVs.
+doc-track/files/                 — actual file attachments from DocTrack (capped at 500 MB total)
+
+Note: DocTrack file attachments are bundled directly into this ZIP.
+URLs for other module attachments (photos, completion docs, etc.) are
+included in the relevant CSVs.
 `;
 
 // ── Export endpoint ────────────────────────────────────────────────────────────
@@ -256,6 +265,74 @@ router.get(
 
       const ackRows = await db.execute(sql`SELECT * FROM doc_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at DESC`);
       archive.append(rawToCsv(ackRows.rows), { name: "doc-track/acknowledgements.csv" });
+
+      // Bundle DocTrack file attachments directly into the ZIP.
+      // Cap total bundled attachment bytes at 500 MB.
+      const MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024;
+      let attachmentBytesUsed = 0;
+      const docStorage = new ObjectStorageService();
+
+      // Fetch rows that have an object_path (i.e. an uploaded file).
+      const docAttachRows = await db.execute(sql`
+        SELECT id, title, file_name, file_size, object_path
+        FROM   doc_track_documents
+        WHERE  client_id  = ${cid}
+          AND  object_path IS NOT NULL
+          AND  object_path != ''
+        ORDER  BY created_at DESC
+      `);
+
+      // Track used filenames within the files/ folder to avoid collisions.
+      const usedFilenames = new Set<string>();
+
+      for (const doc of docAttachRows.rows as Array<{
+        id: number;
+        title: string | null;
+        file_name: string | null;
+        file_size: number | null;
+        object_path: string;
+      }>) {
+        // Respect the 500 MB cap.
+        const estimatedSize = doc.file_size ?? 0;
+        if (attachmentBytesUsed + estimatedSize > MAX_ATTACHMENT_BYTES) {
+          // Add a note file instead of silently dropping.
+          archive.append(
+            `Attachment omitted — 500 MB export cap reached.\nDocument ID: ${doc.id}\nTitle: ${doc.title ?? "(untitled)"}\n`,
+            { name: `doc-track/files/_omitted_${doc.id}.txt` },
+          );
+          continue;
+        }
+
+        // Derive a safe filename: prefer title + extension from file_name.
+        const originalExt = doc.file_name ? path.extname(doc.file_name) : "";
+        const rawTitle = (doc.title ?? `document-${doc.id}`)
+          .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+          .slice(0, 200)
+          .trim() || `document-${doc.id}`;
+        let safeName = rawTitle + originalExt;
+
+        // Deduplicate within the files/ folder.
+        if (usedFilenames.has(safeName)) {
+          const base = rawTitle + (originalExt ? "" : "");
+          let counter = 2;
+          while (usedFilenames.has(`${base} (${counter})${originalExt}`)) counter++;
+          safeName = `${base} (${counter})${originalExt}`;
+        }
+        usedFilenames.add(safeName);
+
+        try {
+          const objectFile = await docStorage.getObjectEntityFile(doc.object_path);
+          const readStream = objectFile.createReadStream();
+          archive.append(readStream, { name: `doc-track/files/${safeName}` });
+          attachmentBytesUsed += estimatedSize;
+        } catch (err) {
+          if (err instanceof ObjectNotFoundError) {
+            // File no longer in storage — skip silently (URL still in CSV).
+          } else {
+            console.error(`Export: failed to bundle doc ${doc.id}`, err);
+          }
+        }
+      }
 
       // ── TrainTrack ────────────────────────────────────────────────────────
       const ttRows = await db.execute(sql`SELECT * FROM train_track_records WHERE client_id = ${cid} ORDER BY completed_date DESC`);

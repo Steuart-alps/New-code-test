@@ -110,6 +110,112 @@ ComplyTrack
   return { subject, html, text };
 }
 
+// ── Early cancellation warning (webhook-triggered) ────────────────────────────
+
+/**
+ * Sends a best-effort warning email to all client_admin users for the client
+ * whose Stripe subscription has just been cancelled or scheduled to cancel at
+ * period end. Called from the Stripe webhook handler; wrapped in try/catch
+ * by the caller so it never blocks the webhook response.
+ *
+ * The email explains when access ends and prompts the user to export their
+ * data before that date.
+ */
+export async function sendCancellationWarningEmail(opts: {
+  stripeCustomerId: string;
+  /** ISO date string or Unix timestamp when access ends. */
+  accessEndsAt: string | number | null;
+}): Promise<void> {
+  // Resolve the client from the Stripe customer id.
+  const clientRows = await db.execute(sql`
+    SELECT id, name FROM clients WHERE stripe_customer_id = ${opts.stripeCustomerId} LIMIT 1
+  `);
+  const client = (clientRows.rows ?? [])[0] as { id: number; name: string } | undefined;
+  if (!client) return;
+
+  // Only client_admin users receive the early warning (not consultants, who
+  // manage the account and would receive the offboarding email later anyway).
+  const adminRows = await db.execute(sql`
+    SELECT id, email, name FROM users
+    WHERE client_id = ${client.id} AND active = true AND role = 'client_admin'
+    LIMIT 10
+  `);
+  const admins = (adminRows.rows ?? []) as { id: number; email: string; name: string }[];
+  if (admins.length === 0) return;
+
+  // Resolve the access-end date from a Unix timestamp or ISO string.
+  let accessEndsDate: Date | null = null;
+  if (opts.accessEndsAt) {
+    const val = opts.accessEndsAt;
+    accessEndsDate = typeof val === "number"
+      ? new Date(val * 1000)
+      : new Date(val);
+    if (isNaN(accessEndsDate.getTime())) accessEndsDate = null;
+  }
+
+  const accessEndsStr = accessEndsDate
+    ? accessEndsDate.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
+    : "the end of your current billing period";
+
+  const settingsUrl = `${getPublicAppUrl()}/settings`;
+  const safeCompany = escapeHtml(client.name);
+  const subject = "Your ComplyTrack access is ending — export your records";
+
+  for (const admin of admins) {
+    const safeName = escapeHtml(admin.name ?? admin.email);
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1e293b;">Your ComplyTrack subscription is being cancelled</h2>
+        <p>Hi ${safeName},</p>
+        <p>This is to let you know that the ComplyTrack subscription for <strong>${safeCompany}</strong>
+           has been cancelled.</p>
+        <p>Your access will continue until <strong>${escapeHtml(accessEndsStr)}</strong>.
+           After that date you will no longer be able to log in or view your compliance records.</p>
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:20px;margin:20px 0;">
+          <p style="margin:0 0 12px;color:#92400e;font-weight:600;">⬇ Export your records before access ends</p>
+          <p style="margin:0 0 16px;color:#78350f;font-size:14px;">
+            Download a full export of all your data — food safety logs, fire safety checks,
+            training records, contractor files and more — as a ZIP file from your account settings.
+          </p>
+          <a href="${settingsUrl}"
+             style="display:inline-block;background:#ea580c;color:white;text-decoration:none;
+                    padding:12px 24px;border-radius:6px;font-weight:600;">
+            Go to Settings &amp; Export
+          </a>
+        </div>
+        <p style="color:#64748b;font-size:14px;">
+          Changed your mind? You can resubscribe at any time from your
+          <a href="${settingsUrl}" style="color:#2563eb;">account settings</a> and your data will be preserved.
+        </p>
+        <p>Best regards,<br><strong>ComplyTrack</strong></p>
+      </div>`;
+
+    const text = `
+Your ComplyTrack subscription is being cancelled
+
+Hi ${admin.name ?? admin.email},
+
+The ComplyTrack subscription for ${client.name} has been cancelled.
+
+Your access will continue until ${accessEndsStr}. After that you will no longer be able to log in.
+
+Export your records before access ends by visiting your account settings:
+${settingsUrl}
+
+Changed your mind? You can resubscribe at any time from your settings page and your data will be preserved.
+
+Best regards,
+ComplyTrack
+`.trim();
+
+    try {
+      await sendSystemEmail({ to: admin.email, subject, html, text });
+    } catch (err) {
+      logger.warn({ err, clientId: client.id, adminEmail: admin.email }, "Cancellation warning email failed for admin");
+    }
+  }
+}
+
 // ── Job 1: Cancellation detection ─────────────────────────────────────────────
 
 /**

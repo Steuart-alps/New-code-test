@@ -8,11 +8,12 @@
  */
 
 import { db } from "@workspace/db";
-import { clientsTable, usersTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { clientsTable } from "@workspace/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
+import { getNotificationEmails } from "./getNotificationEmails";
 
 interface OutstandingDocSummary {
   title: string;
@@ -139,18 +140,8 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
       const outstanding = await getOutstandingAckSummary(client.id);
       if (outstanding.length === 0) continue;
 
-      // Managers only.
-      const managers = await db
-        .select({ id: usersTable.id, email: usersTable.email })
-        .from(usersTable)
-        .where(and(
-          eq(usersTable.clientId, client.id),
-          eq(usersTable.active, true),
-          eq(usersTable.role, "client_admin"),
-        ))
-        .limit(20);
-      const emails = managers.map((m) => m.email).filter(Boolean) as string[];
-      const userIds = [...new Set(managers.map((m) => m.id))];
+      // Resolve notification recipients (client-level email or admin users).
+      const { emails, userIds } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
       // Claim first so concurrent job runs can't double-send; release the

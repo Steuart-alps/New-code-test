@@ -53,7 +53,9 @@ const formSchema = z.object({
   address: z.string().optional(),
   notes:   z.string().optional(),
   gasSafeNumber:               z.string().max(30, "Max 30 characters").optional(),
-  publicLiabilityExpiry: z.string().optional(),
+  gasSafeRegistration:         z.string().optional(),
+  publicLiabilityExpiry:       z.string().optional(),
+  dbsIssueDate:                z.string().optional(),
   dbsType:                     z.string().optional(),
   dbsExpiryDate:               z.string().optional(),
 });
@@ -101,8 +103,9 @@ export function ContractorFormDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "", company: "", email: "", phone: "", address: "", notes: "",
-      gasSafeNumber: "", publicLiabilityExpiry: "",
-      dbsType: "", dbsExpiryDate: "",
+      gasSafeNumber: "", gasSafeRegistration: "",
+      publicLiabilityExpiry: "",
+      dbsIssueDate: "", dbsType: "", dbsExpiryDate: "",
     },
   });
 
@@ -116,7 +119,9 @@ export function ContractorFormDialog({
         address: contractor.address  || "",
         notes:   contractor.notes    || "",
         gasSafeNumber:         contractor.gasSafeNumber || "",
+        gasSafeRegistration:   (contractor as any).gasSafeRegistration || "",
         publicLiabilityExpiry: toDateInput(contractor.publicLiabilityExpiry),
+        dbsIssueDate:          toDateInput((contractor as any).dbsIssueDate),
         dbsType:               (contractor as any).dbsType || "",
         dbsExpiryDate:         toDateInput((contractor as any).dbsExpiryDate),
       });
@@ -124,8 +129,9 @@ export function ContractorFormDialog({
     } else {
       form.reset({
         name: "", company: "", email: "", phone: "", address: "", notes: "",
-        gasSafeNumber: "", publicLiabilityExpiry: "",
-        dbsType: "", dbsExpiryDate: "",
+        gasSafeNumber: "", gasSafeRegistration: "",
+        publicLiabilityExpiry: "",
+        dbsIssueDate: "", dbsType: "", dbsExpiryDate: "",
       });
       setTrades([]);
     }
@@ -144,7 +150,9 @@ export function ContractorFormDialog({
         ...data,
         trades,
         gasSafeNumber:         data.gasSafeNumber?.trim() || null,
+        gasSafeRegistration:   data.gasSafeRegistration?.trim() || null,
         publicLiabilityExpiry: data.publicLiabilityExpiry || null,
+        dbsIssueDate:          data.dbsIssueDate || null,
         dbsType:               data.dbsType || null,
         dbsExpiryDate:         data.dbsExpiryDate || null,
       };
@@ -220,21 +228,26 @@ export function ContractorFormDialog({
             </div>
           </div>
 
-          {/* Compliance */}
+          {/* Compliance Details */}
           <div className="space-y-2.5 pt-2 border-t border-border/50">
             <div>
-              <Label>Compliance</Label>
+              <Label>Compliance Details</Label>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Record registration and check details so expiries can be flagged for review.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
-                <Label htmlFor="gasSafeNumber">Gas Safe Registration No.</Label>
-                <Input id="gasSafeNumber" maxLength={30} {...form.register("gasSafeNumber")} />
+                <Label htmlFor="gasSafeNumber">Gas Safe Number</Label>
+                <Input id="gasSafeNumber" maxLength={30} placeholder="e.g. 123456" {...form.register("gasSafeNumber")} />
                 {form.formState.errors.gasSafeNumber && (
                   <p className="text-xs text-destructive">{form.formState.errors.gasSafeNumber.message}</p>
                 )}
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="gasSafeRegistration">Gas Safe Registration</Label>
+                <Input id="gasSafeRegistration" placeholder="e.g. 556677" {...form.register("gasSafeRegistration")} />
               </div>
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
@@ -252,6 +265,11 @@ export function ContractorFormDialog({
                     {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 space-y-1.5">
+                <Label htmlFor="dbsIssueDate">DBS / PVG Issue Date</Label>
+                <Input type="date" id="dbsIssueDate" {...form.register("dbsIssueDate")} />
               </div>
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">

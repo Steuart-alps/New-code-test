@@ -22,6 +22,8 @@ import { runContractorComplianceReminderJob } from "./lib/contractorComplianceRe
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 import { runCancellationDetectionJob, runDataDeletionJob } from "./lib/offboarding";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
+import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
+import { runSafeTrackAckReminderJob } from "./lib/safeTrackAckReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -209,6 +211,33 @@ function startScheduler() {
     }
   });
   logger.info("Monthly compliance summary scheduler started (1st of month at 08:05)");
+
+  // Alert client admins weekly (Monday 09:00) when contractor public liability
+  // insurance is expiring within 30 days or has already expired.
+  cron.schedule("0 9 * * 1", async () => {
+    logger.info("Running contractor insurance expiry reminder job...");
+    try {
+      const result = await runContractorInsuranceExpiryReminderJob();
+      logger.info({ result }, "Contractor insurance expiry reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "Contractor insurance expiry reminder job failed");
+    }
+  });
+  logger.info("Contractor insurance expiry reminder scheduler started (weekly Monday at 09:00)");
+
+  // Alert client admins weekly (Monday 09:30) when staff haven't acknowledged
+  // required SafeTrack documents (risk assessments, SOPs, handbook entries)
+  // within 7 days of publication.
+  cron.schedule("30 9 * * 1", async () => {
+    logger.info("Running SafeTrack acknowledgement reminder job...");
+    try {
+      const result = await runSafeTrackAckReminderJob();
+      logger.info({ result }, "SafeTrack acknowledgement reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "SafeTrack acknowledgement reminder job failed");
+    }
+  });
+  logger.info("SafeTrack acknowledgement reminder scheduler started (weekly Monday at 09:30)");
 }
 
 async function runTrialReminders() {
@@ -299,6 +328,52 @@ async function notifyAdminOfBillingDrift(corrections: QuantityCorrection[]) {
     logger.error({ err }, "Failed to send billing drift notification email");
   }
 }
+
+// ── Global error handlers ──────────────────────────────────────────────────
+// These are a last-resort safety net for errors that escape every try/catch
+// (e.g. bugs in async cron jobs that aren't individually guarded).
+// Sentry.init() has already been called above so these will also be captured
+// there if SENTRY_DSN is configured.
+
+process.on("unhandledRejection", async (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? (reason.stack ?? "") : "";
+  logger.error({ reason }, `Unhandled promise rejection: ${message}`);
+
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  if (!adminEmail) return;
+  try {
+    await sendSystemEmail({
+      to: adminEmail,
+      subject: `[ComplyTrack] Unhandled rejection on ${new Date().toISOString()}`,
+      html: `<p><strong>Unhandled promise rejection</strong></p><pre style="background:#f1f5f9;padding:12px;border-radius:6px;font-size:12px;overflow:auto;">${message}\n\n${stack}</pre>`,
+      text: `Unhandled promise rejection\n\n${message}\n\n${stack}`,
+    });
+  } catch {
+    // best-effort — don't throw from inside an error handler
+  }
+});
+
+process.on("uncaughtException", async (err: Error) => {
+  logger.fatal({ err }, `Uncaught exception: ${err.message}`);
+
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  if (adminEmail) {
+    try {
+      await sendSystemEmail({
+        to: adminEmail,
+        subject: `[ComplyTrack] FATAL uncaught exception on ${new Date().toISOString()}`,
+        html: `<p><strong>Uncaught exception — process may restart</strong></p><pre style="background:#fee2e2;padding:12px;border-radius:6px;font-size:12px;overflow:auto;">${err.message}\n\n${err.stack ?? ""}</pre>`,
+        text: `Uncaught exception — process may restart\n\n${err.message}\n\n${err.stack ?? ""}`,
+      });
+    } catch {
+      // best-effort
+    }
+  }
+  // Give the event loop a tick so pino can flush, then exit so the process
+  // manager (or Replit) can restart the server cleanly.
+  setTimeout(() => process.exit(1), 500);
+});
 
 app.listen(port, async (err?: any) => {
   if (err) {

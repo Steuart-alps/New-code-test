@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Upload, FolderOpen, FileText, FileSpreadsheet, FileImage, FileVideo, File,
   Download, Trash2, Search, Plus, Loader2, Presentation, CheckSquare, Users,
-  CheckCircle2, Clock, Link2, Copy, Check,
+  CheckCircle2, Clock, Link2, Copy, Check, Printer, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +38,7 @@ interface Doc {
   object_path: string;
   uploaded_by: string | null;
   requires_acknowledgement: boolean;
+  annual_acknowledgement?: boolean;
   department: string | null;
   site_name: string | null;
   created_at: string;
@@ -136,6 +137,53 @@ function AcknowledgementsDialog({ doc, open, onClose }: { doc: Doc; open: boolea
   const [sigs, setSigs] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [deptFilter, setDeptFilter] = useState("all");
+
+  function handlePrintRegister() {
+    const generated = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    const ackedIds = new Set(acks.map(a => a.staff_roster_id));
+    const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
+    const esc = (s: string | null | undefined) =>
+      (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fmtDate = (d: string | null | undefined) =>
+      d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "";
+
+    const ackedStaff = staff.filter(s => ackedIds.has(s.id));
+    const pendingStaff = staff.filter(s => !ackedIds.has(s.id));
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Acknowledgement Register — ${esc(doc.title)}</title>
+<style>
+  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 8px; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; vertical-align: top; }
+  th { background: #f0ede2; font-weight: bold; }
+  .pending { color: #a15c00; }
+  .footer { margin-top: 32px; font-size: 10px; color: #777; border-top: 1px solid #ccc; padding-top: 6px; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+<h1>Document Acknowledgement Register</h1>
+<div class="meta">Document: <strong>${esc(doc.title)}</strong></div>
+<div class="meta">Category: ${esc(doc.category.replace(/_/g, " "))}${doc.department ? ` · Department: ${esc(doc.department)}` : ""}</div>
+<div class="meta">Generated: ${generated} · ${ackedStaff.length}/${staff.length} staff acknowledged</div>
+<table>
+<tr><th>Staff member</th><th>Status</th><th>Date acknowledged</th><th>Signature</th></tr>
+${ackedStaff.map(s => {
+  const a = ackedMap[s.id];
+  return `<tr><td>${esc(s.name)}</td><td>Acknowledged</td><td>${fmtDate(a?.acknowledged_at)}</td><td>${esc(a?.signature ?? "")}</td></tr>`;
+}).join("")}
+${pendingStaff.map(s => `<tr class="pending"><td>${esc(s.name)}</td><td>Outstanding</td><td></td><td></td></tr>`).join("")}
+</table>
+<div class="footer">Generated for audit purposes — ${esc(doc.title)}</div>
+</body></html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) { toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to print.", variant: "destructive" }); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -330,6 +378,11 @@ function AcknowledgementsDialog({ doc, open, onClose }: { doc: Doc; open: boolea
           <span className="text-xs text-muted-foreground mr-auto">
             {totalAcked}/{staff.length} acknowledged overall · TrainTrack records created automatically
           </span>
+          {!loading && staff.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handlePrintRegister} className="gap-1.5" disabled={saving}>
+              <Printer className="w-3.5 h-3.5" /> Print / Export PDF
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
           {unacked.length > 0 && (
             <Button onClick={handleSave} disabled={!anyChecked || saving}>
@@ -717,16 +770,135 @@ function UploadDialog({
   );
 }
 
+// ─── My Documents (personal view for non-manager staff) ──────────────────────
+
+interface MyDoc {
+  id: number;
+  title: string;
+  category: string;
+  department: string | null;
+  staffRosterId: number;
+}
+
+function MyDocumentsView({ staffName }: { staffName: string }) {
+  const { toast } = useToast();
+  const [myDocs, setMyDocs] = useState<MyDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acknowledging, setAcknowledging] = useState<number | null>(null);
+
+  function load() {
+    setLoading(true);
+    apiFetch("/doc-track/acknowledgements/outstanding")
+      .then(r => r.ok ? r.json() : { documents: [] })
+      .then(d => {
+        const docs: OutstandingDoc[] = d.documents ?? [];
+        // Filter to only docs where the current user appears in outstanding list (matched by name)
+        const mine: MyDoc[] = docs
+          .filter(doc => doc.outstanding.some(s => s.name === staffName))
+          .map(doc => {
+            const staffEntry = doc.outstanding.find(s => s.name === staffName)!;
+            return { id: doc.id, title: doc.title, category: doc.category, department: doc.department, staffRosterId: staffEntry.id };
+          });
+        setMyDocs(mine);
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, [staffName]);
+
+  async function handleAcknowledge(docId: number, docTitle: string, staffRosterId: number) {
+    setAcknowledging(docId);
+    try {
+      const res = await apiFetch(`/doc-track/documents/${docId}/acknowledge`, {
+        method: "POST",
+        body: JSON.stringify({
+          acknowledgements: [{ staffRosterId, staffName, signature: null }],
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Acknowledged", description: `"${docTitle}" marked as read.` });
+      load();
+    } catch {
+      toast({ title: "Acknowledgement failed", variant: "destructive" });
+    } finally {
+      setAcknowledging(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (myDocs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
+        <div className="p-4 bg-emerald-50 rounded-2xl">
+          <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+        </div>
+        <div>
+          <p className="font-medium text-base">You&apos;re all caught up!</p>
+          <p className="text-sm text-muted-foreground mt-1">No documents require your acknowledgement right now.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+        {myDocs.length} document{myDocs.length !== 1 ? "s" : ""} require your acknowledgement. Please read each one and click &ldquo;Acknowledge&rdquo; to confirm you have read it.
+      </p>
+      {myDocs.map(doc => {
+        const cat = CATEGORY_META[doc.category] ?? CATEGORY_META.other;
+        return (
+          <div key={doc.id} className="flex items-center gap-4 p-4 border rounded-lg bg-card">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-sm">{doc.title}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border", cat.bg, cat.color)}>
+                  {cat.label}
+                </span>
+                {doc.department && (
+                  <span className="text-[11px] text-muted-foreground">{doc.department}</span>
+                )}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              className="flex-shrink-0 gap-1.5"
+              onClick={() => handleAcknowledge(doc.id, doc.title, doc.staffRosterId)}
+              disabled={acknowledging === doc.id}
+            >
+              {acknowledging === doc.id
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <CheckSquare className="w-3.5 h-3.5" />}
+              Acknowledge
+            </Button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DocTrackPage() {
-  const { activeClientId } = useAuth();
+  const { activeClientId, user } = useAuth();
   const { toast } = useToast();
+
+  // Determine if the current user is a manager (admin / consultant) or staff
+  const isManager = user?.role === "client_admin" || user?.role === "consultant";
 
   const [docs, setDocs] = useState<Doc[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
+  const [pageView, setPageView] = useState<"library" | "my-docs">("library");
   const [search, setSearch] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
@@ -817,108 +989,148 @@ export default function DocTrackPage() {
             Document library — risk assessments, SOPs, policies &amp; more
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <Button variant="outline" onClick={() => setOutstandingOpen(true)} className="gap-1.5">
-            <Users className="w-4 h-4" /> Outstanding
-          </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {isManager && (
+            <Button variant="outline" onClick={() => setOutstandingOpen(true)} className="gap-1.5">
+              <Users className="w-4 h-4" /> Outstanding
+            </Button>
+          )}
           <Button onClick={() => setUploadOpen(true)} className="gap-1.5">
             <Plus className="w-4 h-4" /> Upload Document
           </Button>
         </div>
       </div>
 
-      {/* Staff self-sign link */}
-      {signOffUrl && (
-        <div className="flex items-center gap-3 mb-6 p-3.5 rounded-xl border bg-amber-50 border-amber-200">
-          <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-amber-900">Staff self-sign link</p>
-            <p className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
-            onClick={copySignOffLink}
+      {/* Page view switcher — show for non-manager staff */}
+      {!isManager && (
+        <div className="flex gap-1 mb-6 border-b border-border">
+          <button
+            onClick={() => setPageView("library")}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              pageView === "library"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
           >
-            {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            {linkCopied ? "Copied!" : "Copy link"}
-          </Button>
+            <FolderOpen className="w-4 h-4" /> Document Library
+          </button>
+          <button
+            onClick={() => setPageView("my-docs")}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              pageView === "my-docs"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <BookOpen className="w-4 h-4" /> My Documents
+          </button>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        {/* Category tabs */}
-        <div className="flex overflow-x-auto gap-1 pb-1 flex-shrink-0">
-          {CATEGORY_TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={cn(
-                "px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors",
-                activeTab === tab.key
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/70",
-              )}
-            >
-              {tab.label}
-              {counts[tab.key] != null && (
-                <span className={cn(
-                  "ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full",
-                  activeTab === tab.key ? "bg-white/20" : "bg-background",
-                )}>
-                  {counts[tab.key]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+      {/* My Documents personal view */}
+      {pageView === "my-docs" && !isManager && user?.name && (
+        <MyDocumentsView staffName={user.name} />
+      )}
 
-        {/* Search */}
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search documents…"
-            className="pl-8 h-9"
-          />
-        </div>
-      </div>
-
-      {/* Content */}
-      {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
-          <div className="p-4 bg-cyan-50 rounded-2xl">
-            <FolderOpen className="w-10 h-10 text-cyan-400" />
-          </div>
-          <div>
-            <p className="font-medium text-base">
-              {docs.length === 0 ? "No documents yet" : "No documents match your filter"}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {docs.length === 0
-                ? "Upload your first risk assessment, SOP, or policy to get started."
-                : "Try a different category or clear the search."}
-            </p>
-          </div>
-          {docs.length === 0 && (
-            <Button onClick={() => setUploadOpen(true)} variant="outline" size="sm" className="gap-1.5 mt-1">
-              <Upload className="w-3.5 h-3.5" /> Upload Document
-            </Button>
+      {/* Library view */}
+      {pageView === "library" && (
+        <>
+          {/* Staff self-sign link */}
+          {signOffUrl && (
+            <div className="flex items-center gap-3 mb-6 p-3.5 rounded-xl border bg-amber-50 border-amber-200">
+              <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-amber-900">Staff self-sign link</p>
+                <p className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
+                onClick={copySignOffLink}
+              >
+                {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {linkCopied ? "Copied!" : "Copy link"}
+              </Button>
+            </div>
           )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {visible.map(doc => (
-            <DocCard key={doc.id} doc={doc} onDelete={setDeleteTarget} onAcknowledge={setAckDoc} />
-          ))}
-        </div>
+
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            {/* Category tabs */}
+            <div className="flex overflow-x-auto gap-1 pb-1 flex-shrink-0">
+              {CATEGORY_TABS.map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors",
+                    activeTab === tab.key
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70",
+                  )}
+                >
+                  {tab.label}
+                  {counts[tab.key] != null && (
+                    <span className={cn(
+                      "ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full",
+                      activeTab === tab.key ? "bg-white/20" : "bg-background",
+                    )}>
+                      {counts[tab.key]}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search documents…"
+                className="pl-8 h-9"
+              />
+            </div>
+          </div>
+
+          {/* Content */}
+          {loading ? (
+            <div className="flex items-center justify-center h-48">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
+              <div className="p-4 bg-cyan-50 rounded-2xl">
+                <FolderOpen className="w-10 h-10 text-cyan-400" />
+              </div>
+              <div>
+                <p className="font-medium text-base">
+                  {docs.length === 0 ? "No documents yet" : "No documents match your filter"}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {docs.length === 0
+                    ? "Upload your first risk assessment, SOP, or policy to get started."
+                    : "Try a different category or clear the search."}
+                </p>
+              </div>
+              {docs.length === 0 && (
+                <Button onClick={() => setUploadOpen(true)} variant="outline" size="sm" className="gap-1.5 mt-1">
+                  <Upload className="w-3.5 h-3.5" /> Upload Document
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {visible.map(doc => (
+                <DocCard key={doc.id} doc={doc} onDelete={setDeleteTarget} onAcknowledge={setAckDoc} />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Upload dialog */}
@@ -1021,10 +1233,12 @@ ${docs.length === 0 ? `<p class="meta">No documents require acknowledgement.</p>
 function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState<OutstandingDoc[]>([]);
+  const [view, setView] = useState<"outstanding" | "summary">("outstanding");
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
+    setView("outstanding");
     apiFetch("/doc-track/acknowledgements/outstanding")
       .then(r => (r.ok ? r.json() : { documents: [] }))
       .then(d => setDocs(d.documents ?? []))
@@ -1032,57 +1246,136 @@ function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }, [open]);
 
   const withOutstanding = docs.filter(d => d.outstanding.length > 0);
+  const fullyAcknowledged = docs.filter(d => d.outstanding.length === 0);
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Users className="w-4 h-4" /> Outstanding acknowledgements
+            <Users className="w-4 h-4" /> Acknowledgements Overview
           </DialogTitle>
         </DialogHeader>
+
+        {/* View toggle + export */}
         {!loading && docs.length > 0 && (
-          <Button variant="outline" size="sm" className="self-start gap-1.5"
-            onClick={() => exportAckRegister(docs)}>
-            <Download className="w-3.5 h-3.5" /> Export register (PDF / print)
-          </Button>
-        )}
-        {loading ? (
-          <div className="flex items-center justify-center h-24">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : docs.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">
-            No documents require acknowledgement yet. Mark a document as &ldquo;Acknowledgement required&rdquo; when uploading to track staff sign-off here.
-          </p>
-        ) : withOutstanding.length === 0 ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-emerald-700">
-            <Check className="w-4 h-4" /> All staff have acknowledged every required document.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {withOutstanding.map(d => (
-              <div key={d.id} className="border rounded-lg p-3">
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <p className="text-sm font-medium truncate">{d.title}</p>
-                  <span className="text-xs text-muted-foreground flex-shrink-0">
-                    {d.acknowledgedCount}/{d.staffTotal} acknowledged
-                  </span>
-                </div>
-                {d.department && (
-                  <p className="text-xs text-muted-foreground mb-1.5">Department: {d.department}</p>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md border border-border overflow-hidden text-xs">
+              <button
+                onClick={() => setView("outstanding")}
+                className={cn(
+                  "px-3 py-1.5 font-medium transition-colors",
+                  view === "outstanding" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
                 )}
-                <div className="flex flex-wrap gap-1.5">
-                  {d.outstanding.map(s => (
-                    <span key={s.id} className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs">
-                      {s.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              >
+                Outstanding ({withOutstanding.length})
+              </button>
+              <button
+                onClick={() => setView("summary")}
+                className={cn(
+                  "px-3 py-1.5 font-medium transition-colors border-l border-border",
+                  view === "summary" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                All docs ({docs.length})
+              </button>
+            </div>
+            <Button variant="outline" size="sm" className="ml-auto gap-1.5"
+              onClick={() => exportAckRegister(docs)}>
+              <Download className="w-3.5 h-3.5" /> Export PDF
+            </Button>
           </div>
         )}
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-24">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : docs.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">
+              No documents require acknowledgement yet. Mark a document as &ldquo;Acknowledgement required&rdquo; when uploading to track staff sign-off here.
+            </p>
+          ) : view === "outstanding" ? (
+            withOutstanding.length === 0 ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-emerald-700">
+                <CheckCircle2 className="w-4 h-4" /> All staff have acknowledged every required document.
+              </div>
+            ) : (
+              <div className="space-y-4 py-1">
+                {withOutstanding.map(d => (
+                  <div key={d.id} className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <p className="text-sm font-medium truncate">{d.title}</p>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                        {d.acknowledgedCount}/{d.staffTotal} acknowledged
+                      </span>
+                    </div>
+                    {d.department && (
+                      <p className="text-xs text-muted-foreground mb-1.5">Department: {d.department}</p>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {d.outstanding.map(s => (
+                        <span key={s.id} className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                          {s.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            /* Summary view — all required docs with completion status */
+            <div className="space-y-2 py-1">
+              {docs.map(d => {
+                const pct = d.staffTotal > 0 ? Math.round((d.acknowledgedCount / d.staffTotal) * 100) : 100;
+                const allDone = d.outstanding.length === 0;
+                return (
+                  <div key={d.id} className={cn(
+                    "border rounded-lg p-3",
+                    allDone ? "border-green-200 bg-green-50/50" : "border-border"
+                  )}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{d.title}</p>
+                        {d.department && (
+                          <p className="text-xs text-muted-foreground">Department: {d.department}</p>
+                        )}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={cn(
+                          "text-xs font-semibold",
+                          allDone ? "text-emerald-700" : d.outstanding.length > 0 ? "text-amber-700" : "text-muted-foreground"
+                        )}>
+                          {d.acknowledgedCount}/{d.staffTotal}
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">staff</p>
+                      </div>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="w-full bg-muted rounded-full h-1.5">
+                      <div
+                        className={cn("h-1.5 rounded-full transition-all", allDone ? "bg-emerald-500" : "bg-amber-400")}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    {allDone && (
+                      <p className="text-xs text-emerald-700 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> All staff acknowledged
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              {fullyAcknowledged.length > 0 && withOutstanding.length > 0 && (
+                <p className="text-xs text-muted-foreground text-center pt-1">
+                  {fullyAcknowledged.length} doc{fullyAcknowledged.length !== 1 ? "s" : ""} fully acknowledged · {withOutstanding.length} with outstanding
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

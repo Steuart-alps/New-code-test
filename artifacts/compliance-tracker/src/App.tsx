@@ -20,6 +20,7 @@ import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import ResetPasswordPage from "@/pages/reset-password";
+import TwoFaRecoverPage from "@/pages/two-fa-recover";
 import TrialEndedPage from "@/pages/trial-ended";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -73,6 +74,7 @@ function ProtectedRoutes() {
 
   // Always-public routes
   if (location === "/reset-password") return <ResetPasswordPage />;
+  if (location === "/2fa-recover") return <TwoFaRecoverPage />;
   if (location === "/signup") return <SignupPage />;
   if (location === "/terms") return <TermsPage />;
   if (location === "/privacy") return <PrivacyPage />;

@@ -273,6 +273,13 @@ export default function LoginPage() {
                     >
                       <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/2fa-recover")}
+                      className="text-xs text-muted-foreground/70 hover:text-[#162D42] hover:underline transition-colors mx-auto block"
+                    >
+                      Lost access to your authenticator?
+                    </button>
                   </form>
                 </motion.div>
               )}

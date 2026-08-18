@@ -484,6 +484,135 @@ function ConfigDialog() {
   );
 }
 
+// ── Food Safety Completeness Calendar ────────────────────────────────────────
+
+type FSDayStatus = "complete" | "draft" | "missing" | "future";
+
+function shiftFSMonth(ym: string, delta: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function fsMonthLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+}
+
+interface FSCompletenessCalendarProps {
+  siteId?: number | null;
+  onPickDay: (date: string) => void;
+}
+
+function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCalendarProps) {
+  const today = format(new Date(), "yyyy-MM-dd");
+  const currentMonth = today.slice(0, 7);
+  const [month, setMonth] = useState(currentMonth);
+  const [records, setRecords] = useState<{ recordDate: string; submittedAt: string | null }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [y, m] = month.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const siteParam = siteId != null ? `&siteId=${siteId}` : "";
+      const res = await apiFetch(`/food-safety${siteParam}`);
+      if (!cancelled) {
+        setRecords(res.ok ? await res.json() : []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [siteId]);
+
+  const dayStatuses: { date: string; status: FSDayStatus }[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${month}-${String(d).padStart(2, "0")}`;
+    if (date > today) {
+      dayStatuses.push({ date, status: "future" });
+      continue;
+    }
+    const record = records.find(r => r.recordDate === date);
+    const status: FSDayStatus = !record ? "missing" : record.submittedAt ? "complete" : "draft";
+    dayStatuses.push({ date, status });
+  }
+
+  const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Mon = 0
+  const missingCount = dayStatuses.filter(d => d.status === "missing").length;
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="pt-4 pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="font-semibold text-sm">Monthly Completeness</h3>
+            <p className="text-xs text-muted-foreground">Days where the food safety diary was not completed.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMonth(shiftFSMonth(month, -1))}>←</Button>
+            <span className="text-sm font-medium min-w-[130px] text-center">{fsMonthLabel(month)}</span>
+            <Button
+              variant="outline" size="sm" className="h-7 px-2"
+              disabled={month >= currentMonth}
+              onClick={() => setMonth(shiftFSMonth(month, 1))}
+            >→</Button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-7 gap-1 max-w-sm">
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
+                <div key={d} className="text-[10px] text-muted-foreground text-center font-medium py-1">{d}</div>
+              ))}
+              {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
+              {dayStatuses.map(({ date, status }) => (
+                <button
+                  key={date}
+                  disabled={status === "future"}
+                  onClick={() => onPickDay(date)}
+                  title={
+                    status === "future" ? "" :
+                    status === "complete" ? `${date} — submitted` :
+                    status === "draft" ? `${date} — draft saved` :
+                    `${date} — no record`
+                  }
+                  className={cn(
+                    "aspect-square rounded text-[11px] font-medium flex items-center justify-center transition-transform",
+                    status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-110",
+                    status === "draft"    && "bg-amber-100 text-amber-700 hover:scale-110",
+                    status === "missing"  && "bg-red-100 text-red-700 hover:scale-110",
+                    status === "future"   && "bg-muted/30 text-muted-foreground/40",
+                  )}
+                >
+                  {parseInt(date.slice(8), 10)}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> Submitted</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Draft only</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 border border-red-300" /> Missing</span>
+              {missingCount > 0 && (
+                <span className="ml-auto font-medium text-red-600">
+                  {missingCount} missing day{missingCount !== 1 ? "s" : ""} in {fsMonthLabel(month)}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Daily Diary tab ───────────────────────────────────────────────────────────
 
 function DailyDiaryTab() {
@@ -1387,6 +1516,12 @@ function DailyDiaryTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Monthly completeness calendar */}
+      <FoodSafetyCompletenessCalendar
+        siteId={selectedSiteId}
+        onPickDay={(d) => { setSelectedDate(d); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+      />
     </div>
   );
 }

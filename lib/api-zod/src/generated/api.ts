@@ -629,6 +629,7 @@ export const UpdateSettingsBody = zod.object({
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
+  notificationEmail: zod.string().email().nullish().or(zod.literal("").transform(() => null)),
 });
 
 export const UpdateSettingsResponse = zod.object({
@@ -640,6 +641,7 @@ export const UpdateSettingsResponse = zod.object({
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
+  notificationEmail: zod.string().nullish(),
 });
 
 /**

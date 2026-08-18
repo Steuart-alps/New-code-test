@@ -194,6 +194,58 @@ router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
   res.json({ ok: true, recoveryCode });
 });
 
+// POST /auth/2fa/recover — account recovery for users locked out of their authenticator app.
+// Accepts email + password + recovery code. On success, clears 2FA and returns a new session.
+router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
+  const { email, password, recoveryCode } = req.body as { email?: string; password?: string; recoveryCode?: string };
+  if (!email || !password || !recoveryCode) {
+    res.status(400).json({ error: "Email, password and recovery code are required" }); return;
+  }
+
+  const result = await getUserWithClientByEmail(email.trim().toLowerCase());
+  if (!result || !result.user.active) {
+    res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
+  }
+
+  const validPassword = await verifyPassword(password, result.user.passwordHash);
+  if (!validPassword) {
+    res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
+  }
+
+  if (!result.user.totpRecoveryHash) {
+    res.status(400).json({ error: "No recovery code is associated with this account" }); return;
+  }
+
+  if (!recoveryCodeMatches(recoveryCode.trim(), result.user.totpRecoveryHash)) {
+    res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
+  }
+
+  // Recovery code matched — disable 2FA so the user can re-enrol with a new device
+  await db.update(usersTable)
+    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+    .where(eq(usersTable.id, result.user.id));
+
+  // Establish a session so they are immediately logged in
+  req.session.userId = result.user.id;
+
+  let billingLocked = false;
+  let services: "all" | string[] = "all";
+  if (result.user.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(result.user.clientId);
+      services = await getEntitledServices(result.user.clientId);
+    } catch {}
+  }
+
+  const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = result.user;
+  res.json({
+    user: { ...safeUser, totpEnabled: false },
+    client: result.client ?? null,
+    billingLocked,
+    services,
+  });
+});
+
 // POST /auth/2fa/disable — verify the user's password then clear TOTP
 router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
   const { password } = req.body as { password?: string };

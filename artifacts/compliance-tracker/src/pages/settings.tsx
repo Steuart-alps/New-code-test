@@ -1425,6 +1425,7 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     companyName: "",
     defaultLeadTimeDays: "30",
+    notificationEmail: "",
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
@@ -1440,6 +1441,7 @@ export default function SettingsPage() {
       setFormData({
         companyName: settings.companyName || "",
         defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
+        notificationEmail: (settings as any).notificationEmail || "",
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
@@ -1510,6 +1512,21 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
+              <div className="space-y-1.5">
+                <Label>Admin / Owner Notification Email</Label>
+                <p className="text-xs text-muted-foreground">
+                  All compliance alert emails (overdue checks, unacknowledged documents, expiring contractor insurance, training certificates)
+                  will be sent to this address. If left blank, alerts go to each admin user on your account instead.
+                </p>
+                <Input
+                  type="email"
+                  name="notificationEmail"
+                  value={formData.notificationEmail}
+                  onChange={handleChange}
+                  placeholder="owner@yourcompany.com"
+                />
+              </div>
+
               <div className="space-y-1.5">
                 <Label>Maintenance / Office CC Emails</Label>
                 <p className="text-xs text-muted-foreground">

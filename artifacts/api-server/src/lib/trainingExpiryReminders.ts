@@ -20,11 +20,12 @@
  */
 
 import { db } from "@workspace/db";
-import { clientsTable, usersTable } from "@workspace/db/schema";
-import { and, eq, or, sql } from "drizzle-orm";
+import { clientsTable } from "@workspace/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
+import { getNotificationEmails } from "./getNotificationEmails";
 
 /** Certificates are flagged when they expire within this many days (or have expired). */
 export const TRAINING_LEAD_DAYS = 30;
@@ -206,18 +207,8 @@ export async function runTrainingExpiryReminderJob(
         if (claimed.length === 0) continue;
         result.remindersClaimed += claimed.length;
 
-        // Managers: client_admin users OR maintenance managers.
-        const managers = await db
-          .select({ id: usersTable.id, email: usersTable.email })
-          .from(usersTable)
-          .where(and(
-            eq(usersTable.clientId, client.id),
-            eq(usersTable.active, true),
-            or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
-          ))
-          .limit(30);
-        const emails = [...new Set(managers.map((m) => m.email).filter(Boolean) as string[])];
-        const userIds = [...new Set(managers.map((m) => m.id))];
+        // Resolve notification recipients (client-level email or admin users).
+        const { emails, userIds } = await getNotificationEmails(client.id, { includeMaintenanceManagers: true });
 
         if (emails.length === 0) {
           // No one to notify — release the claims so a later run (once managers
