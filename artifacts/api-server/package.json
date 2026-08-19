@@ -21,7 +21,9 @@
     "test:config:ci": "bash tests/run-config-endpoints.sh",
     "test:training-expiry": "node tests/training-expiry-reminders.mjs",
     "test:discounts": "node tests/discount-codes.mjs",
-    "test:discounts:ci": "bash tests/run-discount-codes.sh"
+    "test:discounts:ci": "bash tests/run-discount-codes.sh",
+    "test:compliance-hub": "node tests/compliance-hub.mjs",
+    "test:compliance-hub:ci": "bash tests/run-compliance-hub.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

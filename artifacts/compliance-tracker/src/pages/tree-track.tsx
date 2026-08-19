@@ -78,11 +78,11 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
 };
 
 const CHECK_TYPE_HINTS: Record<CheckType, string> = {
-  visual_assessment:   "Routine ground-level walking survey of all trees. Minimum annually per BS 3998:2010. High-risk trees may require more frequent checks.",
+  visual_assessment:   "Routine ground-level survey. Set the inspection frequency from the tree, location, occupancy and risk assessment; higher-risk trees may need more frequent checks.",
   detailed_assessment: "Close inspection required when anomalies (deadwood, cracks, fungal bodies, lean) are found during a VTA. May require climbing inspection or specialist assessment.",
   post_storm:          "Carry out a walk-over inspection after any storm or severe weather event to identify newly fallen branches, uprooted or leaning trees, or structural failures.",
   remedial_works:      "Record of arboricultural works carried out — crown reduction, deadwood removal, felling, stump grinding, cable bracing, etc.",
-  risk_assessment:     "Full BS 3998:2010 / NTSG tree risk assessment. Identifies likelihood of failure and potential consequences. Required before remedial works.",
+  risk_assessment:     "Detailed tree risk assessment by a competent person where indicated. It assesses likelihood of failure and consequences; obtain suitable arboricultural advice before specifying works.",
 };
 
 const RESULT_CFG: Record<CheckResult, { label: string; badge: string }> = {

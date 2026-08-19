@@ -1219,7 +1219,7 @@ ${rows.map(h => `<tr>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm text-muted-foreground mt-1">
-          Bike hire logbook — fleet management, guest hires, safety checks &amp; annual servicing
+          Bike hire logbook — fleet management, guest hires, safety checks and service planning based on use and risk
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           <Button variant="outline" size="sm" onClick={handleExportRegister} disabled={exporting}
@@ -1619,7 +1619,7 @@ ${rows.map(h => `<tr>
           ) : services.length === 0 ? (
             <div className="text-center py-10 border border-dashed rounded-sm">
               <Wrench className="w-8 h-8 mx-auto text-muted-foreground/30 mb-2" />
-              <p className="text-sm text-muted-foreground">No service records yet. Log your first annual service to start tracking.</p>
+              <p className="text-sm text-muted-foreground">No service records yet. Log the first service or risk-based inspection to start tracking.</p>
               <Button onClick={() => setLogService("new")} variant="outline" size="sm" className="mt-3 gap-1.5 rounded-sm">
                 <Plus className="w-3.5 h-3.5" /> Log a Service
               </Button>

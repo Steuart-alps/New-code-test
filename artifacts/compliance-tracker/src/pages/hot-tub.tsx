@@ -468,7 +468,7 @@ ${rows.map(r => `<tr>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm text-muted-foreground mt-1">
-            Hot tub & spa maintenance logbook — water chemistry, temperature checks and HSG282 compliance
+            Hot tub & spa maintenance logbook — record water chemistry and controls from your risk-assessed operating procedure
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">

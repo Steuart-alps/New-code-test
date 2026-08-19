@@ -426,7 +426,7 @@ function PATConfigDialog() {
                 <SelectContent>
                   <SelectItem value="3">3 months (quarterly)</SelectItem>
                   <SelectItem value="6">6 months (twice yearly)</SelectItem>
-                  <SelectItem value="12">12 months (annual)</SelectItem>
+                  <SelectItem value="12">12 months (risk-assessed starting point)</SelectItem>
                   <SelectItem value="24">24 months (every 2 years)</SelectItem>
                   <SelectItem value="48">48 months (every 4 years)</SelectItem>
                 </SelectContent>

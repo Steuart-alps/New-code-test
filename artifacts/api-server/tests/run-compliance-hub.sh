@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Self-sufficient runner for Compliance Hub API regression tests.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+_free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19092; }
+TEST_PORT="${TEST_PORT:-$(_free_port)}"
+export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
+healthy() { curl -sf -m 2 "${API_BASE}/healthz" >/dev/null 2>&1; }
+SERVER_PID=""
+cleanup() { [ -z "$SERVER_PID" ] || { kill "$SERVER_PID" >/dev/null 2>&1 || true; wait "$SERVER_PID" 2>/dev/null || true; }; }
+trap cleanup EXIT
+if ! healthy; then
+  pnpm run build
+  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  SERVER_PID=$!
+  for _ in $(seq 1 30); do healthy && break; kill -0 "$SERVER_PID" 2>/dev/null || exit 1; sleep 1; done
+  # The health listener opens before additive runtime migrations finish. Give
+  # the isolated server time to establish the route tables before tests begin.
+  sleep 5
+fi
+healthy || { echo "API server did not become healthy" >&2; exit 1; }
+node tests/compliance-hub.mjs

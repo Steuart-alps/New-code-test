@@ -84,7 +84,7 @@ const MODULES = [
     activeBorder: "border-sky-500",
     activeBg: "bg-sky-50",
     required: false,
-    description: "Water safety logbook — L8 ACOP and HSG274 compliant checks for Legionella risk management.",
+    description: "Water safety logbook to support site-specific Legionella risk-management records, written schemes and actions.",
     features: [
       "Cold & hot water temperature checks",
       "Sentinel flush & shower clean records",
@@ -450,7 +450,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center relative z-10">
           <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: "easeOut" }}>
             <div className="inline-flex items-center gap-2 border border-white/20 text-white/80 rounded-full px-4 py-1.5 text-sm font-medium mb-10 tracking-wide">
-              <Star className="w-3.5 h-3.5 text-primary fill-primary" /> Built for UK Health & Safety compliance
+              <Star className="w-3.5 h-3.5 text-primary fill-primary" /> Built to support UK health & safety record keeping
             </div>
             <h1 className="text-5xl sm:text-7xl font-display leading-[1.05] mb-8 tracking-tight text-white">
               Health & Safety<br />
@@ -476,7 +476,7 @@ export default function LandingPage() {
       {/* Trust bar */}
       <div className="bg-white border-b border-border/50 py-6 px-6">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-10 text-sm font-medium text-muted-foreground uppercase tracking-widest">
-          {["ISO 45001 aligned", "GDPR compliant", "UK H&S legislation", "14-day free trial"].map(item => (
+          {["Supports ISO 45001-aligned processes", "GDPR-aware data controls", "UK H&S record keeping", "14-day free trial"].map(item => (
             <div key={item} className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
               {item}
@@ -491,7 +491,7 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <h2 className="text-4xl sm:text-5xl font-display mb-5 text-[#162D42]">One platform, every compliance discipline</h2>
             <p className="text-muted-foreground text-xl font-light max-w-2xl mx-auto">
-              Each module is built for a specific area of UK Health & Safety law. Use them together or separately — your call.
+              Each module supports records and controls for a specific UK health-and-safety area. Use them together or separately — your call.
             </p>
           </div>
 

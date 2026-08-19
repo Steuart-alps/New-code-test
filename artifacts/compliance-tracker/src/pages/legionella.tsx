@@ -69,19 +69,19 @@ function checkTypeLabel(t: string): string {
 }
 
 const CHECK_TYPE_HINTS: Record<LegionellaCheckType, string> = {
-  calorifier_temp:       "HSG274 Table 2.1: ≥60°C at calorifier base/return — weekly",
-  hot_sentinel_temp:     "HSG274 Table 2.1: ≥50°C within 1 min at first/last hot outlets — monthly",
-  hot_nonsent_temp:      "HSG274 Table 2.1: ≥50°C within 1 min at representative hot outlets — quarterly",
-  cold_tank_temp:        "HSG274 Table 2.1: ≤20°C in cold water storage — monthly",
-  cold_sentinel_temp:    "HSG274 Table 2.1: ≤20°C after 2 min flow at first/last cold outlets — monthly",
-  cold_nonsent_temp:     "HSG274 Table 2.1: ≤20°C after 2 min flow at representative cold outlets — quarterly",
-  cold_tank_inspection:  "HSG274 Table 2.1: Check condition, debris, fouling, insulation and lid — 6-monthly",
-  cold_tank_clean:       "HSG274 Table 2.1: Full tank clean, disinfect and refill — annually",
-  calorifier_inspection: "HSG274 Table 2.1: Internal inspection, check scale, corrosion, components — annually",
-  calorifier_clean:      "HSG274 Table 2.1: Full calorifier clean, disinfect and recommission — annually",
-  shower_clean:          "HSG274 Table 2.1: Descale, clean and disinfect heads and flexible hoses — quarterly",
-  tmv_service:           "HSG274 Table 2.1: Service, test and verify blending temperature — annually",
-  outlet_flush:          "L8/HSG274: Run infrequently used outlets for at least 5 minutes — weekly",
+  calorifier_temp:       "HSG274 benchmark: calorifier temperature monitoring — use only where it is in the site written scheme.",
+  hot_sentinel_temp:     "HSG274 benchmark: sentinel hot-water monitoring — set outlets and frequency in the written scheme.",
+  hot_nonsent_temp:      "HSG274 benchmark: representative hot-outlet monitoring — set sampling and frequency from the risk assessment.",
+  cold_tank_temp:        "HSG274 benchmark: cold-water storage monitoring — set controls in the written scheme.",
+  cold_sentinel_temp:    "HSG274 benchmark: sentinel cold-water monitoring — set outlets and frequency in the written scheme.",
+  cold_nonsent_temp:     "HSG274 benchmark: representative cold-outlet monitoring — set sampling and frequency from the risk assessment.",
+  cold_tank_inspection:  "HSG274 benchmark: inspect tank condition — use the risk-assessed written scheme.",
+  cold_tank_clean:       "HSG274 benchmark: cleaning and disinfection — arrange when justified by the system risk assessment.",
+  calorifier_inspection: "HSG274 benchmark: inspect calorifier condition — set the scope and interval with a competent person.",
+  calorifier_clean:      "HSG274 benchmark: clean and recommission a calorifier — arrange when justified by the risk assessment.",
+  shower_clean:          "HSG274 benchmark: shower-head and hose cleaning — set method and frequency in the written scheme.",
+  tmv_service:           "HSG274 benchmark: service and test TMVs — set the interval with competent advice.",
+  outlet_flush:          "L8/HSG274 benchmark: manage infrequently used outlets in line with the written scheme.",
 };
 
 const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([
@@ -530,7 +530,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                 </span>
               )}
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">Monthly temperature tests per HSG274 Part 2 Table 2.1</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Monitoring points and frequency should match this site's risk assessment and written scheme.</p>
           </div>
           {canAdmin && (
             <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
@@ -1016,7 +1016,7 @@ export default function LegionellaPage() {
               <div>
                 <h2 className="text-2xl font-display font-medium text-foreground mb-2">LegionellaTrack</h2>
                 <p className="text-muted-foreground mb-1">
-                  Digital Legionella water safety logbook — record L8/HSG274 checks and track compliance status.
+                  Digital Legionella water safety logbook — record a site-specific written scheme, monitoring and actions.
                 </p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
@@ -1054,7 +1054,7 @@ export default function LegionellaPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">
-                Legionella water safety logbook — L8 ACOP / HSG274 compliance checks
+                Legionella water safety logbook — supporting L8/HSG274-informed, risk-assessed controls
               </p>
             </div>
           </div>

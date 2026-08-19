@@ -49,6 +49,7 @@ import mobileRouter from "./mobile";
 import exportRouter from "./export";
 import reportsRouter from "./reports";
 import dashboardSummaryRouter from "./dashboard-summary";
+import complianceHubRouter from "./compliance-hub";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -107,6 +108,7 @@ router.use(mobileRouter);
 router.use(exportRouter);
 router.use(reportsRouter);
 router.use(dashboardSummaryRouter);
+router.use(complianceHubRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);
 // Public contractor self-service portal — no auth, token-protected

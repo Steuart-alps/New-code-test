@@ -574,7 +574,7 @@ ${rows.map(r => `<tr>
               <div>
                 <h2 className="text-2xl font-display font-medium text-foreground mb-2">IncidentTrack</h2>
                 <p className="text-muted-foreground mb-1">
-                  Digital accident & incident logbook — log accidents, near misses, dangerous occurrences and occupational diseases with built-in RIDDOR reporting for HSE compliance.
+                  Digital accident and incident logbook — record investigation, reportability decisions, HSE references and follow-up actions. Confirm RIDDOR duties for each event.
                 </p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>

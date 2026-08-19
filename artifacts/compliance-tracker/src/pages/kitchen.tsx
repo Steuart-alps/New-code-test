@@ -436,31 +436,31 @@ function ConfigDialog() {
           {/* ── Limits tab ── */}
           <TabsContent value="limits" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
             <p className="text-xs text-muted-foreground mb-3">
-              These limits appear as guidance text on every diary day. The defaults match UK food safety legislation.
+              These limits are starting guidance only. Set and review critical limits in your food-business-specific HACCP system, with competent advice where needed.
             </p>
             <div className="space-y-1.5">
               <Label>Cooking temperature limit</Label>
               <Input value={cookingLimit} placeholder="Above 75°C (10 seconds)"
                 onChange={e => setCookingLimit(e.target.value)} />
-              <p className="text-xs text-muted-foreground">UK default: Above 75°C for 10 seconds (Scotland: 82°C)</p>
+              <p className="text-xs text-muted-foreground">Example guidance varies by process and nation; use the critical limit in your documented HACCP system.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Cooling limit</Label>
               <Input value={coolingLimit} placeholder="8°C within 90 minutes"
                 onChange={e => setCoolingLimit(e.target.value)} />
-              <p className="text-xs text-muted-foreground">Cool to 8°C or below within 90 minutes</p>
+              <p className="text-xs text-muted-foreground">Set a safe cooling limit and corrective action for your process in the HACCP system.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Reheating limit</Label>
               <Input value={reheatingLimit} placeholder="Above 82°C"
                 onChange={e => setReheatingLimit(e.target.value)} />
-              <p className="text-xs text-muted-foreground">Scotland: 82°C · England/Wales/NI: 75°C</p>
+              <p className="text-xs text-muted-foreground">Reheating controls depend on the food process and jurisdiction; confirm your own documented limit.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Hot holding minimum</Label>
               <Input value={hotHoldingLimit} placeholder="Above 63°C"
                 onChange={e => setHotHoldingLimit(e.target.value)} />
-              <p className="text-xs text-muted-foreground">UK default: Above 63°C at all times</p>
+              <p className="text-xs text-muted-foreground">Confirm your hot-holding controls, permitted tolerances and corrective action in the HACCP system.</p>
             </div>
           </TabsContent>
         </Tabs>

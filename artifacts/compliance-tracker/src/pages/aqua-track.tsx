@@ -786,7 +786,7 @@ export default function AquaTrackPage() {
               </div>
               <div>
                 <h2 className="text-2xl font-display font-medium mb-2">AquaTrack</h2>
-                <p className="text-muted-foreground mb-1">Complete aquatic compliance — pool water quality testing (PWTAG / HSG179), lifeguard sessions, surveillance checks, first-aid equipment readiness, and incident recording. Everything in one place.</p>
+                <p className="text-muted-foreground mb-1">Pool and swim records — water testing, lifeguard sessions, surveillance, first-aid readiness and incident evidence to support your site operating procedures.</p>
                 <p className="font-medium text-primary">£10 per site per month</p>
               </div>
               <div className="pt-4">

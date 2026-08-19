@@ -36,6 +36,7 @@ import {
   Zap,
   Bug,
   BarChart2,
+  FileCheck2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -55,6 +56,7 @@ function useNavGroups() {
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/reports",   label: "Reports",   icon: BarChart2 },
+        { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
         { href: "/categories", label: "Categories", icon: Tags },
@@ -362,6 +364,12 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             transition={{ duration: 0.4, ease: "easeOut" }}
             className="max-w-7xl mx-auto space-y-8"
           >
+            {location !== "/compliance-hub" && (
+              <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
+                <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>
+                <Link href="/compliance-hub" className="shrink-0 font-semibold underline underline-offset-2">Compliance Hub</Link>
+              </div>
+            )}
             {children}
           </motion.div>
         </div>

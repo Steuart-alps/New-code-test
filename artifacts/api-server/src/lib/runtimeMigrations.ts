@@ -455,6 +455,7 @@ export async function runRuntimeMigrations() {
     await migrateOffboardingColumns();
     await migrateDoctrackSafetrackMerge();
     await migrateLegionellaOutlets();
+    await migrateComplianceHub();
 
     // Annual-acknowledgement flag on DocTrack documents
     await db.execute(sql`
@@ -1455,6 +1456,62 @@ async function migratePestTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pest_activity_client" ON "pest_activity" ("client_id")`);
+}
+
+async function migrateComplianceHub() {
+  // A client-level accountability profile anchors the guidance to the correct
+  // UK nation, business activity and competent people. It deliberately does
+  // not assert that a generic checklist proves legal compliance.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "compliance_profiles" (
+      "client_id"                integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+      "nation"                   text NOT NULL,
+      "operation_type"           text NOT NULL,
+      "responsible_person_name"  text NOT NULL,
+      "responsible_person_role"  text NOT NULL,
+      "responsible_person_email" text,
+      "competent_appointments"   jsonb NOT NULL DEFAULT '[]',
+      "review_cadence"           text NOT NULL,
+      "next_review_date"         date NOT NULL,
+      "haccp_system_reviewed"    boolean NOT NULL DEFAULT false,
+      "water_written_scheme_reference" text,
+      "updated_by"               integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_at"               timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "compliance_profiles"
+    ADD COLUMN IF NOT EXISTS "water_written_scheme_reference" text
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "compliance_actions" (
+      "id"                 serial PRIMARY KEY,
+      "client_id"          integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "source_track"       text NOT NULL,
+      "source_record_id"   text,
+      "title"              text NOT NULL,
+      "severity"           text NOT NULL DEFAULT 'medium',
+      "status"             text NOT NULL DEFAULT 'open',
+      "owner_name"         text NOT NULL,
+      "due_date"           date,
+      "interim_control"    text,
+      "corrective_action"  text NOT NULL,
+      "evidence_reference" text,
+      "verification_notes" text,
+      "verified_by"        integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "verified_at"        timestamp,
+      "created_by"         integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_by"         integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"         timestamp NOT NULL DEFAULT now(),
+      "updated_at"         timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT "CK_compliance_action_status" CHECK ("status" IN ('open', 'in_progress', 'awaiting_verification', 'verified')),
+      CONSTRAINT "CK_compliance_action_severity" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'))
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_compliance_actions_client_status_due"
+    ON "compliance_actions" ("client_id", "status", "due_date")
+  `);
 }
 
 async function migratePremisesTrack() {
