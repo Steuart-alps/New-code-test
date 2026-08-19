@@ -7,7 +7,7 @@ import { useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Pencil, Building2, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Pencil, Building2, ToggleLeft, ToggleRight, TicketPercent, Copy, Check } from "lucide-react";
 
 interface Client {
   id: number;
@@ -150,6 +150,148 @@ function ClientDialog({
   );
 }
 
+interface DiscountStatus {
+  status: "none" | "available" | "reserved" | "redeemed";
+  hint: string | null;
+  issuedAt: string | null;
+  redeemedAt: string | null;
+}
+
+const DISCOUNT_STATUS_COPY: Record<DiscountStatus["status"], { label: string; className: string; desc: string }> = {
+  none: {
+    label: "No code issued",
+    className: "bg-gray-100 text-gray-600",
+    desc: "This client has no discount code yet. Generate one and share it with them privately.",
+  },
+  available: {
+    label: "Code available",
+    className: "bg-blue-100 text-blue-700",
+    desc: "A code has been issued but not used yet. For security the full code is only shown once, when generated — replacing it invalidates the old one.",
+  },
+  reserved: {
+    label: "Checkout in progress",
+    className: "bg-amber-100 text-amber-700",
+    desc: "The client has started a checkout using their code. It can't be replaced until the checkout completes or expires.",
+  },
+  redeemed: {
+    label: "Discount redeemed",
+    className: "bg-green-100 text-green-700",
+    desc: "The 50% discount has been applied to this client's subscription. Each client can only redeem one discount.",
+  },
+};
+
+function DiscountCodeDialog({ client, onClose }: { client: Client | null; onClose: () => void }) {
+  const [status, setStatus] = useState<DiscountStatus | null>(null);
+  const [freshCode, setFreshCode] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setStatus(null);
+    setFreshCode(null);
+    setError("");
+    setCopied(false);
+    if (!client) return;
+    (async () => {
+      const res = await apiFetch(`/billing/discount-code?clientId=${client.id}`);
+      if (res.ok) setStatus(await res.json());
+      else setError((await res.json().catch(() => ({}))).error ?? "Could not load discount status");
+    })();
+  }, [client?.id]);
+
+  async function generate() {
+    if (!client) return;
+    setWorking(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/billing/discount-code?clientId=${client.id}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not generate code");
+      setFreshCode(data.code);
+      const statusRes = await apiFetch(`/billing/discount-code?clientId=${client.id}`);
+      if (statusRes.ok) setStatus(await statusRes.json());
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not generate code");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function copyCode() {
+    if (!freshCode) return;
+    try {
+      await navigator.clipboard.writeText(freshCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable — the code remains visible for manual copy.
+    }
+  }
+
+  const s = status ? DISCOUNT_STATUS_COPY[status.status] : null;
+  const canGenerate = status && (status.status === "none" || status.status === "available");
+
+  return (
+    <Dialog open={!!client} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Discount code — {client?.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          {!status && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {s && status && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${s.className}`}>{s.label}</span>
+                {status.hint && status.status !== "none" && (
+                  <span className="text-xs text-muted-foreground">Code ending …{status.hint}</span>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">{s.desc}</p>
+              {status.issuedAt && (
+                <p className="text-xs text-muted-foreground">Issued {new Date(status.issuedAt).toLocaleDateString()}</p>
+              )}
+              {status.redeemedAt && (
+                <p className="text-xs text-muted-foreground">Redeemed {new Date(status.redeemedAt).toLocaleDateString()}</p>
+              )}
+            </div>
+          )}
+
+          {freshCode && (
+            <div className="border-2 border-dashed border-primary/40 bg-primary/5 rounded-lg p-4 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Copy this code now — it will not be shown again.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 font-mono text-sm break-all select-all">{freshCode}</code>
+                <Button size="icon" variant="outline" className="h-8 w-8 flex-shrink-0" onClick={copyCode} title="Copy code">
+                  {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>Close</Button>
+            {canGenerate && (
+              <Button onClick={generate} disabled={working}>
+                {working
+                  ? "Generating…"
+                  : status?.status === "available"
+                    ? "Replace code"
+                    : "Generate code"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ClientsPage() {
   const { setActiveClientId } = useAuth();
   const [, navigate] = useLocation();
@@ -157,6 +299,7 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [discountClient, setDiscountClient] = useState<Client | null>(null);
 
   async function load() {
     setLoading(true);
@@ -221,6 +364,9 @@ export default function ClientsPage() {
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditingClient(c); setDialogOpen(true); }} title="Edit">
                     <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                   </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDiscountClient(c)} title="Discount code">
+                    <TicketPercent className="w-3.5 h-3.5 text-muted-foreground" />
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleActive(c)} title={c.active ? "Deactivate" : "Activate"}>
                     {c.active ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-muted-foreground" />}
                   </Button>
@@ -250,6 +396,7 @@ export default function ClientsPage() {
         onSaved={load}
         client={editingClient}
       />
+      <DiscountCodeDialog client={discountClient} onClose={() => setDiscountClient(null)} />
     </AppLayout>
   );
 }

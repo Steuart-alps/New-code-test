@@ -184,7 +184,7 @@ export default function TrialEndedPage() {
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
   const total = bundle ? 50 : 10 + selectedAddons.size * 10;
-  const hasAlpsDiscount = discountCode.trim().toUpperCase() === "ALPS50";
+  const hasAlpsDiscount = discountCode.trim().length > 0;
 
   const toggleAddon = (key: string) => {
     setBundle(false);
@@ -392,8 +392,8 @@ export default function TrialEndedPage() {
               />
               <p className="mt-2 text-xs text-muted-foreground">
                 {hasAlpsDiscount
-                  ? "50% ALPS discount selected — it will be checked before Checkout opens and applies to future monthly invoices."
-                  : "Enter your ALPS code to receive 50% off this subscription, including future monthly invoices."}
+                  ? "Your code will be checked before Checkout opens. If valid, 50% off applies to this subscription, including future monthly invoices."
+                  : "If ALPS has given you a discount code, enter it here for 50% off this subscription, including future monthly invoices."}
               </p>
             </div>
           </div>

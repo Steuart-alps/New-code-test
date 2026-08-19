@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-sufficient runner for the per-client config endpoints test suite.
+# Self-sufficient runner for the discount-codes happy-path test suite.
 #
 # If an API server is already answering on $API_BASE/healthz we use it;
 # otherwise we build and boot a private instance on TEST_PORT, run the
@@ -8,10 +8,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Pick a free ephemeral port if none is set. Falls back to 19091 if python3
+# Pick a free ephemeral port if none is set. Falls back to 19090 if python3
 # is unavailable (unlikely in this environment).
 _free_port() {
-  python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19091
+  python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19090
 }
 TEST_PORT="${TEST_PORT:-$(_free_port)}"
 export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
@@ -48,4 +48,4 @@ if ! healthy; then
   fi
 fi
 
-node tests/config-endpoints.mjs
+node tests/discount-codes.mjs

@@ -98,6 +98,20 @@ async function registerAccount(label, ts) {
     console.error(`FATAL: registration failed for ${label}`, reg.status, reg.data);
     process.exit(1);
   }
+  // Self-registrations require email verification; the test instance returns
+  // the one-time token in the response because there is no mailbox.
+  if (reg.data?.verificationToken) {
+    const verify = await session("GET", `/auth/verify-email?token=${encodeURIComponent(reg.data.verificationToken)}`);
+    if (verify.status !== 200) {
+      console.error(`FATAL: email verification failed for ${label}`, verify.status, verify.data);
+      process.exit(1);
+    }
+    const login = await session("POST", "/auth/login", { email, password: "password-123" });
+    if (login.status !== 200) {
+      console.error(`FATAL: login after verification failed for ${label}`, login.status, login.data);
+      process.exit(1);
+    }
+  }
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;

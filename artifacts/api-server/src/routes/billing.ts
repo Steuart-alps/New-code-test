@@ -23,12 +23,15 @@ import {
   type ServiceKey,
 } from "../lib/services";
 import {
-  ALPS_DISCOUNT_CODE,
   attachDiscountCheckoutSession,
   getAlpsDiscountCouponId,
+  getClientDiscountCodeStatus,
+  hashDiscountCode,
+  issueClientDiscountCode,
   normaliseAlpsDiscountCode,
   releaseAlpsDiscountReservation,
   reserveAlpsDiscount,
+  verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
 
@@ -207,10 +210,16 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
 
+  // Discount codes are manager-issued per client; the entered code must match
+  // the code issued to THIS client (server-derived context) exactly.
   const discountCode = normaliseAlpsDiscountCode(rawDiscountCode);
   const codeWasEntered = typeof rawDiscountCode === "string" && rawDiscountCode.trim().length > 0;
-  if (codeWasEntered && discountCode !== ALPS_DISCOUNT_CODE) {
-    return res.status(400).json({ error: "That discount code is not valid." });
+  let discountValid = false;
+  if (codeWasEntered) {
+    discountValid = discountCode !== null && (await verifyClientDiscountCode(clientId, discountCode));
+    if (!discountValid) {
+      return res.status(400).json({ error: "That discount code is not valid for this account." });
+    }
   }
 
   let discountReservation: { code: string; token: string; expiresAt: Date } | null = null;
@@ -281,11 +290,13 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     }
 
     let couponId: string | undefined;
-    if (discountCode === ALPS_DISCOUNT_CODE) {
-      discountReservation = await reserveAlpsDiscount(clientId, discountCode, stripe);
+    if (discountValid && discountCode) {
+      // Only the SHA-256 hash travels past this point — it is what gets
+      // persisted in the reservation row and Stripe session metadata.
+      discountReservation = await reserveAlpsDiscount(clientId, hashDiscountCode(discountCode), stripe);
       if (!discountReservation) {
         return res.status(409).json({
-          error: "This ALPS discount code has already been used for this account.",
+          error: "A discount has already been used or is pending for this account.",
         });
       }
       couponId = await getAlpsDiscountCouponId(stripe);
@@ -346,6 +357,42 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
         // Preserve the original checkout failure; a stale reservation expires.
       }
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Manager-issued client discount codes ────────────────────────────────────
+// Consultant (manager) only. The raw code is returned exactly ONCE at issue
+// time; afterwards only the lifecycle status and a 4-character hint are
+// visible. Client users can never read or manage codes.
+
+// GET /api/billing/discount-code — lifecycle status for the client's code.
+router.get("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  try {
+    res.json(await getClientDiscountCodeStatus(clientId));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/discount-code — generate (or replace) the client's code.
+router.post("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  try {
+    const result = await issueClientDiscountCode(clientId, req.currentUser?.id ?? null);
+    if ("error" in result) {
+      return res.status(409).json({
+        error:
+          result.error === "redeemed"
+            ? "This account has already redeemed its discount — a new code cannot be issued."
+            : "A checkout using this account's discount code is currently in progress. Try again once it completes or expires.",
+      });
+    }
+    res.status(201).json({ code: result.code, hint: result.hint });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });

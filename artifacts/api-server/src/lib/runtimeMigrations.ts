@@ -53,6 +53,31 @@ export async function runRuntimeMigrations() {
       CREATE INDEX IF NOT EXISTS "IDX_billing_discount_redemptions_status"
       ON "billing_discount_redemptions" ("status", "created_at")
     `);
+    // One redemption ever per client, regardless of which code value was used
+    // (codes are now manager-issued and replaceable). Existing data used a
+    // single shared code, so (client_id, code) uniqueness already implied
+    // one row per client and this index cannot fail on legacy rows.
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_billing_discount_redemption_client"
+      ON "billing_discount_redemptions" ("client_id")
+    `);
+
+    // ---- Manager-issued per-client discount codes ----
+    // One active code per client; only the SHA-256 hash is stored. The raw
+    // code is shown to the issuing manager exactly once.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "billing_discount_codes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "code_hash" text NOT NULL,
+        "code_hint" text NOT NULL,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "replaced_at" timestamp,
+        CONSTRAINT "UQ_billing_discount_codes_client" UNIQUE ("client_id"),
+        CONSTRAINT "UQ_billing_discount_codes_hash" UNIQUE ("code_hash")
+      )
+    `);
 
     // ---- Sites table ----
     await db.execute(sql`
