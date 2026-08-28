@@ -45,6 +45,26 @@ import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import alpsLogo from "@/assets/alps-logo.png";
+import { ModuleActionsPanel } from "@/components/module-actions-panel";
+
+const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
+  { prefix: "/daily-track-am", moduleKey: "daily_am" },
+  { prefix: "/daily-track-pm", moduleKey: "daily_pm" },
+  { prefix: "/food-safety", moduleKey: "kitchen" },
+  { prefix: "/kitchen", moduleKey: "kitchen" },
+  { prefix: "/fire-safety", moduleKey: "fire" },
+  { prefix: "/legionella", moduleKey: "legionella" },
+  { prefix: "/pool-track", moduleKey: "pool" },
+  { prefix: "/aqua-track", moduleKey: "pool" },
+  { prefix: "/pat-track", moduleKey: "pat" },
+  { prefix: "/pest-track", moduleKey: "pest" },
+  { prefix: "/premises-track", moduleKey: "premises" },
+  { prefix: "/hot-tub", moduleKey: "hot_tub" },
+  { prefix: "/tree-track", moduleKey: "tree" },
+  { prefix: "/green-track", moduleKey: "green" },
+  { prefix: "/swim-track", moduleKey: "swim" },
+  { prefix: "/incidents", moduleKey: "incident" },
+];
 
 function useNavGroups() {
   const isConsultant = useIsConsultant();
@@ -111,6 +131,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
   const [showAppDialog, setShowAppDialog] = useState(false);
+  const moduleActionKey = moduleActionRoutes.find(route => location.startsWith(route.prefix))?.moduleKey;
 
   const primaryColor = client?.primaryColor ?? "#7FA8C9";
 
@@ -371,6 +392,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               </div>
             )}
             {children}
+            {moduleActionKey && <ModuleActionsPanel moduleKey={moduleActionKey} />}
           </motion.div>
         </div>
       </main>

@@ -456,6 +456,7 @@ export async function runRuntimeMigrations() {
     await migrateDoctrackSafetrackMerge();
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
+    await migrateTrackActions();
 
     // Annual-acknowledgement flag on DocTrack documents
     await db.execute(sql`
@@ -477,6 +478,171 @@ export async function runRuntimeMigrations() {
     logger.error({ err }, "Runtime migrations failed");
     throw err;
   }
+}
+
+// ---- Shared operational action register ----
+async function migrateTrackActions() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_actions" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "module" text NOT NULL,
+      "source_record_id" integer,
+      "title" text NOT NULL,
+      "severity" text NOT NULL DEFAULT 'action_required'
+        CHECK ("severity" IN ('monitor', 'action_required', 'urgent')),
+      "owner_name" text,
+      "due_date" date,
+      "remedial_action" text,
+      "evidence_reference" text,
+      "resolution_notes" text,
+      "status" text NOT NULL DEFAULT 'open'
+        CHECK ("status" IN ('open', 'in_progress', 'resolved')),
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "resolved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "resolved_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_actions_client_module_status"
+    ON "track_actions" ("client_id", "module", "status")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_actions_site"
+    ON "track_actions" ("site_id")
+  `);
+  // Earlier installs created this column as required. Automated records do not
+  // have a human creator, whereas API-created records continue to set it.
+  await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_actions_source"
+    ON "track_actions" ("client_id", "module", "source_record_id")
+    WHERE "source_record_id" IS NOT NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_action_reminder_log" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_date" date NOT NULL,
+      "sent_at" timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("client_id", "log_date")
+    )
+  `);
+
+  // A generic JSONB trigger keeps this independent from source-table schema
+  // drift: some operational tables do not have check_type/follow_up_date (or
+  // created_by), and to_jsonb(NEW) makes those optional safely readable.
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "sync_track_action_from_source"()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      record_json jsonb := to_jsonb(NEW);
+      source_result text := lower(coalesce(record_json->>'result', ''));
+      action_severity text;
+      action_title text;
+      action_due_date date;
+      source_site_id integer;
+    BEGIN
+      IF source_result NOT IN (
+        'monitor', 'fail', 'failed', 'action_required', 'urgent_action',
+        'urgent', 'out_of_range', 'unsafe'
+      ) THEN
+        RETURN NEW;
+      END IF;
+
+      action_severity := CASE
+        WHEN source_result = 'monitor' THEN 'monitor'
+        WHEN source_result IN ('urgent_action', 'urgent', 'out_of_range', 'unsafe') THEN 'urgent'
+        ELSE 'action_required'
+      END;
+      action_title := coalesce(
+        nullif(initcap(replace(record_json->>'check_type', '_', ' ')), ''),
+        initcap(replace(TG_ARGV[0], '_', ' ')) || ' check'
+      );
+      IF nullif(record_json->>'follow_up_date', '') IS NOT NULL THEN
+        action_due_date := (record_json->>'follow_up_date')::date;
+      END IF;
+      source_site_id := nullif(record_json->>'site_id', '')::integer;
+      -- Green PUWER checks are machine-scoped. Resolve their site through the
+      -- machine when the check row itself has no site_id, so department
+      -- filtering remains as strict as for directly site-scoped records.
+      IF TG_ARGV[0] = 'green'
+        AND source_site_id IS NULL
+        AND nullif(record_json->>'machine_id', '') IS NOT NULL THEN
+        SELECT site_id INTO source_site_id
+        FROM green_machines
+        WHERE id = (record_json->>'machine_id')::integer
+          AND client_id = (record_json->>'client_id')::integer;
+      END IF;
+
+      INSERT INTO "track_actions" (
+        "client_id", "site_id", "module", "source_record_id", "title",
+        "severity", "due_date", "status"
+      )
+      VALUES (
+        (record_json->>'client_id')::integer,
+        source_site_id,
+        TG_ARGV[0],
+        (record_json->>'id')::integer,
+        action_title,
+        action_severity,
+        action_due_date,
+        'open'
+      )
+      ON CONFLICT ("client_id", "module", "source_record_id")
+        WHERE "source_record_id" IS NOT NULL
+      DO UPDATE SET
+        "title" = EXCLUDED."title",
+        "severity" = EXCLUDED."severity",
+        "due_date" = EXCLUDED."due_date",
+        "updated_at" = now()
+      WHERE "track_actions"."status" <> 'resolved';
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await db.execute(sql`
+    DO $$
+    DECLARE
+      source_table text;
+      module_key text;
+    BEGIN
+      FOR source_table, module_key IN
+        SELECT * FROM (VALUES
+          ('fire_safety_checks', 'fire'),
+          ('legionella_checks', 'legionella'),
+          ('pool_checks', 'pool'),
+          ('hot_tub_checks', 'hot_tub'),
+          ('tree_inspections', 'tree'),
+          ('green_pre_use_checks', 'green'),
+          ('green_puwer_inspections', 'green'),
+          ('swim_sessions', 'swim'),
+          ('swim_surveillance_checks', 'swim'),
+          ('swim_first_aid_checks', 'swim')
+        ) AS sources(table_name, module_name)
+      LOOP
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = source_table
+            AND column_name IN ('id', 'client_id', 'result')
+          GROUP BY table_name HAVING count(DISTINCT column_name) = 3
+        ) THEN
+          EXECUTE format('DROP TRIGGER IF EXISTS sync_track_action_on_result ON public.%I', source_table);
+          EXECUTE format(
+            'CREATE TRIGGER sync_track_action_on_result
+             AFTER INSERT OR UPDATE OF result ON public.%I
+             FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source(%L)',
+            source_table, module_key
+          );
+        END IF;
+      END LOOP;
+    END $$
+  `);
 }
 
 // ---- 2026-08 audit fixes: schema drift between routes and migrations ----

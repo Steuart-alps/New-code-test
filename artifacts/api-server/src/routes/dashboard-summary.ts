@@ -9,7 +9,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
 import { getCheckAlerts } from "../lib/checkReminders";
 import { getEntitledServices, isEntitled } from "../lib/services";
 
@@ -29,6 +29,7 @@ export interface TrackSummary {
   path: string;
   enabled: boolean;
   status: TrackStatus;
+  health: "action_required" | "clear";
   badge: string;
   items: TrackItem[];
 }
@@ -43,6 +44,36 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
   const rawSiteId = req.query.siteId as string | undefined;
   const siteId = rawSiteId && !isNaN(parseInt(rawSiteId, 10)) ? parseInt(rawSiteId, 10) : null;
+  const departmentId = getActiveDepartmentId(req);
+  let accessibleSiteIds: number[] | null = null;
+  try {
+    if (departmentId != null) {
+      const accessibleRows = await db.execute(sql`
+        SELECT id FROM sites
+        WHERE client_id = ${clientId}
+          AND (department_id IS NULL OR department_id = ${departmentId})
+      `);
+      accessibleSiteIds = rows(accessibleRows).map((site: any) => Number(site.id));
+    }
+    if (siteId != null) {
+      const requestedSite = await db.execute(sql`
+        SELECT id FROM sites
+        WHERE id = ${siteId} AND client_id = ${clientId}
+          ${departmentId != null ? sql`AND (department_id IS NULL OR department_id = ${departmentId})` : sql``}
+        LIMIT 1
+      `);
+      if (rows(requestedSite).length === 0) {
+        return res.status(403).json({ error: "Site is not available in the current department" });
+      }
+    }
+  } catch {
+    return res.status(500).json({ error: "Unable to validate site access" });
+  }
+  const protectedSiteClause = siteId != null
+    ? sql`AND site_id = ${siteId}`
+    : accessibleSiteIds != null
+    ? sql`AND (site_id IS NULL OR site_id = ANY(${accessibleSiteIds}))`
+    : sql``;
 
   const today = new Date().toISOString().slice(0, 10);
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -51,7 +82,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   const entitled = (key: string) =>
     isEntitled(services, key as Parameters<typeof isEntitled>[1]);
 
-  const tracks: TrackSummary[] = [];
+  const tracks: Omit<TrackSummary, "health">[] = [];
 
   // ── Sites list (for daily track gap detection) ──────────────────────────────
   let allSites: { id: number; name: string }[] = [];
@@ -186,7 +217,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           status = "attention";
           badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not recorded today`;
           for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: "Food safety diary not submitted today", path: "/food-safety" });
+            items.push({ label: site.name, detail: "Food safety diary not submitted today", path: "/kitchen" });
           }
         }
       } catch {
@@ -198,7 +229,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     tracks.push({
       trackId: "kitchen",
       label: "KitchenTrack",
-      path: "/food-safety",
+      path: "/kitchen",
       enabled,
       status,
       badge,
@@ -228,7 +259,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due soon`;
-        } else if (totalAlerts === 0 && never.length === 0) {
+        } else if (never.length > 0) {
+          status = "no_data";
+          badge = `${never.length} check${never.length > 1 ? "s" : ""} never recorded`;
+        } else if (totalAlerts === 0) {
           status = "ok";
           badge = "All checks up to date";
         } else if (never.length > 0 && overdue.length === 0 && dueSoon.length === 0) {
@@ -239,13 +273,15 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...dueSoon].slice(0, 10)) {
+        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
           const days = a.daysUntilDue;
           const detail =
             a.status === "overdue"
               ? `Overdue by ${Math.abs(days ?? 0)} day${Math.abs(days ?? 0) !== 1 ? "s" : ""}`
               : days === 0
               ? "Due today"
+              : a.status === "never"
+              ? "No record has been submitted"
               : `Due in ${days} day${days !== 1 ? "s" : ""}`;
           items.push({ label: a.checkLabel, detail, path: "/fire-safety" });
         }
@@ -279,6 +315,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const legAlerts = alerts.filter((a) => a.module === "legionella");
         const overdue = legAlerts.filter((a) => a.status === "overdue");
         const dueSoon = legAlerts.filter((a) => a.status === "due_soon");
+        const never = legAlerts.filter((a) => a.status === "never");
 
         if (overdue.length > 0) {
           status = "overdue";
@@ -286,22 +323,22 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due soon`;
-        } else if (legAlerts.length === 0) {
+        } else if (never.length > 0 || legAlerts.length === 0) {
           status = "no_data";
-          badge = "No records yet";
+          badge = never.length > 0 ? `${never.length} check${never.length > 1 ? "s" : ""} never recorded` : "No records yet";
         } else {
           status = "ok";
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...dueSoon].slice(0, 10)) {
+        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
           const days = a.daysUntilDue;
           const detail =
             a.status === "overdue"
               ? `Overdue by ${Math.abs(days ?? 0)} day${Math.abs(days ?? 0) !== 1 ? "s" : ""}`
               : days === 0
               ? "Due today"
-              : `Due in ${days} day${days !== 1 ? "s" : ""}`;
+              : a.status === "never" ? "No record has been submitted" : `Due in ${days} day${days !== 1 ? "s" : ""}`;
           items.push({ label: a.checkLabel, detail, path: "/legionella" });
         }
       } catch {
@@ -334,6 +371,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const poolAlerts = alerts.filter((a) => a.module === "pool");
         const overdue = poolAlerts.filter((a) => a.status === "overdue");
         const dueSoon = poolAlerts.filter((a) => a.status === "due_soon");
+        const never = poolAlerts.filter((a) => a.status === "never");
 
         if (overdue.length > 0) {
           status = "overdue";
@@ -341,18 +379,18 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due soon`;
-        } else if (poolAlerts.length === 0) {
+        } else if (never.length > 0 || poolAlerts.length === 0) {
           status = "no_data";
-          badge = "No records yet";
+          badge = never.length > 0 ? `${never.length} check${never.length > 1 ? "s" : ""} never recorded` : "No records yet";
         } else {
           status = "ok";
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...dueSoon].slice(0, 10)) {
+        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
           const detail =
-            a.status === "overdue" ? "Overdue check" : "Due soon";
-          items.push({ label: a.checkLabel, detail, path: "/pool-track" });
+            a.status === "overdue" ? "Overdue check" : a.status === "never" ? "No record has been submitted" : "Due soon";
+          items.push({ label: a.checkLabel, detail, path: "/aqua-track" });
         }
       } catch {
         status = "no_data";
@@ -363,7 +401,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     tracks.push({
       trackId: "pool",
       label: "PoolTrack",
-      path: "/pool-track",
+      path: "/aqua-track",
       enabled,
       status,
       badge,
@@ -411,6 +449,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         if (overdue.length > 0) {
           status = "overdue";
           badge = `${overdue.length} overdue`;
+        } else if (untested.length > 0) {
+          status = "attention";
+          badge = `${untested.length} appliance${untested.length > 1 ? "s" : ""} never tested`;
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due for testing`;
@@ -1226,7 +1267,216 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     tracks.push({ trackId: "incident", label: "IncidentTrack", path: "/incidents", enabled, status, badge, items });
   }
 
-  res.json({ tracks });
+  // Actions are deliberately read-only here. During the transition to the
+  // shared action table it may not exist yet, so a missing table must not
+  // prevent the dashboard from loading.
+  let openActions: any[] = [];
+  try {
+    const actionRows = await db.execute(sql`
+      SELECT module, title, severity, due_date
+      FROM track_actions
+      WHERE client_id = ${clientId}
+        AND COALESCE(status, 'open') NOT IN ('resolved', 'closed', 'completed', 'cancelled')
+        ${siteId != null ? sql`AND (site_id IS NULL OR site_id = ${siteId})` : accessibleSiteIds != null ? sql`AND (site_id IS NULL OR site_id = ANY(${accessibleSiteIds}))` : sql``}
+      ORDER BY due_date ASC NULLS LAST
+    `);
+    openActions = rows(actionRows);
+  } catch {
+    // track_actions is introduced independently of this endpoint.
+  }
+
+  const aliases: Record<string, string[]> = {
+    daily_am: ["dailyam", "dailytrackam"],
+    daily_pm: ["dailypm", "dailytrackpm"],
+    kitchen: ["kitchen", "kitchentrack", "foodsafety"],
+    fire: ["fire", "firetrack", "firesafety"],
+    legionella: ["legionella", "legionellatrack"],
+    pool: ["pool", "pooltrack"],
+    pat: ["pat", "pattrack"],
+    pest: ["pest", "pesttrack"],
+    fix: ["fix", "fixtrack"],
+    premises: ["premises", "premisestrack"],
+    doc: ["doc", "doctrack"],
+    safe: ["safe", "safetrack"],
+    train: ["train", "traintrack"],
+    hot_tub: ["hottub", "hottubtrack", "tub", "tubtrack"],
+    tree: ["tree", "treetrack"],
+    bike: ["bike", "biketrack"],
+    green: ["green", "greentrack"],
+    swim: ["swim", "swimtrack"],
+    incident: ["incident", "incidenttrack"],
+  };
+  const normaliseModule = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const actionRequiredTrackIds = new Set<string>();
+
+  for (const track of tracks) {
+    const actionModules = new Set((aliases[track.trackId] ?? [track.trackId]).map(normaliseModule));
+    for (const action of openActions) {
+      if (!actionModules.has(normaliseModule(action.module))) continue;
+      const severity = normaliseModule(action.severity);
+      const monitorIsDue = !action.due_date || String(action.due_date).slice(0, 10) <= today;
+      if (severity === "actionrequired" || severity === "urgent" || (severity === "monitor" && monitorIsDue)) {
+        actionRequiredTrackIds.add(track.trackId);
+      }
+      track.items.unshift({
+        label: action.title || "Open action",
+        detail: `${action.severity ? `${action.severity} priority — ` : ""}Open action${action.due_date ? ` due ${action.due_date}` : ""}`,
+        path: track.path,
+      });
+    }
+  }
+
+  // Surface the current result for result-based tracks as an actionable item.
+  // DISTINCT ON ensures an old failed check does not remain red after a newer
+  // passing check of the same type at the same site.
+  const failedResultQueries: Array<{
+    trackId: string;
+    path: string;
+    query: ReturnType<typeof sql>;
+  }> = [
+    {
+      trackId: "fire",
+      path: "/fire-safety",
+      query: sql`
+        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        FROM fire_safety_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_type, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "legionella",
+      path: "/legionella",
+      query: sql`
+        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        FROM legionella_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_type, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "pool",
+      path: "/aqua-track",
+      query: sql`
+        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, NULL::text AS location
+        FROM pool_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_type, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "hot_tub",
+      path: "/hot-tub",
+      query: sql`
+        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        FROM hot_tub_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_type, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "tree",
+      path: "/tree-track",
+      query: sql`
+        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        FROM tree_inspections WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_type, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "green",
+      path: "/green-track",
+      query: sql`
+        SELECT DISTINCT ON (c.machine_id) 'pre_use_check' AS check_type, c.check_date AS date, c.result, m.name AS location
+        FROM green_pre_use_checks c
+        JOIN green_machines m ON m.id = c.machine_id
+        WHERE c.client_id = ${clientId}
+          ${siteId != null ? sql`AND m.site_id = ${siteId}` : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``}
+        ORDER BY c.machine_id, c.check_date DESC, c.id DESC
+      `,
+    },
+    {
+      trackId: "green",
+      path: "/green-track",
+      query: sql`
+        SELECT DISTINCT ON (p.machine_id) p.inspection_type AS check_type, p.inspection_date AS date, p.result, m.name AS location
+        FROM green_puwer_inspections p
+        JOIN green_machines m ON m.id = p.machine_id
+        WHERE p.client_id = ${clientId}
+          ${siteId != null ? sql`AND m.site_id = ${siteId}` : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``}
+        ORDER BY p.machine_id, p.inspection_date DESC, p.id DESC
+      `,
+    },
+    {
+      trackId: "swim",
+      path: "/swim-track",
+      query: sql`
+        SELECT DISTINCT ON (site_id, session_type) session_type AS check_type, session_date AS date, result, NULL::text AS location
+        FROM swim_sessions WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, session_type, session_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "swim",
+      path: "/swim-track",
+      query: sql`
+        SELECT DISTINCT ON (site_id) 'surveillance_check' AS check_type, check_date AS date, result, NULL::text AS location
+        FROM swim_surveillance_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_date DESC, id DESC
+      `,
+    },
+    {
+      trackId: "swim",
+      path: "/swim-track",
+      query: sql`
+        SELECT DISTINCT ON (site_id) 'first_aid_check' AS check_type, check_date AS date, result, NULL::text AS location
+        FROM swim_first_aid_checks WHERE client_id = ${clientId} ${protectedSiteClause}
+        ORDER BY site_id, check_date DESC, id DESC
+      `,
+    },
+  ];
+  for (const resultQuery of failedResultQueries) {
+    try {
+      const resultRows = rows(await db.execute(resultQuery.query));
+      const track = tracks.find((candidate) => candidate.trackId === resultQuery.trackId);
+      if (!track) continue;
+      for (const result of resultRows) {
+        const failedResult = /fail|action.?required|urgent|out.?of.?range|unsafe|non.?compliant/i.test(
+          String(result.result ?? ""),
+        );
+        if (!failedResult) continue;
+        actionRequiredTrackIds.add(track.trackId);
+        track.items.unshift({
+          label: `${String(result.check_type ?? "Check").replace(/_/g, " ")} result requires action`,
+          detail: `${result.result || "Action required"}${result.location ? ` — ${result.location}` : ""}${result.date ? ` (${result.date})` : ""}`,
+          path: resultQuery.path,
+        });
+      }
+    } catch {
+      // Older schemas can lack a result column; dashboard availability wins.
+    }
+  }
+
+  // A red state means a user must act now. Amber future reminders remain
+  // visible through their existing badge but do not turn the module red.
+  const summaries: TrackSummary[] = tracks.map((track) => {
+    const dueNow = track.items.some((item) => /due today/i.test(item.detail));
+    const futureReminderOnly =
+      track.status === "attention" &&
+      /(due soon|due for testing|review.*due soon|expiring soon)/i.test(track.badge) &&
+      track.items.length > 0 &&
+      track.items.every((item) =>
+        /^due soon$|due in|review due|next test due|expires \d{4}-\d{2}-\d{2}/i.test(item.detail),
+      ) &&
+      !dueNow;
+    const health: TrackSummary["health"] =
+      track.enabled &&
+      (track.status === "overdue" ||
+        track.status === "no_data" ||
+        actionRequiredTrackIds.has(track.trackId) ||
+        (track.status === "attention" && !futureReminderOnly))
+        ? "action_required"
+        : "clear";
+    return { ...track, health };
+  });
+
+  res.json({ tracks: summaries });
 });
 
 export default router;

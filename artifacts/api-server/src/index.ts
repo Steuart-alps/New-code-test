@@ -24,6 +24,7 @@ import { runCancellationDetectionJob, runDataDeletionJob } from "./lib/offboardi
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runSafeTrackAckReminderJob } from "./lib/safeTrackAckReminders";
+import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 
 const rawPort = process.env["PORT"];
 
@@ -77,6 +78,17 @@ async function initStripe() {
 }
 
 function startScheduler() {
+  cron.schedule("35 8 * * *", async () => {
+    logger.info("Running operational action reminder job...");
+    try {
+      const result = await runTrackActionReminderJob();
+      logger.info({ result }, "Operational action reminder job complete");
+    } catch (err) {
+      logger.error({ err }, "Operational action reminder job failed");
+    }
+  });
+  logger.info("Operational action reminder scheduler started (daily at 08:35)");
+
   // Run reminder job every day at 8am
   cron.schedule("0 8 * * *", async () => {
     logger.info("Running scheduled contractor reminder job...");

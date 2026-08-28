@@ -17,6 +17,7 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type TrackStatus = "ok" | "attention" | "overdue" | "no_data";
+type TrackHealth = "action_required" | "clear";
 
 interface TrackItem {
   label: string;
@@ -30,6 +31,7 @@ interface TrackSummary {
   path: string;
   enabled: boolean;
   status: TrackStatus;
+  health: TrackHealth;
   badge: string;
   items: TrackItem[];
 }
@@ -57,10 +59,10 @@ const STATUS_BADGE: Record<TrackStatus, string> = {
   no_data:   "bg-muted text-muted-foreground",
 };
 
-function StatusIcon({ status, className }: { status: TrackStatus; className?: string }) {
-  if (status === "overdue")   return <AlertCircle   className={cn("text-rose-500",               className)} />;
-  if (status === "attention") return <AlertTriangle  className={cn("text-amber-500",              className)} />;
-  if (status === "ok")        return <CheckCircle2   className={cn("text-emerald-500",            className)} />;
+function StatusIcon({ status, health, className }: { status: TrackStatus; health: TrackHealth; className?: string }) {
+  if (health === "action_required") return <AlertCircle className={cn("text-rose-500", className)} />;
+  if (status === "attention") return <AlertTriangle className={cn("text-amber-500", className)} />;
+  if (health === "clear") return <CheckCircle2 className={cn("text-emerald-500", className)} />;
   return                             <MinusCircle    className={cn("text-muted-foreground/50",    className)} />;
 }
 
@@ -75,7 +77,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
     <div
       className={cn(
         "border-l-4 rounded-r-md border border-border/60 transition-colors",
-        STATUS_BORDER[track.status],
+        track.health === "action_required" ? "border-l-rose-500" : "border-l-emerald-500",
         STATUS_BG[track.status],
       )}
     >
@@ -84,11 +86,14 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
         <Link
           href={track.path}
           className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-          aria-label={`Open ${track.label}`}
+          aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
         >
-          <StatusIcon status={track.status} className="w-4 h-4 shrink-0" />
+          <StatusIcon status={track.status} health={track.health} className="w-4 h-4 shrink-0" />
 
-          <span className="font-medium text-sm flex-1">{track.label}</span>
+          <span className={cn(
+            "font-medium text-sm flex-1",
+            track.health === "action_required" ? "text-rose-700" : "text-emerald-700",
+          )}>{track.label}</span>
 
           {kitchenOverdueBadge}
 
@@ -120,7 +125,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
           <Link
             href={track.path}
             className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            aria-label={`Open ${track.label}`}
+            aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
           >
             <ArrowRight className="w-4 h-4" />
           </Link>
@@ -175,30 +180,23 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 
 function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   const enabled = tracks.filter((t) => t.enabled);
-  const overdue   = enabled.filter((t) => t.status === "overdue").length;
-  const attention = enabled.filter((t) => t.status === "attention").length;
-  const ok        = enabled.filter((t) => t.status === "ok").length;
+  const actionRequired = enabled.filter((t) => t.health === "action_required").length;
+  const clear = enabled.filter((t) => t.health === "clear").length;
 
   if (enabled.length === 0) return null;
 
   return (
     <div className="flex items-center gap-4 text-sm flex-wrap">
-      {overdue > 0 && (
+      {actionRequired > 0 && (
         <span className="flex items-center gap-1.5 text-rose-600 font-medium">
           <AlertCircle className="w-4 h-4" />
-          {overdue} track{overdue > 1 ? "s" : ""} overdue
+          {actionRequired} track{actionRequired > 1 ? "s" : ""} require action
         </span>
       )}
-      {attention > 0 && (
-        <span className="flex items-center gap-1.5 text-amber-600 font-medium">
-          <AlertTriangle className="w-4 h-4" />
-          {attention} need{attention === 1 ? "s" : ""} attention
-        </span>
-      )}
-      {ok > 0 && (
+      {clear > 0 && (
         <span className="flex items-center gap-1.5 text-emerald-600">
           <CheckCircle2 className="w-4 h-4" />
-          {ok} all OK
+          {clear} clear
         </span>
       )}
     </div>
@@ -482,12 +480,14 @@ export default function Dashboard() {
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
 
-  // Sort: overdue first, then attention, then ok, then no_data
+  // Put actionable modules first; due-soon modules stay visible but follow them.
   const statusOrder: Record<TrackStatus, number> = {
     overdue: 0, attention: 1, ok: 2, no_data: 3,
   };
   const sorted = [...enabledTracks].sort(
-    (a, b) => statusOrder[a.status] - statusOrder[b.status],
+    (a, b) =>
+      (a.health === "action_required" ? 0 : 1) - (b.health === "action_required" ? 0 : 1) ||
+      statusOrder[a.status] - statusOrder[b.status],
   );
 
   return (
