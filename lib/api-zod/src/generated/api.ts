@@ -1555,6 +1555,45 @@ export const GetFoodSafetyRecordByDateResponse = zod.object({
 });
 
 /**
+ * @summary Get daily food safety diary completeness for a month
+ */
+export const getFoodSafetySummaryQueryYearMin = 1000;
+export const getFoodSafetySummaryQueryYearMax = 9999;
+
+export const getFoodSafetySummaryQueryMonthMax = 12;
+
+export const GetFoodSafetySummaryQueryParams = zod.object({
+  year: zod.coerce
+    .number()
+    .min(getFoodSafetySummaryQueryYearMin)
+    .max(getFoodSafetySummaryQueryYearMax),
+  month: zod.coerce.number().min(1).max(getFoodSafetySummaryQueryMonthMax),
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Scope to a site's diary. Omit for the whole-organisation diary.",
+    ),
+});
+
+export const GetFoodSafetySummaryResponse = zod.object({
+  year: zod.number(),
+  month: zod.number(),
+  siteId: zod.number().nullable(),
+  days: zod.array(
+    zod.object({
+      date: zod.date(),
+      hasRecord: zod
+        .boolean()
+        .describe("Whether a diary record exists for this date."),
+      submitted: zod
+        .boolean()
+        .describe("Whether the diary record has been submitted."),
+    }),
+  ),
+});
+
+/**
  * @summary List missing and unsubmitted food safety diary dates in a bounded range
  */
 export const GetFoodSafetyMissingDatesQueryParams = zod.object({

@@ -11,6 +11,8 @@ import {
   getListFoodSafetyRecordsQueryKey,
   useGetFoodSafetyRecordByDate,
   getGetFoodSafetyRecordByDateQueryKey,
+  useGetFoodSafetySummary,
+  getGetFoodSafetySummaryQueryKey,
   useCreateFoodSafetyRecord,
   useUpdateFoodSafetyRecord,
   useListSites,
@@ -486,7 +488,7 @@ function ConfigDialog() {
 
 // ── Food Safety Completeness Calendar ────────────────────────────────────────
 
-type FSDayStatus = "complete" | "draft" | "missing" | "future";
+type FSDayStatus = "complete" | "draft" | "missing" | "nonOperating";
 
 function shiftFSMonth(ym: string, delta: number): string {
   const [y, m] = ym.split("-").map(Number);
@@ -508,50 +510,37 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
   const today = format(new Date(), "yyyy-MM-dd");
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
-  const [missingDates, setMissingDates] = useState<string[]>([]);
-  const [draftDates, setDraftDates] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
-  const from = `${month}-01`;
-  const to = `${month}-${String(daysInMonth).padStart(2, "0")}`;
-  const rangeTo = to > today ? today : to;
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const params = new URLSearchParams({ from, to: rangeTo });
-      if (siteId != null) params.set("siteId", String(siteId));
-      const res = await apiFetch(`/food-safety/missing-dates?${params}`);
-      if (!cancelled) {
-        const data = res.ok ? await res.json() : null;
-        setMissingDates(Array.isArray(data?.missingDates) ? data.missingDates : []);
-        setDraftDates(Array.isArray(data?.draftDates) ? data.draftDates : []);
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [siteId, from, rangeTo]);
+  const summaryParams = { year: y, month: m, ...(siteId != null ? { siteId } : {}) };
+  const { data: summary, isLoading: loading, isError } = useGetFoodSafetySummary(summaryParams, {
+    query: {
+      queryKey: getGetFoodSafetySummaryQueryKey(summaryParams),
+      staleTime: 30_000,
+    },
+  });
+  const summaryByDate = new Map((summary?.days ?? []).map((day) => [day.date, day]));
 
   const dayStatuses: { date: string; status: FSDayStatus }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${month}-${String(d).padStart(2, "0")}`;
     if (date > today) {
-      dayStatuses.push({ date, status: "future" });
+      dayStatuses.push({ date, status: "nonOperating" });
       continue;
     }
-    const status: FSDayStatus = missingDates.includes(date)
-      ? "missing"
-      : draftDates.includes(date)
+    const day = summaryByDate.get(date);
+    const status: FSDayStatus = day?.submitted
+      ? "complete"
+      : day?.hasRecord
       ? "draft"
-      : "complete";
+      : "missing";
     dayStatuses.push({ date, status });
   }
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Mon = 0
-  const missingCount = missingDates.length;
+  const missingCount = dayStatuses.filter(({ status }) => status === "missing").length;
+  const actionableDates = dayStatuses.filter(({ status }) => status === "missing" || status === "draft");
 
   return (
     <Card className="mt-6">
@@ -576,6 +565,10 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
           <div className="flex justify-center py-6">
             <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
           </div>
+        ) : isError ? (
+          <div className="rounded-sm border border-destructive/20 bg-destructive/5 px-4 py-5 text-sm text-destructive">
+            Monthly completeness could not be loaded. Try again shortly.
+          </div>
         ) : (
           <>
             <div className="grid grid-cols-7 gap-1 max-w-sm">
@@ -586,10 +579,10 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
               {dayStatuses.map(({ date, status }) => (
                 <button
                   key={date}
-                  disabled={status === "future"}
-                  onClick={() => onPickDay(date)}
+                  disabled={status === "nonOperating"}
+                  onClick={() => { if (status !== "nonOperating") onPickDay(date); }}
                   title={
-                    status === "future" ? "" :
+                    status === "nonOperating" ? `${date} — not operating yet` :
                     status === "complete" ? `${date} — submitted` :
                     status === "draft" ? `${date} — draft saved` :
                     `${date} — no record`
@@ -598,8 +591,8 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                     "aspect-square rounded text-[11px] font-medium flex items-center justify-center transition-transform",
                     status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-110",
                     status === "draft"    && "bg-amber-100 text-amber-700 hover:scale-110",
-                    status === "missing"  && "bg-red-100 text-red-700 hover:scale-110",
-                    status === "future"   && "bg-muted/30 text-muted-foreground/40",
+                    status === "missing"  && "bg-amber-200 text-amber-800 hover:scale-110",
+                    status === "nonOperating"   && "bg-muted/30 text-muted-foreground/40",
                   )}
                 >
                   {parseInt(date.slice(8), 10)}
@@ -607,27 +600,28 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> Submitted</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> Filled / submitted</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Draft only</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 border border-red-300" /> Missing</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-200 border border-amber-300" /> Missing</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted/30 border border-border" /> Non-operating / future</span>
               {missingCount > 0 && (
-                <span className="ml-auto font-medium text-red-600">
+                <span className="ml-auto font-medium text-amber-700">
                   {missingCount} missing day{missingCount !== 1 ? "s" : ""} in {fsMonthLabel(month)}
                 </span>
               )}
             </div>
-            {(missingDates.length > 0 || draftDates.length > 0) && (
+            {actionableDates.length > 0 && (
               <div className="mt-4 border-t border-border/50 pt-3">
                 <p className="text-xs font-medium text-foreground">Dates needing attention</p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {missingDates.map((date) => (
-                    <Button key={date} variant="outline" size="sm" className="h-7 border-red-200 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => onPickDay(date)}>
-                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — missing
-                    </Button>
-                  ))}
-                  {draftDates.map((date) => (
-                    <Button key={date} variant="outline" size="sm" className="h-7 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" onClick={() => onPickDay(date)}>
-                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — draft
+                  {actionableDates.map(({ date, status }) => (
+                    <Button key={date} variant="outline" size="sm" className={cn(
+                      "h-7",
+                      status === "missing"
+                        ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                        : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
+                    )} onClick={() => onPickDay(date)}>
+                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — {status === "missing" ? "missing" : "draft"}
                     </Button>
                   ))}
                 </div>
@@ -761,6 +755,7 @@ function DailyDiaryTab() {
   const invalidateRecords = () => {
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams) });
     queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey(recordParams) });
+    queryClient.invalidateQueries({ queryKey: getGetFoodSafetySummaryQueryKey().slice(0, 1) });
   };
 
   const buildData = (submittedAt?: string) => ({
@@ -1429,80 +1424,6 @@ function DailyDiaryTab() {
           )}
         </>
       )}
-
-      {/* Missing Days Alert */}
-      {records !== undefined && (() => {
-        const hasRecord = new Set(records.map((r) => r.recordDate));
-        const submitted = new Set(records.filter((r) => r.submittedAt).map((r) => r.recordDate));
-        const missing: string[] = [];
-        const draftsOnly: string[] = [];
-        for (let i = 1; i <= 30; i++) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          const ds = format(d, "yyyy-MM-dd");
-          if (!hasRecord.has(ds)) {
-            missing.push(ds);
-          } else if (!submitted.has(ds)) {
-            draftsOnly.push(ds);
-          }
-        }
-        if (missing.length === 0 && draftsOnly.length === 0) return null;
-        const DateButton = ({ ds, variant }: { ds: string; variant: "missing" | "draft" }) => (
-          <button
-            key={ds}
-            onClick={() => setSelectedDate(ds)}
-            className={
-              variant === "missing"
-                ? "text-xs px-2 py-1 rounded-md bg-red-100 hover:bg-red-200 text-red-800 border border-red-200 transition-colors font-medium dark:bg-red-900/40 dark:text-red-300 dark:border-red-700 dark:hover:bg-red-900/60"
-                : "text-xs px-2 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 transition-colors font-medium dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-900/60"
-            }
-            title={`Open diary for ${ds}`}
-          >
-            {format(new Date(ds + "T12:00:00"), "d MMM")}
-          </button>
-        );
-        return (
-          <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20">
-            <CardHeader className="pb-3 border-b border-amber-200/60">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <CardTitle className="text-sm font-medium text-amber-800 dark:text-amber-400">
-                  {missing.length > 0 && draftsOnly.length > 0
-                    ? `${missing.length} missing + ${draftsOnly.length} draft-only ${missing.length + draftsOnly.length === 1 ? "day" : "days"} in the last 30 days`
-                    : missing.length > 0
-                      ? `${missing.length} ${missing.length === 1 ? "day" : "days"} with no food safety record in the last 30 days`
-                      : `${draftsOnly.length} ${draftsOnly.length === 1 ? "day" : "days"} with an unsubmitted draft in the last 30 days`}
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-3 pb-4 space-y-3">
-              {missing.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-1.5">No record filed:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {missing.slice(0, 20).map((ds) => <DateButton key={ds} ds={ds} variant="missing" />)}
-                    {missing.length > 20 && (
-                      <span className="text-xs text-red-700 self-center pl-1">+{missing.length - 20} more</span>
-                    )}
-                  </div>
-                </div>
-              )}
-              {draftsOnly.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1.5">Draft not submitted:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {draftsOnly.slice(0, 20).map((ds) => <DateButton key={ds} ds={ds} variant="draft" />)}
-                    {draftsOnly.length > 20 && (
-                      <span className="text-xs text-amber-700 self-center pl-1">+{draftsOnly.length - 20} more</span>
-                    )}
-                  </div>
-                </div>
-              )}
-              <p className="text-xs text-amber-700 dark:text-amber-400">Click a date to open the diary entry for that day.</p>
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       {/* History */}
       <Card>

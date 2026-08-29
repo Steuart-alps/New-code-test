@@ -1579,6 +1579,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /food-safety/summary:
+    get:
+      operationId: getFoodSafetySummary
+      tags: [food-safety]
+      summary: Get daily food safety diary completeness for a month
+      parameters:
+        - in: query
+          name: year
+          required: true
+          schema:
+            type: integer
+            minimum: 1000
+            maximum: 9999
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+        - in: query
+          name: siteId
+          description: Scope to a site's diary. Omit for the whole-organisation diary.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Completeness status for every calendar day in the requested month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FoodSafetyMonthlySummary"
+        "400":
+          description: Invalid year, month, or site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /food-safety/missing-dates:
     get:
       operationId: getFoodSafetyMissingDates
@@ -2930,6 +2969,43 @@ components:
           items:
             type: string
             format: date
+
+    FoodSafetyMonthlySummaryDay:
+      type: object
+      required:
+        - date
+        - hasRecord
+        - submitted
+      properties:
+        date:
+          type: string
+          format: date
+        hasRecord:
+          type: boolean
+          description: Whether a diary record exists for this date.
+        submitted:
+          type: boolean
+          description: Whether the diary record has been submitted.
+
+    FoodSafetyMonthlySummary:
+      type: object
+      required:
+        - year
+        - month
+        - siteId
+        - days
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+        siteId:
+          type: integer
+          nullable: true
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/FoodSafetyMonthlySummaryDay"
 
     FoodSafetyRecord:
       type: object

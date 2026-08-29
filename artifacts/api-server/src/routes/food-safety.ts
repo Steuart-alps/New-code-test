@@ -429,6 +429,66 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(record);
 });
 
+// GET /api/food-safety/summary?year=YYYY&month=MM[&siteId=N]
+// Return one completeness entry for every calendar day in the requested month.
+router.get("/summary", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+
+  const rawYear = (req.query as { year?: unknown }).year;
+  const rawMonth = (req.query as { month?: unknown }).month;
+  const year = Number(rawYear);
+  const month = Number(rawMonth);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    year < 1000 ||
+    year > 9999 ||
+    month < 1 ||
+    month > 12
+  ) {
+    res.status(400).json({ error: "year and month are required and must be valid calendar values" });
+    return;
+  }
+
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const monthPrefix = `${year}-${String(month).padStart(2, "0")}`;
+  const firstDate = `${monthPrefix}-01`;
+  const lastDate = `${monthPrefix}-${String(daysInMonth).padStart(2, "0")}`;
+
+  const records = await db
+    .select({
+      recordDate: foodSafetyRecordsTable.recordDate,
+      submittedAt: foodSafetyRecordsTable.submittedAt,
+    })
+    .from(foodSafetyRecordsTable)
+    .where(and(
+      eq(foodSafetyRecordsTable.clientId, clientId),
+      sql`${foodSafetyRecordsTable.recordDate} >= ${firstDate}`,
+      sql`${foodSafetyRecordsTable.recordDate} <= ${lastDate}`,
+      siteScopeCond(siteId),
+    ));
+
+  const recordsByDate = new Map(records.map((record) => [record.recordDate, record]));
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = `${monthPrefix}-${String(index + 1).padStart(2, "0")}`;
+    const record = recordsByDate.get(date);
+    return {
+      date,
+      hasRecord: !!record,
+      submitted: !!record?.submittedAt,
+    };
+  });
+
+  res.json({ year, month, siteId, days });
+});
+
 // GET /api/food-safety/missing-dates?from=YYYY-MM-DD&to=YYYY-MM-DD[&siteId=N]
 // Return an explicit, bounded history range rather than making clients infer
 // absent dates from an unbounded record list. Drafts are reported separately:
