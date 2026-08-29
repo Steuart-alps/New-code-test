@@ -37,6 +37,7 @@ import {
   Bug,
   BarChart2,
   FileCheck2,
+  BedDouble,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -59,6 +60,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/pat-track", moduleKey: "pat" },
   { prefix: "/pest-track", moduleKey: "pest" },
   { prefix: "/premises-track", moduleKey: "premises" },
+  { prefix: "/room-track", moduleKey: "room" },
   { prefix: "/hot-tub", moduleKey: "hot_tub" },
   { prefix: "/tree-track", moduleKey: "tree" },
   { prefix: "/green-track", moduleKey: "green" },
@@ -91,6 +93,7 @@ function useNavGroups() {
         { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
         { href: "/fix-track",      label: "FixTrack",        icon: Wrench,          serviceKey: "fixtrack" },
         { href: "/premises-track", label: "PremisesTrack",   icon: Building2,       serviceKey: "premisestrack" },
+        { href: "/room-track",     label: "RoomTrack",       icon: BedDouble,       serviceKey: "roomtrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
         { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },

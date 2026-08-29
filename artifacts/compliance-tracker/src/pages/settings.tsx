@@ -518,6 +518,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "pest", label: "PestTrack" },
   { key: "fix", label: "FixTrack" },
   { key: "premises", label: "PremisesTrack" },
+  { key: "room", label: "RoomTrack" },
   { key: "doc", label: "DocTrack" },
   { key: "safe", label: "SafeTrack" },
   { key: "train", label: "TrainTrack" },

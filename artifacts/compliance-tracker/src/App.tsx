@@ -50,6 +50,7 @@ import IncidentsPage from "@/pages/incidents";
 import PATTrackPage  from "@/pages/pat-track";
 import PestTrackPage from "@/pages/pest-track";
 import PremisesTrackPage from "@/pages/premises-track";
+import RoomTrackPage from "@/pages/room-track";
 import ReportsPage from "@/pages/reports";
 import ComplianceHubPage from "@/pages/compliance-hub";
 import NotFound from "@/pages/not-found";
@@ -145,6 +146,7 @@ function ProtectedRoutes() {
       <Route path="/pat-track"  component={PATTrackPage} />
       <Route path="/pest-track" component={PestTrackPage} />
       <Route path="/premises-track" component={PremisesTrackPage} />
+      <Route path="/room-track" component={RoomTrackPage} />
       <Route path="/reports" component={ReportsPage} />
       <Route path="/compliance-hub" component={ComplianceHubPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}

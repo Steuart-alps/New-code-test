@@ -750,6 +750,58 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   }
 
   // ── DocTrack ──────────────────────────────────────────────────────────────────
+  // ── RoomTrack ─────────────────────────────────────────────────────────────────
+  {
+    const enabled = entitled("roomtrack");
+    const items: TrackItem[] = [];
+    let status: TrackStatus = "no_data";
+    let badge = "No rooms";
+    if (enabled) {
+      try {
+        const roomSiteClause = siteId != null
+          ? sql`AND r.site_id = ${siteId}`
+          : accessibleSiteIds != null
+          ? sql`AND (r.site_id IS NULL OR r.site_id = ANY(${accessibleSiteIds}))`
+          : sql``;
+        const result = await db.execute(sql`
+          SELECT
+            count(*)::int AS total,
+            count(c.id) FILTER (WHERE c.clean = true AND c.tidy = true AND c.to_standard = true)::int AS checked
+          FROM room_track_rooms r
+          LEFT JOIN room_track_checks c
+            ON c.room_id = r.id
+           AND c.client_id = r.client_id
+           AND c.check_date = ${today}
+          WHERE r.client_id = ${clientId}
+            AND r.active = true
+            ${roomSiteClause}
+        `);
+        const roomTotals = rows(result)[0] ?? { total: 0, checked: 0 };
+        const total = Number(roomTotals.total);
+        const checked = Number(roomTotals.checked);
+        if (total === 0) {
+          status = "no_data";
+          badge = "No rooms";
+        } else if (checked === 0) {
+          status = "attention";
+          badge = `0 / ${total} checked today`;
+          items.push({ label: `${total} room${total === 1 ? "" : "s"} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
+        } else if (checked < total) {
+          status = "attention";
+          badge = `${checked} / ${total} checked today`;
+          items.push({ label: `${total - checked} room${total - checked === 1 ? "" : "s"} unchecked`, detail: "Room checks are still due today", path: "/room-track" });
+        } else {
+          status = "ok";
+          badge = `${checked} / ${total} checked today`;
+        }
+      } catch {
+        status = "no_data";
+        badge = "No records";
+      }
+    }
+    tracks.push({ trackId: "room", label: "RoomTrack", path: "/room-track", enabled, status, badge, items });
+  }
+
   {
     const enabled = entitled("doctrack") || entitled("safetrack");
     const items: TrackItem[] = [];

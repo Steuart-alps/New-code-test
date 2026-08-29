@@ -44,6 +44,7 @@ import incidentsRouter from "./incidents";
 import patTrackRouter from "./pat-track";
 import pestTrackRouter from "./pest-track";
 import premisesTrackRouter from "./premises-track";
+import roomTrackRouter from "./room-track";
 import formOptionsRouter from "./form-options";
 import mobileRouter from "./mobile";
 import exportRouter from "./export";
@@ -105,6 +106,7 @@ router.use("/incidents", requireAuth, requireService("incidenttrack"), incidents
 router.use("/pat-track",  requireAuth, requireService("pattrack"),  patTrackRouter);
 router.use("/pest-track", requireAuth, requireService("pesttrack"), pestTrackRouter);
 router.use("/premises-track", requireAuth, requireService("premisestrack"), premisesTrackRouter);
+router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);

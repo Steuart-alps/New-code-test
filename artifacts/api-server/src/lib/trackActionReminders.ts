@@ -68,6 +68,7 @@ const moduleRoutes: Record<string, string> = {
   green: "/green-track",
   swim: "/swim-track",
   incident: "/incidents",
+  room: "/room-track",
 };
 
 const moduleLabels: Record<string, string> = {
@@ -90,6 +91,7 @@ const moduleLabels: Record<string, string> = {
   green: "GreenTrack",
   swim: "SwimTrack",
   incident: "IncidentTrack",
+  room: "RoomTrack",
 };
 
 function normalizeEmail(email: string): string {

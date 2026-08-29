@@ -10,7 +10,7 @@ const router: IRouter = Router();
 const TRACK_SUMMARY_MODULES = new Set([
   "daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat",
   "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree",
-  "bike", "green", "swim", "incident",
+  "bike", "green", "swim", "incident", "room",
 ]);
 
 const SETTING_KEYS = [

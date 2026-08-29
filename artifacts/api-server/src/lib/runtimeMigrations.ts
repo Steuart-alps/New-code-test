@@ -336,6 +336,7 @@ export async function runRuntimeMigrations() {
     await migratePATtrack();
     await migratePestTrack();
     await migratePremisesTrack();
+    await migrateRoomTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
 
@@ -1826,6 +1827,65 @@ async function migratePremisesTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_premises_inspections_client" ON "premises_inspections" ("client_id", "inspection_date")`);
+}
+
+async function migrateRoomTrack() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "room_track_rooms" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "room_number" text NOT NULL,
+      "name" text,
+      "floor" text,
+      "active" boolean NOT NULL DEFAULT true,
+      "notes" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "room_track_checks" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "room_id" integer NOT NULL REFERENCES "room_track_rooms"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "check_date" date NOT NULL,
+      "status" text,
+      "clean" boolean NOT NULL DEFAULT false,
+      "tidy" boolean NOT NULL DEFAULT false,
+      "to_standard" boolean NOT NULL DEFAULT false,
+      "notes" text,
+      "checked_by" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("room_id", "check_date")
+    )
+  `);
+  // The original RoomTrack proof-of-concept used one mutually exclusive
+  // status. Keep it for audit compatibility, but make new writes criteria-
+  // based and translate historical values into their matching criterion.
+  await db.execute(sql`ALTER TABLE "room_track_checks" ADD COLUMN IF NOT EXISTS "clean" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "room_track_checks" ADD COLUMN IF NOT EXISTS "tidy" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE "room_track_checks" ADD COLUMN IF NOT EXISTS "to_standard" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`
+    UPDATE "room_track_checks"
+    SET clean = CASE WHEN status = 'clean' THEN true ELSE clean END,
+        tidy = CASE WHEN status = 'tidy' THEN true ELSE tidy END,
+        to_standard = CASE WHEN status = 'to_standard' THEN true ELSE to_standard END
+    WHERE status IS NOT NULL
+  `);
+  await db.execute(sql`
+    ALTER TABLE "room_track_checks"
+    DROP CONSTRAINT IF EXISTS "room_track_checks_status_check"
+  `);
+  await db.execute(sql`ALTER TABLE "room_track_checks" ALTER COLUMN "status" DROP NOT NULL`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_rooms_client_site" ON "room_track_rooms" ("client_id", "site_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_room_track_checks_client_date" ON "room_track_checks" ("client_id", "check_date", "site_id")`);
 }
 
 async function migrateKitchenCleaning() {
