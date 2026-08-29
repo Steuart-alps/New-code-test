@@ -317,7 +317,7 @@ async function main() {
       !staffLeg.some((r) => r.id === legBetaId),
       "beta legionella check visible in staff list",
     );
-    expectBlocked(
+    expectForbidden(
       "staff: PUT /legionella/:id (other dept)",
       (await staff("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
     );
