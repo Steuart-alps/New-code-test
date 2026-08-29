@@ -1,11 +1,17 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { appSettingsTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { appSettingsTable, usersTable } from "@workspace/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 
 const router: IRouter = Router();
+
+const TRACK_SUMMARY_MODULES = new Set([
+  "daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat",
+  "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree",
+  "bike", "green", "swim", "incident",
+]);
 
 const SETTING_KEYS = [
   "smtpFrom",
@@ -23,7 +29,65 @@ const SETTING_KEYS = [
   // Client-defined notification email — all automated digest/alert emails for
   // this client go here instead of to individual admin user addresses.
   "notificationEmail",
+  // JSON map of operational module keys to the active manager user IDs who
+  // should receive that track's daily action summary.
+  "trackSummaryRouting",
 ] as const;
+
+async function validateTrackSummaryRouting(
+  clientId: number,
+  value: string | null,
+): Promise<{ valid: true; value: string | null } | { valid: false; error: string }> {
+  if (value == null || value.trim() === "") return { valid: true, value: null };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { valid: false, error: "Track summary routing must be valid JSON" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { valid: false, error: "Track summary routing must be an object" };
+  }
+
+  const normalized: Record<string, number[]> = {};
+  const requestedIds = new Set<number>();
+  for (const [module, rawIds] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!TRACK_SUMMARY_MODULES.has(module)) {
+      return { valid: false, error: `Unknown track: ${module}` };
+    }
+    if (!Array.isArray(rawIds)) {
+      return { valid: false, error: `Recipients for ${module} must be a list` };
+    }
+    const ids = [...new Set(rawIds.map(Number))];
+    if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+      return { valid: false, error: `Recipients for ${module} contain an invalid user` };
+    }
+    normalized[module] = ids;
+    ids.forEach((id) => requestedIds.add(id));
+  }
+
+  if (requestedIds.size > 0) {
+    const eligible = await db
+      .select({ id: usersTable.id, role: usersTable.role })
+      .from(usersTable)
+      .where(and(
+        eq(usersTable.clientId, clientId),
+        eq(usersTable.active, true),
+        inArray(usersTable.id, [...requestedIds]),
+      ));
+    const eligibleIds = new Set(
+      eligible
+        .filter((user) => user.role === "client_admin" || user.role === "client_staff")
+        .map((user) => user.id),
+    );
+    if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
+      return { valid: false, error: "Every track recipient must be an active manager in this client account" };
+    }
+  }
+
+  return { valid: true, value: JSON.stringify(normalized) };
+}
 
 router.get("/settings", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -60,6 +124,14 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
   // not silently stripped by the schema.
   UpdateSettingsBody.parse(req.body);
   const rawBody = (req.body ?? {}) as Record<string, string | null | undefined>;
+  if (rawBody.trackSummaryRouting !== undefined) {
+    const validated = await validateTrackSummaryRouting(clientId, rawBody.trackSummaryRouting);
+    if (!validated.valid) {
+      res.status(400).json({ error: validated.error });
+      return;
+    }
+    rawBody.trackSummaryRouting = validated.value;
+  }
 
   for (const key of SETTING_KEYS) {
     const value = rawBody[key];

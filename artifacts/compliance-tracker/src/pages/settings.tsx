@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
@@ -70,7 +70,7 @@ function StatusBadge({ status }: { status: string | null }) {
 
 // ── Local types used by DepartmentsCard ──────────────────────────────────────
 interface Department { id: number; clientId: number; name: string; description?: string | null; createdAt: string; }
-interface DeptUser { id: number; name: string; email: string; role: string; departmentId?: number | null; }
+interface DeptUser { id: number; name: string; email: string; role: string; departmentId?: number | null; active?: boolean; }
 interface DeptSite { id: number; name: string; departmentId?: number | null; }
 
 function DepartmentsCard() {
@@ -504,6 +504,184 @@ function DepartmentsCard() {
       </DialogContent>
     </Dialog>
     </>
+  );
+}
+
+const TRACK_SUMMARY_MODULES = [
+  { key: "daily_am", label: "DailyTrack AM" },
+  { key: "daily_pm", label: "DailyTrack PM" },
+  { key: "kitchen", label: "KitchenTrack" },
+  { key: "fire", label: "FireTrack" },
+  { key: "legionella", label: "LegionellaTrack" },
+  { key: "pool", label: "AquaTrack" },
+  { key: "pat", label: "PATtrack" },
+  { key: "pest", label: "PestTrack" },
+  { key: "fix", label: "FixTrack" },
+  { key: "premises", label: "PremisesTrack" },
+  { key: "doc", label: "DocTrack" },
+  { key: "safe", label: "SafeTrack" },
+  { key: "train", label: "TrainTrack" },
+  { key: "hot_tub", label: "TubTrack" },
+  { key: "tree", label: "TreeTrack" },
+  { key: "bike", label: "BikeTrack" },
+  { key: "green", label: "GreenTrack" },
+  { key: "swim", label: "SwimTrack" },
+  { key: "incident", label: "IncidentTrack" },
+] as const;
+
+function TrackSummaryRoutingCard({
+  value,
+  seniorEmail,
+  onSaved,
+}: {
+  value: string | null | undefined;
+  seniorEmail: string;
+  onSaved: (value: string) => void;
+}) {
+  const { toast } = useToast();
+  const canAdmin = useCanAdmin();
+  const [users, setUsers] = useState<DeptUser[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [routing, setRouting] = useState<Record<string, number[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    try {
+      const parsed = value ? JSON.parse(value) : {};
+      setRouting(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {});
+    } catch {
+      setRouting({});
+    }
+  }, [value]);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch<DeptUser[]>("/users"),
+      apiFetch<Department[]>("/departments"),
+    ])
+      .then(([userList, departmentList]) => {
+        setUsers(userList);
+        setDepartments(departmentList);
+      })
+      .catch((err: Error) => {
+        toast({ title: "Couldn't load track recipients", description: err.message, variant: "destructive" });
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const managers = users.filter(
+    (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_staff"),
+  );
+  const seniorManagers = users.filter((user) => user.active !== false && user.role === "client_admin");
+
+  const toggleManager = (module: string, userId: number) => {
+    setRouting((current) => {
+      const selected = new Set(current[module] ?? []);
+      selected.has(userId) ? selected.delete(userId) : selected.add(userId);
+      return { ...current, [module]: [...selected] };
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const serialized = JSON.stringify(routing);
+      await apiFetch("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ trackSummaryRouting: serialized }),
+      });
+      onSaved(serialized);
+      toast({ title: "Track summary routing saved" });
+    } catch (err: any) {
+      toast({ title: "Couldn't save routing", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Route className="w-5 h-5 text-sky-600" />
+          <CardTitle className="font-display">Track Summary Recipients</CardTitle>
+        </div>
+        <CardDescription>
+          Senior management receives every track. Assign the relevant department managers below so they receive only the tracks they oversee.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-5">
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+          <p className="font-semibold">Senior management — all tracks</p>
+          <p className="mt-1 text-xs text-sky-800">
+            {seniorEmail.trim()
+              ? seniorEmail
+              : seniorManagers.length > 0
+                ? seniorManagers.map((manager) => manager.email).join(", ")
+                : "No admin/owner notification recipient is currently configured."}
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : managers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Add an admin or staff account before assigning department managers to tracks.
+          </p>
+        ) : (
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {TRACK_SUMMARY_MODULES.map((track) => {
+              const selectedIds = routing[track.key] ?? [];
+              const selectedManagers = managers.filter((manager) => selectedIds.includes(manager.id));
+              return (
+                <details key={track.key} className="group">
+                  <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 hover:bg-muted/30">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                    <span className="flex-1 text-sm font-medium">{track.label}</span>
+                    <span className="max-w-[55%] truncate text-xs text-muted-foreground">
+                      {selectedManagers.length > 0
+                        ? selectedManagers.map((manager) => manager.name).join(", ")
+                        : "Senior management only"}
+                    </span>
+                  </summary>
+                  <div className="grid gap-2 border-t border-border/60 bg-muted/10 px-10 py-3 sm:grid-cols-2">
+                    {managers.map((manager) => {
+                      const department = departments.find((item) => item.id === manager.departmentId);
+                      return (
+                        <label key={manager.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-2.5 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                            checked={selectedIds.includes(manager.id)}
+                            onChange={() => toggleManager(track.key, manager.id)}
+                            disabled={!canAdmin || saving}
+                          />
+                          <span>
+                            <span className="block font-medium">{manager.name}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {department?.name ?? (manager.role === "client_admin" ? "Account admin" : "No department")}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        )}
+
+        {canAdmin && (
+          <Button type="button" onClick={save} disabled={saving || loading}>
+            {saving ? "Saving…" : "Save Track Recipients"}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1426,6 +1604,7 @@ export default function SettingsPage() {
   });
 
   const [testEmail, setTestEmail] = useState("");
+  const [trackSummaryRouting, setTrackSummaryRouting] = useState("");
 
   useEffect(() => {
     if (settings) {
@@ -1440,6 +1619,7 @@ export default function SettingsPage() {
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
       });
+      setTrackSummaryRouting((settings as any).trackSummaryRouting || "");
     }
   }, [settings]);
 
@@ -1466,6 +1646,11 @@ export default function SettingsPage() {
         <InvoicesCard />
         <DataExportCard />
         <DepartmentsCard />
+        <TrackSummaryRoutingCard
+          value={trackSummaryRouting}
+          seniorEmail={formData.notificationEmail}
+          onSaved={setTrackSummaryRouting}
+        />
         <PhotoRequirementsCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">

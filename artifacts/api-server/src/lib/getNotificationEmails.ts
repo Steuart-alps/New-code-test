@@ -3,8 +3,8 @@
  *
  * Priority order:
  * 1. If the client has a `notificationEmail` setting configured in app_settings,
- *    that single address is the sole recipient for all automated digest emails.
- *    This is the "admin email" defined by the client owner/manager.
+ *    that address is the senior/admin recipient for automated digest emails.
+ *    Individual jobs may add separately configured operational recipients.
  * 2. Otherwise, falls back to querying active client_admin users (and optionally
  *    maintenance managers) for the client.
  *
