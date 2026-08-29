@@ -10,12 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Plus, Users, Package, ShieldCheck, ClipboardCheck } from "lucide-react";
-import {
-
 interface DomainRecord {
   record?: string;
   name: string;
@@ -1568,6 +1565,148 @@ function PhotoRequirementsCard() {
   );
 }
 
+type RequiredActionTemplate = {
+  id: number;
+  title: string;
+  module: string | null;
+  instruction?: string | null;
+  severity: "monitor" | "action_required" | "urgent";
+  ownerDefault?: string | null;
+  leadTimeDays?: number | null;
+  siteId?: number | null;
+  departmentId?: number | null;
+  enabled?: boolean;
+  active?: boolean;
+  sortOrder?: number | null;
+};
+
+const emptyActionTemplate: { title: string; module: string; instruction: string; severity: RequiredActionTemplate["severity"]; ownerName: string; leadTimeDays: string; siteId: string; departmentId: string } = {
+  title: "", module: "fire", instruction: "", severity: "action_required",
+  ownerName: "", leadTimeDays: "7", siteId: "", departmentId: "",
+};
+
+function RequiredActionTemplatesCard() {
+  const { toast } = useToast();
+  const [templates, setTemplates] = useState<RequiredActionTemplate[]>([]);
+  const [sites, setSites] = useState<DeptSite[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [draft, setDraft] = useState(emptyActionTemplate);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const [templateData, siteData, departmentData] = await Promise.all([
+        apiFetch<RequiredActionTemplate[] | { templates: RequiredActionTemplate[] }>("/track-actions/templates"),
+        apiFetch<DeptSite[]>("/sites"),
+        apiFetch<Department[]>("/departments"),
+      ]);
+      setTemplates(Array.isArray(templateData) ? templateData : templateData.templates ?? []);
+      setSites(siteData);
+      setDepartments(departmentData);
+    } catch (err: any) {
+      toast({ title: "Couldn't load action templates", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void refresh(); }, []);
+
+  const beginEdit = (template: RequiredActionTemplate) => {
+    setEditingId(template.id);
+    setDraft({
+      title: template.title, module: template.module ?? "", instruction: template.instruction ?? "",
+      severity: template.severity, ownerName: template.ownerDefault ?? "",
+      leadTimeDays: String(template.leadTimeDays ?? 0),
+      siteId: template.siteId ? String(template.siteId) : "",
+      departmentId: template.departmentId ? String(template.departmentId) : "",
+    });
+  };
+
+  const save = async () => {
+    if (!draft.title.trim()) return;
+    setBusy(true);
+    const body = {
+      title: draft.title.trim(), module: draft.module || null, instruction: draft.instruction.trim(),
+      severity: draft.severity, ownerDefault: draft.ownerName.trim() || null,
+      leadTimeDays: Math.max(0, Number(draft.leadTimeDays) || 0),
+      siteId: draft.siteId ? Number(draft.siteId) : null,
+      departmentId: draft.departmentId ? Number(draft.departmentId) : null,
+    };
+    try {
+      await apiFetch(editingId ? `/track-actions/templates/${editingId}` : "/track-actions/templates", {
+        method: editingId ? "PATCH" : "POST", body: JSON.stringify(body),
+      });
+      toast({ title: editingId ? "Action template updated" : "Action template created" });
+      setEditingId(null);
+      setDraft(emptyActionTemplate);
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't save action template", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const patchTemplate = async (template: RequiredActionTemplate, patch: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      await apiFetch(`/track-actions/templates/${template.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't update action template", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const move = async (template: RequiredActionTemplate, direction: -1 | 1) => {
+    const ordered = [...templates].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const from = ordered.findIndex(item => item.id === template.id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= ordered.length) return;
+    const reordered = [...ordered];
+    [reordered[from], reordered[to]] = [reordered[to], reordered[from]];
+    setBusy(true);
+    try {
+      await apiFetch("/track-actions/templates/reorder", {
+        method: "POST", body: JSON.stringify({ templateIds: reordered.map(item => item.id) }),
+      });
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't reorder action templates", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-primary" /><CardTitle className="font-display">Required Action Templates</CardTitle></div>
+        <CardDescription>Standardise actions for each module. Selecting a template creates an editable snapshot, so later template changes do not alter existing actions.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-5">
+        <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-2">
+          <div className="space-y-1.5 sm:col-span-2"><Label>Template title</Label><Input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Arrange emergency lighting repair" /></div>
+          <div className="space-y-1.5"><Label>Module</Label><Select value={draft.module || "all"} onValueChange={module => setDraft({ ...draft, module: module === "all" ? "" : module })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All modules</SelectItem>{TRACK_SUMMARY_MODULES.map(item => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Severity</Label><Select value={draft.severity} onValueChange={severity => setDraft({ ...draft, severity: severity as RequiredActionTemplate["severity"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div>
+          <div className="space-y-1.5 sm:col-span-2"><Label>Instruction</Label><Textarea value={draft.instruction} onChange={e => setDraft({ ...draft, instruction: e.target.value })} placeholder="Explain the required work or evidence." /></div>
+          <div className="space-y-1.5"><Label>Default owner</Label><Input value={draft.ownerName} onChange={e => setDraft({ ...draft, ownerName: e.target.value })} placeholder="Role or person" /></div>
+          <div className="space-y-1.5"><Label>Lead time (days)</Label><Input type="number" min="0" value={draft.leadTimeDays} onChange={e => setDraft({ ...draft, leadTimeDays: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>Site scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "all"} onValueChange={siteId => setDraft({ ...draft, siteId: siteId === "all" ? "" : siteId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All sites</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Department scope <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.departmentId || "all"} onValueChange={departmentId => setDraft({ ...draft, departmentId: departmentId === "all" ? "" : departmentId })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All departments</SelectItem>{departments.map(department => <SelectItem key={department.id} value={String(department.id)}>{department.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="flex gap-2 sm:col-span-2"><Button type="button" disabled={busy || !draft.title.trim() || !draft.instruction.trim()} onClick={save}>{editingId ? "Save template" : "Create template"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { setEditingId(null); setDraft(emptyActionTemplate); }}>Cancel</Button>}</div>
+        </div>
+        {loading ? <p className="text-sm text-muted-foreground">Loading templates…</p> : templates.length === 0 ? <p className="text-sm text-muted-foreground">No required-action templates yet.</p> : <div className="divide-y rounded-lg border">{[...templates].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((template, index, list) => <div key={template.id} className="flex items-start gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{template.title}</p><span className={`text-xs ${template.active ?? true ? "text-emerald-700" : "text-muted-foreground"}`}>{template.active ?? true ? "Enabled" : "Disabled"}</span></div><p className="mt-1 text-xs text-muted-foreground">{template.module ? TRACK_SUMMARY_MODULES.find(item => item.key === template.module)?.label ?? template.module : "All modules"} · {template.severity.replace("_", " ")} · {template.ownerDefault || "No owner"} · {template.leadTimeDays ?? 0} day lead time</p>{template.instruction && <p className="mt-1 text-sm text-muted-foreground">Instruction: {template.instruction}</p>}</div><div className="flex flex-wrap gap-1"><Button size="sm" variant="ghost" disabled={busy || index === 0} onClick={() => move(template, -1)}>↑</Button><Button size="sm" variant="ghost" disabled={busy || index === list.length - 1} onClick={() => move(template, 1)}>↓</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => beginEdit(template)}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => patchTemplate(template, { active: !(template.active ?? true) })}>{template.active ?? true ? "Disable" : "Enable"}</Button></div></div>)}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading } = useGetSettings();
   const { updateSettings, triggerTestEmail } = useAppMutations();
@@ -1650,6 +1789,7 @@ export default function SettingsPage() {
         <InvoicesCard />
         <DataExportCard />
         <DepartmentsCard />
+        {canAdmin && <RequiredActionTemplatesCard />}
         <TrackSummaryRoutingCard
           value={trackSummaryRouting}
           seniorEmail={formData.notificationEmail}

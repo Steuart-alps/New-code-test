@@ -1,202 +1,248 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { sitesTable } from "@workspace/db/schema";
-import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
-import { date, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { departmentsTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
+import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 
 const router = Router();
-
-// This deliberately belongs to the operational modules, rather than the
-// Compliance Hub data model. Keep it independent of compliance_hub_* tables.
-const trackActionsTable = pgTable("track_actions", {
-  id: serial("id").primaryKey(),
-  clientId: integer("client_id").notNull(),
-  siteId: integer("site_id"),
-  module: text("module").notNull(),
-  sourceKind: text("source_kind"),
-  sourceRecordId: integer("source_record_id"),
-  title: text("title").notNull(),
-  severity: text("severity").notNull(),
-  ownerName: text("owner_name"),
-  dueDate: date("due_date"),
-  remedialAction: text("remedial_action"),
-  evidenceReference: text("evidence_reference"),
-  resolutionNotes: text("resolution_notes"),
-  status: text("status").notNull(),
-  createdBy: integer("created_by").notNull(),
-  resolvedBy: integer("resolved_by"),
-  resolvedAt: timestamp("resolved_at"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
-
-const MODULES = [
-  "daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat",
-  "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree",
-  "bike", "green", "swim", "incident",
-] as const;
-
-const optionalText = z.string().trim().max(10_000).nullable().optional();
-const actionFields = {
+const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident"] as const;
+const severity = z.enum(["monitor", "action_required", "urgent"]);
+const nullableText = z.string().trim().max(10_000).nullable().optional();
+const scopeFields = {
+  siteId: z.number().int().positive().nullable().optional(),
+  departmentId: z.number().int().positive().nullable().optional(),
+};
+const templateFields = {
+  module: z.enum(MODULES).nullable().optional(),
+  ...scopeFields,
+  title: z.string().trim().min(1).max(500),
+  instruction: z.string().trim().min(1).max(10_000),
+  severity: severity.default("action_required"),
+  ownerDefault: nullableText,
+  leadTimeDays: z.number().int().min(0).max(3650).default(0),
+  sortOrder: z.number().int().min(0).max(1_000_000).default(0),
+  active: z.boolean().default(true),
+};
+const templateCreateSchema = z.object(templateFields).strict();
+const templatePatchSchema = z.object({
+  module: z.enum(MODULES).nullable().optional(), ...scopeFields,
+  title: z.string().trim().min(1).max(500).optional(), instruction: z.string().trim().min(1).max(10_000).optional(),
+  severity: severity.optional(), ownerDefault: nullableText,
+  leadTimeDays: z.number().int().min(0).max(3650).optional(),
+  sortOrder: z.number().int().min(0).max(1_000_000).optional(), active: z.boolean().optional(),
+}).strict();
+const oneOffFields = {
+  module: z.enum(MODULES),
+  title: z.string().trim().min(1).max(500).optional(),
+  instruction: nullableText,
+  severity: severity.optional(),
+  ownerName: nullableText,
+  leadTimeDays: z.number().int().min(0).max(3650).optional(),
+  dueDate: z.string().date().nullable().optional(),
   siteId: z.number().int().positive().nullable().optional(),
   sourceRecordId: z.number().int().positive().nullable().optional(),
-  ownerName: optionalText,
-  dueDate: z.string().date().nullable().optional(),
-  remedialAction: optionalText,
-  evidenceReference: optionalText,
-  resolutionNotes: optionalText,
+  remedialAction: nullableText,
+  evidenceReference: nullableText,
+  resolutionNotes: nullableText,
 };
-
-const createSchema = z.object({
-  module: z.enum(MODULES),
-  title: z.string().trim().min(1).max(500),
-  severity: z.enum(["monitor", "action_required", "urgent"]).default("action_required"),
-  status: z.enum(["open", "in_progress", "resolved"]).default("open"),
-  ...actionFields,
-});
-
+const createSchema = z.object({ templateId: z.number().int().positive().optional(), status: z.enum(["open", "in_progress"]).default("open"), ...oneOffFields }).strict()
+  .superRefine((value, ctx) => {
+    if (!value.templateId && (!value.module || !value.title || !value.severity)) ctx.addIssue({ code: "custom", message: "templateId or module, title and severity are required" });
+  });
 const patchSchema = z.object({
-  title: z.string().trim().min(1).max(500).optional(),
-  severity: z.enum(["monitor", "action_required", "urgent"]).optional(),
-  status: z.enum(["open", "in_progress", "resolved"]).optional(),
-  ...actionFields,
+  title: z.string().trim().min(1).max(500).optional(), instruction: nullableText, severity: severity.optional(),
+  status: z.enum(["open", "in_progress", "resolved"]).optional(), siteId: z.number().int().positive().nullable().optional(),
+  ownerName: nullableText, dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
+  evidenceReference: nullableText, resolutionNotes: nullableText,
 }).strict();
 
-async function canAccessSite(
-  siteId: number | null | undefined,
-  clientId: number,
-  departmentId: number | null,
-): Promise<boolean> {
+async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
   if (siteId == null) return true;
   const conditions = [eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)];
-  if (departmentId != null) {
-    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))!);
-  }
-  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(...conditions));
-  return !!site;
+  if (departmentId != null) conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))!);
+  return !!(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(...conditions)))[0];
 }
-
-async function accessibleSiteIds(clientId: number, departmentId: number | null): Promise<number[] | null> {
+async function canOwnScope(siteId: number | null | undefined, departmentId: number | null | undefined, clientId: number) {
+  if (siteId != null && !await canAccessSite(siteId, clientId, null)) return false;
+  if (departmentId != null && !(await db.select({ id: departmentsTable.id }).from(departmentsTable).where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId))))[0]) return false;
+  if (siteId != null && departmentId != null && !(await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.id, siteId), eq(sitesTable.departmentId, departmentId))))[0]) return false;
+  return true;
+}
+async function accessibleSiteIds(clientId: number, departmentId: number | null) {
   if (departmentId == null) return null;
-  const sites = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
-    eq(sitesTable.clientId, clientId),
-    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
-  ));
-  return sites.map((site) => site.id);
+  return (await db.select({ id: sitesTable.id }).from(sitesTable).where(and(eq(sitesTable.clientId, clientId), or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))))).map(x => x.id);
 }
+async function scopeDepartmentId(clientId: number, siteId: number | undefined, activeDepartmentId: number | null) {
+  if (activeDepartmentId != null || siteId == null) return activeDepartmentId;
+  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable).where(and(
+    eq(sitesTable.id, siteId),
+    eq(sitesTable.clientId, clientId),
+  ));
+  return site?.departmentId ?? null;
+}
+function matchingConditions(clientId: number, module: typeof MODULES[number], siteId: number | undefined, departmentId: number | null) {
+  const conditions = [eq(trackActionTemplatesTable.clientId, clientId), or(isNull(trackActionTemplatesTable.module), eq(trackActionTemplatesTable.module, module))!, eq(trackActionTemplatesTable.active, true)];
+  conditions.push(siteId == null ? isNull(trackActionTemplatesTable.siteId) : or(isNull(trackActionTemplatesTable.siteId), eq(trackActionTemplatesTable.siteId, siteId))!);
+  conditions.push(departmentId == null ? isNull(trackActionTemplatesTable.departmentId) : or(isNull(trackActionTemplatesTable.departmentId), eq(trackActionTemplatesTable.departmentId, departmentId))!);
+  return conditions;
+}
+// A module-specific template beats a module-global one at the same site/
+// department scope. Site + department remains the most specific combination.
+const specificity = sql<number>`(
+  CASE WHEN ${trackActionTemplatesTable.module} IS NULL THEN 0 ELSE 1 END +
+  CASE WHEN ${trackActionTemplatesTable.siteId} IS NULL THEN 0 ELSE 2 END +
+  CASE WHEN ${trackActionTemplatesTable.departmentId} IS NULL THEN 0 ELSE 2 END
+)`;
+
+// Active templates suitable for the action form. Restricted users cannot use a
+// site they cannot see, and receive only their department/global catalogue.
+router.get("/templates/matching", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  const query = z.object({ module: z.enum(MODULES), siteId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+  if (!query.success) return res.status(400).json({ error: query.error.flatten() });
+  const activeDepartmentId = getActiveDepartmentId(req);
+  if (!await canAccessSite(query.data.siteId, clientId, activeDepartmentId)) return res.status(403).json({ error: "Forbidden site" });
+  const departmentId = await scopeDepartmentId(clientId, query.data.siteId, activeDepartmentId);
+  res.json(await db.select().from(trackActionTemplatesTable).where(and(...matchingConditions(clientId, query.data.module, query.data.siteId, departmentId))).orderBy(desc(specificity), asc(trackActionTemplatesTable.sortOrder), asc(trackActionTemplatesTable.id)));
+});
+
+router.get("/templates", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  res.json(await db.select().from(trackActionTemplatesTable).where(eq(trackActionTemplatesTable.clientId, clientId)).orderBy(asc(trackActionTemplatesTable.module), asc(trackActionTemplatesTable.sortOrder), asc(trackActionTemplatesTable.id)));
+});
+router.post("/templates", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req); const parsed = templateCreateSchema.safeParse(req.body);
+  if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const result = await db.transaction(async (tx) => {
+    const [site] = parsed.data.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
+    const [department] = parsed.data.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, parsed.data.departmentId)).for("update");
+    if ((parsed.data.siteId != null && site?.clientId !== clientId)
+      || (parsed.data.departmentId != null && department?.clientId !== clientId)
+      || (site && parsed.data.departmentId != null && site.departmentId !== parsed.data.departmentId)) return null;
+    const [row] = await tx.insert(trackActionTemplatesTable).values({ ...parsed.data, clientId, siteId: parsed.data.siteId ?? null, departmentId: parsed.data.departmentId ?? null, instruction: parsed.data.instruction, ownerDefault: parsed.data.ownerDefault ?? null }).returning();
+    return row;
+  });
+  if (!result) return res.status(400).json({ error: "Template scope must belong to this client" });
+  res.status(201).json(result);
+});
+router.patch("/templates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); const parsed = templatePatchSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid request" }); if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(trackActionTemplatesTable).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId))).for("update");
+    if (!current) return { status: 404 as const, error: "Template not found" };
+    const next = { ...current, ...parsed.data };
+    const [site] = next.siteId == null ? [null] : await tx.select({ clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(eq(sitesTable.id, next.siteId)).for("update");
+    const [department] = next.departmentId == null ? [null] : await tx.select({ clientId: departmentsTable.clientId }).from(departmentsTable).where(eq(departmentsTable.id, next.departmentId)).for("update");
+    if ((next.siteId != null && site?.clientId !== clientId)
+      || (next.departmentId != null && department?.clientId !== clientId)
+      || (site && next.departmentId != null && site.departmentId !== next.departmentId)) {
+      return { status: 400 as const, error: "Template scope must belong to this client" };
+    }
+    const [row] = await tx.update(trackActionTemplatesTable).set({ ...parsed.data, updatedAt: new Date() }).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId))).returning();
+    return { status: 200 as const, row };
+  });
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.json(result.row);
+});
+router.delete("/templates/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const [row] = await db.delete(trackActionTemplatesTable).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId))).returning({ id: trackActionTemplatesTable.id }); if (!row) return res.status(404).json({ error: "Template not found" }); res.status(204).end();
+});
+router.post("/templates/reorder", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req); const parsed = z.object({ templateIds: z.array(z.number().int().positive()).min(1).max(1000) }).strict().safeParse(req.body);
+  if (!clientId || !parsed.success || new Set(parsed.success ? parsed.data.templateIds : []).size !== (parsed.success ? parsed.data.templateIds.length : 0)) return res.status(400).json({ error: "templateIds must be a unique non-empty list" });
+  const rows = await db.transaction(async (tx) => {
+    const found = await tx.select({ id: trackActionTemplatesTable.id }).from(trackActionTemplatesTable).where(and(eq(trackActionTemplatesTable.clientId, clientId), inArray(trackActionTemplatesTable.id, parsed.data.templateIds))).for("update");
+    if (found.length !== parsed.data.templateIds.length) return null;
+    for (const [sortOrder, id] of parsed.data.templateIds.entries()) {
+      await tx.update(trackActionTemplatesTable).set({ sortOrder, updatedAt: new Date() }).where(and(eq(trackActionTemplatesTable.id, id), eq(trackActionTemplatesTable.clientId, clientId)));
+    }
+    return tx.select().from(trackActionTemplatesTable).where(and(eq(trackActionTemplatesTable.clientId, clientId), inArray(trackActionTemplatesTable.id, parsed.data.templateIds))).orderBy(asc(trackActionTemplatesTable.sortOrder));
+  });
+  if (!rows) return res.status(404).json({ error: "Template not found" });
+  res.json(rows);
+});
 
 router.get("/", requireAuth, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-
-  const query = z.object({
-    module: z.enum(MODULES),
-    siteId: z.coerce.number().int().positive().optional(),
-  }).safeParse(req.query);
-  if (!query.success) return res.status(400).json({ error: query.error.flatten() });
-
-  const siteIds = await accessibleSiteIds(clientId, getActiveDepartmentId(req));
-  const conditions = [
-    eq(trackActionsTable.clientId, clientId),
-    eq(trackActionsTable.module, query.data.module),
-  ];
-  if (siteIds) conditions.push(or(isNull(trackActionsTable.siteId), inArray(trackActionsTable.siteId, siteIds))!);
-  if (query.data.siteId) {
-    // Global actions are relevant in every site's action view.
-    conditions.push(or(
-      isNull(trackActionsTable.siteId),
-      eq(trackActionsTable.siteId, query.data.siteId),
-    )!);
-  }
-
-  const actions = await db.select().from(trackActionsTable)
-    .where(and(...conditions))
-    .orderBy(desc(trackActionsTable.createdAt));
-  res.json(actions);
-});
-
-router.post("/", requireAuth, denyViewers, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  if (parsed.data.status === "resolved") {
-    return res.status(400).json({ error: "Actions must be resolved via PATCH" });
-  }
-  if (!await canAccessSite(parsed.data.siteId, clientId, getActiveDepartmentId(req))) {
-    return res.status(403).json({ error: "Forbidden site" });
-  }
-
-  const [action] = await db.insert(trackActionsTable).values({
-    ...parsed.data,
-    siteId: parsed.data.siteId ?? null,
-    sourceRecordId: parsed.data.sourceRecordId ?? null,
-    ownerName: parsed.data.ownerName ?? null,
-    dueDate: parsed.data.dueDate ?? null,
-    remedialAction: parsed.data.remedialAction ?? null,
-    evidenceReference: parsed.data.evidenceReference ?? null,
-    resolutionNotes: parsed.data.resolutionNotes ?? null,
-    clientId,
-    createdBy: req.currentUser!.id,
-  }).returning();
-  res.status(201).json(action);
-});
-
-router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const parsed = patchSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  if (Object.keys(parsed.data).length === 0) return res.status(400).json({ error: "No changes supplied" });
-
-  const [current] = await db.select().from(trackActionsTable).where(and(
-    eq(trackActionsTable.id, id),
-    eq(trackActionsTable.clientId, clientId),
-  ));
-  if (!current) return res.status(404).json({ error: "Action not found" });
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  const query = z.object({ module: z.enum(MODULES), siteId: z.coerce.number().int().positive().optional() }).safeParse(req.query); if (!query.success) return res.status(400).json({ error: query.error.flatten() });
   const departmentId = getActiveDepartmentId(req);
-  if (!await canAccessSite(current.siteId, clientId, departmentId)) {
-    return res.status(403).json({ error: "Forbidden site" });
-  }
-  if (current.status === "resolved") {
-    return res.status(409).json({ error: "Resolved actions cannot be edited or reopened" });
-  }
-  if ("siteId" in parsed.data && !await canAccessSite(parsed.data.siteId, clientId, departmentId)) {
-    return res.status(403).json({ error: "Forbidden site" });
-  }
-
-  const nextStatus = parsed.data.status ?? current.status;
-  if (nextStatus === "resolved") {
-    const nonblank = (value: string | null | undefined) => typeof value === "string" && value.trim().length > 0;
-    if (!nonblank(parsed.data.remedialAction ?? current.remedialAction)
-      || !nonblank(parsed.data.evidenceReference ?? current.evidenceReference)
-      || !nonblank(parsed.data.resolutionNotes ?? current.resolutionNotes)) {
-      return res.status(400).json({
-        error: "remedialAction, evidenceReference and resolutionNotes are required to resolve an action",
-      });
-    }
-  }
-
-  const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
-  if (nextStatus === "resolved") {
-    updates.resolvedBy = req.currentUser!.id;
-    updates.resolvedAt = new Date();
-  }
-  const [action] = await db.update(trackActionsTable).set(updates as any)
-    // The pre-read is needed for site access and resolution validation, but
-    // this predicate is the authoritative immutability guard under races.
-    .where(and(
-      eq(trackActionsTable.id, id),
-      eq(trackActionsTable.clientId, clientId),
-      ne(trackActionsTable.status, "resolved"),
-    ))
-    .returning();
-  if (!action) return res.status(409).json({ error: "Resolved actions cannot be edited or reopened" });
-  res.json(action);
+  if (!await canAccessSite(query.data.siteId, clientId, departmentId)) return res.status(403).json({ error: "Forbidden site" });
+  const siteIds = await accessibleSiteIds(clientId, departmentId); const conditions = [eq(trackActionsTable.clientId, clientId), eq(trackActionsTable.module, query.data.module)];
+  if (siteIds) conditions.push(or(isNull(trackActionsTable.siteId), inArray(trackActionsTable.siteId, siteIds))!); if (query.data.siteId) conditions.push(or(isNull(trackActionsTable.siteId), eq(trackActionsTable.siteId, query.data.siteId))!);
+  res.json(await db.select().from(trackActionsTable).where(and(...conditions)).orderBy(desc(trackActionsTable.createdAt)));
 });
-
+router.post("/", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req); const parsed = createSchema.safeParse(req.body); if (!clientId) return res.status(400).json({ error: "No client context" }); if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const activeDepartmentId = getActiveDepartmentId(req);
+  const createValues = (template?: typeof trackActionTemplatesTable.$inferSelect) => {
+    const leadTimeDays = template ? template.leadTimeDays : parsed.data.leadTimeDays ?? null;
+    const dueDate = template
+      ? new Date(Date.now() + template.leadTimeDays * 86400000).toISOString().slice(0, 10)
+      : parsed.data.dueDate ?? (leadTimeDays == null ? null : new Date(Date.now() + leadTimeDays * 86400000).toISOString().slice(0, 10));
+    return {
+      clientId, createdBy: req.currentUser!.id, status: parsed.data.status,
+      siteId: parsed.data.siteId ?? null, sourceRecordId: parsed.data.sourceRecordId ?? null,
+      templateId: template?.id ?? null, provenance: template ? "template" : "one_off",
+      module: parsed.data.module, title: template?.title ?? parsed.data.title!,
+      instruction: template?.instruction ?? parsed.data.instruction ?? null,
+      severity: template?.severity ?? parsed.data.severity!,
+      ownerName: template?.ownerDefault ?? parsed.data.ownerName ?? null,
+      leadTimeDays, dueDate, remedialAction: parsed.data.remedialAction ?? null,
+      evidenceReference: parsed.data.evidenceReference ?? null, resolutionNotes: parsed.data.resolutionNotes ?? null,
+    };
+  };
+  const result = await db.transaction(async (tx) => {
+    let departmentId = activeDepartmentId;
+    if (parsed.data.siteId != null) {
+      const [site] = await tx.select({
+        clientId: sitesTable.clientId,
+        departmentId: sitesTable.departmentId,
+      }).from(sitesTable).where(eq(sitesTable.id, parsed.data.siteId)).for("update");
+      if (!site || site.clientId !== clientId
+        || (activeDepartmentId != null && site.departmentId != null && site.departmentId !== activeDepartmentId)) {
+        return { status: 403 as const, error: "Forbidden site" };
+      }
+      if (activeDepartmentId == null) departmentId = site.departmentId;
+    }
+    if (!parsed.data.templateId) {
+      const [created] = await tx.insert(trackActionsTable).values(createValues()).returning();
+      return { status: 201 as const, row: created };
+    }
+    const [template] = await tx.select().from(trackActionTemplatesTable).where(and(
+      eq(trackActionTemplatesTable.id, parsed.data.templateId!),
+      ...matchingConditions(clientId, parsed.data.module, parsed.data.siteId ?? undefined, departmentId),
+    )).for("update");
+    if (!template) return { status: 404 as const, error: "Active matching template not found" };
+    const [created] = await tx.insert(trackActionsTable).values(createValues(template)).returning();
+    return { status: 201 as const, row: created };
+  });
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.row);
+});
+router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); const parsed = patchSchema.safeParse(req.body); if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" }); if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });
+  const departmentId = getActiveDepartmentId(req);
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
+    if (!current) return { status: 404 as const, error: "Action not found" };
+    const siteIds = [...new Set([current.siteId, parsed.data.siteId].filter((value): value is number => value != null))].sort((a, b) => a - b);
+    const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
+    const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
+    if (!canUse(current.siteId) || ("siteId" in parsed.data && !canUse(parsed.data.siteId))) return { status: 403 as const, error: "Forbidden site" };
+    if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
+    const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
+    if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes))) {
+      return { status: 400 as const, error: "remedialAction, evidenceReference and resolutionNotes are required to resolve an action" };
+    }
+    const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() }; if (nextStatus === "resolved") { updates.resolvedBy = req.currentUser!.id; updates.resolvedAt = new Date(); }
+    const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
+    if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
+    return { status: 200 as const, row };
+  });
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.json(result.row);
+});
 export default router;

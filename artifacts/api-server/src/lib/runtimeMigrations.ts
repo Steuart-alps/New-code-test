@@ -517,10 +517,14 @@ async function migrateTrackActions() {
       "module" text NOT NULL,
       "source_kind" text,
       "source_record_id" integer,
+      "template_id" integer,
+      "provenance" text NOT NULL DEFAULT 'one_off',
       "title" text NOT NULL,
+      "instruction" text,
       "severity" text NOT NULL DEFAULT 'action_required'
         CHECK ("severity" IN ('monitor', 'action_required', 'urgent')),
       "owner_name" text,
+      "lead_time_days" integer,
       "due_date" date,
       "remedial_action" text,
       "evidence_reference" text,
@@ -538,6 +542,27 @@ async function migrateTrackActions() {
     CREATE INDEX IF NOT EXISTS "IDX_track_actions_client_module_status"
     ON "track_actions" ("client_id", "module", "status")
   `);
+  // The catalogue must exist before legacy track_actions installs can add its
+  // foreign key below.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_action_templates" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "module" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "department_id" integer REFERENCES "departments"("id") ON DELETE CASCADE,
+      "title" text NOT NULL,
+      "instruction" text,
+      "severity" text NOT NULL DEFAULT 'action_required'
+        CHECK ("severity" IN ('monitor', 'action_required', 'urgent')),
+      "owner_default" text,
+      "lead_time_days" integer NOT NULL DEFAULT 0 CHECK ("lead_time_days" >= 0),
+      "sort_order" integer NOT NULL DEFAULT 0,
+      "active" boolean NOT NULL DEFAULT true,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_track_actions_site"
     ON "track_actions" ("site_id")
@@ -549,11 +574,35 @@ async function migrateTrackActions() {
   // (whose source_kind remains NULL) while making new automated actions
   // collision-safe across the Green and Swim source tables.
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "source_kind" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "template_id" integer`);
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'track_actions_template_id_fkey'
+          AND conrelid = 'track_actions'::regclass
+      ) THEN
+        ALTER TABLE "track_actions"
+          ADD CONSTRAINT "track_actions_template_id_fkey"
+          FOREIGN KEY ("template_id") REFERENCES "track_action_templates"("id") ON DELETE SET NULL;
+      END IF;
+    END $$
+  `);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEFAULT 'one_off'`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "instruction" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "lead_time_days" integer`);
+  await db.execute(sql`UPDATE "track_actions" SET "provenance" = 'product_default' WHERE "source_kind" IS NOT NULL`);
+  await db.execute(sql`ALTER TABLE "track_action_templates" ALTER COLUMN "module" DROP NOT NULL`);
   await db.execute(sql`DROP INDEX IF EXISTS "UQ_track_actions_source"`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_actions_source"
     ON "track_actions" ("client_id", "module", "source_kind", "source_record_id")
     WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_action_templates_match"
+    ON "track_action_templates" ("client_id", "module", "active", "site_id", "department_id", "sort_order")
   `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "track_action_reminder_log" (
@@ -653,7 +702,7 @@ async function migrateTrackActions() {
 
       INSERT INTO "track_actions" (
         "client_id", "site_id", "module", "source_kind", "source_record_id", "title",
-        "severity", "due_date", "status"
+        "provenance", "severity", "due_date", "status"
       )
       VALUES (
         (record_json->>'client_id')::integer,
@@ -662,6 +711,7 @@ async function migrateTrackActions() {
         TG_ARGV[2],
         (record_json->>'id')::integer,
         action_title,
+        'product_default',
         action_severity,
         action_due_date,
         'open'

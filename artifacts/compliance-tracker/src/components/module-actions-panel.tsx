@@ -23,10 +23,16 @@ interface TrackAction {
   status: ActionStatus;
   siteId?: number | null;
   ownerName?: string | null;
+  ownerDefault?: string | null;
   dueDate?: string | null;
   remedialAction?: string | null;
   evidenceReference?: string | null;
   resolutionNotes?: string | null;
+  instruction?: string | null;
+  instructionSnapshot?: string | null;
+  sourceKind?: string | null;
+  provenance?: "product_default" | "template" | "one_off" | null;
+  templateId?: number | null;
   createdAt?: string | null;
 }
 
@@ -35,7 +41,25 @@ interface Site {
   name: string;
 }
 
-const emptyDraft = { title: "", severity: "monitor" as Severity, siteId: "", ownerName: "", dueDate: "" };
+interface RequiredActionTemplate {
+  id: number | string;
+  module?: string | null;
+  moduleKey?: string | null;
+  title: string;
+  instruction?: string | null;
+  severity?: Severity | null;
+  ownerName?: string | null;
+  ownerDefault?: string | null;
+  defaultOwner?: string | null;
+  leadTimeDays?: number | null;
+  defaultLeadTimeDays?: number | null;
+  siteId?: number | null;
+  departmentId?: number | null;
+  enabled?: boolean;
+  active?: boolean;
+}
+
+const emptyDraft = { title: "", instruction: "", severity: "monitor" as Severity, siteId: "", ownerName: "", dueDate: "", templateId: "" };
 const severityStyles: Record<Severity, string> = {
   monitor: "bg-slate-100 text-slate-700 border-slate-200",
   action_required: "bg-amber-50 text-amber-800 border-amber-200",
@@ -51,6 +75,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const { toast } = useToast();
   const [actions, setActions] = useState<TrackAction[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [templates, setTemplates] = useState<RequiredActionTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -82,6 +107,41 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   }, [activeClientId, moduleKey, toast]);
 
   useEffect(() => { void loadActions(); }, [loadActions]);
+  useEffect(() => {
+    let cancelled = false;
+    const site = draft.siteId ? `&siteId=${encodeURIComponent(draft.siteId)}` : "";
+    void apiFetch(`/track-actions/templates/matching?module=${encodeURIComponent(moduleKey)}${site}`)
+      .then(async response => ({ response, data: await response.json().catch(() => null) }))
+      .then(({ response, data }) => {
+        if (cancelled) return;
+        const list = response.ok ? (Array.isArray(data) ? data : Array.isArray(data?.templates) ? data.templates : []) : [];
+        setTemplates(list.filter((template: RequiredActionTemplate) => template.active ?? true));
+      })
+      .catch(() => { if (!cancelled) setTemplates([]); });
+    return () => { cancelled = true; };
+  }, [activeClientId, draft.siteId, moduleKey]);
+
+  function selectTemplate(templateId: string) {
+    if (templateId === "one-off") {
+      setDraft(emptyDraft);
+      return;
+    }
+    const template = templates.find(item => String(item.id) === templateId);
+    if (!template) return;
+    const leadTimeDays = template.leadTimeDays ?? template.defaultLeadTimeDays ?? 0;
+    const dueDate = leadTimeDays > 0
+      ? new Date(Date.now() + leadTimeDays * 86_400_000).toISOString().slice(0, 10)
+      : "";
+    setDraft({
+      title: template.title,
+      instruction: template.instruction ?? "",
+      severity: template.severity ?? "action_required",
+      siteId: template.siteId ? String(template.siteId) : "",
+      ownerName: template.ownerDefault ?? template.ownerName ?? template.defaultOwner ?? "",
+      dueDate,
+      templateId,
+    });
+  }
 
   async function createAction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -90,13 +150,18 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
     try {
       const response = await apiFetch("/track-actions", {
         method: "POST",
-        body: JSON.stringify({
+        body: JSON.stringify(draft.templateId ? {
+          module: moduleKey,
+          templateId: Number(draft.templateId),
+          siteId: draft.siteId ? Number(draft.siteId) : null,
+        } : {
           module: moduleKey,
           title: draft.title.trim(),
           severity: draft.severity,
           siteId: draft.siteId ? Number(draft.siteId) : null,
           ...(draft.ownerName.trim() ? { ownerName: draft.ownerName.trim() } : {}),
           ...(draft.dueDate ? { dueDate: draft.dueDate } : {}),
+          instruction: draft.instruction.trim() || null,
         }),
       });
       const data = await response.json().catch(() => null);
@@ -148,11 +213,13 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
         <CardContent className="space-y-4">
           {showCreate && canMutate && (
             <form onSubmit={createAction} className="grid gap-3 rounded-sm border bg-muted/30 p-4 sm:grid-cols-2">
-              <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-title">Action title</Label><Input id="action-title" required value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Describe the corrective action" /></div>
-              <div className="space-y-1.5"><Label htmlFor="action-severity">Severity</Label><Select value={draft.severity} onValueChange={value => setDraft({ ...draft, severity: value as Severity })}><SelectTrigger id="action-severity"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div>
-              <div className="space-y-1.5"><Label htmlFor="action-site">Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value })}><SelectTrigger id="action-site"><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-1.5"><Label htmlFor="action-owner">Owner <span className="text-muted-foreground">(optional)</span></Label><Input id="action-owner" value={draft.ownerName} onChange={event => setDraft({ ...draft, ownerName: event.target.value })} /></div>
-              <div className="space-y-1.5"><Label htmlFor="action-due-date">Due date <span className="text-muted-foreground">(optional)</span></Label><Input id="action-due-date" type="date" value={draft.dueDate} onChange={event => setDraft({ ...draft, dueDate: event.target.value })} /></div>
+               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-template">Start from a required-action template <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.templateId || "one-off"} onValueChange={selectTemplate}><SelectTrigger id="action-template"><SelectValue placeholder="Create a one-off action" /></SelectTrigger><SelectContent><SelectItem value="one-off">One-off action</SelectItem>{templates.map(template => <SelectItem key={template.id} value={String(template.id)}>{template.title}</SelectItem>)}</SelectContent></Select>{draft.templateId && <p className="text-xs text-muted-foreground">The current approved template is copied into the action as an immutable snapshot. Choose one-off to customise it first.</p>}</div>
+               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-title">Action title</Label><Input id="action-title" required disabled={!!draft.templateId} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="Describe the corrective action" /></div>
+               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="action-instruction">Instruction snapshot <span className="text-muted-foreground">(optional)</span></Label><Textarea id="action-instruction" disabled={!!draft.templateId} value={draft.instruction} onChange={event => setDraft({ ...draft, instruction: event.target.value })} placeholder="What needs to be done and how" /></div>
+               <div className="space-y-1.5"><Label htmlFor="action-severity">Severity</Label><Select disabled={!!draft.templateId} value={draft.severity} onValueChange={value => setDraft({ ...draft, severity: value as Severity })}><SelectTrigger id="action-severity"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div>
+               <div className="space-y-1.5"><Label htmlFor="action-site">Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value, templateId: "" })}><SelectTrigger id="action-site"><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
+               <div className="space-y-1.5"><Label htmlFor="action-owner">Owner <span className="text-muted-foreground">(optional)</span></Label><Input id="action-owner" disabled={!!draft.templateId} value={draft.ownerName} onChange={event => setDraft({ ...draft, ownerName: event.target.value })} /></div>
+               <div className="space-y-1.5"><Label htmlFor="action-due-date">Due date <span className="text-muted-foreground">(optional)</span></Label><Input id="action-due-date" disabled={!!draft.templateId} type="date" value={draft.dueDate} onChange={event => setDraft({ ...draft, dueDate: event.target.value })} /></div>
               <div className="flex gap-2 sm:col-span-2"><Button type="submit" disabled={submitting}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create action</Button><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button></div>
             </form>
           )}
@@ -184,5 +251,7 @@ function ActionRow({ action, sites, siteName, canMutate, submitting, resolution,
   const canResolve = values.remedialAction.trim() && values.evidenceReference.trim() && values.resolutionNotes.trim();
   const due = action.dueDate ? new Date(`${action.dueDate}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
   const fieldId = `action-${action.id}`;
-  return <article className="rounded-sm border bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium text-[#162D42]">{action.title}</h3><Badge variant="outline" className={cn("capitalize", severityStyles[action.severity] ?? severityStyles.monitor)}>{action.severity.replace("_", " ")}</Badge><Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge></div><p className="mt-1.5 text-xs text-muted-foreground">{[siteName, action.ownerName && `Owner: ${action.ownerName}`, due && `Due: ${due}`].filter(Boolean).join(" · ") || "No site, owner or due date recorded"}</p></div>{canMutate && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" aria-expanded={editing} onClick={() => setEditing(value => !value)}>Edit details</Button>{action.status === "open" && <Button type="button" size="sm" variant="outline" disabled={submitting} onClick={onStart}><CircleDot className="mr-1.5 h-4 w-4" />Start action</Button>}</div>}</div>{editing && canMutate && <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2"><div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`${fieldId}-title`}>Action title</Label><Input id={`${fieldId}-title`} value={details.title} onChange={event => setDetails({ ...details, title: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-severity`}>Severity</Label><Select value={details.severity} onValueChange={value => setDetails({ ...details, severity: value as Severity })}><SelectTrigger id={`${fieldId}-severity`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-site`}>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={details.siteId || "none"} onValueChange={value => setDetails({ ...details, siteId: value === "none" ? "" : value })}><SelectTrigger id={`${fieldId}-site`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-owner`}>Owner <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-owner`} value={details.ownerName} onChange={event => setDetails({ ...details, ownerName: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-due`}>Due date <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-due`} type="date" value={details.dueDate} onChange={event => setDetails({ ...details, dueDate: event.target.value })} /></div><div className="flex gap-2 sm:col-span-2"><Button type="button" size="sm" disabled={submitting || !details.title.trim()} onClick={() => onUpdate?.({ title: details.title.trim(), severity: details.severity, siteId: details.siteId ? Number(details.siteId) : null, ownerName: details.ownerName.trim() || null, dueDate: details.dueDate || null })}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save details</Button><Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div>}{action.status === "resolved" ? <div className="mt-3 border-t pt-3 text-sm text-muted-foreground space-y-1"><p><strong className="text-foreground">Remedial action:</strong> {action.remedialAction || "Not recorded"}</p><p><strong className="text-foreground">Evidence:</strong> {action.evidenceReference || "Not recorded"}</p><p><strong className="text-foreground">Resolution notes:</strong> {action.resolutionNotes || "Not recorded"}</p></div> : canMutate && <div className="mt-3 border-t pt-3"><Button type="button" size="sm" variant="outline" onClick={() => setResolving(value => !value)}><CheckCircle2 className="mr-1.5 h-4 w-4" />Resolve action</Button>{resolving && <div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Remedial action</Label><Textarea value={values.remedialAction} onChange={event => onResolutionChange?.({ ...values, remedialAction: event.target.value })} /></div><div className="space-y-1.5"><Label>Evidence reference</Label><Input value={values.evidenceReference} onChange={event => onResolutionChange?.({ ...values, evidenceReference: event.target.value })} placeholder="Photo, record or document reference" /></div><div className="space-y-1.5 sm:col-span-2"><Label>Resolution notes</Label><Textarea value={values.resolutionNotes} onChange={event => onResolutionChange?.({ ...values, resolutionNotes: event.target.value })} /></div><div><Button type="button" size="sm" disabled={submitting || !canResolve} onClick={() => onResolve?.(values)}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm resolution</Button></div></div>}</div>}</article>;
+  const provenance = action.provenance === "product_default" || action.sourceKind ? "Product default" : action.provenance === "template" || action.templateId ? "Client template" : "One-off";
+  const instruction = action.instructionSnapshot ?? action.instruction;
+  return <article className="rounded-sm border bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium text-[#162D42]">{action.title}</h3><Badge variant="outline" className={cn("capitalize", severityStyles[action.severity] ?? severityStyles.monitor)}>{action.severity.replace("_", " ")}</Badge><Badge variant="outline" className="capitalize">{action.status.replace("_", " ")}</Badge><Badge variant="secondary">{provenance}</Badge></div><p className="mt-1.5 text-xs text-muted-foreground">{[siteName, action.ownerName && `Owner: ${action.ownerName}`, due && `Due: ${due}`].filter(Boolean).join(" · ") || "No site, owner or due date recorded"}</p>{instruction && <p className="mt-2 rounded-sm bg-muted/50 px-2.5 py-2 text-sm text-muted-foreground"><strong className="text-foreground">Instruction snapshot:</strong> {instruction}</p>}</div>{canMutate && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" aria-expanded={editing} onClick={() => setEditing(value => !value)}>Edit details</Button>{action.status === "open" && <Button type="button" size="sm" variant="outline" disabled={submitting} onClick={onStart}><CircleDot className="mr-1.5 h-4 w-4" />Start action</Button>}</div>}</div>{editing && canMutate && <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-2"><div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`${fieldId}-title`}>Action title</Label><Input id={`${fieldId}-title`} value={details.title} onChange={event => setDetails({ ...details, title: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-severity`}>Severity</Label><Select value={details.severity} onValueChange={value => setDetails({ ...details, severity: value as Severity })}><SelectTrigger id={`${fieldId}-severity`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monitor">Monitor</SelectItem><SelectItem value="action_required">Action required</SelectItem><SelectItem value="urgent">Urgent</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-site`}>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={details.siteId || "none"} onValueChange={value => setDetails({ ...details, siteId: value === "none" ? "" : value })}><SelectTrigger id={`${fieldId}-site`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-owner`}>Owner <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-owner`} value={details.ownerName} onChange={event => setDetails({ ...details, ownerName: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor={`${fieldId}-due`}>Due date <span className="text-muted-foreground">(optional)</span></Label><Input id={`${fieldId}-due`} type="date" value={details.dueDate} onChange={event => setDetails({ ...details, dueDate: event.target.value })} /></div><div className="flex gap-2 sm:col-span-2"><Button type="button" size="sm" disabled={submitting || !details.title.trim()} onClick={() => onUpdate?.({ title: details.title.trim(), severity: details.severity, siteId: details.siteId ? Number(details.siteId) : null, ownerName: details.ownerName.trim() || null, dueDate: details.dueDate || null })}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save details</Button><Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button></div></div>}{action.status === "resolved" ? <div className="mt-3 border-t pt-3 text-sm text-muted-foreground space-y-1"><p><strong className="text-foreground">Remedial action:</strong> {action.remedialAction || "Not recorded"}</p><p><strong className="text-foreground">Evidence:</strong> {action.evidenceReference || "Not recorded"}</p><p><strong className="text-foreground">Resolution notes:</strong> {action.resolutionNotes || "Not recorded"}</p></div> : canMutate && <div className="mt-3 border-t pt-3"><Button type="button" size="sm" variant="outline" onClick={() => setResolving(value => !value)}><CheckCircle2 className="mr-1.5 h-4 w-4" />Resolve action</Button>{resolving && <div className="mt-3 grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Remedial action</Label><Textarea value={values.remedialAction} onChange={event => onResolutionChange?.({ ...values, remedialAction: event.target.value })} /></div><div className="space-y-1.5"><Label>Evidence reference</Label><Input value={values.evidenceReference} onChange={event => onResolutionChange?.({ ...values, evidenceReference: event.target.value })} placeholder="Photo, record or document reference" /></div><div className="space-y-1.5 sm:col-span-2"><Label>Resolution notes</Label><Textarea value={values.resolutionNotes} onChange={event => onResolutionChange?.({ ...values, resolutionNotes: event.target.value })} /></div><div><Button type="button" size="sm" disabled={submitting || !canResolve} onClick={() => onResolve?.(values)}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm resolution</Button></div></div>}</div>}</article>;
 }
