@@ -42,10 +42,12 @@ router.post("/sessions", denyViewers, async (req, res) => {
     const {
       siteId, sessionDate, sessionType, lifeguardName, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
-      poolClosed, closureReason, notes, result,
+      poolClosed, closureReason, notes,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
 
+    const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
+    const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
     const dbResult = await db.execute(sql`
       INSERT INTO swim_sessions (
         client_id, site_id, session_date, session_type, lifeguard_name,
@@ -56,9 +58,9 @@ router.post("/sessions", denyViewers, async (req, res) => {
         ${sessionType ?? "public_swim"}, ${lifeguardName?.trim() ?? null},
         ${openTime ?? null}, ${closeTime ?? null},
         ${maxBathers ?? null}, ${batherCountPeak ?? null},
-        ${preSessionResult ?? "pass"}, ${preSessionNotes?.trim() ?? null},
+        ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
         ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
-        ${notes?.trim() ?? null}, ${result ?? "pass"}
+        ${notes?.trim() ?? null}, ${canonicalResult}
       )
       RETURNING *
     `);
@@ -74,8 +76,11 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
     const {
       siteId, sessionDate, sessionType, lifeguardName, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
-      poolClosed, closureReason, notes, result,
+      poolClosed, closureReason, notes,
     } = req.body;
+    const resultWasProvided = Object.prototype.hasOwnProperty.call(req.body, "result");
+    const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
+    const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
     const dbResult = await db.execute(sql`
       UPDATE swim_sessions SET
         site_id = ${siteId ?? null}, session_date = ${sessionDate},
@@ -83,11 +88,12 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
         lifeguard_name = ${lifeguardName?.trim() ?? null},
         open_time = ${openTime ?? null}, close_time = ${closeTime ?? null},
         max_bathers = ${maxBathers ?? null}, bather_count_peak = ${batherCountPeak ?? null},
-        pre_session_result = ${preSessionResult ?? "pass"},
+        pre_session_result = ${canonicalPreSessionResult},
         pre_session_notes = ${preSessionNotes?.trim() ?? null},
         pool_closed = ${poolClosed ?? false},
         closure_reason = ${closureReason?.trim() ?? null},
-        notes = ${notes?.trim() ?? null}, result = ${result ?? "pass"},
+        notes = ${notes?.trim() ?? null},
+        result = ${resultWasProvided ? canonicalResult : sql`result`},
         updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
@@ -137,9 +143,10 @@ router.get("/surveillance", async (req, res) => {
 router.post("/surveillance", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, result } = req.body;
+    const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy } = req.body;
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
 
+    const canonicalResult = scanCompleted === false ? "fail" : "pass";
     const dbResult = await db.execute(sql`
       INSERT INTO swim_surveillance_checks (
         client_id, session_id, site_id, check_date, check_time,
@@ -147,7 +154,7 @@ router.post("/surveillance", denyViewers, async (req, res) => {
       ) VALUES (
         ${clientId}, ${sessionId ?? null}, ${siteId ?? null}, ${checkDate},
         ${checkTime ?? null}, ${batherCount ?? null}, ${scanCompleted ?? true},
-        ${observations?.trim() ?? null}, ${checkedBy?.trim() ?? null}, ${result ?? "pass"}
+        ${observations?.trim() ?? null}, ${checkedBy?.trim() ?? null}, ${canonicalResult}
       )
       RETURNING *
     `);
@@ -160,14 +167,17 @@ router.post("/surveillance", denyViewers, async (req, res) => {
 router.put("/surveillance/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, result } = req.body;
+    const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy } = req.body;
+    const resultWasProvided = Object.prototype.hasOwnProperty.call(req.body, "result");
+    const canonicalResult = scanCompleted === false ? "fail" : "pass";
     const dbResult = await db.execute(sql`
       UPDATE swim_surveillance_checks SET
         site_id = ${siteId ?? null}, check_date = ${checkDate},
         check_time = ${checkTime ?? null}, bather_count = ${batherCount ?? null},
         scan_completed = ${scanCompleted ?? true},
         observations = ${observations?.trim() ?? null},
-        checked_by = ${checkedBy?.trim() ?? null}, result = ${result ?? "pass"}
+        checked_by = ${checkedBy?.trim() ?? null},
+        result = ${resultWasProvided ? canonicalResult : sql`result`}
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -224,7 +234,7 @@ router.post("/first-aid", denyViewers, async (req, res) => {
 
     const allOk = [aedOk, firstAidKitOk, rescuePoleOk, throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk]
       .every(v => v !== false);
-    const result = allOk ? "pass" : "action_required";
+    const result = allOk ? "pass" : "fail";
 
     const dbResult = await db.execute(sql`
       INSERT INTO swim_first_aid_checks (
@@ -257,7 +267,7 @@ router.put("/first-aid/:id", denyViewers, async (req, res) => {
     } = req.body;
     const allOk = [aedOk, firstAidKitOk, rescuePoleOk, throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk]
       .every(v => v !== false);
-    const result = allOk ? "pass" : "action_required";
+    const result = allOk ? "pass" : "fail";
 
     const dbResult = await db.execute(sql`
       UPDATE swim_first_aid_checks SET
@@ -408,7 +418,10 @@ router.get("/status", async (req, res) => {
         SELECT
           COUNT(*) FILTER (WHERE check_date >= ${thirtyDaysAgo}) AS checks_last_30d,
           MAX(check_date) AS last_check_date,
-          COUNT(*) FILTER (WHERE result = 'action_required' AND check_date >= ${thirtyDaysAgo}) AS action_required
+          COUNT(*) FILTER (
+            WHERE result IN ('fail', 'action_required')
+              AND check_date >= ${thirtyDaysAgo}
+          ) AS action_required
         FROM swim_first_aid_checks WHERE client_id = ${clientId}
       `),
       db.execute(sql`

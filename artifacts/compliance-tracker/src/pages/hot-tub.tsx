@@ -41,7 +41,7 @@ export const CHECK_TYPES = [
 ] as const;
 
 type CheckType = (typeof CHECK_TYPES)[number];
-type CheckResult = "pass" | "fail" | "action_required";
+type CheckResult = "pass" | "fail";
 type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
 
 interface HotTub {
@@ -153,11 +153,6 @@ function ResultBadge({ result }: { result: string }) {
   if (result === "pass") return (
     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
       <CheckCircle2 className="w-3 h-3 mr-1" /> Pass
-    </Badge>
-  );
-  if (result === "action_required") return (
-    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-      <AlertTriangle className="w-3 h-3 mr-1" /> Action Required
     </Badge>
   );
   return (
@@ -300,7 +295,7 @@ export default function HotTubPage() {
     const filterLine = filterParts.length ? `Filters applied — ${filterParts.join(" · ")}` : "All records";
 
     const resultLabel = (r: string) =>
-      r === "pass" ? "Pass" : r === "action_required" ? "Action required" : r === "fail" ? "Fail" : r;
+      r === "pass" ? "Pass" : "Fail";
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hot Tub Maintenance Log</title>
 <style>
@@ -374,7 +369,7 @@ ${rows.map(r => `<tr>
     setForm({
       checkType: r.checkType as CheckType,
       checkDate: r.checkDate?.slice(0, 10) ?? "",
-      result: r.result as CheckResult,
+      result: r.result === "pass" ? "pass" : "fail",
       session: r.session ?? "",
       phValue: r.phValue ?? "",
       sanitiserLevel: r.sanitiserLevel ?? "",
@@ -822,15 +817,15 @@ ${rows.map(r => `<tr>
 
             {/* Result */}
             <div>
-              <Label>Result *</Label>
+              <Label>Check result *</Label>
               <Select value={form.result} onValueChange={v => setForm(f => ({ ...f, result: v as CheckResult }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pass">Pass</SelectItem>
                   <SelectItem value="fail">Fail</SelectItem>
-                  <SelectItem value="action_required">Action Required</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">A Fail automatically opens an Action Required item to track remediation.</p>
             </div>
 
             {/* Water chemistry fields */}

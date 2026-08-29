@@ -248,11 +248,11 @@ function waterTemp(v: number | null): ValLevel {
 function autoResult(fields: {
   ph: number | null; free: number | null; combined: number | null;
   turb: string | null; temp: number | null;
-}): "pass" | "fail" | "action_required" {
+}): "pass" | "fail" {
   const levels = [pHLevel(fields.ph), freeCl(fields.free), combCl(fields.combined),
                   turbLevel(fields.turb), waterTemp(fields.temp)];
   if (levels.includes("fail")) return "fail";
-  if (levels.includes("warn")) return "action_required";
+  if (levels.includes("warn")) return "fail";
   return "pass";
 }
 
@@ -507,10 +507,9 @@ function RecordDialog({
           {hasValues && (
             <div className={cn("rounded-sm border px-3 py-2 text-xs font-medium",
               suggested === "pass"           ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-              : suggested === "action_required" ? "bg-amber-50 border-amber-200 text-amber-800"
               :                                   "bg-rose-50 border-rose-200 text-rose-800"
             )}>
-              Suggested result: <span className="font-bold">{suggested === "pass" ? "Pass" : suggested === "action_required" ? "Action Required" : "Fail"}</span>
+              Suggested result: <span className="font-bold">{suggested === "pass" ? "Pass" : "Fail"}</span>
               {suggested !== "pass" && (
                 <span className="font-normal ml-1">based on chemistry values</span>
               )}
@@ -518,15 +517,15 @@ function RecordDialog({
           )}
 
           <div className="space-y-1.5">
-            <Label>Overall result</Label>
+            <Label>Check result</Label>
             <Select value={effectiveResult} onValueChange={v => setOverrideResult(v)}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pass">Pass</SelectItem>
-                <SelectItem value="action_required">Action Required</SelectItem>
                 <SelectItem value="fail">Fail</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">A Fail automatically opens an Action Required item to track remediation.</p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -709,10 +708,9 @@ export default function PoolTrackPage() {
                     {item.result && (
                       <Badge variant="outline" className={cn("text-xs mt-0.5",
                         item.result === "pass"           ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                        item.result === "action_required"? "bg-amber-50 text-amber-700 border-amber-200" :
                                                            "bg-rose-50 text-rose-700 border-rose-200"
                       )}>
-                        {item.result === "pass" ? "Pass" : item.result === "action_required" ? "Action Req." : "Fail"}
+                        {item.result === "pass" ? "Pass" : "Fail"}
                       </Badge>
                     )}
                     <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
@@ -801,10 +799,9 @@ export default function PoolTrackPage() {
                             <span className="font-medium text-sm">{CHECK_TYPE_LABELS[check.check_type] ?? check.check_type}</span>
                             <Badge variant="outline" className={cn("text-xs",
                               check.result === "pass"           ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                              check.result === "action_required"? "bg-amber-50 text-amber-700 border-amber-200" :
                                                                   "bg-rose-50 text-rose-700 border-rose-200"
                             )}>
-                              {check.result === "pass" ? "Pass" : check.result === "action_required" ? "Action Required" : "Fail"}
+                              {check.result === "pass" ? "Pass" : "Fail"}
                             </Badge>
                             {!check.pool_open && <Badge variant="outline" className="text-xs bg-slate-50 text-slate-600">Pool closed</Badge>}
                             {check.site_name && <Badge variant="outline" className="text-xs">{check.site_name}</Badge>}

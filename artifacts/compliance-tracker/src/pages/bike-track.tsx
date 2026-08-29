@@ -184,7 +184,7 @@ function emptyCheckItems() {
   return Object.fromEntries(CHECK_ITEMS.map(i => [i.key, "pass"])) as Record<string, string>;
 }
 
-function autoOverallResult(items: Record<string, string>): "pass" | "fail" | "action_required" {
+function autoOverallResult(items: Record<string, string>): "pass" | "fail" {
   const vals = Object.values(items);
   if (vals.some(v => v === "fail")) return "fail";
   return "pass";
@@ -210,8 +210,7 @@ function BikeStatusBadge({ status }: { status: string }) {
 function ResultBadge({ result }: { result: string | null }) {
   if (!result) return null;
   if (result === "pass") return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px]"><Check className="w-2.5 h-2.5 mr-1" />Pass</Badge>;
-  if (result === "fail") return <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[11px]"><X className="w-2.5 h-2.5 mr-1" />Fail</Badge>;
-  return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[11px]"><AlertTriangle className="w-2.5 h-2.5 mr-1" />Action</Badge>;
+  return <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[11px]"><X className="w-2.5 h-2.5 mr-1" />Fail</Badge>;
 }
 
 // ─── Check Items Editor ───────────────────────────────────────────────────────
@@ -553,7 +552,7 @@ function NewHireDialog({
                       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                       : "bg-rose-50 text-rose-700 border-rose-200"
                   )}>
-                    Overall result: {autoOverallResult(checkItems) === "pass" ? "✓ Pass" : "✗ Fail — do not hire until resolved"}
+                    Overall result: {autoOverallResult(checkItems) === "pass" ? "✓ Pass" : "✗ Fail — do not hire until resolved; an Action Required item is opened automatically."}
                   </div>
                 </>
               )}
@@ -715,7 +714,7 @@ function ReturnDialog({
                 )}>
                   {autoOverallResult(checkItems) === "pass"
                     ? "✓ Pass — bike will be marked available"
-                    : "✗ Fail — bike will be moved to maintenance"}
+                    : "✗ Fail — bike will be moved to maintenance and an Action Required item is opened automatically."}
                 </div>
               </div>
             )}

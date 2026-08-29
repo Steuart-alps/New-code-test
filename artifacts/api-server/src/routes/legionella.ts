@@ -47,7 +47,9 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
 const createSchema = z.object({
   checkType: z.enum(CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  result: z.enum(["pass", "fail", "action_required"]),
+  // New observations are canonicalised at the write boundary. Historical
+  // action_required values remain readable from the database.
+  result: z.enum(["pass", "fail"]),
   temperature: z.number().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   location: z.string().max(500).nullable().optional(),

@@ -19,7 +19,8 @@ export const treeInspectionsTable = pgTable("tree_inspections", {
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
   checkType: text("check_type").notNull(),
   checkDate: date("check_date").notNull(),
-  result: text("result").notNull().default("pass"), // pass | monitor | action_required | urgent_action
+  result: text("result").notNull().default("pass"), // new writes: pass | fail; legacy aliases remain readable
+  actionSeverity: text("action_severity"), // monitor | action_required | urgent_action
   treeRef: text("tree_ref"),          // tree tag number, name or group
   location: text("location"),         // where on site
   inspector: text("inspector"),       // inspector name / company

@@ -153,6 +153,10 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const parsed = testSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const [appliance] = await db.select({ id: patAppliancesTable.id }).from(patAppliancesTable)
+    .where(and(eq(patAppliancesTable.id, d.applianceId), eq(patAppliancesTable.clientId, clientId)))
+    .limit(1);
+  if (!appliance) return res.status(400).json({ error: "Appliance not found" });
   const [row] = await db.insert(patTestsTable).values({
     clientId,
     applianceId:         d.applianceId,
@@ -177,6 +181,10 @@ router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = testSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const [appliance] = await db.select({ id: patAppliancesTable.id }).from(patAppliancesTable)
+    .where(and(eq(patAppliancesTable.id, d.applianceId), eq(patAppliancesTable.clientId, clientId)))
+    .limit(1);
+  if (!appliance) return res.status(400).json({ error: "Appliance not found" });
   const [row] = await db.update(patTestsTable)
     .set({
       applianceId:         d.applianceId,

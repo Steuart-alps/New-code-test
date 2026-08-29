@@ -489,6 +489,7 @@ async function migrateTrackActions() {
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
       "module" text NOT NULL,
+      "source_kind" text,
       "source_record_id" integer,
       "title" text NOT NULL,
       "severity" text NOT NULL DEFAULT 'action_required'
@@ -518,10 +519,15 @@ async function migrateTrackActions() {
   // Earlier installs created this column as required. Automated records do not
   // have a human creator, whereas API-created records continue to set it.
   await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);
+  // A source record ID is only unique within its table. Preserve old rows
+  // (whose source_kind remains NULL) while making new automated actions
+  // collision-safe across the Green and Swim source tables.
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "source_kind" text`);
+  await db.execute(sql`DROP INDEX IF EXISTS "UQ_track_actions_source"`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_actions_source"
-    ON "track_actions" ("client_id", "module", "source_record_id")
-    WHERE "source_record_id" IS NOT NULL
+    ON "track_actions" ("client_id", "module", "source_kind", "source_record_id")
+    WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
   `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "track_action_reminder_log" (
@@ -536,6 +542,8 @@ async function migrateTrackActions() {
   // A generic JSONB trigger keeps this independent from source-table schema
   // drift: some operational tables do not have check_type/follow_up_date (or
   // created_by), and to_jsonb(NEW) makes those optional safely readable.
+  // TG_ARGV[1] names the source result column (normally result, but some
+  // operational records use overall_result).
   await db.execute(sql`
     CREATE OR REPLACE FUNCTION "sync_track_action_from_source"()
     RETURNS trigger
@@ -543,7 +551,8 @@ async function migrateTrackActions() {
     AS $$
     DECLARE
       record_json jsonb := to_jsonb(NEW);
-      source_result text := lower(coalesce(record_json->>'result', ''));
+      source_result text := lower(coalesce(record_json->>coalesce(TG_ARGV[1], 'result'), ''));
+      source_action_severity text := lower(coalesce(record_json->>'action_severity', ''));
       action_severity text;
       action_title text;
       action_due_date date;
@@ -557,6 +566,11 @@ async function migrateTrackActions() {
       END IF;
 
       action_severity := CASE
+        WHEN source_action_severity IN ('monitor', 'action_required', 'urgent_action')
+          THEN CASE source_action_severity
+            WHEN 'urgent_action' THEN 'urgent'
+            ELSE source_action_severity
+          END
         WHEN source_result = 'monitor' THEN 'monitor'
         WHEN source_result IN ('urgent_action', 'urgent', 'out_of_range', 'unsafe') THEN 'urgent'
         ELSE 'action_required'
@@ -580,29 +594,55 @@ async function migrateTrackActions() {
         WHERE id = (record_json->>'machine_id')::integer
           AND client_id = (record_json->>'client_id')::integer;
       END IF;
+      -- PAT tests are appliance-scoped; only accept the appliance site from
+      -- the same tenant as the test record.
+      IF TG_ARGV[0] = 'pat'
+        AND nullif(record_json->>'appliance_id', '') IS NOT NULL THEN
+        SELECT site_id INTO source_site_id
+        FROM pat_appliances
+        WHERE id = (record_json->>'appliance_id')::integer
+          AND client_id = (record_json->>'client_id')::integer;
+      END IF;
+      -- Bike checks can inherit a site from their hire, falling back to the
+      -- bike's registered site. Both joins are tenant constrained.
+      IF TG_ARGV[0] = 'bike'
+        AND nullif(record_json->>'bike_id', '') IS NOT NULL THEN
+        SELECT coalesce(h.site_id, b.site_id) INTO source_site_id
+        FROM bikes b
+        LEFT JOIN bike_hire_records h
+          ON h.id = nullif(record_json->>'hire_record_id', '')::integer
+         AND h.client_id = b.client_id
+        WHERE b.id = (record_json->>'bike_id')::integer
+          AND b.client_id = (record_json->>'client_id')::integer;
+      END IF;
+      -- Never attach an action to another tenant's site, including where a
+      -- legacy source row contains an invalid site_id.
+      IF source_site_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM sites
+        WHERE id = source_site_id
+          AND client_id = (record_json->>'client_id')::integer
+      ) THEN
+        source_site_id := NULL;
+      END IF;
 
       INSERT INTO "track_actions" (
-        "client_id", "site_id", "module", "source_record_id", "title",
+        "client_id", "site_id", "module", "source_kind", "source_record_id", "title",
         "severity", "due_date", "status"
       )
       VALUES (
         (record_json->>'client_id')::integer,
         source_site_id,
         TG_ARGV[0],
+        TG_ARGV[2],
         (record_json->>'id')::integer,
         action_title,
         action_severity,
         action_due_date,
         'open'
       )
-      ON CONFLICT ("client_id", "module", "source_record_id")
-        WHERE "source_record_id" IS NOT NULL
-      DO UPDATE SET
-        "title" = EXCLUDED."title",
-        "severity" = EXCLUDED."severity",
-        "due_date" = EXCLUDED."due_date",
-        "updated_at" = now()
-      WHERE "track_actions"."status" <> 'resolved';
+      ON CONFLICT ("client_id", "module", "source_kind", "source_record_id")
+        WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
+      DO NOTHING;
       RETURN NEW;
     END;
     $$
@@ -610,35 +650,40 @@ async function migrateTrackActions() {
   await db.execute(sql`
     DO $$
     DECLARE
-      source_table text;
-      module_key text;
+       source_table text;
+       module_key text;
+       result_column text;
     BEGIN
-      FOR source_table, module_key IN
+       FOR source_table, module_key, result_column IN
         SELECT * FROM (VALUES
-          ('fire_safety_checks', 'fire'),
-          ('legionella_checks', 'legionella'),
-          ('pool_checks', 'pool'),
-          ('hot_tub_checks', 'hot_tub'),
-          ('tree_inspections', 'tree'),
-          ('green_pre_use_checks', 'green'),
-          ('green_puwer_inspections', 'green'),
-          ('swim_sessions', 'swim'),
-          ('swim_surveillance_checks', 'swim'),
-          ('swim_first_aid_checks', 'swim')
-        ) AS sources(table_name, module_name)
+          ('fire_safety_checks', 'fire', 'result'),
+          ('legionella_checks', 'legionella', 'result'),
+          ('pool_checks', 'pool', 'result'),
+          ('hot_tub_checks', 'hot_tub', 'result'),
+          ('tree_inspections', 'tree', 'result'),
+          ('green_pre_use_checks', 'green', 'result'),
+          ('green_puwer_inspections', 'green', 'result'),
+          ('swim_sessions', 'swim', 'result'),
+          ('swim_surveillance_checks', 'swim', 'result'),
+          ('swim_first_aid_checks', 'swim', 'result'),
+          ('pat_tests', 'pat', 'result'),
+          ('bike_checks', 'bike', 'overall_result'),
+          ('kitchen_probe_checks', 'kitchen', 'overall_result'),
+          ('kitchen_weekly_records', 'kitchen', 'overall_result')
+        ) AS sources(table_name, module_name, result_column_name)
       LOOP
         IF EXISTS (
           SELECT 1 FROM information_schema.columns
           WHERE table_schema = 'public' AND table_name = source_table
-            AND column_name IN ('id', 'client_id', 'result')
+            AND column_name IN ('id', 'client_id', result_column)
           GROUP BY table_name HAVING count(DISTINCT column_name) = 3
         ) THEN
           EXECUTE format('DROP TRIGGER IF EXISTS sync_track_action_on_result ON public.%I', source_table);
           EXECUTE format(
             'CREATE TRIGGER sync_track_action_on_result
-             AFTER INSERT OR UPDATE OF result ON public.%I
-             FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source(%L)',
-            source_table, module_key
+             AFTER INSERT OR UPDATE OF %I ON public.%I
+             FOR EACH ROW EXECUTE FUNCTION sync_track_action_from_source(%L, %L, %L)',
+             result_column, source_table, module_key, result_column, source_table
           );
         END IF;
       END LOOP;
@@ -689,6 +734,7 @@ async function migrateAuditFixes2026_08() {
       "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
       "week_commencing" date NOT NULL,
       "checks" jsonb NOT NULL DEFAULT '[]',
+      "overall_result" text,
       "deviations" jsonb NOT NULL DEFAULT '[]',
       "additional" jsonb NOT NULL DEFAULT '[]',
       "manager_signature" text,
@@ -698,6 +744,9 @@ async function migrateAuditFixes2026_08() {
       "updated_at" timestamp NOT NULL DEFAULT now()
     )
   `);
+  // New submitted reviews can carry a computed canonical result. Existing
+  // historical rows are intentionally not backfilled.
+  await db.execute(sql`ALTER TABLE "kitchen_weekly_records" ADD COLUMN IF NOT EXISTS "overall_result" text`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_weekly_client" ON "kitchen_weekly_records" ("client_id")`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "kitchen_probe_checks" (
@@ -820,6 +869,12 @@ async function migrateTreeTrack() {
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
     )
+  `);
+  // Remediation priority is distinct from the pass/fail observation. Older
+  // rows used result for both concepts; leave those values untouched.
+  await db.execute(sql`
+    ALTER TABLE "tree_inspections"
+    ADD COLUMN IF NOT EXISTS "action_severity" text
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
 }

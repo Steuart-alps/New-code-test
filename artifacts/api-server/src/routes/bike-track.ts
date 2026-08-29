@@ -48,7 +48,7 @@ const hireSchema = z.object({
   notes:              z.string().max(2000).nullable().optional(),
   preHireCheck:       checkItemsSchema.extend({
     performedBy:   z.string().max(200).nullable().optional(),
-    overallResult: z.enum(["pass", "fail", "action_required"]).optional(),
+    overallResult: z.enum(["pass", "fail"]).optional(),
     checkDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     checkNotes:    z.string().max(2000).nullable().optional(),
   }).optional(),
@@ -60,7 +60,7 @@ const returnSchema = z.object({
   notes:            z.string().max(2000).nullable().optional(),
   postReturnCheck:  checkItemsSchema.extend({
     performedBy:   z.string().max(200).nullable().optional(),
-    overallResult: z.enum(["pass", "fail", "action_required"]).optional(),
+    overallResult: z.enum(["pass", "fail"]).optional(),
     checkDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     checkNotes:    z.string().max(2000).nullable().optional(),
   }).optional(),
@@ -296,7 +296,7 @@ router.post("/hires/:id/return", requireAuth, denyViewers, async (req, res) => {
   if (d.postReturnCheck) {
     const c = d.postReturnCheck;
     const overallResult = c.overallResult ?? "pass";
-    if (overallResult === "fail" || overallResult === "action_required") newBikeStatus = "maintenance";
+    if (overallResult === "fail") newBikeStatus = "maintenance";
     const [check] = await db.insert(bikeChecksTable).values({
       clientId,
       hireRecordId: hire.id,

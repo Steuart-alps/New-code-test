@@ -15,6 +15,7 @@ const trackActionsTable = pgTable("track_actions", {
   clientId: integer("client_id").notNull(),
   siteId: integer("site_id"),
   module: text("module").notNull(),
+  sourceKind: text("source_kind"),
   sourceRecordId: integer("source_record_id"),
   title: text("title").notNull(),
   severity: text("severity").notNull(),

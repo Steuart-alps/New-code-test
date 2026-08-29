@@ -52,7 +52,7 @@ export const bikeChecksTable = pgTable("bike_checks", {
   checkType: text("check_type").notNull(), // pre_hire | post_return | routine
   checkDate: date("check_date").notNull(),
   performedBy: text("performed_by"),
-  overallResult: text("overall_result").notNull().default("pass"), // pass | fail | action_required
+  overallResult: text("overall_result").notNull().default("pass"), // new writes: pass | fail; legacy action_required remains readable
   // Individual check items: pass | fail | na
   brakesFront: text("brakes_front"),
   brakesRear: text("brakes_rear"),

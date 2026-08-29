@@ -555,12 +555,12 @@ function PreUseDialog({
     cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
   } : blank);
 
-  // Auto-compute result: any false = fail, any null advisory items present = advisory, else pass
+  // N/A is represented at checklist-item level; the completed observation is
+  // always canonical pass/fail.
   const autoResult = useMemo(() => {
     const vals = [form.fluidLevelsOk, form.tyresOk, form.bladesOk, form.guardsOk, form.controlsOk, form.lightsOk, form.cleanlinessOk];
     if (vals.some(v => v === false)) return "fail";
-    if (vals.every(v => v === true)) return "pass";
-    return "advisory";
+    return "pass";
   }, [form.fluidLevelsOk, form.tyresOk, form.bladesOk, form.guardsOk, form.controlsOk, form.lightsOk, form.cleanlinessOk]);
 
   const handleSave = async () => {

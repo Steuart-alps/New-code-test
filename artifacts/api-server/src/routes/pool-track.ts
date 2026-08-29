@@ -35,7 +35,7 @@ const createSchema = z.object({
   poolOpen: z.boolean().default(true),
   performedBy: z.string().max(200).optional(),
   actionsTaken: z.string().max(2000).optional(),
-  result: z.enum(["pass", "fail", "action_required"]).default("pass"),
+  result: z.enum(["pass", "fail"]).default("pass"),
   notes: z.string().max(2000).optional(),
 });
 

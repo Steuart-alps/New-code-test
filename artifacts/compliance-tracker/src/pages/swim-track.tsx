@@ -174,20 +174,24 @@ function SessionDialog({
     closureReason: "", notes: "",
   };
   const [form, setForm] = useState(blank);
+  const [preSessionResultChanged, setPreSessionResultChanged] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const reset = () => setForm(session ? {
+  const reset = () => {
+    setPreSessionResultChanged(false);
+    setForm(session ? {
     siteId: session.siteId ? String(session.siteId) : "",
     sessionDate: session.sessionDate, sessionType: session.sessionType,
     lifeguardName: session.lifeguardName ?? "", openTime: session.openTime ?? "",
     closeTime: session.closeTime ?? "",
     maxBathers: session.maxBathers != null ? String(session.maxBathers) : "",
     batherCountPeak: session.batherCountPeak != null ? String(session.batherCountPeak) : "",
-    preSessionResult: session.preSessionResult,
+    preSessionResult: session.preSessionResult === "pass" ? "pass" : "fail",
     preSessionNotes: session.preSessionNotes ?? "",
     poolClosed: session.poolClosed, closureReason: session.closureReason ?? "",
     notes: session.notes ?? "",
-  } : blank);
+    } : blank);
+  };
 
   const handleSave = async () => {
     if (!form.sessionDate) { toast({ title: "Session date is required", variant: "destructive" }); return; }
@@ -205,7 +209,9 @@ function SessionDialog({
         poolClosed: form.poolClosed,
         closureReason: form.closureReason.trim() || null,
         notes: form.notes.trim() || null,
-        result: form.poolClosed ? "fail" : form.preSessionResult,
+        ...(!session || preSessionResultChanged || ["pass", "fail"].includes(session.result)
+          ? { result: form.poolClosed ? "fail" : form.preSessionResult }
+          : {}),
       };
       if (session) {
         await apiFetch(`/swim-track/sessions/${session.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -260,14 +266,17 @@ function SessionDialog({
             </div>
             <div>
               <Label>Pre-session check result</Label>
-              <Select value={form.preSessionResult} onValueChange={v => setForm(f => ({ ...f, preSessionResult: v }))}>
+              <Select value={form.preSessionResult} onValueChange={v => { setPreSessionResultChanged(true); setForm(f => ({ ...f, preSessionResult: v })); }}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pass">Pass</SelectItem>
-                  <SelectItem value="advisory">Advisory</SelectItem>
                   <SelectItem value="fail">Fail</SelectItem>
                 </SelectContent>
               </Select>
+              {session && !["pass", "fail"].includes(session.result) && (
+                <p className="text-xs text-muted-foreground mt-1">Legacy result: Action Required (treated as Fail). Choose a result to replace it.</p>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">A Fail automatically opens an Action Required item to track remediation.</p>
             </div>
             <div>
               <Label>Open time <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -360,7 +369,7 @@ function SurveillanceDialog({
         scanCompleted: form.scanCompleted,
         observations: form.observations.trim() || null,
         checkedBy: form.checkedBy.trim() || null,
-        result: form.scanCompleted ? "pass" : "attention_required",
+        result: form.scanCompleted ? "pass" : "fail",
       };
       if (check) {
         await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -968,10 +977,9 @@ export default function SwimTrackPage() {
                         <td className="py-2 pr-4">
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${
                             s.preSessionResult === "pass" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                            s.preSessionResult === "advisory" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
                             "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                           }`}>
-                            {s.preSessionResult === "pass" ? "Pass" : s.preSessionResult === "advisory" ? "Advisory" : "Fail"}
+                            {s.preSessionResult === "pass" ? "Pass" : "Fail"}
                           </span>
                         </td>
                         <td className="py-2 pr-4">
@@ -1141,8 +1149,8 @@ export default function SwimTrackPage() {
                               ? <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit">
                                   <CheckCircle2 className="w-3 h-3" /> Pass
                                 </span>
-                              : <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit">
-                                  <AlertTriangle className="w-3 h-3" /> Action required
+                              : <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit">
+                                  <XCircle className="w-3 h-3" /> Fail
                                 </span>}
                           </td>
                           <td className="py-2 text-right">

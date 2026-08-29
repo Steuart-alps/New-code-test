@@ -130,7 +130,7 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     const {
       machineId, checkDate, operator,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, result: checkResult, notes,
+      defectNoted, notes,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
@@ -141,6 +141,10 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
 
+    // The checklist is the source of truth. Never persist caller-supplied
+    // aliases such as "advisory" as a newly recorded observation.
+    const canonicalResult = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+      .some((value) => value === false) ? "fail" : "pass";
     const result = await db.execute(sql`
       INSERT INTO green_pre_use_checks (
         client_id, machine_id, check_date, operator,
@@ -150,7 +154,7 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
         ${clientId}, ${machineId}, ${checkDate}, ${operator?.trim() ?? null},
         ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
         ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
-        ${defectNoted ?? false}, ${checkResult ?? "pass"}, ${notes?.trim() ?? null}
+        ${defectNoted ?? false}, ${canonicalResult}, ${notes?.trim() ?? null}
       )
       RETURNING *
     `);
@@ -166,8 +170,10 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
     const {
       checkDate, operator,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, result: checkResult, notes,
+      defectNoted, notes,
     } = req.body;
+    const canonicalResult = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+      .some((value) => value === false) ? "fail" : "pass";
     const result = await db.execute(sql`
       UPDATE green_pre_use_checks
       SET check_date = ${checkDate}, operator = ${operator?.trim() ?? null},
@@ -175,7 +181,7 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
           blades_ok = ${bladesOk ?? null}, guards_ok = ${guardsOk ?? null},
           controls_ok = ${controlsOk ?? null}, lights_ok = ${lightsOk ?? null},
           cleanliness_ok = ${cleanlinessOk ?? null}, defect_noted = ${defectNoted ?? false},
-          result = ${checkResult ?? "pass"}, notes = ${notes?.trim() ?? null}
+          result = ${canonicalResult}, notes = ${notes?.trim() ?? null}
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -409,7 +415,7 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       machineId, inspectionDate, nextInspectionDate, inspectionType,
-      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, result: checkResult, notes,
+      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!inspectionDate) return res.status(400).json({ error: "inspectionDate is required" });
@@ -419,6 +425,7 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
 
+    const canonicalResult = safeToOperate === false ? "fail" : "pass";
     const result = await db.execute(sql`
       INSERT INTO green_puwer_inspections (
         client_id, machine_id, inspection_date, next_inspection_date, inspection_type,
@@ -428,7 +435,7 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
         ${inspectionType ?? "thorough_examination"},
         ${inspectorName?.trim() ?? null}, ${inspectorCompany?.trim() ?? null},
         ${certRef?.trim() ?? null}, ${safeToOperate ?? true},
-        ${defectsFound?.trim() ?? null}, ${checkResult ?? "pass"}, ${notes?.trim() ?? null}
+        ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null}
       )
       RETURNING *
     `);
@@ -443,15 +450,16 @@ router.put("/puwer-inspections/:id", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       inspectionDate, nextInspectionDate, inspectionType,
-      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, result: checkResult, notes,
+      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
     } = req.body;
+    const canonicalResult = safeToOperate === false ? "fail" : "pass";
     const result = await db.execute(sql`
       UPDATE green_puwer_inspections
       SET inspection_date = ${inspectionDate}, next_inspection_date = ${nextInspectionDate ?? null},
           inspection_type = ${inspectionType ?? "thorough_examination"},
           inspector_name = ${inspectorName?.trim() ?? null}, inspector_company = ${inspectorCompany?.trim() ?? null},
           cert_ref = ${certRef?.trim() ?? null}, safe_to_operate = ${safeToOperate ?? true},
-          defects_found = ${defectsFound?.trim() ?? null}, result = ${checkResult ?? "pass"},
+          defects_found = ${defectsFound?.trim() ?? null}, result = ${canonicalResult},
           notes = ${notes?.trim() ?? null}, updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *

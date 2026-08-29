@@ -19,7 +19,8 @@ const FREQUENCY_DAYS: Record<(typeof TREE_CHECK_TYPES)[number], number> = {
 const createSchema = z.object({
   checkType: z.enum(TREE_CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  result: z.enum(["pass", "monitor", "action_required", "urgent_action"]),
+  result: z.enum(["pass", "fail"]),
+  actionSeverity: z.enum(["monitor", "action_required", "urgent_action"]).nullable().optional(),
   treeRef: z.string().max(300).nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   inspector: z.string().max(200).nullable().optional(),
@@ -29,6 +30,19 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+
+function readInspection<T extends { result: string; actionSeverity?: string | null }>(inspection: T) {
+  const legacySeverity = ["monitor", "action_required", "urgent_action"].includes(inspection.result)
+    ? inspection.result
+    : null;
+  return {
+    ...inspection,
+    // Keep result untouched for consumers of the historical aliases, while
+    // making the two concepts explicit for updated clients.
+    observationResult: inspection.result === "pass" ? "pass" : "fail",
+    actionSeverity: inspection.actionSeverity ?? legacySeverity,
+  };
+}
 
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
   if (siteId == null) return null;
@@ -89,7 +103,7 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(treeInspectionsTable.checkDate), desc(treeInspectionsTable.id));
 
-  res.json(rows);
+  res.json(rows.map(readInspection));
 });
 
 // GET /api/tree-track/status?siteId=
@@ -164,6 +178,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       checkType: data.checkType,
       checkDate: data.checkDate,
       result: data.result,
+      actionSeverity: data.actionSeverity ?? null,
       treeRef: data.treeRef ?? null,
       location: data.location ?? null,
       inspector: data.inspector ?? null,
@@ -174,7 +189,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     })
     .returning();
 
-  res.status(201).json(inserted);
+  res.status(201).json(readInspection(inserted));
 });
 
 // PUT /api/tree-track/:id
@@ -212,7 +227,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     .returning();
 
   if (!updated) return res.status(404).json({ error: "Not found" });
-  res.json(updated);
+  res.json(readInspection(updated));
 });
 
 // DELETE /api/tree-track/:id

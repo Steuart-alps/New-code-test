@@ -109,11 +109,11 @@ function waterTemp(v: number | null): ValLevel {
 function autoResult(fields: {
   ph: number | null; free: number | null; combined: number | null;
   turb: string | null; temp: number | null;
-}): "pass" | "fail" | "action_required" {
+}): "pass" | "fail" {
   const levels = [pHLevel(fields.ph), freeCl(fields.free), combCl(fields.combined),
                   turbLevel(fields.turb), waterTemp(fields.temp)];
   if (levels.includes("fail")) return "fail";
-  if (levels.includes("warn")) return "action_required";
+  if (levels.includes("warn")) return "fail";
   return "pass";
 }
 function levelCls(level: ValLevel) {
@@ -404,22 +404,21 @@ function PoolRecordDialog({
           {hasValues && (
             <div className={cn("rounded-sm border px-3 py-2 text-xs font-medium",
               suggested === "pass" ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-              : suggested === "action_required" ? "bg-amber-50 border-amber-200 text-amber-800"
               : "bg-rose-50 border-rose-200 text-rose-800"
             )}>
-              Suggested result: <span className="font-bold">{suggested === "pass" ? "Pass" : suggested === "action_required" ? "Action Required" : "Fail"}</span>
+              Suggested result: <span className="font-bold">{suggested === "pass" ? "Pass" : "Fail"}</span>
             </div>
           )}
           <div className="space-y-1.5">
-            <Label>Overall result</Label>
+            <Label>Check result</Label>
             <Select value={effectiveResult} onValueChange={v => setOverrideResult(v)}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pass">Pass</SelectItem>
-                <SelectItem value="action_required">Action Required</SelectItem>
                 <SelectItem value="fail">Fail</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">A Fail automatically opens an Action Required item to track remediation.</p>
           </div>
           <div className="flex items-center gap-3">
             <Label className="text-sm">Pool status:</Label>
@@ -485,7 +484,7 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
   const blank = { siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "", preSessionResult: "pass", preSessionNotes: "", poolClosed: false, closureReason: "", notes: "" };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
-  const reset = () => setForm(session ? { siteId: session.siteId ? String(session.siteId) : "", sessionDate: session.sessionDate, sessionType: session.sessionType, lifeguardName: session.lifeguardName ?? "", openTime: session.openTime ?? "", closeTime: session.closeTime ?? "", maxBathers: session.maxBathers != null ? String(session.maxBathers) : "", batherCountPeak: session.batherCountPeak != null ? String(session.batherCountPeak) : "", preSessionResult: session.preSessionResult, preSessionNotes: session.preSessionNotes ?? "", poolClosed: session.poolClosed, closureReason: session.closureReason ?? "", notes: session.notes ?? "" } : blank);
+  const reset = () => setForm(session ? { siteId: session.siteId ? String(session.siteId) : "", sessionDate: session.sessionDate, sessionType: session.sessionType, lifeguardName: session.lifeguardName ?? "", openTime: session.openTime ?? "", closeTime: session.closeTime ?? "", maxBathers: session.maxBathers != null ? String(session.maxBathers) : "", batherCountPeak: session.batherCountPeak != null ? String(session.batherCountPeak) : "", preSessionResult: session.preSessionResult === "pass" ? "pass" : "fail", preSessionNotes: session.preSessionNotes ?? "", poolClosed: session.poolClosed, closureReason: session.closureReason ?? "", notes: session.notes ?? "" } : blank);
   const handleSave = async () => {
     if (!form.sessionDate) { toast({ title: "Session date is required", variant: "destructive" }); return; }
     setSaving(true);
@@ -523,8 +522,9 @@ function SessionDialog({ open, onClose, session, sites, onSaved }: { open: boole
             <div><Label>Pre-session result</Label>
               <Select value={form.preSessionResult} onValueChange={v => setForm(f => ({ ...f, preSessionResult: v }))}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="pass">Pass</SelectItem><SelectItem value="advisory">Advisory</SelectItem><SelectItem value="fail">Fail</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="pass">Pass</SelectItem><SelectItem value="fail">Fail</SelectItem></SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">A Fail automatically opens an Action Required item to track remediation.</p>
             </div>
             <div><Label>Open time <span className="text-muted-foreground text-xs">optional</span></Label><Input type="time" className="mt-1 rounded-sm" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} /></div>
             <div><Label>Close time <span className="text-muted-foreground text-xs">optional</span></Label><Input type="time" className="mt-1 rounded-sm" value={form.closeTime} onChange={e => setForm(f => ({ ...f, closeTime: e.target.value }))} /></div>
@@ -557,7 +557,7 @@ function SurveillanceDialog({ open, onClose, check, sites, onSaved }: { open: bo
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
-      const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, checkDate: form.checkDate, checkTime: form.checkTime || null, batherCount: form.batherCount ? parseInt(form.batherCount, 10) : null, scanCompleted: form.scanCompleted, observations: form.observations.trim() || null, checkedBy: form.checkedBy.trim() || null, result: form.scanCompleted ? "pass" : "attention_required" };
+      const body = { siteId: form.siteId ? parseInt(form.siteId, 10) : null, checkDate: form.checkDate, checkTime: form.checkTime || null, batherCount: form.batherCount ? parseInt(form.batherCount, 10) : null, scanCompleted: form.scanCompleted, observations: form.observations.trim() || null, checkedBy: form.checkedBy.trim() || null, result: form.scanCompleted ? "pass" : "fail" };
       if (check) await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       else await apiFetch("/swim-track/surveillance", { method: "POST", body: JSON.stringify(body) });
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
@@ -923,10 +923,9 @@ export default function AquaTrackPage() {
                         {item.result && (
                           <Badge variant="outline" className={cn("text-xs mt-0.5",
                             item.result === "pass" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                            item.result === "action_required" ? "bg-amber-50 text-amber-700 border-amber-200" :
                             "bg-rose-50 text-rose-700 border-rose-200"
                           )}>
-                            {item.result === "pass" ? "Pass" : item.result === "action_required" ? "Action Req." : "Fail"}
+                            {item.result === "pass" ? "Pass" : "Fail"}
                           </Badge>
                         )}
                         <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">+ Record check →</div>
@@ -1009,10 +1008,9 @@ export default function AquaTrackPage() {
                                 <span className="font-medium text-sm">{CHECK_TYPE_LABELS[check.check_type] ?? check.check_type}</span>
                                 <Badge variant="outline" className={cn("text-xs",
                                   check.result === "pass" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                  check.result === "action_required" ? "bg-amber-50 text-amber-700 border-amber-200" :
                                   "bg-rose-50 text-rose-700 border-rose-200"
                                 )}>
-                                  {check.result === "pass" ? "Pass" : check.result === "action_required" ? "Action Required" : "Fail"}
+                                  {check.result === "pass" ? "Pass" : "Fail"}
                                 </Badge>
                                 {!check.pool_open && <Badge variant="outline" className="text-xs bg-slate-50 text-slate-600">Pool closed</Badge>}
                                 {check.site_name && <Badge variant="outline" className="text-xs">{check.site_name}</Badge>}
@@ -1089,7 +1087,7 @@ export default function AquaTrackPage() {
                         <td className="py-2 pr-4 hidden sm:table-cell">{s.lifeguardName ?? <span className="text-muted-foreground">—</span>}</td>
                         <td className="py-2 pr-4 text-muted-foreground tabular-nums hidden lg:table-cell">{s.openTime ?? "—"}{s.closeTime ? ` – ${s.closeTime}` : ""}</td>
                         <td className="py-2 pr-4 text-right tabular-nums hidden md:table-cell">{s.batherCountPeak != null ? <>{s.batherCountPeak}{s.maxBathers ? <span className="text-muted-foreground">/{s.maxBathers}</span> : null}</> : <span className="text-muted-foreground">—</span>}</td>
-                        <td className="py-2 pr-4"><span className={`text-xs px-1.5 py-0.5 rounded-full ${s.preSessionResult === "pass" ? "bg-green-100 text-green-700" : s.preSessionResult === "advisory" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>{s.preSessionResult === "pass" ? "Pass" : s.preSessionResult === "advisory" ? "Advisory" : "Fail"}</span></td>
+                        <td className="py-2 pr-4"><span className={`text-xs px-1.5 py-0.5 rounded-full ${s.preSessionResult === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{s.preSessionResult === "pass" ? "Pass" : "Fail"}</span></td>
                         <td className="py-2 pr-4">{s.poolClosed ? <span className="text-xs text-destructive font-medium flex items-center gap-1"><XCircle className="w-3 h-3" />Closed</span> : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}</td>
                         <td className="py-2 px-2"><CheckPhotoUploader entityType="swim_session" entityId={s.id} compact /></td>
                         <td className="py-2 text-right">
@@ -1200,7 +1198,7 @@ export default function AquaTrackPage() {
                           <td className="py-2 pr-4 text-muted-foreground hidden md:table-cell">{f.siteName ?? "—"}</td>
                           <td className="py-2 pr-4 hidden sm:table-cell">{f.checkedBy ?? <span className="text-muted-foreground">—</span>}</td>
                           {items.map(i => <td key={i.key} className="py-2 px-1 text-center hidden lg:table-cell">{i.ok ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500 mx-auto" /> : <XCircle className="w-3.5 h-3.5 text-destructive mx-auto" />}</td>)}
-                          <td className="py-2 pr-4">{f.result === "pass" ? <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit"><CheckCircle2 className="w-3 h-3" /> Pass</span> : <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit"><AlertTriangle className="w-3 h-3" /> Action required</span>}</td>
+                          <td className="py-2 pr-4">{f.result === "pass" ? <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit"><CheckCircle2 className="w-3 h-3" /> Pass</span> : <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit"><XCircle className="w-3 h-3" /> Fail</span>}</td>
                           <td className="py-2 text-right">
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditFirstAid(f); setFirstAidDialog(true); }}><Pencil className="w-3.5 h-3.5" /></Button>
                             {canAdmin && <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId({ type: "first-aid", id: f.id })}><Trash2 className="w-3.5 h-3.5" /></Button>}

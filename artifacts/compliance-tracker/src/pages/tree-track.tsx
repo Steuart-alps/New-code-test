@@ -39,7 +39,8 @@ const CHECK_TYPES = [
 ] as const;
 
 type CheckType = (typeof CHECK_TYPES)[number];
-type CheckResult = "pass" | "monitor" | "action_required" | "urgent_action";
+type CheckResult = "pass" | "fail";
+type ActionSeverity = "monitor" | "action_required" | "urgent_action";
 type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
 
 interface TreeInspection {
@@ -49,6 +50,8 @@ interface TreeInspection {
   checkType: string;
   checkDate: string;
   result: string;
+  observationResult?: CheckResult;
+  actionSeverity?: ActionSeverity | null;
   treeRef: string | null;
   location: string | null;
   inspector: string | null;
@@ -87,9 +90,13 @@ const CHECK_TYPE_HINTS: Record<CheckType, string> = {
 
 const RESULT_CFG: Record<CheckResult, { label: string; badge: string }> = {
   pass:            { label: "Pass",           badge: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  monitor:         { label: "Monitor",        badge: "bg-blue-50 text-blue-700 border-blue-200" },
+  fail:            { label: "Fail",           badge: "bg-rose-50 text-rose-700 border-rose-200" },
+};
+
+const SEVERITY_CFG: Record<ActionSeverity, { label: string; badge: string }> = {
+  monitor:         { label: "Monitor", badge: "bg-blue-50 text-blue-700 border-blue-200" },
   action_required: { label: "Action Required", badge: "bg-amber-50 text-amber-700 border-amber-200" },
-  urgent_action:   { label: "Urgent Action",  badge: "bg-rose-50 text-rose-700 border-rose-200" },
+  urgent_action:   { label: "Urgent Action", badge: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -118,7 +125,7 @@ function daysUntil(d: string | null) {
 }
 
 function ResultBadge({ result }: { result: string }) {
-  const cfg = RESULT_CFG[result as CheckResult] ?? { label: result, badge: "bg-slate-50 text-slate-700 border-slate-200" };
+  const cfg = RESULT_CFG[result as CheckResult] ?? SEVERITY_CFG[result as ActionSeverity] ?? { label: result, badge: "bg-slate-50 text-slate-700 border-slate-200" };
   const Icon = result === "pass" ? CheckCircle2
     : result === "monitor" ? Clock
     : AlertTriangle;
@@ -156,6 +163,7 @@ const emptyForm = () => ({
   checkType: "visual_assessment" as CheckType,
   checkDate: new Date().toISOString().slice(0, 10),
   result: "pass" as CheckResult,
+  actionSeverity: "" as "" | ActionSeverity,
   treeRef: "",
   location: "",
   inspector: "",
@@ -181,6 +189,7 @@ export default function TreeTrackPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [resultChanged, setResultChanged] = useState(false);
   const [w3wLoading, setW3wLoading] = useState(false);
 
   async function handleUseLocation() {
@@ -243,11 +252,11 @@ export default function TreeTrackPage() {
   // ── Derived ────────────────────────────────────────────────────────────────
 
   const urgentCount = useMemo(
-    () => records.filter(r => r.result === "urgent_action").length,
+    () => records.filter(r => (r.actionSeverity ?? r.result) === "urgent_action").length,
     [records],
   );
   const actionCount = useMemo(
-    () => records.filter(r => r.result === "action_required").length,
+    () => records.filter(r => (r.actionSeverity ?? r.result) === "action_required").length,
     [records],
   );
 
@@ -285,6 +294,7 @@ export default function TreeTrackPage() {
 
   function openAdd() {
     setEditItem(null);
+    setResultChanged(false);
     setForm(emptyForm());
     setShowDialog(true);
   }
@@ -294,7 +304,8 @@ export default function TreeTrackPage() {
     setForm({
       checkType: r.checkType as CheckType,
       checkDate: r.checkDate?.slice(0, 10) ?? "",
-      result: r.result as CheckResult,
+      result: r.observationResult ?? (r.result === "pass" ? "pass" : "fail"),
+      actionSeverity: (r.actionSeverity ?? (["monitor", "action_required", "urgent_action"].includes(r.result) ? r.result : "")) as "" | ActionSeverity,
       treeRef: r.treeRef ?? "",
       location: r.location ?? "",
       inspector: r.inspector ?? "",
@@ -302,6 +313,7 @@ export default function TreeTrackPage() {
       siteId: r.siteId ? String(r.siteId) : "",
       notes: r.notes ?? "",
     });
+    setResultChanged(false);
     setShowDialog(true);
   }
 
@@ -313,6 +325,7 @@ export default function TreeTrackPage() {
         checkType: form.checkType,
         checkDate: form.checkDate,
         result: form.result,
+        actionSeverity: form.actionSeverity || null,
         treeRef: form.treeRef.trim() || null,
         location: form.location.trim() || null,
         inspector: form.inspector.trim() || null,
@@ -322,6 +335,12 @@ export default function TreeTrackPage() {
       };
       if (editItem) {
         const { checkType, ...updateBody } = body;
+        // Legacy rows encoded remediation severity in result. Unless the user
+        // changes the selector, leave that historical value byte-for-byte intact.
+        if (!resultChanged && editItem.result !== "pass" && editItem.result !== "fail") {
+          delete updateBody.result;
+          delete updateBody.actionSeverity;
+        }
         await apiFetch(`/tree-track/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
         toast({ title: "Record updated" });
       } else {
@@ -532,7 +551,12 @@ export default function TreeTrackPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(r.checkDate)}</td>
-                    <td className="px-4 py-3"><ResultBadge result={r.result} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        <ResultBadge result={r.observationResult ?? (r.result === "pass" ? "pass" : "fail")} />
+                        {r.actionSeverity && <ResultBadge result={r.actionSeverity} />}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
                       {r.treeRef ?? <span className="opacity-40">—</span>}
                     </td>
@@ -629,16 +653,28 @@ export default function TreeTrackPage() {
             {/* Result */}
             <div>
               <Label>Result *</Label>
-              <Select value={form.result} onValueChange={v => setForm(f => ({ ...f, result: v as CheckResult }))}>
+              <Select value={form.result} onValueChange={v => { setResultChanged(true); setForm(f => ({ ...f, result: v as CheckResult })); }}>
                 <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pass">Pass — No significant concerns</SelectItem>
-                  <SelectItem value="monitor">Monitor — Minor concerns, re-inspect</SelectItem>
-                  <SelectItem value="action_required">Action Required — Works needed</SelectItem>
-                  <SelectItem value="urgent_action">Urgent Action — Immediate risk</SelectItem>
+                  <SelectItem value="fail">Fail — concerns found</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {form.result === "fail" && (
+              <div>
+                <Label>Remediation severity <span className="text-muted-foreground text-xs">optional</span></Label>
+                <Select value={form.actionSeverity || "none"} onValueChange={v => { setResultChanged(true); setForm(f => ({ ...f, actionSeverity: v === "none" ? "" : v as ActionSeverity })); }}>
+                  <SelectTrigger className="mt-1 rounded-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No severity specified</SelectItem>
+                    <SelectItem value="monitor">Monitor</SelectItem>
+                    <SelectItem value="action_required">Action Required</SelectItem>
+                    <SelectItem value="urgent_action">Urgent Action</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Tree reference */}
             <div>

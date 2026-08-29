@@ -8,6 +8,10 @@ const router = Router();
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+function computedWeeklyResult(checks: Record<string, "yes" | "no" | "na">): "pass" | "fail" {
+  return Object.values(checks).some((value) => value === "no") ? "fail" : "pass";
+}
+
 async function fetchWeekly(clientId: number, date: string) {
   const r = await db.execute(sql`
     SELECT * FROM kitchen_weekly_records
@@ -91,13 +95,14 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const checksJson = JSON.stringify(checks ?? {});
   const deviationsJson = JSON.stringify(deviations ?? []);
   const additionalJson = JSON.stringify(additional ?? {});
+  const overallResult = submittedAt ? computedWeeklyResult(checks ?? {}) : null;
 
   const result = await db.execute(sql`
     INSERT INTO kitchen_weekly_records
-      (client_id, site_id, week_commencing, checks, deviations, additional, manager_signature, submitted_at, created_by)
+      (client_id, site_id, week_commencing, checks, deviations, additional, overall_result, manager_signature, submitted_at, created_by)
     VALUES (
       ${clientId}, ${siteId ?? null}, ${weekCommencing},
-      ${checksJson}::jsonb, ${deviationsJson}::jsonb, ${additionalJson}::jsonb,
+       ${checksJson}::jsonb, ${deviationsJson}::jsonb, ${additionalJson}::jsonb, ${overallResult},
       ${managerSignature ?? null},
       ${submittedAt ? new Date(submittedAt) : null},
       ${userId}
@@ -130,12 +135,17 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
   const sig = managerSignature !== undefined ? managerSignature : existing.manager_signature;
   const sub = submittedAt !== undefined ? (submittedAt ? new Date(submittedAt) : null) : existing.submitted_at;
   const site = siteId !== undefined ? siteId : existing.site_id;
+  // Do not infer a result for old submissions during an unrelated edit.
+  const overallResult = (checks !== undefined || submittedAt !== undefined)
+    ? (sub ? computedWeeklyResult(checks ?? existing.checks) : null)
+    : existing.overall_result;
 
   const result = await db.execute(sql`
     UPDATE kitchen_weekly_records SET
       checks            = ${checksJson}::jsonb,
       deviations        = ${deviationsJson}::jsonb,
       additional        = ${additionalJson}::jsonb,
+       overall_result    = ${overallResult},
       manager_signature = ${sig},
       submitted_at      = ${sub},
       site_id           = ${site},

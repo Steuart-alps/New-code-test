@@ -4,7 +4,7 @@
 //   - FireTrack (fire-safety): all 5 check types can be created, listed,
 //     filtered, updated, and deleted; status summary is coherent.
 //   - LegionellaTrack (legionella): all 6 check types including temperature
-//     storage and action_required result; same CRUD + status checks.
+//     storage and canonical pass/fail results; same CRUD + status checks.
 //   - KitchenTrack (food-safety): config read/write, daily record
 //     create/update/list/by-date, duplicate-date 409 guard.
 //
@@ -201,7 +201,7 @@ async function testLegionella(req) {
     const body = {
       checkType,
       checkDate: isoDate(-1),
-      result: checkType === "cold_tank_temp" ? "pass" : "action_required",
+      result: checkType === "cold_tank_temp" ? "pass" : "fail",
       notes: `Legionella test: ${checkType}`,
       performedBy: "Water Hygiene Ltd",
     };
@@ -215,7 +215,7 @@ async function testLegionella(req) {
     check(`legionella: POST ${checkType} persists checkType`, res.data?.checkType === checkType, `got ${res.data?.checkType}`);
     check(
       `legionella: POST ${checkType} persists result`,
-      res.data?.result === (checkType === "cold_tank_temp" ? "pass" : "action_required"),
+      res.data?.result === (checkType === "cold_tank_temp" ? "pass" : "fail"),
       `got ${res.data?.result}`,
     );
 

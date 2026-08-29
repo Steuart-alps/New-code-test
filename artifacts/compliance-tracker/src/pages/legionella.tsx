@@ -106,13 +106,6 @@ function ResultBadge({ result }: { result: string }) {
       </Badge>
     );
   }
-  if (result === "action_required") {
-    return (
-      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-        <AlertTriangle className="w-3 h-3 mr-1" /> Action Required
-      </Badge>
-    );
-  }
   return (
     <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200">
       <AlertTriangle className="w-3 h-3 mr-1" /> Fail
@@ -121,10 +114,10 @@ function ResultBadge({ result }: { result: string }) {
 }
 
 function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
-  if (lastResult === "fail" || lastResult === "action_required")
+  if (lastResult && lastResult !== "pass")
     return (
       <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
-        <AlertTriangle className="w-3 h-3 mr-1" /> {lastResult === "fail" ? "Failed" : "Action needed"}
+        <AlertTriangle className="w-3 h-3 mr-1" /> Failed
       </Badge>
     );
   if (status === "ok")
@@ -365,7 +358,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
 }) {
   const checkType = outlet.checkTypeForOutlet;
   const [checkDate, setCheckDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
+  const [result, setResult] = useState<"pass" | "fail">("pass");
   const [temperature, setTemperature] = useState("");
   const [performedBy, setPerformedBy] = useState("");
   const [notes, setNotes] = useState("");
@@ -404,7 +397,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
     if (r.ok) {
       queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
       queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
-      const label = result === "pass" ? "Pass" : result === "fail" ? "Fail" : "Action required";
+      const label = result === "pass" ? "Pass" : "Fail";
       toast({ title: "Test recorded", description: `${outlet.name} — ${label}` });
       onSuccess();
     } else {
@@ -429,15 +422,15 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
             <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label>Result</Label>
+            <Label>Check result</Label>
             <Select value={result} onValueChange={v => setResult(v as any)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pass">Pass</SelectItem>
                 <SelectItem value="fail">Fail</SelectItem>
-                <SelectItem value="action_required">Action Required</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">A Fail automatically opens an Action Required item to track remediation.</p>
           </div>
           {isTemperature && (
             <div className="space-y-1.5">
@@ -561,7 +554,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
               <div key={outlet.id} className={cn(
                 "rounded-lg border p-4 space-y-3 transition-all",
                 outlet.testedThisMonth
-                  ? outlet.lastCheck?.result === "fail" || outlet.lastCheck?.result === "action_required"
+                  ? outlet.lastCheck?.result !== "pass"
                     ? "border-red-200 bg-red-50/40"
                     : "border-emerald-200 bg-emerald-50/40"
                   : "border-amber-200 bg-amber-50/40"
@@ -600,7 +593,7 @@ function SentinelOutletsPanel({ canAdmin }: { canAdmin: boolean }) {
                         "font-medium",
                         outlet.lastCheck?.result === "pass" ? "text-emerald-700" : "text-red-700"
                       )}>
-                        {outlet.lastCheck?.result === "pass" ? "Passed" : outlet.lastCheck?.result === "fail" ? "Failed" : "Action required"}
+                          {outlet.lastCheck?.result === "pass" ? "Passed" : "Failed"}
                         {outlet.lastCheck?.temperature && ` (${outlet.lastCheck.temperature}°C)`}
                         {outlet.lastCheck?.checkDate && ` — ${format(new Date(outlet.lastCheck.checkDate), "dd MMM")}`}
                       </span>
@@ -672,7 +665,7 @@ function RecordCheckDialog({
     if (open && defaultCheckType) setCheckType(defaultCheckType);
   }, [open, defaultCheckType]);
   const [checkDate, setCheckDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [result, setResult] = useState<"pass" | "fail" | "action_required">("pass");
+  const [result, setResult] = useState<"pass" | "fail">("pass");
   const [temperature, setTemperature] = useState("");
   const [location, setLocation] = useState("");
   const { user } = useAuth();
@@ -761,15 +754,15 @@ function RecordCheckDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Result</Label>
+            <Label>Check result</Label>
             <Select value={result} onValueChange={(v) => setResult(v as typeof result)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pass">Pass</SelectItem>
                 <SelectItem value="fail">Fail</SelectItem>
-                <SelectItem value="action_required">Action Required</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">A Fail automatically opens an Action Required item to track remediation.</p>
           </div>
 
           {isTemperatureCheck && (
@@ -836,7 +829,8 @@ function RecordCheckDialog({
 function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const [open, setOpen] = useState(false);
   const [checkDate, setCheckDate] = useState(check.checkDate);
-  const [result, setResult] = useState<"pass" | "fail" | "action_required">(check.result as any);
+  const [result, setResult] = useState<"pass" | "fail">(check.result === "pass" ? "pass" : "fail");
+  const [resultChanged, setResultChanged] = useState(false);
   const [temperature, setTemperature] = useState(check.temperature || "");
   const [location, setLocation] = useState(check.location || "");
   const [performedBy, setPerformedBy] = useState(check.performedBy || "");
@@ -856,7 +850,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
         id: check.id,
         data: {
           checkDate,
-          result,
+          ...(resultChanged ? { result } : {}),
           temperature: isTemperatureCheck && temperature ? parseFloat(String(temperature)) : undefined,
           siteId: selectedSite,
           location: location || undefined,
@@ -894,15 +888,18 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Result</Label>
-            <Select value={result} onValueChange={(v) => setResult(v as typeof result)}>
+            <Label>Check result</Label>
+            {check.result !== "pass" && check.result !== "fail" && (
+              <p className="text-xs text-muted-foreground">Legacy result: Action Required (treated as Fail). Choose a result to replace it.</p>
+            )}
+            <Select value={result} onValueChange={(v) => { setResult(v as typeof result); setResultChanged(true); }}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="pass">Pass</SelectItem>
                 <SelectItem value="fail">Fail</SelectItem>
-                <SelectItem value="action_required">Action Required</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">A Fail automatically opens an Action Required item to track remediation.</p>
           </div>
 
           {isTemperatureCheck && (
@@ -1078,7 +1075,7 @@ export default function LegionellaPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
-                  item.lastResult === "fail" || item.lastResult === "action_required"
+                  item.lastResult && item.lastResult !== "pass"
                     ? "border-l-red-600 bg-red-100/60"
                     : item.status === "overdue"
                     ? "border-l-rose-500 bg-rose-50/50"

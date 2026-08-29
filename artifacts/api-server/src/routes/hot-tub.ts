@@ -23,7 +23,9 @@ const FREQUENCY_DAYS: Record<HotTubCheckType, number> = {
 const createSchema = z.object({
   checkType: z.enum(HOT_TUB_CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  result: z.enum(["pass", "fail", "action_required"]),
+  // New observations use the canonical pass/fail vocabulary. Legacy records
+  // retain their original result when read.
+  result: z.enum(["pass", "fail"]),
   session: z.enum(["morning", "midday", "evening"]).nullable().optional(),
   phValue: z.number().min(0).max(14).nullable().optional(),
   sanitiserLevel: z.number().min(0).nullable().optional(),

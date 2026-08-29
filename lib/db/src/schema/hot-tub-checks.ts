@@ -22,7 +22,7 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
   checkType: text("check_type").notNull(),
   checkDate: date("check_date").notNull(),
-  result: text("result").notNull().default("pass"), // pass | fail | action_required
+  result: text("result").notNull().default("pass"), // new writes: pass | fail; legacy action_required remains readable
   phValue: numeric("ph_value", { precision: 4, scale: 2 }),          // target 7.2–7.8
   sanitiserLevel: numeric("sanitiser_level", { precision: 6, scale: 2 }), // ppm (Cl/Br)
   temperature: numeric("temperature", { precision: 5, scale: 2 }),    // °C (max 40)

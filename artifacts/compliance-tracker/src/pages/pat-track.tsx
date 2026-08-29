@@ -341,8 +341,7 @@ function StatusBadge({ status }: { status: ReturnType<typeof applianceStatus> })
 
 function ResultBadge({ result }: { result: string }) {
   if (result === "pass") return <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 rounded-sm text-xs">Pass</Badge>;
-  if (result === "fail") return <Badge className="bg-rose-100 text-rose-800 border-rose-200 rounded-sm text-xs">Fail</Badge>;
-  return <Badge className="bg-slate-100 text-slate-600 border-slate-200 rounded-sm text-xs">{result}</Badge>;
+  return <Badge className="bg-rose-100 text-rose-800 border-rose-200 rounded-sm text-xs">Fail</Badge>;
 }
 
 // ─── apiFetch ─────────────────────────────────────────────────────────────────
@@ -1088,7 +1087,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
 
   const reset = () => setForm(test ? {
     applianceId: String(test.appliance_id), testDate: test.test_date,
-    result: test.result, nextTestDate: test.next_test_date ?? "",
+    result: test.result === "pass" ? "pass" : "fail", nextTestDate: test.next_test_date ?? "",
     testedBy: test.tested_by ?? "", visualInspection: test.visual_inspection ?? "pass",
     earthContinuityOhms: test.earth_continuity_ohms ?? "",
     insulationMohms: test.insulation_mohms ?? "",
@@ -1176,6 +1175,7 @@ function TestDialog({ test, appliances, onSaved, onClose, open, config, presetAp
                   <SelectItem value="fail">Fail ✗</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground mt-1">A Fail automatically opens an Action Required item to track remediation.</p>
             </div>
           </div>
 
