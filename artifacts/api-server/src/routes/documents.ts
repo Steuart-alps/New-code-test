@@ -1,0 +1,221 @@
+import { Router } from "express";
+import { Readable } from "stream";
+import { z } from "zod";
+import { db } from "@workspace/db";
+import { clientDocumentsTable } from "@workspace/db/schema";
+import { eq, and } from "drizzle-orm";
+import { requireAuth, getClientId, canAccessClient } from "../middleware/requireAuth";
+import {
+  ObjectStorageService,
+  ObjectNotFoundError,
+} from "../lib/objectStorage";
+
+const router = Router();
+const storage = new ObjectStorageService();
+
+// ── List documents for the current client ────────────────────────────────────
+
+router.get("/documents", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  const docs = await db
+    .select()
+    .from(clientDocumentsTable)
+    .where(eq(clientDocumentsTable.clientId, clientId))
+    .orderBy(clientDocumentsTable.createdAt);
+
+  res.json(docs);
+});
+
+// ── Register a document after the client has uploaded it to object storage ───
+// Body: { name, description?, objectPath, fileSize?, mimeType? }
+
+const CreateDocBody = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string().max(2000).optional().nullable(),
+  objectPath: z.string().min(1),
+  fileSize: z.number().int().positive().optional().nullable(),
+  mimeType: z.string().optional().nullable(),
+});
+
+router.post("/documents", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  // Only consultants and client admins may upload
+  if (!["consultant", "client_admin"].includes(user.role)) {
+    res.status(403).json({ error: "Only managers can upload documents" });
+    return;
+  }
+
+  const parsed = CreateDocBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+
+  const { name, description, objectPath, fileSize, mimeType } = parsed.data;
+
+  const [doc] = await db
+    .insert(clientDocumentsTable)
+    .values({
+      clientId,
+      name,
+      description: description ?? null,
+      objectPath,
+      fileSize: fileSize ?? null,
+      mimeType: mimeType ?? null,
+      uploadedById: user.id,
+      uploadedByName: user.name,
+    })
+    .returning();
+
+  res.status(201).json(doc);
+});
+
+// ── Update document metadata ──────────────────────────────────────────────────
+
+const UpdateDocBody = z.object({
+  name: z.string().min(1).max(255).optional(),
+  description: z.string().max(2000).optional().nullable(),
+});
+
+router.patch("/documents/:id", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  if (!["consultant", "client_admin"].includes(user.role)) {
+    res.status(403).json({ error: "Only managers can edit documents" });
+    return;
+  }
+
+  const [doc] = await db
+    .select()
+    .from(clientDocumentsTable)
+    .where(
+      and(
+        eq(clientDocumentsTable.id, Number(req.params.id)),
+        eq(clientDocumentsTable.clientId, clientId),
+      ),
+    );
+
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+
+  const parsed = UpdateDocBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(clientDocumentsTable)
+    .set({ ...parsed.data, updatedAt: new Date() })
+    .where(eq(clientDocumentsTable.id, doc.id))
+    .returning();
+
+  res.json(updated);
+});
+
+// ── Delete a document (removes DB record; object storage is cleaned by GC) ───
+
+router.delete("/documents/:id", requireAuth, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  if (!["consultant", "client_admin"].includes(user.role)) {
+    res.status(403).json({ error: "Only managers can delete documents" });
+    return;
+  }
+
+  const [doc] = await db
+    .select()
+    .from(clientDocumentsTable)
+    .where(
+      and(
+        eq(clientDocumentsTable.id, Number(req.params.id)),
+        eq(clientDocumentsTable.clientId, clientId),
+      ),
+    );
+
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+
+  await db.delete(clientDocumentsTable).where(eq(clientDocumentsTable.id, doc.id));
+  res.status(204).end();
+});
+
+// ── Download / stream a document ─────────────────────────────────────────────
+
+router.get("/documents/:id/download", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
+
+  const [doc] = await db
+    .select()
+    .from(clientDocumentsTable)
+    .where(
+      and(
+        eq(clientDocumentsTable.id, Number(req.params.id)),
+        eq(clientDocumentsTable.clientId, clientId),
+      ),
+    );
+
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+
+  try {
+    const file = await storage.getObjectEntityFile(doc.objectPath);
+    const response = await storage.downloadObject(file, 0 /* no cache for private docs */);
+
+    // Force a download with the original filename
+    const safeName = doc.name.replace(/[^a-zA-Z0-9._\- ]/g, "_");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      if (key.toLowerCase() !== "content-disposition") res.setHeader(key, value);
+    });
+
+    if (response.body) {
+      const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+      nodeStream.pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "File not found in storage" });
+      return;
+    }
+    req.log.error({ err }, "Error streaming document");
+    res.status(500).json({ error: "Failed to download document" });
+  }
+});
+
+export default router;

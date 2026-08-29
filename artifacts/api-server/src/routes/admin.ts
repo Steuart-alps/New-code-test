@@ -11,17 +11,17 @@ const router = Router();
 router.post("/admin/seed-demo", async (req, res) => {
   const token = process.env.DEMO_SEED_TOKEN;
   if (!token) {
-    return res.status(503).json({ error: "Seed endpoint disabled (no token configured)." });
+    return void res.status(503).json({ error: "Seed endpoint disabled (no token configured)." });
   }
 
   const auth = req.headers.authorization ?? "";
   const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (presented !== token) {
-    return res.status(401).json({ error: "Invalid token" });
+    return void res.status(401).json({ error: "Invalid token" });
   }
 
   try {
-    const result = await seedDemo();
+    const result = await ensureServicePrices();
     logger.info({ result }, "Demo data seeded");
     res.json({ ok: true, ...result });
   } catch (err: any) {

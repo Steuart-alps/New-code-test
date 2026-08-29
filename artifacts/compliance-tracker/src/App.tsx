@@ -54,6 +54,13 @@ import RoomTrackPage from "@/pages/room-track";
 import ReportsPage from "@/pages/reports";
 import ComplianceHubPage from "@/pages/compliance-hub";
 import NotFound from "@/pages/not-found";
+import DailyOverviewPage from "@/pages/daily-overview";
+import DailyChecklistPage from "@/pages/daily-checklist";
+import DocumentsPage from "@/pages/documents";
+import FoodSafetyPage from "@/pages/food-safety";
+import DailyHistoryPage from "@/pages/daily-history";
+import StaffTrainingPage from "@/pages/staff-training";
+import FireSafetyPage, { WaterSafetyPage } from "@/pages/safety-summary";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -157,6 +164,15 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
+      {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
+      <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>
+      <Route path="/daily/pm">{() => <DailyChecklistPage type="pm" />}</Route>
+      <Route path="/documents" component={DocumentsPage} />
+      <Route path="/food-safety" component={FoodSafetyPage} />
+      <Route path="/daily/history" component={DailyHistoryPage} />
+      <Route path="/staff-training" component={StaffTrainingPage} />
+      <Route path="/fire-safety" component={FireSafetyPage} />
+      <Route path="/water-safety" component={WaterSafetyPage} />
       <Route component={NotFound} />
     </Switch>
   );

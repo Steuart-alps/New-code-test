@@ -217,7 +217,7 @@ function validateConfigPatch(
 // plus _siteOverrides listing which keys the site overrides.
 router.get("/config", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
@@ -271,7 +271,7 @@ router.get("/config", requireAuth, async (req, res) => {
 // With siteId: writes site-scoped override keys (site.<siteId>.<key>).
 router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
@@ -328,7 +328,7 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
 // is left untouched and remains the effective config for the site.
 router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
@@ -403,7 +403,7 @@ router.get("/by-date/:date", requireAuth, async (req, res) => {
 // GET /api/food-safety?date=YYYY-MM-DD[&siteId=N]
 router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const siteId = await resolveDiarySiteId(req, res, clientId);
   if (siteId === undefined) return;
@@ -416,7 +416,7 @@ router.get("/", requireAuth, async (req, res) => {
       .from(foodSafetyRecordsTable)
       .where(and(eq(foodSafetyRecordsTable.clientId, clientId), siteScopeCond(siteId)))
       .orderBy(foodSafetyRecordsTable.recordDate);
-    return res.json(records);
+    return void res.json(records);
   }
 
   const [record] = await db
@@ -425,7 +425,7 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, date), siteScopeCond(siteId)))
     .limit(1);
 
-  if (!record) return res.json(null);
+  if (!record) return void res.json(null);
   res.json(record);
 });
 
@@ -435,7 +435,7 @@ router.get("/", requireAuth, async (req, res) => {
 // they exist, but still need to be submitted.
 router.get("/missing-dates", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const { from, to } = req.query as { from?: string; to?: string };
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -508,7 +508,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
 
-  if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+  if (existing) return void res.status(409).json({ error: "Record already exists for this date", id: existing.id });
 
   const [inserted] = await db
     .insert(foodSafetyRecordsTable)
@@ -604,7 +604,7 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
 // PUT /api/food-safety/:id
 router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) return void res.status(400).json({ error: "No client context" });
 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });

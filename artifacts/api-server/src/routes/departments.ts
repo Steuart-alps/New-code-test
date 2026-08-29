@@ -5,6 +5,8 @@ import { departmentsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, count } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { nameIsClean } from "../lib/contentFilter";
+import { departmentsTable, usersTable } from "@workspace/db/schema";
+import { eq, and, count } from "drizzle-orm";
 
 const router = Router();
 
@@ -17,27 +19,22 @@ const UpsertDepartmentBody = z.object({
 router.get("/departments", requireAuth, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
-
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
   }
 
-  if (!canAccessClient(req, clientId)) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
-
   const rows = await db
-    .select()
-    .from(departmentsTable)
-    .where(eq(departmentsTable.clientId, clientId));
-  res.json(rows);
+    .update(departmentsTable)
+    .set(body)
+    .where(eq(departmentsTable.id, id))
+    .returning();
+  res.status(201).json(rows[0]);
 });
 
-router.post("/departments", requireAuth, requireClientAdmin, async (req, res) => {
+router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const actor = req.currentUser!;
-  const body = UpsertDepartmentBody.parse(req.body);
+  const body = UpsertDepartmentBody.partial().parse(req.body);
 
   const clientId = getClientId(req);
   if (!clientId) {
@@ -46,8 +43,9 @@ router.post("/departments", requireAuth, requireClientAdmin, async (req, res) =>
   }
 
   const rows = await db
-    .insert(departmentsTable)
-    .values({ name: body.name, description: body.description ?? null, clientId })
+    .update(departmentsTable)
+    .set(body)
+    .where(eq(departmentsTable.id, id))
     .returning();
   res.status(201).json(rows[0]);
 });
@@ -55,6 +53,8 @@ router.post("/departments", requireAuth, requireClientAdmin, async (req, res) =>
 router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const actor = req.currentUser!;
   const id = Number(req.params.id);
+
+  const [existing] = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
 
   const existing = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
   if (!existing[0]) {
@@ -73,12 +73,14 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
     .set(body)
     .where(eq(departmentsTable.id, id))
     .returning();
-  res.json(rows[0]);
+  res.status(201).json(rows[0]);
 });
 
-router.delete("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
+router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const actor = req.currentUser!;
   const id = Number(req.params.id);
+
+  const [existing] = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
 
   const existing = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
   if (!existing[0]) {
@@ -126,3 +128,8 @@ router.delete("/departments/:id", requireAuth, requireClientAdmin, async (req, r
 });
 
 export default router;
+
+  const [{ value: userCount }] = await db
+    .select({ value: count() })
+    .from(usersTable)
+    .where(eq(usersTable.departmentId, id));

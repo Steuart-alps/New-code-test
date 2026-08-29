@@ -55,6 +55,8 @@ import trackActionsRouter from "./track-actions";
 import auditEventsRouter from "./audit-events";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
+import documentsRouter from "./documents";
+import { staffTrainingRouter } from "./staff-training";
 
 const router: IRouter = Router();
 
@@ -75,6 +77,9 @@ router.use(settingsRouter);
 router.use(notificationsRouter);
 router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
+router.use(dailyChecklistsRouter);
+router.use(documentsRouter);
+router.use(staffTrainingRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);

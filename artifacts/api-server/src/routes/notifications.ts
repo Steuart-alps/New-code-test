@@ -201,10 +201,10 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
     }
-    const settings = settingsCache[item.clientId];
-    const companyName = settings["companyName"] ?? "ComplyTrack";
-    const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-    const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
+  const settings = await getClientSettings(item.clientId);
+  const companyName = settings["companyName"] ?? "ComplyTrack";
+  const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
 
     const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
     const dueDate = new Date(item.dueDate);
@@ -219,19 +219,19 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
       skipped++; continue;
     }
 
-    const ccList = await buildReminderCcList({
-      clientId: item.clientId,
-      settings,
-      recipient: contractor.email,
-      actorEmail: req.currentUser?.email ?? null,
-    });
+  const ccList = await buildReminderCcList({
+    clientId: item.clientId,
+    settings,
+    recipient: contractor.email,
+    actorEmail: req.currentUser?.email ?? null,
+  });
 
     try {
       await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "sent" });
       sent++;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+    const message = err instanceof Error ? err.message : "Failed to send test email";
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "error", reason: message });
       errors++;
     }
@@ -242,30 +242,22 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
 
 router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAdmin, async (req, res) => {
   const itemId = parseInt(req.params.itemId as string, 10);
-  if (!Number.isFinite(itemId)) return res.status(400).json({ error: "Invalid item id" });
+  if (!Number.isFinite(itemId)) return void res.status(400).json({ error: "Invalid item id" });
 
   const callerClientId = getClientId(req);
-  if (!callerClientId) return res.status(400).json({ error: "clientId required" });
+  if (!callerClientId) return void res.status(400).json({ error: "clientId required" });
 
   const rows = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.id, itemId))
+    .where(eq(complianceItemsTable.scheduleToken, token))
     .limit(1);
 
   const row = rows[0];
-  if (!row) return res.status(404).json({ error: "Compliance check not found" });
+  if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
   const { item, contractor } = row;
-
-  // Tenant isolation — block sending reminders for items outside the caller's client.
-  if (item.clientId !== callerClientId) {
-    return res.status(404).json({ error: "Compliance check not found" });
-  }
-
-  if (!contractor) return res.status(400).json({ error: "This check has no contractor assigned." });
-  if (!contractor.email) return res.status(400).json({ error: `${contractor.name} does not have an email address on file.` });
-  if (!item.dueDate) return res.status(400).json({ error: "This check has no due date set." });
+  if (!contractor?.email) return void res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
 
   const settings = await getClientSettings(item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
@@ -305,9 +297,9 @@ router.get("/notifications/public/schedule/:token", async (req, res) => {
     .limit(1);
 
   const row = rows[0];
-  if (!row) return res.status(404).json({ error: "This scheduling link is no longer valid." });
+  if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
 
-  const settings = await getClientSettings(row.item.clientId);
+  const settings = await getClientSettings(item.clientId);
   res.json({
     itemTitle: row.item.title,
     notes: row.item.notes,
@@ -321,11 +313,11 @@ router.get("/notifications/public/schedule/:token", async (req, res) => {
 router.post("/notifications/public/schedule/:token", async (req, res) => {
   const token = req.params.token;
   const { date } = req.body ?? {};
-  if (!date || typeof date !== "string") return res.status(400).json({ error: "Please choose a date." });
+  if (!date || typeof date !== "string") return void res.status(400).json({ error: "Please choose a date." });
 
   const proposed = new Date(date);
-  if (Number.isNaN(proposed.getTime())) return res.status(400).json({ error: "That date isn't valid." });
-  if (proposed.getTime() < Date.now() - 24 * 60 * 60 * 1000) return res.status(400).json({ error: "Please choose a date in the future." });
+  if (Number.isNaN(proposed.getTime())) return void res.status(400).json({ error: "That date isn't valid." });
+  if (proposed.getTime() < Date.now() - 24 * 60 * 60 * 1000) return void res.status(400).json({ error: "Please choose a date in the future." });
 
   const rows = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable })
@@ -335,9 +327,9 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
     .limit(1);
 
   const row = rows[0];
-  if (!row) return res.status(404).json({ error: "This scheduling link is no longer valid." });
+  if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
   const { item, contractor } = row;
-  if (!contractor?.email) return res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
+  if (!contractor?.email) return void res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
 
   const settings = await getClientSettings(item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";

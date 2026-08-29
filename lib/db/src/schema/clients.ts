@@ -21,6 +21,8 @@ export const clientsTable = pgTable("clients", {
   // Claimed before cancellation cutoff warnings are delivered. Kept separate
   // from trial reminders because paid access can end independently of a trial.
   cancellationWarningSentAt: timestamp("cancellation_warning_sent_at"),
+  safeTrackEnabled: boolean("safe_track_enabled").notNull().default(false),
+  dailyTrackEnabled: boolean("daily_track_enabled").notNull().default(false),
   // Offboarding / data retention
   cancelledAt: timestamp("cancelled_at"),
   offboardingEmailSentAt: timestamp("offboarding_email_sent_at"),

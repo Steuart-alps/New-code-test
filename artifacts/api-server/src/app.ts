@@ -88,7 +88,7 @@ app.post(
   express.raw({ type: "application/json" }),
   async (req, res) => {
     const signature = req.headers["stripe-signature"];
-    if (!signature) return res.status(400).json({ error: "Missing stripe-signature" });
+    if (!signature) return void res.status(400).json({ error: "Missing stripe-signature" });
     const sig = Array.isArray(signature) ? signature[0] : signature;
     let event: {
       type?: string;

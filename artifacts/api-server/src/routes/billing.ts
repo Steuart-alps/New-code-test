@@ -2,7 +2,6 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth";
 import { getUncachableStripeClient, getStripePublishableKey } from "../lib/stripeClient";
 import {
   countClientSites,
@@ -34,6 +33,8 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import { z } from "zod";
+import { requireAuth, getClientId, requireRole, requireClientAdmin } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -42,11 +43,13 @@ router.get("/config", requireAuth, async (req, res) => {
   try {
     const publishableKey = await getStripePublishableKey();
 
-    const clientId = getClientId(req);
+  const clientId = getClientId(req);
+
+  const module = req.params.module as ModuleName;
     let subscription = null;
     let siteCount = 0;
     if (clientId) {
-      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       if (client?.stripeSubscriptionId) {
         const subRows = await db.execute(
           sql`SELECT * FROM stripe.subscriptions WHERE id = ${client.stripeSubscriptionId} LIMIT 1`
@@ -64,14 +67,14 @@ router.get("/config", requireAuth, async (req, res) => {
 
     // Per-service breakdown: which branches the client has, and the per-site
     // monthly rate across all of them (capped by the bundle price).
-    let entitled: "all" | ServiceKey[] = ["core"];
+    const entitled = await getEntitledServices(clientId);
     let activeAddons: string[] = [];
     let hasBundle = false;
     let subscribed = false;
     let perSiteRate = perSite?.unitAmount ?? 0;
     if (clientId) {
       entitled = await getEntitledServices(clientId);
-      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       if (client?.stripeCustomerId) {
         try {
           const live = await findLiveSubscription(client.stripeCustomerId);
@@ -204,8 +207,10 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     bundle?: boolean;
     discountCode?: unknown;
   };
-  const clientId = bodyClientId ?? getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const clientId = getClientId(req);
+
+  const module = req.params.module as ModuleName;
+  if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
@@ -247,7 +252,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
         return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });
       }
       for (const addon of requested) {
-        const price = await getServicePrice(addon);
+    const price = await getServicePrice(service);
         if (!price) return res.status(400).json({ error: `Price not configured for ${addon}` });
         lineItems.push({ price: price.priceId, quantity });
       }
@@ -302,73 +307,25 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       couponId = await getAlpsDiscountCouponId(stripe);
     }
 
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ["card"],
-      line_items: lineItems,
-      mode: "subscription",
-      success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
-      cancel_url: `${baseUrl}/?billing=cancel`,
-      metadata: {
-        clientId: String(clientId),
-        ...(discountReservation
-          ? {
-              discountCode: discountReservation.code,
-              discountReservationToken: discountReservation.token,
-            }
-          : {}),
-      },
-      ...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
-      ...(discountReservation
-        ? { expires_at: Math.floor(discountReservation.expiresAt.getTime() / 1000) }
-        : {}),
-      automatic_tax: { enabled: true },
-      customer_update: { address: "auto" },
+    const session = await stripe.billingPortal.sessions.create({
+      customer: client.stripeCustomerId,
+      configuration,
+      return_url: `${baseUrl}/`,
     });
-    checkoutSessionCreated = true;
-
-    if (discountReservation) {
-      try {
-        await attachDiscountCheckoutSession(clientId, discountReservation, session.id);
-      } catch (err) {
-        // If the session ID was not persisted, we cannot safely reconcile it
-        // later. Invalidate the live Stripe session before releasing the code.
-        try {
-          await stripe.checkout.sessions.expire(session.id);
-          await releaseAlpsDiscountReservation(clientId, discountReservation);
-        } catch (cleanupError) {
-          // Leave the reservation in place rather than risk allowing a code
-          // that may still be attached to a live Checkout session.
-          logger.error(
-            { err: cleanupError, clientId, checkoutSessionId: session.id },
-            "Could not safely cancel an unattached ALPS discount checkout session",
-          );
-        }
-        throw err;
-      }
-    }
-
-    res.json({ url: session.url, discountApplied: Boolean(discountReservation) });
+    res.json({ url: session.url });
   } catch (err: any) {
-    if (discountReservation && !checkoutSessionCreated) {
-      try {
-        await releaseAlpsDiscountReservation(clientId, discountReservation);
-      } catch {
-        // Preserve the original checkout failure; a stale reservation expires.
-      }
-    }
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Manager-issued client discount codes ────────────────────────────────────
-// Consultant (manager) only. The raw code is returned exactly ONCE at issue
-// time; afterwards only the lifecycle status and a 4-character hint are
-// visible. Client users can never read or manage codes.
-
-// GET /api/billing/discount-code — lifecycle status for the client's code.
-router.get("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
+// POST /api/billing/refresh-access — drop the cached trial-lock decision for
+// the caller's client and re-check Stripe fresh. Called by the lock screen
+// after checkout so a new subscription restores access immediately instead of
+// waiting out the cache TTL.
+router.post("/refresh-access", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
+
+  const module = req.params.module as ModuleName;
   if (!clientId) return res.status(400).json({ error: "No client context" });
   try {
     res.json(await getClientDiscountCodeStatus(clientId));
@@ -380,6 +337,8 @@ router.get("/discount-code", requireAuth, requireRole("consultant"), async (req,
 // POST /api/billing/discount-code — generate (or replace) the client's code.
 router.post("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
   const clientId = getClientId(req);
+
+  const module = req.params.module as ModuleName;
   if (!clientId) return res.status(400).json({ error: "No client context" });
   try {
     const result = await issueClientDiscountCode(clientId, req.currentUser?.id ?? null);
@@ -410,12 +369,12 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     return res.status(400).json({ error: "Action must be 'add' or 'remove'" });
   }
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const module = req.params.module as ModuleName;
+  if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client?.stripeCustomerId) {
-    return res.status(400).json({ error: "No billing account yet — subscribe first" });
-  }
+  if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
     const stripe = await getUncachableStripeClient();
@@ -520,11 +479,12 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 // resolved server-side, never taken from the request).
 router.get("/invoices", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const module = req.params.module as ModuleName;
+  if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client) return res.status(404).json({ error: "Client not found" });
-  if (!client.stripeCustomerId) return res.json({ invoices: [] });
+  if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
     const stripe = await getUncachableStripeClient();
@@ -630,10 +590,12 @@ async function createNoRefundPortalConfig(stripe: any): Promise<string> {
 // POST /api/billing/portal — customer portal for managing subscription
 router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const module = req.params.module as ModuleName;
+  if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
-  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
+  if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
     const stripe = await getUncachableStripeClient();
@@ -656,18 +618,25 @@ router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), a
 // waiting out the cache TTL.
 router.post("/refresh-access", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
+
+  const module = req.params.module as ModuleName;
   if (!clientId) return res.json({ billingLocked: false });
   try {
     invalidateTrialLock(clientId);
     invalidateEntitlements(clientId);
     const billingLocked = await isClientBillingLocked(clientId);
-    res.json({ billingLocked });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-// POST /api/billing/webhook — Stripe webhooks (registered raw in app.ts)
-// Handled separately in app.ts before express.json()
-
+const MODULE_NAMES = ["safetrack", "dailytrack"] as const;
 export default router;
+
+  const [updated] = await db
+    .update(clientsTable)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(clientsTable.id, clientId))
+    .returning({ safeTrackEnabled: clientsTable.safeTrackEnabled, dailyTrackEnabled: clientsTable.dailyTrackEnabled });
+
+type ModuleName = (typeof MODULE_NAMES)[number];
+
+  const updates: Partial<typeof clientsTable.$inferInsert> = {};
+
+  const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);

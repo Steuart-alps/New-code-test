@@ -13,6 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Plus, Users, Package, ShieldCheck, ClipboardCheck } from "lucide-react";
+import {
 
 interface DomainRecord {
   record?: string;
@@ -1313,6 +1315,7 @@ function BillingCard() {
   );
 }
 
+interface ModuleState { safetrack: { enabled: boolean }; dailytrack: { enabled: boolean } }
 interface InvoiceRow {
   id: string;
   number: string | null;
@@ -2014,6 +2017,104 @@ function TwoFactorCard() {
                 </form>
               </div>
             )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const MODULES = [
+  {
+    id: "safetrack" as const,
+    label: "SafeTrack",
+    description: "Compliance item tracking, contractor reminders, fire & water safety summaries.",
+    Icon: ShieldCheck,
+  },
+  {
+    id: "dailytrack" as const,
+    label: "DailyTrack",
+    description: "Daily opening & closing checklists for all sites, with sign-off and history archive.",
+    Icon: ClipboardCheck,
+  },
+];
+
+function ModulesCard() {
+  const { toast } = useToast();
+  const [modules, setModules] = useState<ModuleState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<ModuleState>("/billing/modules")
+      .then(setModules)
+      .catch(() => setModules(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = async (id: "safetrack" | "dailytrack", currentlyEnabled: boolean) => {
+    setToggling(id);
+    try {
+      const updated = await apiFetch<ModuleState>(`/billing/modules/${id}`, {
+        method: "POST",
+        body: JSON.stringify({ enabled: !currentlyEnabled }),
+      });
+      setModules(updated);
+      toast({ title: `${id === "safetrack" ? "SafeTrack" : "DailyTrack"} ${!currentlyEnabled ? "activated" : "deactivated"}` });
+    } catch (err: any) {
+      toast({ title: "Failed to update module", description: err.message, variant: "destructive" });
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <Package className="w-5 h-5 text-primary" />
+          <CardTitle className="font-display">Modules</CardTitle>
+        </div>
+        <CardDescription>
+          Activate or deactivate product modules for your account.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6">
+        {loading ? (
+          <div className="py-4 flex justify-center"><div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" /></div>
+        ) : (
+          <div className="space-y-3">
+            {MODULES.map(({ id, label, description, Icon }) => {
+              const enabled = modules?.[id]?.enabled ?? false;
+              const busy = toggling === id;
+              return (
+                <div key={id} className={`flex items-start gap-4 rounded-xl border p-4 transition-colors ${enabled ? "border-emerald-200 bg-emerald-50/40" : "border-border bg-muted/20"}`}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${enabled ? "bg-emerald-100" : "bg-muted"}`}>
+                    <Icon className={`w-5 h-5 ${enabled ? "text-emerald-600" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{label}</span>
+                      {enabled && (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-medium bg-emerald-100 border border-emerald-200 rounded-full px-2 py-0.5">
+                          <CheckCircle2 className="w-3 h-3" /> Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                  </div>
+                  <Button
+                    variant={enabled ? "outline" : "default"}
+                    size="sm"
+                    className="flex-shrink-0"
+                    disabled={busy}
+                    onClick={() => toggle(id, enabled)}
+                  >
+                    {busy ? "…" : enabled ? "Deactivate" : "Activate"}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         )}
       </CardContent>

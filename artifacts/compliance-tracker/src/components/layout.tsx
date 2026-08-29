@@ -411,4 +411,3 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
     </div>
   );
 }
-

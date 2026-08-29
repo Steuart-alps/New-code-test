@@ -475,6 +475,31 @@ export async function runRuntimeMigrations() {
     // ---- 2FA recovery code (Task #52) ----
     await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_code text`);
 
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "staff_training_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL,
+        "user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "staff_name" text NOT NULL,
+        "course_name" text NOT NULL,
+        "issued_at" timestamp,
+        "expires_at" timestamp,
+        "notes" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
+    // Add module flags to clients table
+    const hasSafeTrack = await columnExists("clients", "safe_track_enabled");
+    if (!hasSafeTrack) {
+      await db.execute(sql`ALTER TABLE "clients" ADD COLUMN "safe_track_enabled" boolean NOT NULL DEFAULT false`);
+    }
+    const hasDailyTrack = await columnExists("clients", "daily_track_enabled");
+    if (!hasDailyTrack) {
+      await db.execute(sql`ALTER TABLE "clients" ADD COLUMN "daily_track_enabled" boolean NOT NULL DEFAULT false`);
+    }
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

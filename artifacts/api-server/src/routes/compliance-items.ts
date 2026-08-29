@@ -107,6 +107,10 @@ router.get("/compliance-items", requireAuth, async (req, res) => {
   // compliance item or a contractor. Scope by joining to whichever owner
   // belongs to the current client.
   const { certificatesTable } = await import("@workspace/db/schema");
+
+  const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
+
+  const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
   const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
   const certs = await db
     .select({
@@ -160,14 +164,14 @@ async function fetchJoinedItem(itemId: number) {
 router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
   const applyToAllSites = req.body?.applyToAllSites === true;
-  const body = CreateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
+  const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
     return;
   }
 
-  const titleCheck = filterName(body.title);
+    const titleCheck = filterName(body.title);
   if (!titleCheck.ok) {
     res.status(400).json({ error: titleCheck.message });
     return;
@@ -175,14 +179,14 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
 
   if (body.siteId != null) {
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
-    if (!s || s.clientId !== clientId) {
+    if (!s || s.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid siteId" });
       return;
     }
   }
   if (body.categoryId != null) {
     const [c] = await db.select().from(categoriesTable).where(eq(categoriesTable.id, body.categoryId));
-    if (!c || c.clientId !== clientId) {
+    if (!c || c.clientId !== existing[0].clientId) {
       res.status(400).json({ error: "Invalid categoryId" });
       return;
     }
@@ -209,7 +213,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
       .values(sites.map(s => ({ ...rest, siteId: s.id, clientId, updatedAt: new Date() })))
       .returning();
 
-    const joined = await Promise.all(inserted.map(i => fetchJoinedItem(i.id)));
+  const joined = await fetchJoinedItem(id);
     await Promise.all(inserted.map(i => appendAuditEvent(req, {
       clientId, entityType: "compliance_item", entityId: i.id, action: "created", after: i,
       metadata: { applyToAllSites: true },
@@ -225,13 +229,16 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     .values({ ...body, clientId, updatedAt: new Date() })
     .returning();
 
-  const joined = await fetchJoinedItem(item.id);
-  await appendAuditEvent(req, { clientId, entityType: "compliance_item", entityId: item.id, action: "created", after: item });
-  res.status(201).json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
+  const joined = await fetchJoinedItem(id);
+  await appendAuditEvent(req, {
+    clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
+    action: "updated", before: existing[0], after: joined!.item,
+  });
+  res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
-router.get("/compliance-items/:id", requireAuth, async (req, res) => {
-  const { id } = GetComplianceItemParams.parse({ id: Number(req.params.id) });
+router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
+  const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const user = req.currentUser!;
 
   const joined = await fetchJoinedItem(id);
@@ -246,11 +253,11 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
   // Department scope: if the user is scoped to a department and the item's site
   // belongs to a different department, deny access.
   const deptId = getActiveDepartmentId(req);
-  if (deptId !== null && joined.item.siteId != null) {
+  if (deptId !== null && existing[0].siteId != null) {
     const [itemSite] = await db
       .select({ departmentId: sitesTable.departmentId })
       .from(sitesTable)
-      .where(eq(sitesTable.id, joined.item.siteId))
+      .where(eq(sitesTable.id, existing[0].siteId))
       .limit(1);
     if (itemSite && itemSite.departmentId !== null && itemSite.departmentId !== deptId) {
       res.status(403).json({ error: "Forbidden" });
@@ -261,7 +268,7 @@ router.get("/compliance-items/:id", requireAuth, async (req, res) => {
 });
 
 router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const { id } = UpdateComplianceItemParams.parse({ id: Number(req.params.id) });
+  const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const user = req.currentUser!;
 
@@ -316,8 +323,13 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
 });
 
 router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const { id } = DeleteComplianceItemParams.parse({ id: Number(req.params.id) });
+  const { id } = UpdateComplianceItemStatusParams.parse({ id: Number(req.params.id) });
   const user = req.currentUser!;
+
+  if (user.role === "client_viewer") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
 
   const existing = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.id, id));
   if (!existing[0] || (!canAccessClient(req, existing[0].clientId))) {
@@ -407,6 +419,10 @@ router.get("/dashboard/stats", requireAuth, async (req, res) => {
   }
 
   const { certificatesTable } = await import("@workspace/db/schema");
+
+  const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
+
+  const { or: orDynamic, sql: dsql } = await import("drizzle-orm");
   const { sql: dsql } = await import("drizzle-orm");
 
   // Also scope the site breakdown to the user's accessible sites
