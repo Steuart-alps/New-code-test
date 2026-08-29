@@ -1,23 +1,27 @@
-import { Router } from "express";
+import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { departmentsTable, usersTable, sitesTable } from "@workspace/db/schema";
-import { eq, count } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { departmentsTable, sitesTable, usersTable } from "@workspace/db/schema";
+import { and, count, eq } from "drizzle-orm";
+import {
+  canAccessClient,
+  getClientId,
+  requireAuth,
+  requireClientAdmin,
+} from "../middleware/requireAuth";
 import { nameIsClean } from "../lib/contentFilter";
-import { departmentsTable, usersTable } from "@workspace/db/schema";
-import { eq, and, count } from "drizzle-orm";
 
-const router = Router();
+const router: IRouter = Router();
 
 const UpsertDepartmentBody = z.object({
   name: z.string().min(1).refine(nameIsClean, { message: "Please use an appropriate name." }),
   description: z.string().nullable().optional(),
+  // Accepted for compatibility with the shared request shape, but the tenant
+  // is always taken from the authenticated request.
   clientId: z.number().optional(),
 });
 
 router.get("/departments", requireAuth, async (req, res) => {
-  const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
@@ -25,17 +29,14 @@ router.get("/departments", requireAuth, async (req, res) => {
   }
 
   const rows = await db
-    .update(departmentsTable)
-    .set(body)
-    .where(eq(departmentsTable.id, id))
-    .returning();
-  res.status(201).json(rows[0]);
+    .select()
+    .from(departmentsTable)
+    .where(eq(departmentsTable.clientId, clientId));
+  res.json(rows);
 });
 
-router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const actor = req.currentUser!;
-  const body = UpsertDepartmentBody.partial().parse(req.body);
-
+router.post("/departments", requireAuth, requireClientAdmin, async (req, res) => {
+  const body = UpsertDepartmentBody.parse(req.body);
   const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
@@ -43,81 +44,86 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
   }
 
   const rows = await db
-    .update(departmentsTable)
-    .set(body)
-    .where(eq(departmentsTable.id, id))
+    .insert(departmentsTable)
+    .values({
+      name: body.name,
+      description: body.description ?? null,
+      clientId,
+    })
     .returning();
   res.status(201).json(rows[0]);
 });
 
 router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const actor = req.currentUser!;
   const id = Number(req.params.id);
+  const [existing] = await db
+    .select()
+    .from(departmentsTable)
+    .where(eq(departmentsTable.id, id));
 
-  const [existing] = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
-
-  const existing = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
-  if (!existing[0]) {
+  if (!existing) {
     res.status(404).json({ error: "Department not found" });
     return;
   }
-
-  if (!canAccessClient(req, existing[0].clientId)) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
 
   const body = UpsertDepartmentBody.partial().parse(req.body);
-  const rows = await db
+  const updates: { name?: string; description?: string | null } = {};
+  if (body.name !== undefined) updates.name = body.name;
+  if (body.description !== undefined) updates.description = body.description;
+
+  const [updated] = await db
     .update(departmentsTable)
-    .set(body)
+    .set(updates)
     .where(eq(departmentsTable.id, id))
     .returning();
-  res.status(201).json(rows[0]);
+  res.json(updated);
 });
 
-router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const actor = req.currentUser!;
+router.delete("/departments/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const id = Number(req.params.id);
+  const [existing] = await db
+    .select()
+    .from(departmentsTable)
+    .where(eq(departmentsTable.id, id));
 
-  const [existing] = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
-
-  const existing = await db.select().from(departmentsTable).where(eq(departmentsTable.id, id));
-  if (!existing[0]) {
+  if (!existing) {
     res.status(404).json({ error: "Department not found" });
     return;
   }
-
-  if (!canAccessClient(req, existing[0].clientId)) {
+  if (!canAccessClient(req, existing.clientId)) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
 
-  // Deleting a department nulls out staff/site assignments (FK onDelete: set
-  // null). Warn admins first: unless ?force=true is supplied, block with 409 and
-  // return the counts so the web UI can show a confirm dialog, then retry with
-  // force. Compliance items are also unassigned but not surfaced in the warning.
+  // users and sites use ON DELETE SET NULL. Require an explicit confirmation
+  // before that happens, otherwise deleting a department could silently make
+  // its staff and sites unscoped.
   const force = req.query.force === "true";
   if (!force) {
-    const [staffCount] = await db
-      .select({ n: count() })
-      .from(usersTable)
-      .where(eq(usersTable.departmentId, id));
-    const [siteCount] = await db
-      .select({ n: count() })
-      .from(sitesTable)
-      .where(eq(sitesTable.departmentId, id));
+    const [[staffCount], [siteCount]] = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(usersTable)
+        .where(and(eq(usersTable.clientId, existing.clientId), eq(usersTable.departmentId, id))),
+      db
+        .select({ value: count() })
+        .from(sitesTable)
+        .where(and(eq(sitesTable.clientId, existing.clientId), eq(sitesTable.departmentId, id))),
+    ]);
 
-    const staff = Number(staffCount?.n ?? 0);
-    const sites = Number(siteCount?.n ?? 0);
-
+    const staff = Number(staffCount?.value ?? 0);
+    const sites = Number(siteCount?.value ?? 0);
     if (staff > 0 || sites > 0) {
       res.status(409).json({
         error: "Department has assignments",
         requiresConfirmation: true,
         staffCount: staff,
         siteCount: sites,
-        message: `This department has ${staff} staff and ${sites} sites — they will be unassigned.`,
+        message: `This department has ${staff} staff and ${sites} sites. They will be unassigned if you continue.`,
       });
       return;
     }
@@ -128,8 +134,3 @@ router.put("/departments/:id", requireAuth, requireClientAdmin, async (req, res)
 });
 
 export default router;
-
-  const [{ value: userCount }] = await db
-    .select({ value: count() })
-    .from(usersTable)
-    .where(eq(usersTable.departmentId, id));
