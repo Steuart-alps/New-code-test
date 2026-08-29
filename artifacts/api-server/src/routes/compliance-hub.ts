@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
-import { UK_COMPLIANCE_GUIDANCE } from "../lib/ukComplianceGuidance";
+import { GUIDANCE_REVIEWED_AT, UK_COMPLIANCE_GAPS, UK_COMPLIANCE_GUIDANCE } from "../lib/ukComplianceGuidance";
 
 const router: IRouter = Router();
 
@@ -56,9 +56,10 @@ function rows<T>(result: unknown): T[] {
 
 router.get("/compliance-hub/guidance", requireAuth, async (_req, res): Promise<void> => {
   res.json({
-    reviewedAt: "2026-08-19",
+    reviewedAt: GUIDANCE_REVIEWED_AT,
     disclaimer: "ComplyTrack helps organise evidence and actions. It does not itself certify legal compliance; obtain competent advice for your premises and jurisdiction.",
     guidance: UK_COMPLIANCE_GUIDANCE,
+    gaps: UK_COMPLIANCE_GAPS,
   });
 });
 

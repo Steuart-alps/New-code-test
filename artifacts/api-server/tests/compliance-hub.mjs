@@ -57,6 +57,26 @@ async function run() {
   const guide = await tenantA("GET", "/compliance-hub/guidance");
   expect("guidance: available to authenticated tenant", guide);
   check("guidance: contains public sources", Array.isArray(guide.data?.guidance) && guide.data.guidance.some(g => g.track === "FireTrack" && g.url.startsWith("https://")));
+  const requiredTracks = [
+    "DailyTrack AM / DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack",
+    "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack",
+    "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack",
+    "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack",
+  ];
+  const coveredTracks = new Set((guide.data?.guidance ?? []).map(g => g.track));
+  check("guidance: covers every operational track", requiredTracks.every(track => coveredTracks.has(track)));
+  check("guidance: classifies sources and records review metadata", (guide.data?.guidance ?? []).every(g =>
+    typeof g.classification === "string"
+    && typeof g.jurisdiction === "string"
+    && typeof g.applicability === "string"
+    && typeof g.owner === "string"
+    && /^\d{4}-\d{2}-\d{2}$/.test(g.reviewedAt)
+    && g.url.startsWith("https://")
+  ));
+  check("guidance: separates priorities in actionable comparison gaps", Array.isArray(guide.data?.gaps)
+    && guide.data.gaps.some(g => g.priority === "high")
+    && guide.data.gaps.every(g => Array.isArray(g.tracks) && g.recommendedControl));
+  check("guidance: retains non-certification disclaimer", /does not itself certify legal compliance/i.test(guide.data?.disclaimer ?? ""));
 
   expect("profile: tenant A saves accountable profile", await tenantA("PUT", "/compliance-hub/profile", profile("A Manager", "england")));
   expect("profile: tenant B saves separate jurisdiction", await tenantB("PUT", "/compliance-hub/profile", profile("B Manager", "scotland")));

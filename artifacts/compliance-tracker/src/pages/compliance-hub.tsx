@@ -20,7 +20,8 @@ type Profile = {
   reviewCadence: string; nextReviewDate: string; haccpSystemReviewed: boolean;
   waterWrittenSchemeReference?: string | null;
 };
-type Guidance = { track: string; title: string; classification: string; applicability: string; url: string; reviewNote: string };
+type Guidance = { track: string; title: string; classification: string; jurisdiction: string; applicability: string; owner: string; url: string; reviewedAt: string; reviewNote: string };
+type ComplianceGap = { id: string; priority: "high" | "medium" | "low"; tracks: string[]; title: string; rationale: string; recommendedControl: string };
 type Action = {
   id: number; sourceTrack: string; sourceRecordId?: string | null; title: string;
   severity: "low" | "medium" | "high" | "critical"; status: "open" | "in_progress" | "awaiting_verification" | "verified";
@@ -38,7 +39,7 @@ const emptyAction = {
   sourceTrack: "FireTrack", sourceRecordId: "", title: "", severity: "medium" as const,
   ownerName: "", dueDate: "", interimControl: "", correctiveAction: "", evidenceReference: "",
 };
-const trackOptions = ["FireTrack", "KitchenTrack", "LegionellaTrack", "AquaTrack", "TubTrack", "PATtrack", "IncidentTrack", "PremisesTrack", "TreeTrack", "PestTrack", "BikeTrack", "GreenTrack", "FixTrack", "DocTrack", "TrainTrack", "DailyTrack"];
+const trackOptions = ["DailyTrack AM", "DailyTrack PM", "KitchenTrack", "FireTrack", "LegionellaTrack", "AquaTrack / PoolTrack", "TubTrack / HotTubTrack", "PATtrack", "PestTrack", "FixTrack", "PremisesTrack", "RoomTrack", "DocTrack", "SafeTrack", "TrainTrack", "TreeTrack", "BikeTrack", "GreenTrack", "SwimTrack", "IncidentTrack"];
 
 export default function ComplianceHubPage() {
   const { activeClientId, user } = useAuth();
@@ -47,6 +48,8 @@ export default function ComplianceHubPage() {
   const { toast } = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [guidance, setGuidance] = useState<Guidance[]>([]);
+  const [guidanceReviewedAt, setGuidanceReviewedAt] = useState("");
+  const [gaps, setGaps] = useState<ComplianceGap[]>([]);
   const [disclaimer, setDisclaimer] = useState("");
   const [actions, setActions] = useState<Action[]>([]);
   const [actionDraft, setActionDraft] = useState(emptyAction);
@@ -76,12 +79,14 @@ export default function ComplianceHubPage() {
     try {
       const [loadedProfile, loadedGuidance, loadedActions] = await Promise.all([
         request<Profile | null>("/compliance-hub/profile"),
-        request<{ guidance: Guidance[]; disclaimer: string }>("/compliance-hub/guidance"),
+        request<{ guidance: Guidance[]; disclaimer: string; reviewedAt: string; gaps: ComplianceGap[] }>("/compliance-hub/guidance"),
         request<Action[]>("/compliance-hub/actions"),
       ]);
       if (generation !== loadGeneration.current) return;
       setProfile(loadedProfile ? { ...emptyProfile, ...loadedProfile, competentAppointments: loadedProfile.competentAppointments ?? [] } : emptyProfile);
       setGuidance(loadedGuidance.guidance);
+      setGuidanceReviewedAt(loadedGuidance.reviewedAt);
+      setGaps(loadedGuidance.gaps ?? []);
       setDisclaimer(loadedGuidance.disclaimer);
       setActions(loadedActions);
     } catch (error: any) {
@@ -221,8 +226,9 @@ export default function ComplianceHubPage() {
         </TabsContent>
 
         <TabsContent value="guidance" className="space-y-5">
-          <Card><CardHeader><CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary" />Source register</CardTitle><CardDescription>Public authoritative signposts and scope notes. Review their applicability following a change in activity, premises, incident or law.</CardDescription></CardHeader></Card>
-          {Object.entries(guidanceGroups).map(([track, sources]) => <Card key={track}><CardHeader className="pb-3"><CardTitle className="text-lg">{track}</CardTitle></CardHeader><CardContent className="space-y-4">{sources.map(source => <div key={source.title} className="border-l-2 border-primary/40 pl-4"><div className="flex gap-2 flex-wrap items-center"><a className="font-medium hover:underline inline-flex items-center gap-1" href={source.url} target="_blank" rel="noreferrer">{source.title}<ExternalLink className="h-3.5 w-3.5" /></a><Badge variant="outline">{source.classification}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{source.applicability}</p><p className="mt-2 text-sm">{source.reviewNote}</p></div>)}</CardContent></Card>)}
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary" />Source register</CardTitle><CardDescription>Public authoritative signposts and scope notes. Reviewed {guidanceReviewedAt || "recently"}; review applicability after a change in activity, premises, incident or law.</CardDescription></CardHeader></Card>
+          {Object.entries(guidanceGroups).map(([track, sources]) => <Card key={track}><CardHeader className="pb-3"><CardTitle className="text-lg">{track}</CardTitle></CardHeader><CardContent className="space-y-4">{sources.map(source => <div key={`${source.track}-${source.title}`} className="border-l-2 border-primary/40 pl-4"><div className="flex gap-2 flex-wrap items-center"><a className="font-medium hover:underline inline-flex items-center gap-1" href={source.url} target="_blank" rel="noreferrer">{source.title}<ExternalLink className="h-3.5 w-3.5" /></a><Badge variant="outline">{source.classification}</Badge><Badge variant="secondary">{source.jurisdiction}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{source.applicability}</p><p className="mt-1 text-xs text-muted-foreground">Owner: {source.owner} · Reviewed: {source.reviewedAt}</p><p className="mt-2 text-sm">{source.reviewNote}</p></div>)}</CardContent></Card>)}
+          <Card><CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-600" />Open comparison points</CardTitle><CardDescription>These are prioritised product and governance gaps identified by the review. They are not a legal-compliance verdict.</CardDescription></CardHeader><CardContent className="space-y-4">{gaps.map(gap => <div key={gap.id} className="rounded-md border p-4"><div className="flex flex-wrap items-center gap-2"><Badge variant={gap.priority === "high" ? "destructive" : "outline"}>{gap.priority} priority</Badge><h3 className="font-semibold">{gap.title}</h3></div><p className="mt-2 text-sm text-muted-foreground">{gap.rationale}</p><p className="mt-2 text-sm"><span className="font-medium">Recommended control:</span> {gap.recommendedControl}</p><p className="mt-2 text-xs text-muted-foreground">Tracks: {gap.tracks.join(" · ")}</p></div>)}</CardContent></Card>
         </TabsContent>
       </Tabs>
     </AppLayout>

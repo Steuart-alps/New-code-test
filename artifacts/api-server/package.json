@@ -27,7 +27,8 @@
     "test:compliance-hub:ci": "bash tests/run-compliance-hub.sh",
     "test:track-summary-routing": "node tests/track-summary-routing.mjs",
     "test:track-actions-trigger": "bash tests/run-track-actions-trigger.sh",
-    "test:room-track": "bash tests/run-room-track-routes.sh"
+    "test:room-track": "bash tests/run-room-track-routes.sh",
+    "test:guidance-register": "node tests/guidance-register.mjs"
     ,"test:export-attachment-acl": "node tests/export-attachment-acl.mjs"
   },
   "dependencies": {

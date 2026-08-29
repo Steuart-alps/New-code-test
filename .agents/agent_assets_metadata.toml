@@ -6,3 +6,10 @@ id = "U8c3jOKkiGAmdZjbxfLOK"
 uri = "file://myproject.tar.gz"
 type = "unspecified"
 title = "ComplyTrack project archive"
+
+[[outputs]]
+id = "S4gfnvrByOnMFYwudXRNp"
+uri = "file://research/notes.md"
+type = "text"
+title = "UK Compliance Comparison — Research Notes"
+description = "Running research plan and source-review checklist for the track-by-track UK comparison."
