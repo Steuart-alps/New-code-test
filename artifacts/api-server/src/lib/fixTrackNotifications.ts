@@ -73,6 +73,7 @@ export interface ContractorAssignmentOpts {
   icsAttachment?:   string;
   icsFilename?:     string;
   cc?:              string | string[];
+  idempotencyKey?:  string;
 }
 
 export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<void> {
@@ -80,7 +81,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
     bookedToken, completedToken, baseUrl, clientId, siteDocuments,
-    icsAttachment, icsFilename, cc,
+    icsAttachment, icsFilename, cc, idempotencyKey,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -166,6 +167,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     icsAttachment,
     icsFilename,
     cc,
+    idempotencyKey,
   });
 }
 
@@ -184,6 +186,7 @@ export interface ContractorQuoteOpts {
   replyTo?:         string | null;
   clientId:         number;
   siteDocuments?:   { name: string; url: string }[];
+  idempotencyKey?:  string;
 }
 
 /**
@@ -193,7 +196,7 @@ export interface ContractorQuoteOpts {
 export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promise<void> {
   const {
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
-    issueLocation, issueDescription, siteName, companyName, clientId, siteDocuments,
+    issueLocation, issueDescription, siteName, companyName, clientId, siteDocuments, idempotencyKey,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -249,5 +252,6 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
     subject: `Quote Requested: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
     html,
     clientId,
+    idempotencyKey,
   });
 }

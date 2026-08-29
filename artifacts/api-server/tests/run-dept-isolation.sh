@@ -15,6 +15,10 @@ healthy() {
   curl -sf -m 2 "${API_BASE}/healthz" >/dev/null 2>&1
 }
 
+ready() {
+  curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1
+}
+
 SERVER_PID=""
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
@@ -27,7 +31,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=development PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 30); do
     if healthy; then break; fi
@@ -39,6 +43,18 @@ if ! healthy; then
   done
   if ! healthy; then
     echo "API server did not become healthy at ${API_BASE} within 30s" >&2
+    exit 1
+  fi
+  for _ in $(seq 1 30); do
+    if ready; then break; fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo "API server process exited before becoming ready" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  if ! ready; then
+    echo "API server did not become ready at ${API_BASE%/api}/readyz within 30s" >&2
     exit 1
   fi
 fi

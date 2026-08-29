@@ -5,9 +5,9 @@
  * organised by module, plus a README. Restricted to client_admin and
  * consultant roles; rate-limited by the express-rate-limit applied in app.ts.
  *
- * DocTrack file attachments (stored in object storage) are bundled into the
- * ZIP under doc-track/files/.  Total bundled attachments are capped at 500 MB
- * to avoid timeouts.
+ * Attachments stored by supported modules are bundled when they can be safely
+ * read from configured private object storage. A manifest records omissions
+ * so one stale upload never prevents a client receiving its export.
  */
 import { Router } from "express";
 // archiver v8 is pure ESM — use ZipArchive directly, no factory function.
@@ -16,6 +16,7 @@ import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
 import path from "path";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
   sitesTable,
   departmentsTable,
@@ -53,6 +54,15 @@ import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth
 const router = Router();
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
+
+/** Deliberately fail closed: an export may read only a private object stamped
+ * with the same tenant ID by an upload route. */
+export function isExportAttachmentAuthorized(
+  acl: { owner: string; visibility: string } | null,
+  clientId: number,
+): boolean {
+  return acl?.visibility === "private" && acl.owner === String(clientId);
+}
 
 function escapeCell(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -155,11 +165,11 @@ premises-track/
 staff-roster/
   staff.csv                      — staff roster
 
-doc-track/files/                 — actual file attachments from DocTrack (capped at 500 MB total)
+attachments/                     — available private-object attachments (capped at 500 MB total)
+attachment-manifest.csv          — included and unavailable attachment records
 
-Note: DocTrack file attachments are bundled directly into this ZIP.
-URLs for other module attachments (photos, completion docs, etc.) are
-included in the relevant CSVs.
+Note: only attachments held in configured private object storage can be
+bundled. External URLs remain in their relevant CSVs.
 `;
 
 // ── Export endpoint ────────────────────────────────────────────────────────────
@@ -266,73 +276,96 @@ router.get(
       const ackRows = await db.execute(sql`SELECT * FROM doc_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at DESC`);
       archive.append(rawToCsv(ackRows.rows), { name: "doc-track/acknowledgements.csv" });
 
-      // Bundle DocTrack file attachments directly into the ZIP.
-      // Cap total bundled attachment bytes at 500 MB.
+      // Bundle every supported private-object attachment. Each query is
+      // client-scoped; paths are accepted only through ObjectStorageService,
+      // which rejects anything outside /objects/ and the configured bucket.
+      // Keep this after the DocTrack CSVs to preserve the historical export.
+      const attachmentRows = await db.execute(sql`
+        SELECT 'doc-track' AS module, id::text AS record_id, title AS label,
+               file_name, file_size::bigint AS file_size, object_path
+          FROM doc_track_documents
+         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'safe-track/risk-assessments', id::text, title, file_name,
+               file_size::bigint, object_path
+          FROM safe_risk_assessments
+         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'safe-track/sops', id::text, title, file_name, file_size::bigint, object_path
+          FROM safe_sops WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'safe-track/handbook', id::text, title, file_name, file_size::bigint, object_path
+          FROM safe_handbook WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'site-documents', id::text, name, name, NULL::bigint, object_path
+          FROM site_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'contractors/certificates', id::text, certificate_name, certificate_name,
+               NULL::bigint, object_path
+          FROM contractor_certificates
+         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'check-photos', id::text, COALESCE(caption, entity_type || '-' || entity_id::text),
+               NULL, NULL::bigint, object_path
+          FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
+        UNION ALL
+        SELECT 'fix-track/completion-documents', id::text, title, NULL, NULL::bigint,
+               completion_document_path
+          FROM fix_track_issues
+         WHERE client_id = ${cid} AND completion_document_path IS NOT NULL
+           AND completion_document_path != ''
+      `).catch(() => ({ rows: [] }));
+
       const MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024;
       let attachmentBytesUsed = 0;
-      const docStorage = new ObjectStorageService();
-
-      // Fetch rows that have an object_path (i.e. an uploaded file).
-      const docAttachRows = await db.execute(sql`
-        SELECT id, title, file_name, file_size, object_path
-        FROM   doc_track_documents
-        WHERE  client_id  = ${cid}
-          AND  object_path IS NOT NULL
-          AND  object_path != ''
-        ORDER  BY created_at DESC
-      `);
-
-      // Track used filenames within the files/ folder to avoid collisions.
-      const usedFilenames = new Set<string>();
-
-      for (const doc of docAttachRows.rows as Array<{
-        id: number;
-        title: string | null;
-        file_name: string | null;
-        file_size: number | null;
-        object_path: string;
+      const storage = new ObjectStorageService();
+      const usedNames = new Set<string>();
+      const seenObjectPaths = new Set<string>();
+      const manifest: Array<Record<string, unknown>> = [];
+      for (const row of attachmentRows.rows as Array<{
+        module: string; record_id: string; label: string | null; file_name: string | null;
+        file_size: number | string | null; object_path: string;
       }>) {
-        // Respect the 500 MB cap.
-        const estimatedSize = doc.file_size ?? 0;
-        if (attachmentBytesUsed + estimatedSize > MAX_ATTACHMENT_BYTES) {
-          // Add a note file instead of silently dropping.
-          archive.append(
-            `Attachment omitted — 500 MB export cap reached.\nDocument ID: ${doc.id}\nTitle: ${doc.title ?? "(untitled)"}\n`,
-            { name: `doc-track/files/_omitted_${doc.id}.txt` },
-          );
+        const size = Number(row.file_size ?? 0);
+        const base = (row.label || `${row.module}-${row.record_id}`)
+          .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+/, "").slice(0, 180).trim()
+          || `attachment-${row.record_id}`;
+        const ext = (row.file_name ? path.extname(path.basename(row.file_name)) : "").replace(/[^a-zA-Z0-9.]/g, "").slice(0, 20);
+        let filename = `${base}${ext}`;
+        let n = 2;
+        while (usedNames.has(`${row.module}/${filename}`)) filename = `${base} (${n++})${ext}`;
+        const zipPath = `attachments/${row.module}/${filename}`;
+        usedNames.add(`${row.module}/${filename}`);
+
+        if (seenObjectPaths.has(row.object_path)) {
+          manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "duplicate object path" });
           continue;
         }
-
-        // Derive a safe filename: prefer title + extension from file_name.
-        const originalExt = doc.file_name ? path.extname(doc.file_name) : "";
-        const rawTitle = (doc.title ?? `document-${doc.id}`)
-          .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
-          .slice(0, 200)
-          .trim() || `document-${doc.id}`;
-        let safeName = rawTitle + originalExt;
-
-        // Deduplicate within the files/ folder.
-        if (usedFilenames.has(safeName)) {
-          const base = rawTitle + (originalExt ? "" : "");
-          let counter = 2;
-          while (usedFilenames.has(`${base} (${counter})${originalExt}`)) counter++;
-          safeName = `${base} (${counter})${originalExt}`;
+        seenObjectPaths.add(row.object_path);
+        if (!Number.isFinite(size) || size < 0 || attachmentBytesUsed + size > MAX_ATTACHMENT_BYTES) {
+          manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "500 MB export cap" });
+          continue;
         }
-        usedFilenames.add(safeName);
-
         try {
-          const objectFile = await docStorage.getObjectEntityFile(doc.object_path);
-          const readStream = objectFile.createReadStream();
-          archive.append(readStream, { name: `doc-track/files/${safeName}` });
-          attachmentBytesUsed += estimatedSize;
-        } catch (err) {
-          if (err instanceof ObjectNotFoundError) {
-            // File no longer in storage — skip silently (URL still in CSV).
-          } else {
-            console.error(`Export: failed to bundle doc ${doc.id}`, err);
+          const file = await storage.getObjectEntityFile(row.object_path);
+          // Object paths are opaque and a compromised/incorrect record must
+          // never turn an export into a cross-tenant download. Every private
+          // upload route stamps the owning client ID in this ACL metadata.
+          const acl = await getObjectAclPolicy(file);
+          if (!isExportAttachmentAuthorized(acl, cid)) {
+            manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "not authorized for exporting client" });
+            continue;
           }
+          archive.append(file.createReadStream(), { name: zipPath });
+          attachmentBytesUsed += size;
+          manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "included", reason: "" });
+        } catch (err) {
+          const reason = err instanceof ObjectNotFoundError ? "object unavailable" : "object storage unavailable";
+          manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason });
+          console.warn(`Export attachment omitted: ${row.module}/${row.record_id}`, err);
         }
       }
+      archive.append(rowsToCsv(manifest), { name: "attachment-manifest.csv" });
 
       // ── TrainTrack ────────────────────────────────────────────────────────
       const ttRows = await db.execute(sql`SELECT * FROM train_track_records WHERE client_id = ${cid} ORDER BY completed_date DESC`);

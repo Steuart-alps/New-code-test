@@ -25,6 +25,12 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   emailRequestMode: text("email_request_mode"),
   emailRequestedBy: integer("email_requested_by").references(() => usersTable.id, { onDelete: "set null" }),
   emailRequestedAt: timestamp("email_requested_at"),
+  // Email dispatch is a separate, auditable state machine. In particular,
+  // "approved" is required before the outbound email route may send.
+  emailRequestStatus: text("email_request_status"),
+  emailApprovedBy: integer("email_approved_by").references(() => usersTable.id, { onDelete: "set null" }),
+  emailApprovedAt: timestamp("email_approved_at"),
+  emailSentAt: timestamp("email_sent_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

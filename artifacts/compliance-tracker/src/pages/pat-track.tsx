@@ -215,6 +215,19 @@ const ROOM_PRESETS = {
       { name: "Refrigerator (Staff Room)",    type: "Kitchen Appliance" },
     ],
   },
+  "pest-control": {
+    label: "Pest Control Store",
+    emoji: "🐀",
+    items: [
+      { name: "Battery Charger — Pest Control Equipment", type: "Class I" },
+      { name: "Electric ULV Fogger",                      type: "Portable Tool" },
+      { name: "Electric Sprayer",                         type: "Portable Tool" },
+      { name: "Insect Light Trap",                        type: "Class I" },
+      { name: "Extension Lead",                           type: "Extension Lead" },
+      { name: "Laptop Charger",                           type: "IT Equipment" },
+      { name: "Mobile Device Charger",                    type: "Class II" },
+    ],
+  },
 } as const;
 
 type PresetKey = keyof typeof ROOM_PRESETS;
@@ -229,7 +242,7 @@ const BUSINESS_TYPE_PRESETS: Record<string, PresetKey[]> = {
   nursery_school:         ["office", "kitchen", "reception"],
   offices_commercial:     ["office", "reception"],
   retail:                 ["retail-shop", "office", "reception"],
-  pest_control:           ["office", "reception", "greenkeeping"],
+  pest_control:           ["pest-control", "office", "reception"],
   other:                  Object.keys(ROOM_PRESETS) as PresetKey[],
 };
 

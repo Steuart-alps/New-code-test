@@ -36,6 +36,15 @@ interface TrackSummary {
   items: TrackItem[];
 }
 
+interface ChecklistTotals {
+  date: string;
+  expectedAmPairs: number;
+  completedAmPairs: number;
+  expectedPmPairs: number;
+  completedPmPairs: number;
+  completedSitePairs: number;
+}
+
 // ── Status styling ─────────────────────────────────────────────────────────────
 
 const STATUS_BORDER: Record<TrackStatus, string> = {
@@ -311,48 +320,13 @@ function SetupChecklist({
 
 // ── DailyTrack snapshot card ──────────────────────────────────────────────────
 
-function DailyTrackSnapshotCard() {
-  const { data: allSites = [] } = useListSites();
-  const [amRows, setAmRows] = useState<{ siteId: number | null; submittedAt: string | null }[]>([]);
-  const [pmRows, setPmRows] = useState<{ siteId: number | null; submittedAt: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    const today = new Date().toISOString().slice(0, 10);
-    (async () => {
-      setLoading(true);
-      try {
-        const [amRes, pmRes] = await Promise.all([
-          apiFetch(`/daily-track-am?date=${today}`),
-          apiFetch(`/daily-track-pm?date=${today}`),
-        ]);
-        if (!cancelled) {
-          setAmRows(amRes.ok ? await amRes.json() : []);
-          setPmRows(pmRes.ok ? await pmRes.json() : []);
-        }
-      } catch { /* silent */ }
-      if (!cancelled) setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const totalSites = allSites.length;
-  if (totalSites === 0 && !loading) return null;
-
-  // Count sites where a "premises_opening" AM checklist was submitted
-  const amComplete = allSites.filter(s =>
-    amRows.some(r => r.siteId === s.id && r.submittedAt)
-  ).length;
-  const pmComplete = allSites.filter(s =>
-    pmRows.some(r => r.siteId === s.id && r.submittedAt)
-  ).length;
-  const totalComplete = allSites.filter(s =>
-    amRows.some(r => r.siteId === s.id && r.submittedAt) &&
-    pmRows.some(r => r.siteId === s.id && r.submittedAt)
-  ).length;
-
-  const allDone = totalComplete === totalSites;
+function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
+  if (!totals && !loading) return null;
+  const totalSites = totals?.expectedAmPairs ?? 0;
+  const amComplete = totals?.completedAmPairs ?? 0;
+  const pmComplete = totals?.completedPmPairs ?? 0;
+  const totalComplete = totals?.completedSitePairs ?? 0;
+  const allDone = totalSites > 0 && totalComplete === totalSites;
 
   return (
     <div className={cn(
@@ -437,6 +411,7 @@ export default function Dashboard() {
   const [notificationEmail, setNotificationEmail] = useState("");
   const [siteId, setSiteId] = useState<string>("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
+  const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -468,6 +443,7 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
       setTracks(json.tracks ?? []);
+      setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -549,7 +525,7 @@ export default function Dashboard() {
         )}
 
         {/* DailyTrack snapshot */}
-        {hasDailytrack && <DailyTrackSnapshotCard />}
+        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={loading} />}
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (

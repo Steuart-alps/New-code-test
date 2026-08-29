@@ -51,6 +51,7 @@ import reportsRouter from "./reports";
 import dashboardSummaryRouter from "./dashboard-summary";
 import complianceHubRouter from "./compliance-hub";
 import trackActionsRouter from "./track-actions";
+import auditEventsRouter from "./audit-events";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 
@@ -110,6 +111,7 @@ router.use(exportRouter);
 router.use(reportsRouter);
 router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
+router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
 // Public contractor action links — no auth, token-protected
 router.use("/fix-track/action", fixTrackPublicRouter);

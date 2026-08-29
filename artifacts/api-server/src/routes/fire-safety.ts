@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { fireSafetyChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { appendAuditEvent } from "../lib/audit";
 
 const router = Router();
 
@@ -189,6 +190,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     })
     .returning();
 
+  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
   res.status(201).json(inserted);
 });
 
@@ -229,6 +231,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     .returning();
 
   if (!updated) return res.status(404).json({ error: "Not found" });
+  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "updated", before: existing, after: updated });
   res.json(updated);
 });
 
@@ -255,6 +258,7 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     .delete(fireSafetyChecksTable)
     .where(and(eq(fireSafetyChecksTable.id, id), eq(fireSafetyChecksTable.clientId, clientId)));
 
+  await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: id, action: "deleted", before: existing });
   res.status(204).end();
 });
 

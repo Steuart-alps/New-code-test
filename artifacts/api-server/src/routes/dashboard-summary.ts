@@ -34,6 +34,15 @@ export interface TrackSummary {
   items: TrackItem[];
 }
 
+export interface ChecklistTotals {
+  date: string;
+  expectedAmPairs: number;
+  completedAmPairs: number;
+  expectedPmPairs: number;
+  completedPmPairs: number;
+  completedSitePairs: number;
+}
+
 function rows(result: unknown): any[] {
   return (result as any).rows ?? [];
 }
@@ -93,9 +102,55 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       ${siteId ? sql`AND id = ${siteId}` : sql``}
       ORDER BY name
     `);
-    allSites = rows(siteRows).map((r: any) => ({ id: r.id, name: r.name }));
+    allSites = rows(siteRows)
+      .map((r: any) => ({ id: r.id, name: r.name }))
+      .filter((site) => accessibleSiteIds == null || accessibleSiteIds.includes(site.id));
   } catch {
     // sites table always exists; skip silently if error
+  }
+
+  // A site has one expected AM pair and one expected PM pair. Each branch is
+  // complete when any of its real checklist types has been submitted; this
+  // keeps KitchenTrack and SafeTrack checklists under the same definition.
+  const checklistTotals: ChecklistTotals = {
+    date: today,
+    expectedAmPairs: allSites.length,
+    completedAmPairs: 0,
+    expectedPmPairs: allSites.length,
+    completedPmPairs: 0,
+    completedSitePairs: 0,
+  };
+  const checklistCompletionBySite = new Map<number, { am: boolean; pm: boolean }>();
+  let checklistTotalsAvailable = false;
+  if (allSites.length > 0) {
+    try {
+      const completed = await db.execute(sql`
+        SELECT
+          site_id,
+          BOOL_OR(checklist_type IN ('kitchen_opening', 'premises_opening')) FILTER (WHERE submitted_at IS NOT NULL) AS am_submitted,
+          BOOL_OR(checklist_type IN ('kitchen_closing', 'premises_closing')) FILTER (WHERE submitted_at IS NOT NULL) AS pm_submitted
+        FROM daily_checklists
+        WHERE client_id = ${clientId}
+          AND check_date = ${today}
+          AND site_id = ANY(${allSites.map((site) => site.id)})
+        GROUP BY site_id
+      `);
+      for (const row of rows(completed)) {
+        checklistCompletionBySite.set(Number(row.site_id), {
+          am: row.am_submitted === true || row.am_submitted === "true",
+          pm: row.pm_submitted === true || row.pm_submitted === "true",
+        });
+      }
+      checklistTotalsAvailable = true;
+      for (const site of allSites) {
+        const complete = checklistCompletionBySite.get(site.id);
+        if (complete?.am) checklistTotals.completedAmPairs++;
+        if (complete?.pm) checklistTotals.completedPmPairs++;
+        if (complete?.am && complete.pm) checklistTotals.completedSitePairs++;
+      }
+    } catch {
+      // The established per-track no-data fallback remains available below.
+    }
   }
 
   // ── Daily AM ─────────────────────────────────────────────────────────────────
@@ -106,18 +161,8 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     let badge = "No records";
 
     if (amEnabled && allSites.length > 0) {
-      try {
-        const submitted = await db.execute(sql`
-          SELECT DISTINCT site_id
-          FROM daily_checklists
-          WHERE client_id = ${clientId}
-            AND check_date = ${today}
-            AND checklist_type = 'am'
-            AND submitted_at IS NOT NULL
-            ${siteId ? sql`AND site_id = ${siteId}` : sql``}
-        `);
-        const submittedIds = new Set(rows(submitted).map((r: any) => r.site_id));
-        const missing = allSites.filter((s) => !submittedIds.has(s.id));
+      if (checklistTotalsAvailable) {
+        const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.am);
         if (missing.length === 0) {
           status = "ok";
           badge = "All submitted";
@@ -128,7 +173,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             items.push({ label: site.name, detail: "AM checklist not submitted today", path: "/daily-track-am" });
           }
         }
-      } catch {
+      } else {
         status = "no_data";
         badge = "No records";
       }
@@ -153,27 +198,19 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     let badge = "No records";
 
     if (pmEnabled && allSites.length > 0) {
-      try {
-        const signed = await db.execute(sql`
-          SELECT DISTINCT site_id
-          FROM daily_manager_signoffs
-          WHERE client_id = ${clientId}
-            AND signoff_date = ${today}
-            ${siteId ? sql`AND site_id = ${siteId}` : sql``}
-        `);
-        const signedIds = new Set(rows(signed).map((r: any) => r.site_id));
-        const missing = allSites.filter((s) => !signedIds.has(s.id));
+      if (checklistTotalsAvailable) {
+        const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.pm);
         if (missing.length === 0) {
           status = "ok";
-          badge = "All signed off";
+          badge = "All submitted";
         } else {
           status = "attention";
-          badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not signed off`;
+          badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not submitted`;
           for (const site of missing.slice(0, 10)) {
-            items.push({ label: site.name, detail: "PM sign-off not completed today", path: "/daily-track-pm" });
+            items.push({ label: site.name, detail: "PM checklist not submitted today", path: "/daily-track-pm" });
           }
         }
-      } catch {
+      } else {
         status = "no_data";
         badge = "No records";
       }
@@ -244,7 +281,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     let status: TrackStatus = "no_data";
     let badge = "No records";
 
-    if (enabled) {
+    if (enabled && departmentId === null) {
       try {
         const alerts = await getCheckAlerts(clientId);
         const fireAlerts = alerts.filter((a) => a.module === "fire");
@@ -309,7 +346,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     let status: TrackStatus = "no_data";
     let badge = "No records";
 
-    if (enabled) {
+    if (enabled && departmentId === null) {
       try {
         const alerts = await getCheckAlerts(clientId);
         const legAlerts = alerts.filter((a) => a.module === "legionella");
@@ -365,7 +402,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     let status: TrackStatus = "no_data";
     let badge = "No records";
 
-    if (enabled) {
+    if (enabled && departmentId === null) {
       try {
         const alerts = await getCheckAlerts(clientId);
         const poolAlerts = alerts.filter((a) => a.module === "pool");
@@ -418,7 +455,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND a.site_id = ${siteId}` : sql``;
+        const siteClause = siteId != null
+          ? sql`AND a.site_id = ${siteId}`
+          : accessibleSiteIds != null ? sql`AND (a.site_id IS NULL OR a.site_id = ANY(${accessibleSiteIds}))` : sql``;
         const patRows = await db.execute(sql`
           SELECT
             a.id, a.name, a.appliance_type, a.location,
@@ -502,7 +541,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         // Overdue visits
         const overdueVisits = await db.execute(sql`
           SELECT id, pest_contractor, next_visit_date, site_id
@@ -587,7 +626,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const openIssues = await db.execute(sql`
           SELECT id, title, priority, status, reported_date
           FROM fix_track_issues
@@ -651,7 +690,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const openInspections = await db.execute(sql`
           SELECT id, inspection_type, inspection_date, next_inspection_date, status, site_id
           FROM premises_inspections
@@ -719,7 +758,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const overdueRows = await db.execute(sql`
           SELECT id, title, next_review_date, category
           FROM doc_track_documents
@@ -798,7 +837,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         // Overdue risk assessments
         const overdueRA = await db.execute(sql`
           SELECT id, title, next_review_date FROM safe_risk_assessments
@@ -870,7 +909,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const expiredRows = await db.execute(sql`
           SELECT id, staff_name, training_title, expiry_date
           FROM train_track_records
@@ -923,7 +962,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const MS_DAY = 86400000;
         const todayDays = Math.floor(Date.now() / MS_DAY);
         const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_DAY);
@@ -986,7 +1025,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const MS_DAY = 86400000;
         const todayDays = Math.floor(Date.now() / MS_DAY);
         const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_DAY);
@@ -1048,6 +1087,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
+        const siteClause = siteId != null
+          ? sql`AND b.site_id = ${siteId}`
+          : accessibleSiteIds != null ? sql`AND (b.site_id IS NULL OR b.site_id = ANY(${accessibleSiteIds}))` : sql``;
         // Bikes currently on hire past their expected return date
         const overdueHires = await db.execute(sql`
           SELECT h.id, b.name AS bike_name, h.hirer_name, h.return_date_expected
@@ -1057,6 +1099,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             AND h.status = 'active'
             AND h.return_date_expected IS NOT NULL
             AND h.return_date_expected < ${today}
+            ${siteClause}
           ORDER BY h.return_date_expected ASC
           LIMIT 10
         `);
@@ -1070,6 +1113,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             ORDER BY service_date DESC LIMIT 1
           ) s ON true
           WHERE b.client_id = ${clientId}
+            ${siteClause}
             AND s.next_service_date IS NOT NULL
             AND s.next_service_date < ${today}
           LIMIT 10
@@ -1091,7 +1135,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
             items.push({ label: b.name, detail: "Service overdue", path: "/bike-track" });
           }
         } else {
-          const anyRows = await db.execute(sql`SELECT 1 FROM bikes WHERE client_id = ${clientId} LIMIT 1`);
+          const anyRows = await db.execute(sql`SELECT 1 FROM bikes b WHERE b.client_id = ${clientId} ${siteClause} LIMIT 1`);
           status = rows(anyRows).length > 0 ? "ok" : "no_data";
           badge = rows(anyRows).length > 0 ? "No bikes overdue" : "No bikes registered";
         }
@@ -1112,7 +1156,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND m.site_id = ${siteId}` : sql``;
+        const siteClause = siteId != null
+          ? sql`AND m.site_id = ${siteId}`
+          : accessibleSiteIds != null ? sql`AND (m.site_id IS NULL OR m.site_id = ANY(${accessibleSiteIds}))` : sql``;
         // Machines with no pre-use check today
         const machines = await db.execute(sql`
           SELECT m.id, m.name, m.type FROM green_machines m
@@ -1179,7 +1225,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         // Check if there's a swim session logged today
         const todaySessions = await db.execute(sql`
           SELECT id, session_type, lifeguard_name, site_id
@@ -1228,7 +1274,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = siteId ? sql`AND site_id = ${siteId}` : sql``;
+        const siteClause = protectedSiteClause;
         const summaryRows = await db.execute(sql`
           SELECT
             COUNT(*) FILTER (WHERE status = 'open')::int                                    AS open_count,
@@ -1476,7 +1522,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     return { ...track, health };
   });
 
-  res.json({ tracks: summaries });
+  res.json({ tracks: summaries, checklistTotals });
 });
 
 export default router;

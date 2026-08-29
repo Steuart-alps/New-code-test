@@ -156,17 +156,18 @@ export function denyViewers(req: Request, res: Response, next: NextFunction) {
 
 /**
  * Returns the department ID that should restrict what data this user can see,
- * or null if the user is unrestricted (admin / consultant / unassigned staff).
+ * or null if the user is unrestricted (admin / consultant).
  *
  * Only client_staff and client_viewer are subject to department scoping.
- * A staff/viewer with no departmentId (null) is also unrestricted — they see
- * everything, matching the pre-departments behaviour.
+ * Unassigned staff/viewers receive a non-matching sentinel. Existing route
+ * filters consequently expose only explicitly unassigned/site-neutral records,
+ * never every department's records.
  */
 export function getActiveDepartmentId(req: Request): number | null {
   const user = req.currentUser;
   if (!user) return null;
   if (user.role === "client_admin" || user.role === "consultant") return null;
-  return (user as any).departmentId ?? null;
+  return (user as any).departmentId ?? -1;
 }
 
 export function getClientId(req: Request): number | null {

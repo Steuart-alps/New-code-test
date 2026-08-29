@@ -90,6 +90,8 @@ function useNavGroups() {
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
         { href: "/fix-track",      label: "FixTrack",        icon: Wrench,          serviceKey: "fixtrack" },
+        { href: "/premises-track", label: "PremisesTrack",   icon: Building2,       serviceKey: "premisestrack" },
+        { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
         { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },
         { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
@@ -357,24 +359,31 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         </header>
 
         {/* Mobile Nav */}
-        <nav className="md:hidden flex overflow-x-auto border-b border-border bg-white px-4 py-3 scrollbar-hide">
-          {navGroups.flatMap(g => g.items).map((item) => {
-            const isActive = location === item.href;
-            const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
-            return (
-              <Link key={item.href} href={item.href} className="flex-shrink-0 mr-2">
-                <div className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium transition-colors border",
-                  isActive ? "text-primary border-primary bg-primary/5" : "bg-white text-muted-foreground border-border hover:bg-muted"
-                )}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                  {isLocked && <Lock className="w-3 h-3 opacity-60 ml-1" />}
-                </div>
-              </Link>
-            );
-          })}
+        <nav className="md:hidden flex overflow-x-auto border-b border-border bg-white px-4 py-3 scrollbar-hide gap-4">
+          {navGroups.map((group) => (
+            <div key={group.title} className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {group.title}
+              </span>
+              {group.items.map((item) => {
+                const isActive = location === item.href;
+                const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
+                return (
+                  <Link key={item.href} href={item.href} className="flex-shrink-0">
+                    <div className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium transition-colors border",
+                      isActive ? "text-primary border-primary bg-primary/5" : "bg-white text-muted-foreground border-border hover:bg-muted"
+                    )}
+                    >
+                      <item.icon className="w-4 h-4" />
+                      {item.label}
+                      {isLocked && <Lock className="w-3 h-3 opacity-60 ml-1" />}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Page Content */}

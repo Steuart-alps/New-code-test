@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "@/components/ui/drawer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useListSites } from "@workspace/api-client-react";
@@ -106,6 +106,7 @@ interface Issue {
   solutionNotes?: string | null;
   completionDocumentPath?: string | null;
   emailRequestMode?: string | null;
+  emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
   mediaUrls: string[];
   siteId?: number | null;
@@ -724,6 +725,21 @@ function IssueDetailPanel({ issue, open, onClose, onEdit, onQuickStatus, canAdmi
         </span>
         <span className={cn("text-xs px-2 py-1 rounded-md border font-medium", typeMeta.color)}>{typeMeta.label}</span>
         <span className={cn("text-xs px-2 py-1 rounded-md border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
+        {issue.emailRequestStatus && (
+          <span className={cn(
+            "text-xs px-2 py-1 rounded-md border font-medium",
+            issue.emailRequestStatus === "sent"
+              ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+              : issue.emailRequestStatus === "approved"
+                ? "text-blue-700 bg-blue-50 border-blue-200"
+                : issue.emailRequestStatus === "pending"
+                  ? "text-amber-700 bg-amber-50 border-amber-200"
+                  : "text-muted-foreground bg-muted border-border",
+          )}>
+            Contractor email: {issue.emailRequestStatus}
+            {issue.emailRequestMode ? ` · ${issue.emailRequestMode === "quote" ? "quote request" : "job assignment"}` : ""}
+          </span>
+        )}
       </div>
 
       {/* Key fields */}
@@ -890,6 +906,9 @@ function IssueDetailPanel({ issue, open, onClose, onEdit, onQuickStatus, canAdmi
       <DialogContent className="sm:max-w-[520px] max-h-[88vh] flex flex-col overflow-hidden">
         <DialogHeader className="border-b pb-4 flex-shrink-0">
           <DialogTitle className="font-display pr-2 leading-snug">{issue.title}</DialogTitle>
+          <DialogDescription>
+            Review the issue, contractor communication status, notes and attachments.
+          </DialogDescription>
           {issue.siteName && (
             <p className="text-xs text-muted-foreground mt-0.5">📍 {issue.siteName}</p>
           )}
@@ -1029,11 +1048,10 @@ export default function FixTrackPage() {
     await load();
   }
 
-  async function handleNotify(issue: Issue, force = false, mode: "assign" | "quote" = "assign") {
+  async function handleNotify(issue: Issue, _force = false, mode: "assign" | "quote" = "assign") {
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const url = `/fix-track/issues/${issue.id}/send-to-contractor${force ? "?force=true" : ""}`;
-      const res = await apiFetch(url, { method: "POST", body: JSON.stringify({ mode }) });
+      const res = await apiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
       const body = await res.json();
       if (res.status === 409 && body.alreadySent) {
         // Ask the manager to confirm before resending
@@ -1050,6 +1068,29 @@ export default function FixTrackPage() {
       await load();
     } catch (err: any) {
       toast({ title: "Could not send email", description: err.message, variant: "destructive" });
+    } finally {
+      setNotifying(n => ({ ...n, [issue.id]: false }));
+    }
+  }
+
+  async function handleApproveAndSend(issue: Issue) {
+    setNotifying(n => ({ ...n, [issue.id]: true }));
+    try {
+      const approved = await apiFetch(`/fix-track/issues/${issue.id}/approve-send`, { method: "POST" });
+      const body = await approved.json();
+      if (!approved.ok) throw new Error(body.error ?? "Could not approve request");
+      const mode = body.mode as "assign" | "quote";
+      const sent = await apiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
+      const sentBody = await sent.json();
+      if (!sent.ok) throw new Error(sentBody.error ?? "Could not send contractor email");
+      toast({
+        title: mode === "quote" ? "Quote request sent" : "Job assigned",
+        description: mode === "quote" ? "The contractor has been asked for a quote." : "The contractor has been sent the job details.",
+      });
+      await load();
+    } catch (err: any) {
+      toast({ title: "Could not approve and send", description: err.message, variant: "destructive" });
+      await load();
     } finally {
       setNotifying(n => ({ ...n, [issue.id]: false }));
     }
@@ -1314,8 +1355,9 @@ export default function FixTrackPage() {
                           className="text-xs h-7 px-2 whitespace-nowrap">Close</Button>
                       )}
 
-                      {/* Contractor emails — managers send, staff request approval */}
-                      {issue.contractorId && canAdmin && (
+                      {/* Contractor emails are only dispatched from a pending,
+                          manager-approved request. */}
+                      {issue.contractorId && canAdmin && issue.emailRequestStatus === "pending" && (
                         <>
                           {issue.emailRequestMode && (
                             <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
@@ -1324,24 +1366,15 @@ export default function FixTrackPage() {
                           )}
                           <Button
                             variant="outline" size="sm"
-                            onClick={() => handleNotify(issue, false, "assign")}
+                            onClick={() => handleApproveAndSend(issue)}
                             disabled={notifying[issue.id]}
                             className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50 gap-1"
-                            title={issue.emailRequestMode ? "Approve & assign the job by email" : `Notify ${issue.contractorName ?? "contractor"}`}
+                            title={`Approve and send this ${issue.emailRequestMode === "quote" ? "quote request" : "job assignment"}`}
                           >
                             {notifying[issue.id]
                               ? <Loader2 className="w-3 h-3 animate-spin" />
                               : <Send className="w-3 h-3" />}
-                            {issue.emailRequestMode === "assign" ? "Approve & send" : "Assign job"}
-                          </Button>
-                          <Button
-                            variant="outline" size="sm"
-                            onClick={() => handleNotify(issue, false, "quote")}
-                            disabled={notifying[issue.id]}
-                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50 gap-1"
-                            title={`Ask ${issue.contractorName ?? "contractor"} for a quotation (no assignment)`}
-                          >
-                            {issue.emailRequestMode === "quote" ? "Approve quote req." : "Request quote"}
+                            Approve & send
                           </Button>
                           {issue.emailRequestMode && (
                             <Button
@@ -1354,13 +1387,13 @@ export default function FixTrackPage() {
                           )}
                         </>
                       )}
-                      {issue.contractorId && !canAdmin && (
-                        issue.emailRequestMode ? (
-                          <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
-                            Awaiting manager approval
-                          </span>
-                        ) : (
-                          <>
+                      {issue.contractorId && !canAdmin && issue.emailRequestStatus === "pending" && (
+                        <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                          Awaiting manager approval
+                        </span>
+                      )}
+                      {issue.contractorId && !canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                        <>
                             <Button
                               variant="outline" size="sm"
                               onClick={() => handleRequestSend(issue, "assign")}
@@ -1382,8 +1415,36 @@ export default function FixTrackPage() {
                             >
                               Request quote
                             </Button>
-                          </>
-                        )
+                        </>
+                      )}
+                      {issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                        <>
+                          <Button variant="outline" size="sm"
+                            onClick={() => handleRequestSend(issue, "assign")}
+                            disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50">
+                            Request assign
+                          </Button>
+                          <Button variant="outline" size="sm"
+                            onClick={() => handleRequestSend(issue, "quote")}
+                            disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-violet-700 border-violet-300 hover:bg-violet-50">
+                            Request quote
+                          </Button>
+                        </>
+                      )}
+                      {issue.contractorId && canAdmin && issue.emailRequestStatus === "approved" && (
+                        <Button variant="outline" size="sm"
+                          onClick={() => handleNotify(issue, false, issue.emailRequestMode === "quote" ? "quote" : "assign")}
+                          disabled={notifying[issue.id]}
+                          className="text-xs h-7 px-2 whitespace-nowrap text-blue-700 border-blue-300 hover:bg-blue-50">
+                          Send approved {issue.emailRequestMode === "quote" ? "quote" : "job"}
+                        </Button>
+                      )}
+                      {issue.contractorId && issue.emailRequestStatus === "sent" && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                          {issue.emailRequestMode === "quote" ? "Quote request sent" : "Job email sent"}
+                        </span>
                       )}
 
                       <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(issue)}>
@@ -1421,6 +1482,7 @@ export default function FixTrackPage() {
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Already sent — send again?</DialogTitle>
+            <DialogDescription>Confirm whether a replacement contractor email should be issued.</DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground py-2">
             An email has already been sent to <span className="font-medium">{renotifyIssue?.contractorName}</span> for this job.
@@ -1444,6 +1506,9 @@ export default function FixTrackPage() {
         <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">{editing ? "Edit Issue" : "Report Maintenance Issue"}</DialogTitle>
+            <DialogDescription>
+              {editing ? "Update the maintenance issue details." : "Record a maintenance issue for manager review."}
+            </DialogDescription>
           </DialogHeader>
           <div className="py-2">
             <IssueForm form={form} setForm={setForm} issueId={editing?.id} isNew={!editing} />

@@ -193,6 +193,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const hasTrainer  = trainer !== undefined;
   const hasDocTitle = documentTitle !== undefined;
   const hasTrainType = trainingType !== undefined;
+  const hasCompleted = completedDate !== undefined;
 
   await db.execute(sql`
     UPDATE train_track_records
@@ -202,7 +203,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
         document_type  = CASE WHEN ${hasDocType}::boolean    THEN ${documentType ?? null}  ELSE document_type  END,
         provider       = CASE WHEN ${hasProvider}::boolean   THEN ${provider ?? null}      ELSE provider       END,
         trainer        = CASE WHEN ${hasTrainer}::boolean     THEN ${trainer ?? null}       ELSE trainer        END,
-        completed_date = CASE WHEN ${completedDate ?? null} IS NOT NULL
+        completed_date = CASE WHEN ${hasCompleted}::boolean
                               THEN ${completedDate ?? null}::date ELSE completed_date END,
         expiry_date    = CASE WHEN ${hasExpiry}::boolean  THEN ${expiryDate ?? null}::date  ELSE expiry_date   END,
         site_id        = CASE WHEN ${hasSite}::boolean    THEN ${siteId ?? null}            ELSE site_id       END,

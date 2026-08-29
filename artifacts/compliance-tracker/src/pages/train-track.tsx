@@ -129,6 +129,10 @@ function daysUntil(d: string | null) {
   return Math.ceil((new Date(d).getTime() - today.getTime()) / 86400000);
 }
 
+function getSignoffStatus(expiryDate: string | null): "acknowledged" | "expired" {
+  return expiryDate && getCertStatus(expiryDate) === "expired" ? "expired" : "acknowledged";
+}
+
 // Route every request through the shared apiFetch and attach the consultant's
 // currently-selected clientId to BOTH reads and writes, so a consultant viewing
 // another client never reads or writes the wrong tenant. Matches the pattern
@@ -850,7 +854,7 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
             <EmptyState message={signoffs.length === 0 ? "No sign-offs yet. Add the first one." : "No sign-offs match the current filter."} />
           ) : (
             <TableWrap
-              headers={["Staff Member", "Document", "Type", "Site", "Date Signed", "Notes", ""]}
+              headers={["Staff Member", "Document", "Type", "Site", "Date Signed", "Status", "Notes", ""]}
               footer={`Showing ${filteredSignoffs.length} of ${signoffs.length} sign-off${signoffs.length !== 1 ? "s" : ""}`}
             >
               {filteredSignoffs.map(r => (
@@ -881,6 +885,30 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
                     <span className="flex items-center gap-1">
                       <CalendarDays className="w-3 h-3 opacity-50" />{formatDate(r.completed_date)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const status = getSignoffStatus(r.expiry_date);
+                      const expired = status === "expired";
+                      return (
+                        <div>
+                          <span className={cn(
+                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-sm text-xs font-medium border",
+                            expired
+                              ? "bg-red-100 text-red-700 border-red-200"
+                              : "bg-emerald-100 text-emerald-700 border-emerald-200",
+                          )}>
+                            {expired ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
+                            {expired ? "Expired" : "Acknowledged"}
+                          </span>
+                          {r.expiry_date && (
+                            <p className={cn("text-[10px] mt-1", expired ? "text-red-600" : "text-muted-foreground")}>
+                              Expires {formatDate(r.expiry_date)}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground text-sm max-w-[200px] truncate hidden lg:table-cell">
                     {r.notes ?? <span className="opacity-40">—</span>}

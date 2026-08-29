@@ -39,6 +39,11 @@ interface Doc {
   uploaded_by: string | null;
   requires_acknowledgement: boolean;
   annual_acknowledgement?: boolean;
+  acknowledgement_status?: "not_required" | "pending" | "acknowledged" | "expired";
+  acknowledgement_staff_total?: number;
+  acknowledged_count?: number;
+  pending_acknowledgement_count?: number;
+  expired_acknowledgement_count?: number;
   department: string | null;
   site_name: string | null;
   created_at: string;
@@ -59,6 +64,8 @@ interface Acknowledgement {
   staff_name: string;
   signature: string | null;
   acknowledged_at: string;
+  expiry_date?: string | null;
+  acknowledgement_status?: "pending" | "acknowledged" | "expired";
 }
 
 interface Site {
@@ -457,6 +464,17 @@ function DocCard({
               Annual
             </span>
           )}
+          {doc.requires_acknowledgement && doc.acknowledgement_status && (
+            <span className={cn(
+              "inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-medium border",
+              doc.acknowledgement_status === "acknowledged" && "bg-emerald-50 text-emerald-700 border-emerald-200",
+              doc.acknowledgement_status === "pending" && "bg-amber-50 text-amber-700 border-amber-200",
+              doc.acknowledgement_status === "expired" && "bg-red-50 text-red-700 border-red-200",
+            )}>
+              {doc.acknowledgement_status === "acknowledged" ? <CheckCircle2 className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
+              {doc.acknowledgement_status === "acknowledged" ? "Acknowledged" : doc.acknowledgement_status === "expired" ? "Expired" : "Pending"}
+            </span>
+          )}
           {doc.site_name && (
             <span className="text-[11px] text-muted-foreground truncate">{doc.site_name}</span>
           )}
@@ -467,6 +485,13 @@ function DocCard({
           <span>{formatDate(doc.created_at)}</span>
           {doc.file_size && <span>{formatSize(doc.file_size)}</span>}
         </div>
+        {doc.requires_acknowledgement && doc.acknowledgement_staff_total != null && (
+          <p className="text-[11px] text-muted-foreground -mt-2 mb-3">
+            {doc.acknowledged_count ?? 0}/{doc.acknowledgement_staff_total} current
+            {(doc.pending_acknowledgement_count ?? 0) > 0 && ` · ${doc.pending_acknowledgement_count} pending`}
+            {(doc.expired_acknowledgement_count ?? 0) > 0 && ` · ${doc.expired_acknowledgement_count} expired`}
+          </p>
+        )}
 
         {/* Actions */}
         <div className="flex gap-2">

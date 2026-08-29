@@ -41,10 +41,12 @@ import type {
   FireSafetyConfig,
   FireSafetyStatus,
   FoodSafetyConfig,
+  FoodSafetyMissingDatesResponse,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
+  GetFoodSafetyMissingDatesParams,
   GetFoodSafetyRecordByDateParams,
   GetLegionellaStatusParams,
   GetPATPresetTemplates200,
@@ -6899,6 +6901,115 @@ export function useGetFoodSafetyRecordByDate<
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetFoodSafetyRecordByDateQueryOptions(
     date,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List missing and unsubmitted food safety diary dates in a bounded range
+ */
+export const getGetFoodSafetyMissingDatesUrl = (
+  params: GetFoodSafetyMissingDatesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/food-safety/missing-dates?${stringifiedParams}`
+    : `/api/food-safety/missing-dates`;
+};
+
+export const getFoodSafetyMissingDates = async (
+  params: GetFoodSafetyMissingDatesParams,
+  options?: RequestInit,
+): Promise<FoodSafetyMissingDatesResponse> => {
+  return customFetch<FoodSafetyMissingDatesResponse>(
+    getGetFoodSafetyMissingDatesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetFoodSafetyMissingDatesQueryKey = (
+  params?: GetFoodSafetyMissingDatesParams,
+) => {
+  return [
+    `/api/food-safety/missing-dates`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetFoodSafetyMissingDatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFoodSafetyMissingDates>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetFoodSafetyMissingDatesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyMissingDates>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFoodSafetyMissingDatesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFoodSafetyMissingDates>>
+  > = ({ signal }) =>
+    getFoodSafetyMissingDates(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFoodSafetyMissingDates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFoodSafetyMissingDatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFoodSafetyMissingDates>>
+>;
+export type GetFoodSafetyMissingDatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List missing and unsubmitted food safety diary dates in a bounded range
+ */
+
+export function useGetFoodSafetyMissingDates<
+  TData = Awaited<ReturnType<typeof getFoodSafetyMissingDates>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetFoodSafetyMissingDatesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getFoodSafetyMissingDates>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFoodSafetyMissingDatesQueryOptions(
     params,
     options,
   );

@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import {
-  incidentsTable, sitesTable, appSettingsTable,
+  incidentsTable, incidentRiddorEventsTable, sitesTable, appSettingsTable, usersTable,
   INCIDENT_STATUSES, EMPLOYMENT_TYPES,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { appendAuditEvent } from "../lib/audit";
 
 const router = Router();
 
@@ -37,6 +38,7 @@ const createSchema = z.object({
   correctiveActions: z.string().max(5000).nullable().optional(),
   reportedBy: z.string().min(1).max(200),
   siteId: z.number().int().nullable().optional(),
+  riddorRationale: z.string().max(5000).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -48,6 +50,14 @@ function allowedSites(clientId: number, deptId: number) {
       eq(sitesTable.clientId, clientId),
       or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
     ));
+}
+
+async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
+  if (siteId == null) return true;
+  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  if (!site) return false;
+  return deptId === null || site.departmentId === null || site.departmentId === deptId;
 }
 
 // GET /api/incidents
@@ -90,6 +100,12 @@ router.get("/summary", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const deptId = getActiveDepartmentId(req);
+  const deptClause = deptId !== null ? sql`
+    AND (site_id IS NULL OR site_id IN (
+      SELECT id FROM sites WHERE client_id = ${clientId}
+      AND (department_id IS NULL OR department_id = ${deptId})
+    ))` : sql``;
   const result = await db.execute(sql`
     SELECT
       COUNT(*)::int                                                           AS total,
@@ -100,7 +116,7 @@ router.get("/summary", requireAuth, async (req, res) => {
       COUNT(*) FILTER (WHERE incident_date >= date_trunc('month', now()))::int AS this_month,
       COUNT(*) FILTER (WHERE severity IN ('serious','fatal'))::int           AS serious_count
     FROM incidents
-    WHERE client_id = ${clientId}
+    WHERE client_id = ${clientId} ${deptClause}
   `);
 
   const row = ((result.rows ?? [])[0] ?? {}) as Record<string, number>;
@@ -131,17 +147,22 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!allowedTypes.includes(data.incidentType)) return res.status(400).json({ error: "Invalid incident type" });
   if (!allowedSeverities.includes(data.severity)) return res.status(400).json({ error: "Invalid severity" });
 
-  if (data.siteId) {
-    const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
-      .where(and(eq(sitesTable.id, data.siteId), eq(sitesTable.clientId, clientId))).limit(1);
-    if (!site) return res.status(400).json({ error: "Invalid site" });
-  }
+  if (!await canAccessSite(clientId, data.siteId, getActiveDepartmentId(req)))
+    return res.status(403).json({ error: "Invalid or inaccessible site" });
 
-  const [inserted] = await db.insert(incidentsTable).values({
-    clientId,
-    ...data,
-    createdBy: (req as any).currentUser?.id ?? null,
-  }).returning();
+  const { riddorRationale, ...incidentData } = data;
+  const inserted = await db.transaction(async (tx) => {
+    const [incident] = await tx.insert(incidentsTable).values({
+      clientId, ...incidentData, createdBy: (req as any).currentUser?.id ?? null,
+    }).returning();
+    await tx.insert(incidentRiddorEventsTable).values({
+      clientId, incidentId: incident.id, eventType: "decision", actorId: (req as any).currentUser?.id ?? null,
+      riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse,
+      rationale: riddorRationale ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+    });
+    return incident;
+  });
+  await appendAuditEvent(req, { clientId, entityType: "incident", entityId: inserted.id, action: "created", after: inserted });
 
   res.status(201).json(inserted);
 });
@@ -153,13 +174,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const [existing] = await db.select({
-    id: incidentsTable.id,
-    incidentType: incidentsTable.incidentType,
-    severity: incidentsTable.severity,
-  }).from(incidentsTable)
+  const [existing] = await db.select().from(incidentsTable)
     .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessSite(clientId, existing.siteId, getActiveDepartmentId(req)))
+    return res.status(403).json({ error: "Forbidden" });
 
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
@@ -176,11 +195,26 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     if (!allowedSeverities.includes(parsed.data.severity)) return res.status(400).json({ error: "Invalid severity" });
   }
 
-  const [updated] = await db.update(incidentsTable)
-    .set({ ...parsed.data, updatedAt: new Date() })
-    .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId)))
-    .returning();
-
+  if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
+    return res.status(403).json({ error: "Invalid or inaccessible site" });
+  const { riddorRationale, ...updateData } = parsed.data;
+  const riddorChanged = ["riddorReportable", "reportedToHse", "hseReference", "hseReportDate"]
+    .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
+  const updated = await db.transaction(async (tx) => {
+    const [incident] = await tx.update(incidentsTable)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).returning();
+    if (riddorChanged || riddorRationale) {
+      await tx.insert(incidentRiddorEventsTable).values({
+        clientId, incidentId: id, eventType: incident.reportedToHse ? "submission" : "decision",
+        actorId: (req as any).currentUser?.id ?? null, riddorReportable: incident.riddorReportable,
+        reportedToHse: incident.reportedToHse, rationale: riddorRationale ?? null,
+        hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+      });
+    }
+    return incident;
+  });
+  await appendAuditEvent(req, { clientId, entityType: "incident", entityId: id, action: "updated", before: existing, after: updated });
   res.json(updated);
 });
 
@@ -191,13 +225,43 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const [existing] = await db.select({ id: incidentsTable.id }).from(incidentsTable)
+  const [existing] = await db.select().from(incidentsTable)
     .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessSite(clientId, existing.siteId, getActiveDepartmentId(req)))
+    return res.status(403).json({ error: "Forbidden" });
 
-  await db.delete(incidentsTable)
-    .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId)));
-  res.status(204).end();
+  // Incidents have a statutory decision/submission trail. Do not allow an API
+  // delete to silently destroy that trail; retain the record for export/audit.
+  return res.status(409).json({ error: "Incident records with compliance history cannot be deleted" });
+});
+
+// Decision/submission events are intentionally insert-only. Current incident
+// fields remain available for existing consumers, while this endpoint retains
+// the legally useful sequence of assessments and HSE references.
+router.get("/:id/riddor-history", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  const id = Number(req.params.id);
+  if (!clientId || !Number.isInteger(id)) return res.status(400).json({ error: "Invalid request" });
+  const [incident] = await db.select().from(incidentsTable)
+    .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).limit(1);
+  if (!incident) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessSite(clientId, incident.siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Forbidden" });
+  res.json(await db.select({
+    id: incidentRiddorEventsTable.id,
+    eventType: incidentRiddorEventsTable.eventType,
+    riddorReportable: incidentRiddorEventsTable.riddorReportable,
+    reportedToHse: incidentRiddorEventsTable.reportedToHse,
+    rationale: incidentRiddorEventsTable.rationale,
+    hseReference: incidentRiddorEventsTable.hseReference,
+    hseReportDate: incidentRiddorEventsTable.hseReportDate,
+    createdAt: incidentRiddorEventsTable.createdAt,
+    actorName: usersTable.name,
+    actorEmail: usersTable.email,
+  }).from(incidentRiddorEventsTable)
+    .leftJoin(usersTable, eq(incidentRiddorEventsTable.actorId, usersTable.id))
+    .where(and(eq(incidentRiddorEventsTable.clientId, clientId), eq(incidentRiddorEventsTable.incidentId, id)))
+    .orderBy(desc(incidentRiddorEventsTable.createdAt), desc(incidentRiddorEventsTable.id)));
 });
 
 // ── Template config ───────────────────────────────────────────────────────────

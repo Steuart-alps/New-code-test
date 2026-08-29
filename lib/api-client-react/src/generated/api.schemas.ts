@@ -626,6 +626,16 @@ export interface FoodSafetyRecordSummary {
   submittedAt?: string | null;
 }
 
+export interface FoodSafetyMissingDatesResponse {
+  from: string;
+  to: string;
+  siteId: number | null;
+  /** Dates with no food safety diary record. */
+  missingDates: string[];
+  /** Dates with a diary record that has not been submitted. */
+  draftDates: string[];
+}
+
 export interface FoodSafetyRecord {
   id: number;
   clientId: number;
@@ -874,6 +884,15 @@ export type CreateFoodSafetyRecordParams = {
 };
 
 export type GetFoodSafetyRecordByDateParams = {
+  /**
+   * Scope to a site's diary. Omit for the whole-organisation diary.
+   */
+  siteId?: number;
+};
+
+export type GetFoodSafetyMissingDatesParams = {
+  from: string;
+  to: string;
   /**
    * Scope to a site's diary. Omit for the whole-organisation diary.
    */

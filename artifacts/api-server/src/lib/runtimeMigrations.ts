@@ -331,6 +331,7 @@ export async function runRuntimeMigrations() {
     await migrateFixTrackV2();
     await migrateMobileSessions();
     await migrateIncidents();
+    await migrateComplianceAuditTrail();
     await migrateSousVide();
     await migratePATtrack();
     await migratePestTrack();
@@ -1427,7 +1428,36 @@ async function migrateFixTrackV2() {
     ALTER TABLE "fix_track_issues"
       ADD COLUMN IF NOT EXISTS "email_request_mode" text,
       ADD COLUMN IF NOT EXISTS "email_requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
-      ADD COLUMN IF NOT EXISTS "email_requested_at" timestamp
+      ADD COLUMN IF NOT EXISTS "email_requested_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "email_request_status" text,
+      ADD COLUMN IF NOT EXISTS "email_approved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "email_approved_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "email_sent_at" timestamp
+  `);
+  // Existing requests were created before an explicit approval state existed.
+  // Treat them as pending, never as implicitly approved.
+  await db.execute(sql`
+    UPDATE "fix_track_issues"
+    SET email_request_status = 'pending'
+    WHERE email_request_mode IS NOT NULL AND email_request_status IS NULL
+  `);
+  // A durable dispatch record is created before provider submission. Its
+  // stable key makes recovery from a post-acceptance DB failure idempotent.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fix_track_email_dispatches" (
+      "id"              serial PRIMARY KEY,
+      "client_id"       integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "issue_id"        integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+      "mode"            text NOT NULL CHECK ("mode" IN ('assign', 'quote')),
+      "idempotency_key" text NOT NULL UNIQUE,
+      "status"          text NOT NULL DEFAULT 'sending' CHECK ("status" IN ('sending', 'failed', 'accepted')),
+      "provider_id"     text,
+      "accepted_at"     timestamp,
+      "last_error"      text,
+      "created_at"      timestamp NOT NULL DEFAULT now(),
+      "updated_at"      timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("client_id", "issue_id", "mode")
+    )
   `);
 
   // One-time action tokens for contractor email buttons (Booked / Completed)
@@ -1526,6 +1556,46 @@ async function migrateIncidents() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_client" ON "incidents" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_date" ON "incidents" ("client_id", "incident_date" DESC)`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "incident_riddor_events" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "incident_id" integer NOT NULL REFERENCES "incidents"("id") ON DELETE CASCADE,
+      "actor_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "event_type" text NOT NULL,
+      "riddor_reportable" boolean NOT NULL,
+      "reported_to_hse" boolean NOT NULL DEFAULT false,
+      "rationale" text,
+      "hse_reference" text,
+      "hse_report_date" date,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incident_riddor_events_incident" ON "incident_riddor_events" ("client_id", "incident_id", "created_at" DESC)`);
+  // Older installs created this FK with CASCADE. Replace it so a current
+  // incident cannot take its immutable legal record with it.
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" DROP CONSTRAINT IF EXISTS "incident_riddor_events_incident_id_incidents_id_fk"`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD CONSTRAINT "incident_riddor_events_incident_id_incidents_id_fk" FOREIGN KEY ("incident_id") REFERENCES "incidents"("id") ON DELETE RESTRICT`);
+}
+
+async function migrateComplianceAuditTrail() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "audit_events" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "actor_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "entity_type" text NOT NULL,
+      "entity_id" integer NOT NULL,
+      "action" text NOT NULL,
+      "before" jsonb,
+      "after" jsonb,
+      "metadata" jsonb,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_audit_events_client_entity" ON "audit_events" ("client_id", "entity_type", "entity_id", "created_at" DESC)`);
+  await db.execute(sql`ALTER TABLE "audit_events" DROP CONSTRAINT IF EXISTS "audit_events_client_id_clients_id_fk"`);
+  await db.execute(sql`ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE RESTRICT`);
 }
 
 async function migrateSousVide() {
@@ -1854,9 +1924,23 @@ async function migrateOffboardingColumns() {
   await db.execute(sql`
     ALTER TABLE "clients"
       ADD COLUMN IF NOT EXISTS "cancelled_at"               timestamptz,
+      ADD COLUMN IF NOT EXISTS "cancellation_warning_sent_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "offboarding_email_sent_at"  timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deletion_scheduled_at" timestamptz,
       ADD COLUMN IF NOT EXISTS "data_deleted_at"            timestamptz
+  `);
+  // Per-recipient delivery state permits failed addresses to retry without
+  // re-emailing successful recipients, unlike a single client-level marker.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "cancellation_warning_deliveries" (
+      id serial PRIMARY KEY,
+      client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      cutoff_key text NOT NULL,
+      claimed_at timestamptz NOT NULL DEFAULT now(),
+      sent_at timestamptz,
+      UNIQUE (client_id, user_id, cutoff_key)
+    )
   `);
 }
 

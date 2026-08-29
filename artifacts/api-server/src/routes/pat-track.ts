@@ -298,6 +298,7 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
 const VALID_PRESET_KEYS = [
   "hotel-suite", "hotel-classic", "office", "bar-restaurant",
   "reception", "kitchen", "pro-shop", "greenkeeping", "retail-shop",
+  "pest-control",
 ] as const;
 
 type ValidPresetKey = (typeof VALID_PRESET_KEYS)[number];

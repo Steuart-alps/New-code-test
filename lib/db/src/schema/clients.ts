@@ -18,6 +18,9 @@ export const clientsTable = pgTable("clients", {
   // post-trial checkout. `["bundle"]` marks a full-bundle selection.
   selectedServices: jsonb("selected_services").$type<string[]>(),
   trialReminderSentAt: timestamp("trial_reminder_sent_at"),
+  // Claimed before cancellation cutoff warnings are delivered. Kept separate
+  // from trial reminders because paid access can end independently of a trial.
+  cancellationWarningSentAt: timestamp("cancellation_warning_sent_at"),
   // Offboarding / data retention
   cancelledAt: timestamp("cancelled_at"),
   offboardingEmailSentAt: timestamp("offboarding_email_sent_at"),

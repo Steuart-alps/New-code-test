@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -90,6 +90,11 @@ interface Summary {
 }
 
 interface Site { id: number; name: string; }
+interface RiddorHistoryEvent {
+  id: number; eventType: "decision" | "submission"; riddorReportable: boolean;
+  reportedToHse: boolean; rationale: string | null; hseReference: string | null;
+  hseReportDate: string | null; createdAt: string; actorName: string | null; actorEmail: string | null;
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -326,6 +331,7 @@ const emptyForm = () => ({
   reportedToHse: false,
   hseReference: "",
   hseReportDate: "",
+  riddorRationale: "",
   immediateActions: "",
   correctiveActions: "",
   reportedBy: "",
@@ -351,6 +357,7 @@ export default function IncidentsPage() {
   const [editItem, setEditItem] = useState<Incident | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
@@ -384,6 +391,11 @@ export default function IncidentsPage() {
     queryKey: ["sites", activeClientId],
     queryFn: () => apiFetch("/sites"),
     enabled: !!activeClientId,
+  });
+  const { data: riddorHistory = [], isLoading: isLoadingHistory } = useQuery<RiddorHistoryEvent[]>({
+    queryKey: ["incident-riddor-history", historyIncident?.id, activeClientId],
+    queryFn: () => apiFetch(`/incidents/${historyIncident!.id}/riddor-history`),
+    enabled: !!historyIncident && !!activeClientId,
   });
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -503,6 +515,7 @@ ${rows.map(r => `<tr>
       reportedToHse: r.reportedToHse,
       hseReference: r.hseReference ?? "",
       hseReportDate: r.hseReportDate?.slice(0, 10) ?? "",
+      riddorRationale: "",
       immediateActions: r.immediateActions ?? "",
       correctiveActions: r.correctiveActions ?? "",
       reportedBy: r.reportedBy,
@@ -539,6 +552,7 @@ ${rows.map(r => `<tr>
         reportedToHse: form.reportedToHse,
         hseReference: form.hseReference.trim() || null,
         hseReportDate: form.hseReportDate || null,
+        riddorRationale: form.riddorRationale.trim() || null,
         immediateActions: form.immediateActions.trim() || null,
         correctiveActions: form.correctiveActions.trim() || null,
         reportedBy: form.reportedBy.trim(),
@@ -808,6 +822,9 @@ ${rows.map(r => `<tr>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="incident" entityId={r.id} compact />
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+                      {canAdmin && <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
+                        <Activity className="w-3.5 h-3.5" />
+                      </Button>}
                       <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
@@ -1103,6 +1120,15 @@ ${rows.map(r => `<tr>
                           </span>
                         </div>
                       )}
+                      <div>
+                        <Label>Decision / submission rationale</Label>
+                        <Textarea
+                          placeholder="Record why this decision was made or submission details. Saved as an immutable history event."
+                          value={form.riddorRationale}
+                          onChange={e => setForm(f => ({ ...f, riddorRationale: e.target.value }))}
+                          className="mt-1 rounded-sm" rows={2}
+                        />
+                      </div>
                     </>
                   )}
                 </div>
@@ -1121,6 +1147,30 @@ ${rows.map(r => `<tr>
               {saving ? "Saving…" : editItem ? "Save Changes" : "Log Incident"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyIncident !== null} onOpenChange={v => { if (!v) setHistoryIncident(null); }}>
+        <DialogContent className="max-w-lg rounded-sm">
+          <DialogHeader>
+            <DialogTitle>RIDDOR decision & submission history</DialogTitle>
+            <DialogDescription>Immutable record for {historyIncident?.involvedName ?? "this incident"}.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] overflow-y-auto space-y-3">
+            {isLoadingHistory ? <p className="text-sm text-muted-foreground">Loading history…</p> :
+              riddorHistory.length === 0 ? <p className="text-sm text-muted-foreground">No RIDDOR decisions recorded.</p> :
+              riddorHistory.map(event => (
+                <div key={event.id} className="border rounded-sm p-3 text-sm space-y-1">
+                  <div className="flex justify-between gap-2 font-medium">
+                    <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{fmt(event.createdAt)}</span>
+                  </div>
+                  <p className="text-muted-foreground">{event.reportedToHse ? "Reported to HSE" : "Not reported to HSE"}{event.hseReference ? ` · ${event.hseReference}` : ""}</p>
+                   <p className="text-xs text-muted-foreground">Recorded by {event.actorName ?? event.actorEmail ?? "System"}</p>
+                  {event.rationale && <p>{event.rationale}</p>}
+                </div>
+              ))}
+          </div>
         </DialogContent>
       </Dialog>
 

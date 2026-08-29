@@ -629,7 +629,6 @@ export const UpdateSettingsBody = zod.object({
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
-  notificationEmail: zod.string().email().nullish().or(zod.literal("").transform(() => null)),
 });
 
 export const UpdateSettingsResponse = zod.object({
@@ -641,7 +640,6 @@ export const UpdateSettingsResponse = zod.object({
   smtpFromName: zod.string().nullish(),
   defaultLeadTimeDays: zod.string().nullish(),
   companyName: zod.string().nullish(),
-  notificationEmail: zod.string().nullish(),
 });
 
 /**
@@ -1554,6 +1552,32 @@ export const GetFoodSafetyRecordByDateResponse = zod.object({
   submittedAt: zod.date().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
+});
+
+/**
+ * @summary List missing and unsubmitted food safety diary dates in a bounded range
+ */
+export const GetFoodSafetyMissingDatesQueryParams = zod.object({
+  from: zod.date(),
+  to: zod.date(),
+  siteId: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Scope to a site's diary. Omit for the whole-organisation diary.",
+    ),
+});
+
+export const GetFoodSafetyMissingDatesResponse = zod.object({
+  from: zod.date(),
+  to: zod.date(),
+  siteId: zod.number().nullable(),
+  missingDates: zod
+    .array(zod.date())
+    .describe("Dates with no food safety diary record."),
+  draftDates: zod
+    .array(zod.date())
+    .describe("Dates with a diary record that has not been submitted."),
 });
 
 /**

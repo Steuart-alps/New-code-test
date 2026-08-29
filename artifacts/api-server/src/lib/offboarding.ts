@@ -125,23 +125,25 @@ export async function sendCancellationWarningEmail(opts: {
   stripeCustomerId: string;
   /** ISO date string or Unix timestamp when access ends. */
   accessEndsAt: string | number | null;
-}): Promise<void> {
+}, deps: { sendEmail?: typeof sendSystemEmail } = {}): Promise<{ emailsSent: number }> {
+  const sendEmail = deps.sendEmail ?? sendSystemEmail;
   // Resolve the client from the Stripe customer id.
   const clientRows = await db.execute(sql`
     SELECT id, name FROM clients WHERE stripe_customer_id = ${opts.stripeCustomerId} LIMIT 1
   `);
   const client = (clientRows.rows ?? [])[0] as { id: number; name: string } | undefined;
-  if (!client) return;
+  if (!client) return { emailsSent: 0 };
 
-  // Only client_admin users receive the early warning (not consultants, who
-  // manage the account and would receive the offboarding email later anyway).
+  // Senior account recipients are represented by client_admin in the current
+  // role model. Consultants are deliberately excluded: this is the client's
+  // billing/access warning, not an operational reminder.
   const adminRows = await db.execute(sql`
     SELECT id, email, name FROM users
     WHERE client_id = ${client.id} AND active = true AND role = 'client_admin'
     LIMIT 10
   `);
   const admins = (adminRows.rows ?? []) as { id: number; email: string; name: string }[];
-  if (admins.length === 0) return;
+  if (admins.length === 0) return { emailsSent: 0 };
 
   // Resolve the access-end date from a Unix timestamp or ISO string.
   let accessEndsDate: Date | null = null;
@@ -156,12 +158,34 @@ export async function sendCancellationWarningEmail(opts: {
   const accessEndsStr = accessEndsDate
     ? accessEndsDate.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
     : "the end of your current billing period";
+  // A changed cutoff warrants a fresh notice; otherwise the same recipient is
+  // sent at most once. This key is intentionally stable for a missing Stripe
+  // date so webhook retries still dedupe.
+  const cutoffKey = accessEndsDate?.toISOString() ?? "period-end-unknown";
 
   const settingsUrl = `${getPublicAppUrl()}/settings`;
+  const billingUrl = `${getPublicAppUrl()}/billing`;
   const safeCompany = escapeHtml(client.name);
   const subject = "Your ComplyTrack access is ending — export your records";
 
+  let sent = 0;
   for (const admin of admins) {
+    // Claim each recipient independently. A stale in-progress claim can be
+    // reclaimed after 15 minutes (e.g. worker crash); successful sends have
+    // sent_at set and can never be claimed again for this cutoff.
+    const claim = await db.execute(sql`
+      INSERT INTO cancellation_warning_deliveries (client_id, user_id, cutoff_key, claimed_at)
+      VALUES (${client.id}, ${admin.id}, ${cutoffKey}, now())
+      ON CONFLICT (client_id, user_id, cutoff_key) DO UPDATE
+        SET claimed_at = now()
+        WHERE cancellation_warning_deliveries.sent_at IS NULL
+          AND cancellation_warning_deliveries.claimed_at < now() - interval '15 minutes'
+      RETURNING id
+    `).catch((err) => {
+      logger.error({ err, clientId: client.id, userId: admin.id }, "Could not claim cancellation warning delivery");
+      return { rows: [] };
+    });
+    if ((claim.rows ?? []).length === 0) continue;
     const safeName = escapeHtml(admin.name ?? admin.email);
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -184,8 +208,8 @@ export async function sendCancellationWarningEmail(opts: {
           </a>
         </div>
         <p style="color:#64748b;font-size:14px;">
-          Changed your mind? You can resubscribe at any time from your
-          <a href="${settingsUrl}" style="color:#2563eb;">account settings</a> and your data will be preserved.
+           Changed your mind? You can <a href="${billingUrl}" style="color:#2563eb;">reactivate your subscription</a>
+           at any time and your data will be preserved.
         </p>
         <p>Best regards,<br><strong>ComplyTrack</strong></p>
       </div>`;
@@ -202,18 +226,61 @@ Your access will continue until ${accessEndsStr}. After that you will no longer 
 Export your records before access ends by visiting your account settings:
 ${settingsUrl}
 
-Changed your mind? You can resubscribe at any time from your settings page and your data will be preserved.
+Reactivate your subscription: ${billingUrl}
 
 Best regards,
 ComplyTrack
 `.trim();
 
     try {
-      await sendSystemEmail({ to: admin.email, subject, html, text });
+      await sendEmail({ to: admin.email, subject, html, text });
+      await db.execute(sql`
+        UPDATE cancellation_warning_deliveries SET sent_at = now()
+         WHERE client_id = ${client.id} AND user_id = ${admin.id}
+           AND cutoff_key = ${cutoffKey} AND sent_at IS NULL
+      `);
+      sent++;
     } catch (err) {
+      // Release only this failed recipient. Successful sibling recipients keep
+      // their sent marker, so the next run retries precisely the failures.
+      await db.execute(sql`
+        DELETE FROM cancellation_warning_deliveries
+         WHERE client_id = ${client.id} AND user_id = ${admin.id}
+           AND cutoff_key = ${cutoffKey} AND sent_at IS NULL
+      `).catch(() => {});
       logger.warn({ err, clientId: client.id, adminEmail: admin.email }, "Cancellation warning email failed for admin");
     }
   }
+  return { emailsSent: sent };
+}
+
+/**
+ * Reconciles cancellation warnings missed while a Stripe webhook was down.
+ * Stripe's synced subscription data is the billing source of truth; unlike
+ * trial reminders this never uses trial dates or trial status.
+ */
+export async function runCancellationWarningJob(): Promise<{ emailsSent: number }> {
+  const candidates = await db.execute(sql`
+    SELECT DISTINCT ON (c.id) c.id, s.customer,
+      COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+    FROM clients c
+    JOIN stripe.subscriptions s ON s.customer = c.stripe_customer_id
+    WHERE s.status = 'canceled' OR s.cancel_at_period_end = true
+    ORDER BY c.id, s.current_period_end DESC NULLS LAST
+  `).catch((err) => {
+    logger.warn({ err }, "Cancellation warning reconciliation unavailable");
+    return { rows: [] };
+  });
+
+  let emailsSent = 0;
+  for (const row of candidates.rows as Array<{ customer: string; access_ends_at: string | number | null }>) {
+    const result = await sendCancellationWarningEmail({
+      stripeCustomerId: String(row.customer),
+      accessEndsAt: row.access_ends_at,
+    });
+    emailsSent += result.emailsSent;
+  }
+  return { emailsSent };
 }
 
 // ── Job 1: Cancellation detection ─────────────────────────────────────────────

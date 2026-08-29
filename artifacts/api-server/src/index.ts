@@ -3,7 +3,7 @@
 import { initSentry } from "./lib/sentry";
 initSentry();
 
-import app from "./app";
+import app, { markApplicationReady } from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./lib/stripeClient";
@@ -20,7 +20,7 @@ import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
-import { runCancellationDetectionJob, runDataDeletionJob } from "./lib/offboarding";
+import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob } from "./lib/offboarding";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runSafeTrackAckReminderJob } from "./lib/safeTrackAckReminders";
@@ -197,6 +197,18 @@ function startScheduler() {
     }
   });
   logger.info("Cancellation detection scheduler started (daily at 07:00)");
+
+  // Reconcile any cancellation/scheduled-cancellation webhook missed by Stripe
+  // sync and warn account admins before their paid access cutoff.
+  cron.schedule("50 6 * * *", async () => {
+    try {
+      const result = await runCancellationWarningJob();
+      logger.info({ result }, "Cancellation warning reconciliation complete");
+    } catch (err) {
+      logger.error({ err }, "Cancellation warning reconciliation failed");
+    }
+  });
+  logger.info("Cancellation warning scheduler started (daily at 06:50)");
 
   // Hard-delete compliance data for clients whose 12-month window has passed
   // (daily at 03:00; irreversible — runs only after data_deletion_scheduled_at).
@@ -395,6 +407,7 @@ app.listen(port, async (err?: any) => {
   logger.info({ port }, "Server listening");
   await runRuntimeMigrations();
   await initStripe();
+  markApplicationReady();
   startScheduler();
   // Also reconcile once shortly after startup so drift never waits a full day
   // (best-effort; exits quietly per client when Stripe isn't reachable).

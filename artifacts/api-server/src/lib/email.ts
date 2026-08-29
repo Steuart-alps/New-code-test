@@ -58,6 +58,8 @@ export async function sendEmail(opts: {
   icsFilename?: string;
   attachments?: EmailAttachment[];
   clientId?: number | null;
+  /** Stable key used by providers to make a retried dispatch non-duplicating. */
+  idempotencyKey?: string;
 }) {
   const settings = await getEmailSettings(opts.clientId ?? null);
   const resend = getResend(settings["resendApiKey"]);
@@ -79,7 +81,7 @@ export async function sendEmail(opts: {
       : [opts.cc]
     : undefined;
 
-  const result = await resend.emails.send({
+  const payload = {
     from,
     to: toList,
     cc: ccList,
@@ -87,7 +89,14 @@ export async function sendEmail(opts: {
     html: opts.html,
     text: opts.text,
     attachments,
-  });
+  };
+  // Resend treats a repeated idempotency key as the same accepted email.
+  // Keep this at the common transport boundary so callers cannot accidentally
+  // retry an uncertain contractor dispatch with a new provider request.
+  const result = await (resend.emails.send as any)(
+    payload,
+    opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined,
+  );
   if (result.error) {
     throw new Error(`Email delivery failed: ${result.error.message ?? result.error.name ?? "unknown error"}`);
   }

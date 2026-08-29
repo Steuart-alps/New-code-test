@@ -2,12 +2,32 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 
 const router = Router();
 const storage = new ObjectStorageService();
+
+async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
+  if (siteId == null) return true;
+  const result = await db.execute(sql`SELECT department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
+  const site = (result.rows ?? [])[0] as any;
+  return !!site && (departmentId === null || site.department_id === null || site.department_id === departmentId);
+}
+async function canAccessDocument(clientId: number, documentId: number, departmentId: number | null) {
+  const result = await db.execute(sql`
+    SELECT d.id, d.site_id, d.department, s.department_id,
+      (SELECT name FROM departments WHERE id = ${departmentId ?? 0}) AS caller_department
+    FROM doc_track_documents d LEFT JOIN sites s ON s.id = d.site_id
+    WHERE d.id = ${documentId} AND d.client_id = ${clientId} LIMIT 1
+  `);
+  const doc = (result.rows ?? [])[0] as any;
+  if (!doc) return false;
+  const siteAllowed = doc.site_id === null || departmentId === null || doc.department_id === null || doc.department_id === departmentId;
+  const documentAllowed = departmentId === null || doc.department === null || doc.department === doc.caller_department;
+  return siteAllowed && documentAllowed;
+}
 
 export const CATEGORIES = ["risk_assessment", "sop", "handbook", "policy", "procedure", "other"] as const;
 
@@ -47,11 +67,50 @@ router.get("/documents", requireAuth, async (req, res) => {
   const result = await db.execute(sql`
     SELECT d.id, d.client_id, d.site_id, d.title, d.category, d.description,
            d.file_name, d.file_size, d.mime_type, d.object_path, d.uploaded_by,
-           d.requires_acknowledgement, d.department, d.created_at, d.updated_at,
-           s.name AS site_name
+           d.requires_acknowledgement, d.annual_acknowledgement, d.department,
+           d.created_at, d.updated_at, s.name AS site_name,
+           COALESCE(ack_status.staff_total, 0) AS acknowledgement_staff_total,
+           COALESCE(ack_status.acknowledged_count, 0) AS acknowledged_count,
+           COALESCE(ack_status.pending_count, 0) AS pending_acknowledgement_count,
+           COALESCE(ack_status.expired_count, 0) AS expired_acknowledgement_count,
+           CASE
+             WHEN d.requires_acknowledgement = false THEN 'not_required'
+             WHEN COALESCE(ack_status.expired_count, 0) > 0 THEN 'expired'
+             WHEN COALESCE(ack_status.pending_count, 0) > 0
+               OR COALESCE(ack_status.staff_total, 0) = 0 THEN 'pending'
+             ELSE 'acknowledged'
+           END AS acknowledgement_status
     FROM doc_track_documents d
     LEFT JOIN sites s ON d.site_id = s.id
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*) AS staff_total,
+        COUNT(*) FILTER (
+          WHERE a.id IS NULL
+             OR (a.train_track_record_id IS NOT NULL AND tr.id IS NULL)
+        ) AS pending_count,
+        COUNT(*) FILTER (
+          WHERE a.id IS NOT NULL
+            AND (a.train_track_record_id IS NULL OR tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
+        ) AS acknowledged_count,
+        COUNT(*) FILTER (
+          WHERE tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE
+        ) AS expired_count
+      FROM staff_roster sr
+      LEFT JOIN doc_acknowledgements a
+        ON a.document_id = d.id
+       AND a.client_id = d.client_id
+       AND a.staff_roster_id = sr.id
+      LEFT JOIN train_track_records tr
+        ON tr.id = a.train_track_record_id
+       AND tr.client_id = d.client_id
+      WHERE sr.client_id = d.client_id
+        AND sr.active = true
+        AND (d.department IS NULL OR sr.department = d.department)
+    ) ack_status ON d.requires_acknowledgement = true
     WHERE d.client_id = ${clientId}
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY d.created_at DESC
   `);
 
@@ -77,6 +136,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
 
   const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
   const createdBy = (req.session as any).userId ?? null;
+  if (!await canAccessSite(clientId, siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   // Tag the uploaded object with a tenant-scoped ACL so the private object
   // route (/storage/objects/*) allows this client's users to read it. Without
@@ -126,6 +186,8 @@ router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
 
   const parsed = docUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (parsed.data.siteId !== undefined && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   const { title, category, description, siteId, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
   const hasDesc   = description !== undefined;
@@ -167,6 +229,7 @@ router.delete("/documents/:id", requireAuth, denyViewers, async (req, res) => {
 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
   await db.execute(sql`
     DELETE FROM doc_track_documents
@@ -185,17 +248,21 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
   if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
 
   // Verify document belongs to this client
-  const docCheck = await db.execute(sql`
-    SELECT id FROM doc_track_documents WHERE id = ${docId} AND client_id = ${clientId} LIMIT 1
-  `);
-  if (!(docCheck.rows ?? [])[0]) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
   const result = await db.execute(sql`
     SELECT a.id, a.document_id, a.staff_roster_id, a.staff_name, a.signature,
-           a.acknowledged_at, a.train_track_record_id,
+           a.acknowledged_at, a.train_track_record_id, tr.expiry_date,
+           CASE
+             WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN 'pending'
+             WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN 'expired'
+             ELSE 'acknowledged'
+           END AS acknowledgement_status,
            u.name AS acknowledged_by_name
     FROM doc_acknowledgements a
     LEFT JOIN users u ON a.acknowledged_by = u.id
+    LEFT JOIN train_track_records tr
+      ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
     WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
     ORDER BY a.staff_name ASC
   `);
@@ -213,7 +280,10 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.category, d.department, d.created_at
     FROM doc_track_documents d
+    LEFT JOIN sites s ON s.id = d.site_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY d.title ASC
   `);
   const docs = (docsResult.rows ?? []) as any[];
@@ -222,6 +292,7 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   const staffResult = await db.execute(sql`
     SELECT id, name, department FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
+      ${getActiveDepartmentId(req) !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY name ASC
   `);
   const staff = (staffResult.rows ?? []) as any[];
@@ -301,6 +372,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   `);
   const doc = (docResult.rows ?? [])[0] as any;
   if (!doc) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
   const user = req.currentUser!;
   const userId = user.id;
@@ -389,10 +461,11 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
       : sql`NULL::date`;
     const trainResult = await db.execute(sql`
       INSERT INTO train_track_records
-        (client_id, site_id, record_type, staff_name, document_title,
+        (client_id, site_id, record_type, staff_name, training_type, document_title,
          document_type, completed_date, expiry_date, notes, signature)
       VALUES
         (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName},
+         ${doc.title},
          ${doc.title}, ${doc.category}, ${today}::date,
          ${expiryDate},
          ${'Document acknowledgement via DocTrack'},
@@ -468,6 +541,7 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   `);
   const row = (result.rows ?? [])[0] as any;
   if (!row) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
   // Backfill ACL for legacy documents that were uploaded before the ACL check
   // was enforced. If the object has no owner set, tag it now so that the

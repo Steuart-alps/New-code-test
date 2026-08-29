@@ -14,6 +14,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
+import { appendAuditEvent } from "../lib/audit";
 
 const router: IRouter = Router();
 
@@ -209,6 +210,10 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
       .returning();
 
     const joined = await Promise.all(inserted.map(i => fetchJoinedItem(i.id)));
+    await Promise.all(inserted.map(i => appendAuditEvent(req, {
+      clientId, entityType: "compliance_item", entityId: i.id, action: "created", after: i,
+      metadata: { applyToAllSites: true },
+    })));
     res.status(201).json(
       joined.map(j => buildItemResponse(j!.item, j!.site, j!.category, j!.contractor)),
     );
@@ -221,6 +226,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     .returning();
 
   const joined = await fetchJoinedItem(item.id);
+  await appendAuditEvent(req, { clientId, entityType: "compliance_item", entityId: item.id, action: "created", after: item });
   res.status(201).json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
@@ -302,6 +308,10 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   await db.update(complianceItemsTable).set(updateData).where(eq(complianceItemsTable.id, id));
 
   const joined = await fetchJoinedItem(id);
+  await appendAuditEvent(req, {
+    clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
+    action: "updated", before: existing[0], after: joined!.item,
+  });
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 
@@ -316,6 +326,10 @@ router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (r
   }
 
   await db.delete(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+  await appendAuditEvent(req, {
+    clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
+    action: "deleted", before: existing[0],
+  });
   res.status(204).send();
 });
 
@@ -355,6 +369,10 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     .where(eq(complianceItemsTable.id, id));
 
   const joined = await fetchJoinedItem(id);
+  await appendAuditEvent(req, {
+    clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
+    action: "status_changed", before: existing[0], after: joined!.item,
+  });
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
 

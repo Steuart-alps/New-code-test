@@ -69,6 +69,18 @@ async function main() {
     password: "password-123",
   });
   expectOk("admin: register", reg.status, [200, 201]);
+  if (reg.data?.verificationToken) {
+    const verify = await admin(
+      "GET",
+      `/auth/verify-email?token=${encodeURIComponent(reg.data.verificationToken)}`,
+    );
+    expectOk("admin: verify email", verify.status);
+    const login = await admin("POST", "/auth/login", {
+      email: adminEmail,
+      password: "password-123",
+    });
+    expectOk("admin: login", login.status);
+  }
 
   const meRes = await admin("GET", "/auth/me");
   expectOk("admin: /auth/me", meRes.status);
@@ -383,6 +395,29 @@ async function main() {
       siteId: siteAlphaId,
     })).status,
   );
+
+  // An unassigned staff/viewer account must never silently become tenant-wide.
+  // It may still see explicitly site-neutral records, but neither department.
+  for (const role of ["client_staff", "client_viewer"]) {
+    const email = `dept-unassigned-${role}-${ts}@test.local`;
+    const created = await admin("POST", "/users", {
+      name: `Unassigned ${role}`, email, password: "password-000", role, clientId,
+    });
+    expectOk(`unassigned ${role}: create`, created.status, [200, 201]);
+    const session = makeSession();
+    expectOk(`unassigned ${role}: login`, (await session("POST", "/auth/login", {
+      email, password: "password-000",
+    })).status, [200, 201]);
+    const scopedSites = await session("GET", "/sites");
+    expectOk(`unassigned ${role}: GET /sites`, scopedSites.status);
+    const rows = Array.isArray(scopedSites.data) ? scopedSites.data : [];
+    check(`unassigned ${role}: excludes alpha department`, !rows.some(s => s.id === siteAlphaId), "alpha site visible");
+    check(`unassigned ${role}: excludes beta department`, !rows.some(s => s.id === siteBetaId), "beta site visible");
+    expectBlocked(`unassigned ${role}: direct alpha site`, (await session("GET", `/sites/${siteAlphaId}`)).status);
+    // Full exports are management-only, so no staff/viewer can use them to
+    // evade the same department boundary.
+    expectBlocked(`unassigned ${role}: export rejected`, (await session("GET", "/export")).status);
+  }
   expectBlocked(
     "viewer: POST /legionella rejected",
     (await viewer("POST", "/legionella", {

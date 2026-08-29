@@ -508,25 +508,32 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
   const today = format(new Date(), "yyyy-MM-dd");
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
-  const [records, setRecords] = useState<{ recordDate: string; submittedAt: string | null }[]>([]);
+  const [missingDates, setMissingDates] = useState<string[]>([]);
+  const [draftDates, setDraftDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
+  const from = `${month}-01`;
+  const to = `${month}-${String(daysInMonth).padStart(2, "0")}`;
+  const rangeTo = to > today ? today : to;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const siteParam = siteId != null ? `&siteId=${siteId}` : "";
-      const res = await apiFetch(`/food-safety${siteParam}`);
+      const params = new URLSearchParams({ from, to: rangeTo });
+      if (siteId != null) params.set("siteId", String(siteId));
+      const res = await apiFetch(`/food-safety/missing-dates?${params}`);
       if (!cancelled) {
-        setRecords(res.ok ? await res.json() : []);
+        const data = res.ok ? await res.json() : null;
+        setMissingDates(Array.isArray(data?.missingDates) ? data.missingDates : []);
+        setDraftDates(Array.isArray(data?.draftDates) ? data.draftDates : []);
         setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [siteId]);
+  }, [siteId, from, rangeTo]);
 
   const dayStatuses: { date: string; status: FSDayStatus }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
@@ -535,13 +542,16 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
       dayStatuses.push({ date, status: "future" });
       continue;
     }
-    const record = records.find(r => r.recordDate === date);
-    const status: FSDayStatus = !record ? "missing" : record.submittedAt ? "complete" : "draft";
+    const status: FSDayStatus = missingDates.includes(date)
+      ? "missing"
+      : draftDates.includes(date)
+      ? "draft"
+      : "complete";
     dayStatuses.push({ date, status });
   }
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Mon = 0
-  const missingCount = dayStatuses.filter(d => d.status === "missing").length;
+  const missingCount = missingDates.length;
 
   return (
     <Card className="mt-6">
@@ -606,6 +616,23 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
                 </span>
               )}
             </div>
+            {(missingDates.length > 0 || draftDates.length > 0) && (
+              <div className="mt-4 border-t border-border/50 pt-3">
+                <p className="text-xs font-medium text-foreground">Dates needing attention</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {missingDates.map((date) => (
+                    <Button key={date} variant="outline" size="sm" className="h-7 border-red-200 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => onPickDay(date)}>
+                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — missing
+                    </Button>
+                  ))}
+                  {draftDates.map((date) => (
+                    <Button key={date} variant="outline" size="sm" className="h-7 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" onClick={() => onPickDay(date)}>
+                      {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} — draft
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </CardContent>

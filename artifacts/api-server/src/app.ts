@@ -15,6 +15,11 @@ import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 
 const app: Express = express();
+let applicationReady = false;
+
+export function markApplicationReady(): void {
+  applicationReady = true;
+}
 
 // Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
 app.set("trust proxy", 1);
@@ -140,6 +145,12 @@ app.use("/api", enforceTrialLock);
 // Root-level health check — matches the deployment probe path and is exempt
 // from the /api prefix so load balancers / Replit can reach it directly.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+app.get("/readyz", (_req, res) => {
+  if (!applicationReady) {
+    return res.status(503).json({ status: "starting" });
+  }
+  res.json({ status: "ok" });
+});
 
 app.use("/api", router);
 

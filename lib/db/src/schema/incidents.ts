@@ -46,3 +46,19 @@ export const incidentsTable = pgTable("incidents", {
 
 export type Incident = typeof incidentsTable.$inferSelect;
 export type NewIncident = typeof incidentsTable.$inferInsert;
+
+/** Append-only RIDDOR assessment and HSE submission record. */
+export const incidentRiddorEventsTable = pgTable("incident_riddor_events", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  // Legal record: an incident cannot be removed while its RIDDOR history exists.
+  incidentId: integer("incident_id").notNull().references(() => incidentsTable.id, { onDelete: "restrict" }),
+  actorId: integer("actor_id").references(() => usersTable.id, { onDelete: "set null" }),
+  eventType: text("event_type").notNull(), // decision | submission
+  riddorReportable: boolean("riddor_reportable").notNull(),
+  reportedToHse: boolean("reported_to_hse").notNull().default(false),
+  rationale: text("rationale"),
+  hseReference: text("hse_reference"),
+  hseReportDate: date("hse_report_date"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

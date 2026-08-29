@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, sql, inArray, isNull } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
+import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -100,11 +100,15 @@ function parseSiteId(raw: unknown): { siteId: number | null } | { error: string 
 }
 
 /** Confirm the site exists and belongs to the given client. */
-async function siteBelongsToClient(siteId: number, clientId: number): Promise<boolean> {
+async function siteBelongsToClient(siteId: number, clientId: number, departmentId?: number | null): Promise<boolean> {
   const [row] = await db
     .select({ id: sitesTable.id })
     .from(sitesTable)
-    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)))
+    .where(and(
+      eq(sitesTable.id, siteId),
+      eq(sitesTable.clientId, clientId),
+      ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+    ))
     .limit(1);
   return !!row;
 }
@@ -217,7 +221,7 @@ router.get("/config", requireAuth, async (req, res) => {
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
-  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId, getActiveDepartmentId(req)))) {
     return res.status(400).json({ error: "Invalid siteId" });
   }
 
@@ -271,7 +275,7 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
-  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId, getActiveDepartmentId(req)))) {
     return res.status(400).json({ error: "Invalid siteId" });
   }
 
@@ -328,7 +332,7 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
 
   const site = parseSiteId((req.query as { siteId?: unknown }).siteId);
   if ("error" in site) return res.status(400).json({ error: site.error });
-  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId, getActiveDepartmentId(req)))) {
     return res.status(400).json({ error: "Invalid siteId" });
   }
 
@@ -368,7 +372,7 @@ async function resolveDiarySiteId(
     res.status(400).json({ error: site.error });
     return undefined;
   }
-  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId))) {
+  if (site.siteId !== null && !(await siteBelongsToClient(site.siteId, clientId, getActiveDepartmentId(req)))) {
     res.status(400).json({ error: "Invalid siteId" });
     return undefined;
   }
@@ -425,6 +429,65 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(record);
 });
 
+// GET /api/food-safety/missing-dates?from=YYYY-MM-DD&to=YYYY-MM-DD[&siteId=N]
+// Return an explicit, bounded history range rather than making clients infer
+// absent dates from an unbounded record list. Drafts are reported separately:
+// they exist, but still need to be submitted.
+router.get("/missing-dates", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const { from, to } = req.query as { from?: string; to?: string };
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const parseCalendarDate = (value: string | undefined) => {
+    if (!value || !dateRe.test(value)) return NaN;
+    const millis = Date.parse(`${value}T00:00:00Z`);
+    return new Date(millis).toISOString().slice(0, 10) === value ? millis : NaN;
+  };
+  const fromMillis = parseCalendarDate(from);
+  const toMillis = parseCalendarDate(to);
+  if (!from || !to || Number.isNaN(fromMillis) || Number.isNaN(toMillis) || from > to) {
+    return res.status(400).json({ error: "from and to (YYYY-MM-DD) are required, with from no later than to" });
+  }
+  const rangeDays = (toMillis - fromMillis) / 86400000;
+  if (rangeDays > 366) return res.status(400).json({ error: "Date range cannot exceed 367 days" });
+
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+
+  const records = await db
+    .select({
+      recordDate: foodSafetyRecordsTable.recordDate,
+      submittedAt: foodSafetyRecordsTable.submittedAt,
+    })
+    .from(foodSafetyRecordsTable)
+    .where(and(
+      eq(foodSafetyRecordsTable.clientId, clientId),
+      sql`${foodSafetyRecordsTable.recordDate} >= ${from}`,
+      sql`${foodSafetyRecordsTable.recordDate} <= ${to}`,
+      siteScopeCond(siteId),
+    ));
+
+  const submittedDates = new Set(
+    records.filter((record) => record.submittedAt).map((record) => record.recordDate),
+  );
+  const draftDates = records
+    .filter((record) => !record.submittedAt)
+    .map((record) => record.recordDate)
+    .sort();
+  const missingDates: string[] = [];
+  for (
+    let day = fromMillis;
+    day <= toMillis;
+    day += 86400000
+  ) {
+    const date = new Date(day).toISOString().slice(0, 10);
+    if (!submittedDates.has(date) && !draftDates.includes(date)) missingDates.push(date);
+  }
+
+  res.json({ from, to, siteId, missingDates, draftDates });
+});
+
 // POST /api/food-safety[?siteId=N]
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
@@ -440,7 +503,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
-    .select({ id: foodSafetyRecordsTable.id })
+    .select({ id: foodSafetyRecordsTable.id, siteId: foodSafetyRecordsTable.siteId })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
@@ -547,12 +610,17 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db
-    .select({ id: foodSafetyRecordsTable.id })
+    .select({ id: foodSafetyRecordsTable.id, siteId: foodSafetyRecordsTable.siteId })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
     .limit(1);
 
   if (!existing) return res.status(404).json({ error: "Not found" });
+  // An ID is not a department bypass: always re-check the owning site's
+  // authorization rather than trusting the tenant predicate alone.
+  if (existing.siteId !== null && !(await siteBelongsToClient(existing.siteId, clientId, getActiveDepartmentId(req)))) {
+    return res.status(403).json({ error: "Site not accessible" });
+  }
 
   const parsedUpdate = recordFieldsSchema.safeParse(req.body);
   if (!parsedUpdate.success) return res.status(400).json({ error: "Invalid data" });

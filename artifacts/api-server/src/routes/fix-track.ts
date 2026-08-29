@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
 import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
@@ -24,11 +25,11 @@ function allowedSites(clientId: number, deptId: number) {
     ));
 }
 
-async function verifySite(siteId: number | null | undefined, clientId: number) {
+async function canAccessSite(siteId: number | null | undefined, clientId: number, deptId: number | null) {
   if (siteId == null) return true;
-  const [row] = await db.select({ id: sitesTable.id }).from(sitesTable)
+  const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
     .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
-  return !!row;
+  return !!site && (deptId === null || site.departmentId === null || site.departmentId === deptId);
 }
 
 async function verifyContractor(contractorId: number | null | undefined, clientId: number) {
@@ -196,7 +197,7 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
     const allowedTypes = await getEffectiveOptionList(clientId, "fixtrack_issue_types");
     if (!allowedTypes.includes(data.issueType)) return res.status(400).json({ error: "Invalid issue type" });
   }
-  if (!(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
+  if (!(await canAccessSite(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   if (!(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 
   // Auto-assign: if no contractor supplied, pick the client's best-matching
@@ -238,7 +239,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       if (!allowedTypes.includes(data.issueType)) return res.status(400).json({ error: "Invalid issue type" });
     }
   }
-  if ("siteId"       in data && !(await verifySite(data.siteId, clientId)))           return res.status(400).json({ error: "Invalid site" });
+  if ("siteId" in data && !(await canAccessSite(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   if ("contractorId" in data && !(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
 
   const updateConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
@@ -306,12 +307,15 @@ router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
+  const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) conditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any);
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
-    .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId))).limit(1);
+    .where(and(...conditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   await db.delete(fixTrackIssuesTable)
-    .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)));
+    .where(and(...conditions));
   res.status(204).end();
 });
 
@@ -324,8 +328,11 @@ router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
+  const uploadConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const uploadDeptId = getActiveDepartmentId(req);
+  if (uploadDeptId !== null) uploadConditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, uploadDeptId))) as any);
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
-    .where(and(eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId))).limit(1);
+    .where(and(...uploadConditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   z.object({
@@ -406,19 +413,55 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     );
   }
 
-  const [row] = await db
-    .update(fixTrackIssuesTable)
-    .set({
-      emailRequestMode: parsed.data.mode,
-      emailRequestedBy: (req.session as any).userId ?? null,
-      emailRequestedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(and(...requestConditions))
-    .returning();
-  if (!row) return res.status(404).json({ error: "Not found" });
-  if (!row.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
+  const [existing] = await db.select({
+    contractorId: fixTrackIssuesTable.contractorId,
+    emailRequestStatus: fixTrackIssuesTable.emailRequestStatus,
+  }).from(fixTrackIssuesTable).where(and(...requestConditions)).limit(1);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!existing.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
+  if (existing.emailRequestStatus === "sent" || existing.emailRequestStatus === "sending") {
+    return res.status(409).json({ error: "A contractor email has already been sent for this issue" });
+  }
+
+  await db.update(fixTrackIssuesTable).set({
+    emailRequestMode: parsed.data.mode,
+    emailRequestStatus: "pending",
+    emailRequestedBy: (req.session as any).userId ?? null,
+    emailRequestedAt: new Date(),
+    emailApprovedBy: null,
+    emailApprovedAt: null,
+    updatedAt: new Date(),
+  }).where(and(...requestConditions));
   res.json({ ok: true, message: "Approval requested" });
+});
+
+// Manager: approve a specific requested mode. Approval and dispatch are
+// intentionally separate so the outbound boundary can require this state.
+router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const deptId = getActiveDepartmentId(req);
+  const deptClause = deptId !== null
+    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))`
+    : sql``;
+  const result = await db.execute(sql`
+    UPDATE fix_track_issues
+    SET email_request_status = 'approved',
+        email_approved_by = ${(req.session as any).userId ?? null},
+        email_approved_at = now(),
+        updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId}
+      AND email_request_status = 'pending'
+      AND email_request_mode IN ('assign', 'quote')${deptClause}
+    RETURNING email_request_mode
+  `);
+  const row = (result.rows as any[])[0];
+  if (!row) return res.status(409).json({ error: "There is no pending contractor email request to approve" });
+  res.json({ ok: true, mode: row.email_request_mode });
 });
 
 // Manager: dismiss a pending request without sending
@@ -430,7 +473,11 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const rejectConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
+  const rejectConditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+    eq(fixTrackIssuesTable.emailRequestStatus, "pending"),
+  ];
   const rejectDeptId = getActiveDepartmentId(req);
   if (rejectDeptId !== null) {
     rejectConditions.push(
@@ -440,10 +487,10 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
 
   const [row] = await db
     .update(fixTrackIssuesTable)
-    .set({ emailRequestMode: null, emailRequestedBy: null, emailRequestedAt: null, updatedAt: new Date() })
+    .set({ emailRequestStatus: "rejected", updatedAt: new Date() })
     .where(and(...rejectConditions))
     .returning();
-  if (!row) return res.status(404).json({ error: "Not found" });
+  if (!row) return res.status(409).json({ error: "There is no pending contractor email request to dismiss" });
   res.json({ ok: true });
 });
 
@@ -459,18 +506,18 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const modeParsed = z.object({ mode: z.enum(["assign", "quote"]).optional() }).safeParse(req.body ?? {});
-  if (!modeParsed.success) return res.status(400).json({ error: "Invalid data" });
-
   const sendDeptId = getActiveDepartmentId(req);
   const sendDeptClause = sendDeptId !== null
     ? sql` AND (fi.site_id IS NULL OR fi.site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
+    : sql``;
+  const sendUpdateDeptClause = sendDeptId !== null
+    ? sql` AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${sendDeptId})))`
     : sql``;
 
   const result = await db.execute(sql`
     SELECT
       fi.id, fi.title, fi.issue_type, fi.priority, fi.location, fi.description,
-      fi.target_date, fi.contractor_id,
+       fi.target_date, fi.contractor_id, fi.email_request_mode, fi.email_request_status,
       s.name  AS site_name,
       c.name  AS contractor_name,
       c.email AS contractor_email,
@@ -488,20 +535,77 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   if (!issue.contractor_id)   return res.status(400).json({ error: "No contractor assigned to this issue" });
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
 
-  // Mode: explicit in body, else whatever the pending request asked for, else assign
-  const pendingModeResult = await db.execute(sql`
-    SELECT email_request_mode FROM fix_track_issues WHERE id = ${id} AND client_id = ${clientId}
-  `);
-  const pendingMode = ((pendingModeResult.rows as any[])[0]?.email_request_mode ?? null) as string | null;
-  const mode: "assign" | "quote" = modeParsed.data.mode ?? (pendingMode === "quote" ? "quote" : "assign");
+  if (!["approved", "sending"].includes(issue.email_request_status) || !["assign", "quote"].includes(issue.email_request_mode)) {
+    return res.status(403).json({ error: "An approved contractor email request is required before sending" });
+  }
+  const mode = issue.email_request_mode as "assign" | "quote";
 
-  const clearPendingRequest = () => db.execute(sql`
+  // Claim the approved request before reaching either email sender. This makes
+  // concurrent clicks safe and is the final gate at the outbound boundary.
+  const claim = await db.execute(sql`
     UPDATE fix_track_issues
-    SET email_request_mode = NULL, email_requested_by = NULL, email_requested_at = NULL, updated_at = now()
+    SET email_request_status = 'sending', updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
+      AND email_request_status IN ('approved', 'sending') AND email_request_mode = ${mode}${sendUpdateDeptClause}
+    RETURNING id
+  `);
+  if (!(claim.rows as any[])[0]) {
+    return res.status(409).json({ error: "This contractor email request is already being processed or has changed" });
+  }
+  const markSent = () => db.execute(sql`
+    UPDATE fix_track_issues
+    SET email_request_status = 'sent', email_sent_at = now(), updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId} AND email_request_status = 'sending'
+  `);
+  const restoreApproval = () => db.execute(sql`
+    UPDATE fix_track_issues
+    SET email_request_status = 'approved', updated_at = now()
+    WHERE id = ${id} AND client_id = ${clientId} AND email_request_status = 'sending'
   `);
 
-  if (mode === "quote") {
+  // Insert before calling the provider. The unique client/issue/mode tuple
+  // gives every dispatch a stable identity, including retries after a crash.
+  let dispatch: any;
+  let providerAccepted = false;
+  try {
+  const insertedDispatch = await db.execute(sql`
+    INSERT INTO fix_track_email_dispatches (client_id, issue_id, mode, idempotency_key, status)
+    VALUES (${clientId}, ${id}, ${mode}, ${randomUUID()}, 'sending')
+    ON CONFLICT (client_id, issue_id, mode) DO NOTHING
+    RETURNING id, idempotency_key, status
+  `);
+  dispatch = (insertedDispatch.rows as any[])[0];
+  if (!dispatch) {
+    const existingDispatch = await db.execute(sql`
+      SELECT id, idempotency_key, status
+      FROM fix_track_email_dispatches
+      WHERE client_id = ${clientId} AND issue_id = ${id} AND mode = ${mode}
+      LIMIT 1
+    `);
+    dispatch = (existingDispatch.rows as any[])[0];
+  }
+  if (!dispatch) throw new Error("Could not create contractor email dispatch");
+
+  // The provider already accepted this exact dispatch; only repair the issue
+  // state. Never submit another provider request in this case.
+  if (dispatch.status === "accepted") {
+    await markSent();
+    return res.json({ ok: true, message: mode === "quote" ? "Quote request already sent to contractor" : "Email already sent to contractor" });
+  }
+  if (dispatch.status === "failed") {
+    await db.execute(sql`
+      UPDATE fix_track_email_dispatches
+      SET status = 'sending', last_error = NULL, updated_at = now()
+      WHERE id = ${dispatch.id} AND client_id = ${clientId} AND status = 'failed'
+    `);
+  }
+
+  const markProviderAccepted = () => db.execute(sql`
+    UPDATE fix_track_email_dispatches
+    SET status = 'accepted', accepted_at = now(), last_error = NULL, updated_at = now()
+    WHERE id = ${dispatch.id} AND client_id = ${clientId}
+  `);
+    if (mode === "quote") {
     // Quote requests carry no action tokens — just send the email.
     const quoteDocs: { name: string; url: string }[] = [];
     const quoteDocResult = await db.execute(sql`
@@ -530,45 +634,29 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
       companyName:      issue.company_name ?? "ComplyTrack",
       clientId,
       siteDocuments:    quoteDocs.length ? quoteDocs : undefined,
+      idempotencyKey:   dispatch.idempotency_key,
     });
-    await clearPendingRequest();
-    return res.json({ ok: true, message: "Quote request sent to contractor" });
-  }
-
-  // Check for existing active (unused, non-expired) tokens for this issue.
-  // Return 409 so the frontend can warn the manager before resending.
-  const force = req.query.force === "true";
-  if (!force) {
-    const existing = await db.execute(sql`
-      SELECT id FROM fix_track_action_tokens
-      WHERE  issue_id   = ${id}
-        AND  client_id  = ${clientId}
-        AND  used_at    IS NULL
-        AND  expires_at  > now()
-      LIMIT 1
-    `);
-    if ((existing.rows as any[]).length > 0) {
-      return res.status(409).json({
-        alreadySent: true,
-        message: "An email has already been sent for this issue. Send again?",
-      });
+    providerAccepted = true;
+    await markProviderAccepted();
+    await markSent();
+      return res.json({ ok: true, message: "Quote request sent to contractor" });
     }
-  }
 
-  // ?force=true: expire all previous tokens before minting fresh ones
-  await db.execute(sql`
+    // The state claim above prevents resends. Expire any legacy action links
+    // before minting the one approved assignment's links.
+    await db.execute(sql`
     UPDATE fix_track_action_tokens
     SET    expires_at = now()
     WHERE  issue_id   = ${id}
       AND  client_id  = ${clientId}
       AND  used_at    IS NULL
-  `);
+    `);
 
-  const proto   = (req.headers["x-forwarded-proto"] as string) ?? req.protocol;
-  const host    = (req.headers["x-forwarded-host"]  as string) ?? req.get("host") ?? "";
-  const baseUrl = `${proto}://${host}`;
+    const proto   = (req.headers["x-forwarded-proto"] as string) ?? req.protocol;
+    const host    = (req.headers["x-forwarded-host"]  as string) ?? req.get("host") ?? "";
+    const baseUrl = `${proto}://${host}`;
 
-  const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
+    const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
 
   // CC the approving manager so they get a copy (and the calendar invite).
   const rawManagerEmail = req.currentUser?.email?.trim() || undefined;
@@ -669,10 +757,29 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     icsAttachment,
     icsFilename,
     cc:               managerEmail,
+    idempotencyKey:   dispatch.idempotency_key,
   });
 
-  await clearPendingRequest();
+  providerAccepted = true;
+  await markProviderAccepted();
+  await markSent();
   res.json({ ok: true, message: "Email sent to contractor" });
+  } catch (err) {
+    // Only an explicit provider failure is retryable. If provider acceptance
+    // succeeded but persisting it failed, retain `sending`: retrying with the
+    // same durable provider idempotency key is safe and cannot duplicate mail.
+    if (!providerAccepted) {
+      if (dispatch) {
+      await db.execute(sql`
+        UPDATE fix_track_email_dispatches
+        SET status = 'failed', last_error = ${err instanceof Error ? err.message.slice(0, 2000) : "Provider submission failed"}, updated_at = now()
+        WHERE id = ${dispatch.id} AND client_id = ${clientId} AND status = 'sending'
+      `).catch(() => {});
+      }
+      await restoreApproval();
+    }
+    throw err;
+  }
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
