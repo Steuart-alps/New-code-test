@@ -23,3 +23,4 @@
 - [Task completion patterns](task-completion-patterns.md) — task queue lags codebase heavily; audit before building; subagent delegation patterns; full scheduler/trial-ended inventory.
 - [Signup verification tests](signup-verification-tests.md) — self-registration tests must explicitly verify the email token before expecting an authenticated session.
 - [UK compliance controls](uk-compliance-controls.md) — present guidance as support, not certification; verified action closure needs independent, atomic evidence-backed state changes.
+- [AnyTrack roadmap](anytrack-roadmap.md) — keep user-configurable tracks as a future direction; prioritise completing and improving the main tracks first.
