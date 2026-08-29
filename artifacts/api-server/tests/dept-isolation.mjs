@@ -1,14 +1,14 @@
 // Department-isolation integration tests.
 //
-// Verifies that client_staff users scoped to a specific department can only
-// access sites, compliance items, and module checks that belong to their
-// department. Admins bypass all department filtering.
+// Verifies that client_staff and client_viewer users scoped to a specific
+// department can only access sites, compliance items, and module checks that
+// belong to their department. Admins bypass all department filtering.
 //
 // Flow:
 //   1. Admin registers and creates two departments (Alpha, Beta).
 //   2. Admin creates one site per department with seeded compliance checks.
-//   3. Admin creates a staff user assigned to Department Alpha.
-//   4. Staff logs in; tests confirm they see only Alpha resources.
+//   3. Admin creates staff and viewer users assigned to Department Alpha.
+//   4. Staff and viewer log in; tests confirm they see only Alpha resources.
 //   5. Admin confirms unrestricted access to both departments.
 //
 // Usage: node tests/dept-isolation.mjs  (API must be running on API_BASE)
@@ -30,6 +30,10 @@ function check(name, condition, detail) {
 
 function expectBlocked(name, status) {
   check(name, [400, 403, 404].includes(status), `expected 400/403/404, got ${status}`);
+}
+
+function expectForbidden(name, status) {
+  check(name, status === 403, `expected 403, got ${status}`);
 }
 
 function expectOk(name, status, allowed = [200, 201]) {
@@ -356,7 +360,7 @@ async function main() {
     "viewer: GET /sites/:id (own dept)",
     (await viewer("GET", `/sites/${siteAlphaId}`)).status,
   );
-  expectBlocked(
+  expectForbidden(
     "viewer: GET /sites/:id (other dept)",
     (await viewer("GET", `/sites/${siteBetaId}`)).status,
   );
@@ -379,7 +383,7 @@ async function main() {
       !viewerItems.some((i) => i.id === betaItem.id),
       "beta dept item visible in viewer list",
     );
-    expectBlocked(
+    expectForbidden(
       "viewer: GET /compliance-items/:id (other dept)",
       (await viewer("GET", `/compliance-items/${betaItem.id}`)).status,
     );
