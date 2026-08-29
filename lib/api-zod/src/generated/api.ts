@@ -773,7 +773,7 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   ]),
   frequencyDays: zod.number(),
   lastDate: zod.string().nullish(),
-  lastResult: zod.string().nullish(),
+  lastResult: zod.enum(["pass", "fail", "action_required"]).nullable(),
   dueDate: zod.string().nullish(),
   status: zod.enum(["ok", "due_soon", "overdue", "never"]),
 });
@@ -1730,7 +1730,7 @@ export const GetLegionellaStatusResponseItem = zod.object({
   ]),
   frequencyDays: zod.number(),
   lastDate: zod.string().nullish(),
-  lastResult: zod.string().nullish(),
+  lastResult: zod.enum(["pass", "fail", "action_required"]).nullable(),
   dueDate: zod.string().nullish(),
   status: zod.enum(["ok", "due_soon", "overdue", "never"]),
 });

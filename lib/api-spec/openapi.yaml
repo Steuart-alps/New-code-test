@@ -2408,6 +2408,7 @@ components:
           nullable: true
         lastResult:
           type: string
+          enum: [pass, fail, action_required]
           nullable: true
         dueDate:
           type: string
@@ -2418,6 +2419,7 @@ components:
       required:
         - checkType
         - frequencyDays
+        - lastResult
         - status
 
     FireSafetyConfig:
@@ -3163,6 +3165,7 @@ components:
           nullable: true
         lastResult:
           type: string
+          enum: [pass, fail, action_required]
           nullable: true
         dueDate:
           type: string
@@ -3173,4 +3176,5 @@ components:
       required:
         - checkType
         - frequencyDays
+        - lastResult
         - status

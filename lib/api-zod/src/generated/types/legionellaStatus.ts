@@ -6,13 +6,14 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { LegionellaCheckType } from "./legionellaCheckType";
+import type { LegionellaStatusLastResult } from "./legionellaStatusLastResult";
 import type { LegionellaStatusStatus } from "./legionellaStatusStatus";
 
 export interface LegionellaStatus {
   checkType: LegionellaCheckType;
   frequencyDays: number;
   lastDate?: string | null;
-  lastResult?: string | null;
+  lastResult: LegionellaStatusLastResult;
   dueDate?: string | null;
   status: LegionellaStatusStatus;
 }

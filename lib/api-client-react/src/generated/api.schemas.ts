@@ -367,6 +367,16 @@ export interface UpdateFireSafetyCheckRequest {
   performedBy?: string | null;
 }
 
+export type FireSafetyStatusLastResult =
+  | (typeof FireSafetyStatusLastResult)[keyof typeof FireSafetyStatusLastResult]
+  | null;
+
+export const FireSafetyStatusLastResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
+
 export type FireSafetyStatusStatus =
   (typeof FireSafetyStatusStatus)[keyof typeof FireSafetyStatusStatus];
 
@@ -381,7 +391,7 @@ export interface FireSafetyStatus {
   checkType: FireCheckType;
   frequencyDays: number;
   lastDate?: string | null;
-  lastResult?: string | null;
+  lastResult: FireSafetyStatusLastResult;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
 }
@@ -767,6 +777,16 @@ export interface UpdateLegionellaCheckRequest {
   performedBy?: string | null;
 }
 
+export type LegionellaStatusLastResult =
+  | (typeof LegionellaStatusLastResult)[keyof typeof LegionellaStatusLastResult]
+  | null;
+
+export const LegionellaStatusLastResult = {
+  pass: "pass",
+  fail: "fail",
+  action_required: "action_required",
+} as const;
+
 export type LegionellaStatusStatus =
   (typeof LegionellaStatusStatus)[keyof typeof LegionellaStatusStatus];
 
@@ -781,7 +801,7 @@ export interface LegionellaStatus {
   checkType: LegionellaCheckType;
   frequencyDays: number;
   lastDate?: string | null;
-  lastResult?: string | null;
+  lastResult: LegionellaStatusLastResult;
   dueDate?: string | null;
   status: LegionellaStatusStatus;
 }

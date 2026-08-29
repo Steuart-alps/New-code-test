@@ -138,6 +138,7 @@ async function testFireSafety(req) {
   for (const entry of statusRes.data ?? []) {
     check(`fire-safety: status.${entry.checkType} has frequencyDays`, typeof entry.frequencyDays === "number", `got ${entry.frequencyDays}`);
     check(`fire-safety: status.${entry.checkType} has lastDate`, entry.lastDate !== undefined, "lastDate field missing");
+    check(`fire-safety: status.${entry.checkType} has lastResult`, entry.lastResult !== undefined, "lastResult field missing");
     check(`fire-safety: status.${entry.checkType} has status field`, ["ok", "due_soon", "overdue", "never"].includes(entry.status), `got ${entry.status}`);
   }
 
@@ -146,6 +147,7 @@ async function testFireSafety(req) {
   // which are weekly — but yesterday is 6 days before due).
   const alarmStatus = (statusRes.data ?? []).find((s) => s.checkType === "alarm");
   check("fire-safety: alarm check yesterday is not overdue", alarmStatus?.status !== "overdue", `status=${alarmStatus?.status}`);
+  check("fire-safety: latest failed alarm result is surfaced", alarmStatus?.lastResult === "fail", `lastResult=${alarmStatus?.lastResult}`);
 
   // 7. DELETE
   const delId = createdIds["fire_drill"];
@@ -284,8 +286,12 @@ async function testLegionella(req) {
   for (const entry of statusRes.data ?? []) {
     check(`legionella: status.${entry.checkType} has frequencyDays`, typeof entry.frequencyDays === "number", `got ${entry.frequencyDays}`);
     check(`legionella: status.${entry.checkType} has lastDate`, entry.lastDate !== undefined, "lastDate field missing");
+    check(`legionella: status.${entry.checkType} has lastResult`, entry.lastResult !== undefined, "lastResult field missing");
     check(`legionella: status.${entry.checkType} has valid status`, ["ok", "due_soon", "overdue", "never"].includes(entry.status), `got ${entry.status}`);
   }
+
+  const coldTankStatus = (statusRes.data ?? []).find((s) => s.checkType === "cold_tank_temp");
+  check("legionella: latest failed cold-tank result is surfaced", coldTankStatus?.lastResult === "fail", `lastResult=${coldTankStatus?.lastResult}`);
 
   // calorifier_clean is annual (365 days) — a record from yesterday must be "ok"
   const annualStatus = (statusRes.data ?? []).find((s) => s.checkType === "calorifier_clean");

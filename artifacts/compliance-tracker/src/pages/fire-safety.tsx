@@ -34,7 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   Flame, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
-  Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings,
+  Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -114,9 +114,14 @@ function todayIso() {
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
-  if (lastResult === "fail" || lastResult === "action_required") return (
+  if (lastResult === "fail") return (
     <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
-      <AlertTriangle className="w-3 h-3 mr-1" />{lastResult === "fail" ? "Failed" : "Action needed"}
+      <XCircle className="w-3 h-3 mr-1" />Failed
+    </Badge>
+  );
+  if (lastResult === "action_required") return (
+    <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-300">
+      <ShieldAlert className="w-3 h-3 mr-1" />Action needed
     </Badge>
   );
   if (status === "ok") return (
@@ -995,8 +1000,9 @@ export default function FireSafetyPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
-                  item.lastResult === "fail" || item.lastResult === "action_required"
-                                             ? "border-l-red-600 bg-red-100/60" :
+                  item.lastResult === "fail"       ? "border-l-red-600 bg-red-100/60" :
+                  item.lastResult === "action_required"
+                                             ? "border-l-orange-600 bg-orange-100/60" :
                   item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
                   item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
                   item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :

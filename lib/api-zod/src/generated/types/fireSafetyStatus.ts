@@ -6,13 +6,14 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { FireCheckType } from "./fireCheckType";
+import type { FireSafetyStatusLastResult } from "./fireSafetyStatusLastResult";
 import type { FireSafetyStatusStatus } from "./fireSafetyStatusStatus";
 
 export interface FireSafetyStatus {
   checkType: FireCheckType;
   frequencyDays: number;
   lastDate?: string | null;
-  lastResult?: string | null;
+  lastResult: FireSafetyStatusLastResult;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
 }
