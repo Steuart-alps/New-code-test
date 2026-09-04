@@ -32,11 +32,6 @@ export async function getUserById(id: number): Promise<SafeUser | null> {
       isMaintenanceManager: usersTable.isMaintenanceManager,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
-      stripeCustomerId: usersTable.stripeCustomerId,
-      subscriptionStatus: usersTable.subscriptionStatus,
-      gcMandateId: usersTable.gcMandateId,
-      gcSubscriptionId: usersTable.gcSubscriptionId,
-      gcCustomerId: usersTable.gcCustomerId,
     })
     .from(usersTable)
     .where(eq(usersTable.id, id));

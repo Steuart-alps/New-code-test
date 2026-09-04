@@ -86,3 +86,6 @@ export * from "./staff-training"
 ;
 export * from "./track-actions"
 ;
+
+export * from "./documents"
+;

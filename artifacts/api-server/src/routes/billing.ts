@@ -43,13 +43,11 @@ router.get("/config", requireAuth, async (req, res) => {
   try {
     const publishableKey = await getStripePublishableKey();
 
-  const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
+    const clientId = getClientId(req);
     let subscription = null;
     let siteCount = 0;
     if (clientId) {
-  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       if (client?.stripeSubscriptionId) {
         const subRows = await db.execute(
           sql`SELECT * FROM stripe.subscriptions WHERE id = ${client.stripeSubscriptionId} LIMIT 1`
@@ -67,14 +65,14 @@ router.get("/config", requireAuth, async (req, res) => {
 
     // Per-service breakdown: which branches the client has, and the per-site
     // monthly rate across all of them (capped by the bundle price).
-    const entitled = await getEntitledServices(clientId);
+    let entitled: "all" | ServiceKey[] = ["core"];
     let activeAddons: string[] = [];
     let hasBundle = false;
     let subscribed = false;
     let perSiteRate = perSite?.unitAmount ?? 0;
     if (clientId) {
       entitled = await getEntitledServices(clientId);
-  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+      const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
       if (client?.stripeCustomerId) {
         try {
           const live = await findLiveSubscription(client.stripeCustomerId);
@@ -208,8 +206,6 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     discountCode?: unknown;
   };
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
@@ -307,25 +303,64 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       couponId = await getAlpsDiscountCouponId(stripe);
     }
 
-    const session = await stripe.billingPortal.sessions.create({
-      customer: client.stripeCustomerId,
-      configuration,
-      return_url: `${baseUrl}/`,
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ["card"],
+      line_items: lineItems,
+      mode: "subscription",
+      success_url: `${baseUrl}/?billing=success&clientId=${clientId}`,
+      cancel_url: `${baseUrl}/?billing=cancel`,
+      metadata: {
+        clientId: String(clientId),
+        ...(discountReservation
+          ? {
+              discountCode: discountReservation.code,
+              discountReservationToken: discountReservation.token,
+            }
+          : {}),
+      },
+      ...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
+      ...(discountReservation
+        ? { expires_at: Math.floor(discountReservation.expiresAt.getTime() / 1000) }
+        : {}),
+      automatic_tax: { enabled: true },
+      customer_update: { address: "auto" },
     });
-    res.json({ url: session.url });
+    checkoutSessionCreated = true;
+
+    if (discountReservation) {
+      try {
+        await attachDiscountCheckoutSession(clientId, discountReservation, session.id);
+      } catch (err) {
+        try {
+          await stripe.checkout.sessions.expire(session.id);
+          await releaseAlpsDiscountReservation(clientId, discountReservation);
+        } catch (cleanupError) {
+          logger.error(
+            { err: cleanupError, clientId, checkoutSessionId: session.id },
+            "Could not safely cancel an unattached ALPS discount checkout session",
+          );
+        }
+        throw err;
+      }
+    }
+
+    res.json({ url: session.url, discountApplied: Boolean(discountReservation) });
   } catch (err: any) {
+    if (discountReservation && !checkoutSessionCreated) {
+      try {
+        await releaseAlpsDiscountReservation(clientId, discountReservation);
+      } catch {
+        // Preserve the original checkout failure; a stale reservation expires.
+      }
+    }
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/billing/refresh-access — drop the cached trial-lock decision for
-// the caller's client and re-check Stripe fresh. Called by the lock screen
-// after checkout so a new subscription restores access immediately instead of
-// waiting out the cache TTL.
-router.post("/refresh-access", requireAuth, async (req, res) => {
+// GET /api/billing/discount-code — lifecycle status for the client's code.
+router.get("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) return res.status(400).json({ error: "No client context" });
   try {
     res.json(await getClientDiscountCodeStatus(clientId));
@@ -337,8 +372,6 @@ router.post("/refresh-access", requireAuth, async (req, res) => {
 // POST /api/billing/discount-code — generate (or replace) the client's code.
 router.post("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) return res.status(400).json({ error: "No client context" });
   try {
     const result = await issueClientDiscountCode(clientId, req.currentUser?.id ?? null);
@@ -369,8 +402,6 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     return res.status(400).json({ error: "Action must be 'add' or 'remove'" });
   }
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
@@ -479,8 +510,6 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 // resolved server-side, never taken from the request).
 router.get("/invoices", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
@@ -590,8 +619,6 @@ async function createNoRefundPortalConfig(stripe: any): Promise<string> {
 // POST /api/billing/portal — customer portal for managing subscription
 router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
@@ -618,25 +645,57 @@ router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), a
 // waiting out the cache TTL.
 router.post("/refresh-access", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
-
-  const module = req.params.module as ModuleName;
   if (!clientId) return res.json({ billingLocked: false });
   try {
     invalidateTrialLock(clientId);
     invalidateEntitlements(clientId);
     const billingLocked = await isClientBillingLocked(clientId);
+    res.json({ billingLocked });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const MODULE_NAMES = ["safetrack", "dailytrack"] as const;
-export default router;
-
-  const [updated] = await db
-    .update(clientsTable)
-    .set({ ...updates, updatedAt: new Date() })
-    .where(eq(clientsTable.id, clientId))
-    .returning({ safeTrackEnabled: clientsTable.safeTrackEnabled, dailyTrackEnabled: clientsTable.dailyTrackEnabled });
-
 type ModuleName = (typeof MODULE_NAMES)[number];
 
-  const updates: Partial<typeof clientsTable.$inferInsert> = {};
+function moduleState(client: Pick<typeof clientsTable.$inferSelect, "safeTrackEnabled" | "dailyTrackEnabled">) {
+  return {
+    safetrack: { enabled: client.safeTrackEnabled },
+    dailytrack: { enabled: client.dailyTrackEnabled },
+  };
+}
 
-  const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+router.get("/modules", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const [client] = await db.select({
+    safeTrackEnabled: clientsTable.safeTrackEnabled,
+    dailyTrackEnabled: clientsTable.dailyTrackEnabled,
+  }).from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client) return res.status(404).json({ error: "Client not found" });
+  res.json(moduleState(client));
+});
+
+router.post("/modules/:module", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  const parsedModule = z.enum(MODULE_NAMES).safeParse(req.params.module);
+  const parsedBody = z.object({ enabled: z.boolean() }).safeParse(req.body);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!parsedModule.success || !parsedBody.success) return res.status(400).json({ error: "Invalid module update" });
+
+  const updates: Partial<typeof clientsTable.$inferInsert> = parsedModule.data === "safetrack"
+    ? { safeTrackEnabled: parsedBody.data.enabled }
+    : { dailyTrackEnabled: parsedBody.data.enabled };
+  const [updated] = await db.update(clientsTable)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(clientsTable.id, clientId))
+    .returning({
+      safeTrackEnabled: clientsTable.safeTrackEnabled,
+      dailyTrackEnabled: clientsTable.dailyTrackEnabled,
+    });
+  if (!updated) return res.status(404).json({ error: "Client not found" });
+  res.json(moduleState(updated));
+});
+
+export default router;

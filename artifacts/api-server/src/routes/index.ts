@@ -57,6 +57,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
+import dailyChecklistsRouter from "./daily-checklists";
 
 const router: IRouter = Router();
 

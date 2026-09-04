@@ -201,7 +201,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     if (!settingsCache[item.clientId]) {
       settingsCache[item.clientId] = await getClientSettings(item.clientId);
     }
-  const settings = await getClientSettings(item.clientId);
+    const settings = settingsCache[item.clientId];
   const companyName = settings["companyName"] ?? "ComplyTrack";
   const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
@@ -251,7 +251,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.scheduleToken, token))
+    .where(and(eq(complianceItemsTable.id, itemId), eq(complianceItemsTable.clientId, callerClientId)))
     .limit(1);
 
   const row = rows[0];
@@ -259,7 +259,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
   const { item, contractor } = row;
   if (!contractor?.email) return void res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
 
-  const settings = await getClientSettings(item.clientId);
+  const settings = await getClientSettings(row.item.clientId);
   const companyName = settings["companyName"] ?? "ComplyTrack";
   const fromEmail = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const defaultLeadTimeDays = parseInt(settings["defaultLeadTimeDays"] ?? "30", 10);
@@ -299,7 +299,7 @@ router.get("/notifications/public/schedule/:token", async (req, res) => {
   const row = rows[0];
   if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
 
-  const settings = await getClientSettings(item.clientId);
+  const settings = await getClientSettings(row.item.clientId);
   res.json({
     itemTitle: row.item.title,
     notes: row.item.notes,

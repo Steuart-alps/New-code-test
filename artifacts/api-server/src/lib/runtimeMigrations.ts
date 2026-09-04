@@ -491,14 +491,8 @@ export async function runRuntimeMigrations() {
     `);
 
     // Add module flags to clients table
-    const hasSafeTrack = await columnExists("clients", "safe_track_enabled");
-    if (!hasSafeTrack) {
-      await db.execute(sql`ALTER TABLE "clients" ADD COLUMN "safe_track_enabled" boolean NOT NULL DEFAULT false`);
-    }
-    const hasDailyTrack = await columnExists("clients", "daily_track_enabled");
-    if (!hasDailyTrack) {
-      await db.execute(sql`ALTER TABLE "clients" ADD COLUMN "daily_track_enabled" boolean NOT NULL DEFAULT false`);
-    }
+    await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "safe_track_enabled" boolean NOT NULL DEFAULT false`);
+    await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "daily_track_enabled" boolean NOT NULL DEFAULT false`);
 
     logger.info("Runtime migrations complete");
   } catch (err) {

@@ -2,7 +2,6 @@ import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
-import { pgTable, serial, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
 
 export const dailyChecklistsTable = pgTable("daily_checklists", {
   id: serial("id").primaryKey(),
