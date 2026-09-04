@@ -11,6 +11,14 @@ function check(name, condition) {
   }
 }
 
+function requireSuccess(name, response, expectedStatus) {
+  check(name, response.status === expectedStatus);
+  if (response.status !== expectedStatus) {
+    console.error(`${name}: status ${response.status}`, response.data);
+    throw new Error(`${name} setup failed`);
+  }
+}
+
 async function request(method, path, body) {
   const response = await fetch(`${BASE}${path}`, {
     method,
@@ -38,14 +46,18 @@ async function main() {
   const registered = await request("POST", "/auth/register", {
     name: "Doc Status Test", email, password: "password-123",
   });
-  check("register account", [200, 201].includes(registered.status));
-  if (registered.data?.verificationToken) {
-    check("verify account", (await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status === 200);
-    check("log in", (await request("POST", "/auth/login", { email, password: "password-123" })).status === 200);
-  }
+  requireSuccess("register account", registered, 200);
+  check("test server exposes verification token", typeof registered.data?.verificationToken === "string");
+  if (typeof registered.data?.verificationToken !== "string") throw new Error("Verification token unavailable; run via the test runner");
+  requireSuccess(
+    "verify account",
+    await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`),
+    200,
+  );
+  requireSuccess("log in", await request("POST", "/auth/login", { email, password: "password-123" }), 200);
 
   const staff = await request("POST", "/staff-roster", { name: "Alex Staff" });
-  check("create roster staff", staff.status === 201);
+  requireSuccess("create roster staff", staff, 201);
   const document = await request("POST", "/doc-track/documents", {
     title: "Annual safety policy",
     category: "policy",
@@ -55,10 +67,13 @@ async function main() {
     requiresAcknowledgement: true,
     annualAcknowledgement: true,
   });
-  check("create acknowledgement document", document.status === 201);
+  requireSuccess("create acknowledgement document", document, 201);
 
   let listed = await request("GET", "/doc-track/documents");
-  let row = listed.data?.find((item) => item.id === document.data?.id);
+  requireSuccess("list acknowledgement documents", listed, 200);
+  check("document list response is an array", Array.isArray(listed.data));
+  if (!Array.isArray(listed.data)) throw new Error("Document list response is not an array");
+  let row = listed.data.find((item) => item.id === document.data?.id);
   check("new document status is pending", row?.acknowledgement_status === "pending");
   check("new document pending count is returned", Number(row?.pending_acknowledgement_count) === 1);
 

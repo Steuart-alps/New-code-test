@@ -20,7 +20,7 @@
     "test:config": "node tests/config-endpoints.mjs",
     "test:config:ci": "bash tests/run-config-endpoints.sh",
     "test:training-expiry": "node tests/training-expiry-reminders.mjs",
-    "test:doc-track-status": "node tests/doc-track-signoff-status.mjs",
+    "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",
     "test:discounts": "node tests/discount-codes.mjs",
     "test:discounts:ci": "bash tests/run-discount-codes.sh",
     "test:compliance-hub": "node tests/compliance-hub.mjs",
