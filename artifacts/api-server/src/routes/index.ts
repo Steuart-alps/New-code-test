@@ -100,11 +100,11 @@ router.use("/photos", requireAuth, photosRouter);
 router.use("/kitchen-weekly", requireAuth, requireService("kitchentrack"), kitchenWeeklyRouter);
 router.use("/kitchen-cleaning", requireAuth, requireService("kitchentrack"), kitchenCleaningRouter);
 // The AM/PM checklists cover both kitchen (kitchentrack) and premises
-// (safetrack) opening/closing items, so the router-level gate only requires
+// (premisestrack) opening/closing items, so the router-level gate only requires
 // SOME purchased branch; each handler additionally checks the specific
 // service that matches the checklistType being read/written.
-router.use("/daily-track-am", requireAuth, requireAnyService("dailytrack_am", "kitchentrack", "safetrack"), dailyTrackAmRouter);
-router.use("/daily-track-pm", requireAuth, requireAnyService("dailytrack_pm", "kitchentrack", "safetrack"), dailyTrackPmRouter);
+router.use("/daily-track-am", requireAuth, requireAnyService("dailytrack_am", "kitchentrack", "premisestrack"), dailyTrackAmRouter);
+router.use("/daily-track-pm", requireAuth, requireAnyService("dailytrack_pm", "kitchentrack", "premisestrack"), dailyTrackPmRouter);
 router.use(checklistTemplatesRouter);
 router.use(checkRemindersRouter);
 router.use(w3wRouter);

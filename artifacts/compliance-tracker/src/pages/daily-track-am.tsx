@@ -344,7 +344,7 @@ function ChecklistCard({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DailyTrackAmPage() {
-  const { activeClientId } = useAuth();
+  const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
 
@@ -357,6 +357,11 @@ export default function DailyTrackAmPage() {
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
+  const hasStandaloneDailyTrack = hasService("dailytrack_am");
+  const visibleTypes = [
+    ...(hasStandaloneDailyTrack || hasService("kitchentrack") ? ["kitchen_opening" as const] : []),
+    ...(hasStandaloneDailyTrack || hasService("premisestrack") ? ["premises_opening" as const] : []),
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -374,7 +379,7 @@ export default function DailyTrackAmPage() {
   return (
     <AppLayout title="DailyTrack AM">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-        <p className="text-muted-foreground hidden sm:block">Morning opening checklist — premises readiness. Kitchen opening checks are in KitchenTrack.</p>
+        <p className="text-muted-foreground hidden sm:block">Morning opening checklists for the services enabled on your account.</p>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Sunrise className="w-4 h-4 text-amber-500" />
           <span>AM Checks</span>
@@ -408,7 +413,7 @@ export default function DailyTrackAmPage() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {(["premises_opening"] as const).map(type => (
+          {visibleTypes.map(type => (
             <ChecklistCard
               key={type}
               type={type}

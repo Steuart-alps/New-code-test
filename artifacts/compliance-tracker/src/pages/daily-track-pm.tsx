@@ -370,7 +370,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DailyTrackPmPage() {
-  const { activeClientId } = useAuth();
+  const { activeClientId, hasService } = useAuth();
   const canAdmin = useCanAdmin();
   const { data: sites = [] } = useListSites();
 
@@ -384,6 +384,11 @@ export default function DailyTrackPmPage() {
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
   const selectedSiteName = sites.find(s => s.id === selectedSiteId)?.name;
+  const hasStandaloneDailyTrack = hasService("dailytrack_pm");
+  const visibleTypes = [
+    ...(hasStandaloneDailyTrack || hasService("kitchentrack") ? ["kitchen_closing" as const] : []),
+    ...(hasStandaloneDailyTrack || hasService("premisestrack") ? ["premises_closing" as const] : []),
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -405,7 +410,7 @@ export default function DailyTrackPmPage() {
   return (
     <AppLayout title="DailyTrack PM">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-        <p className="text-muted-foreground hidden sm:block">End-of-day premises closing checklist and manager sign-off. Kitchen closing checks are in KitchenTrack.</p>
+        <p className="text-muted-foreground hidden sm:block">End-of-day closing checklists and manager sign-off for the services enabled on your account.</p>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Sunset className="w-4 h-4 text-orange-400" />
           <span>PM Checks</span>
@@ -438,7 +443,7 @@ export default function DailyTrackPmPage() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {(["premises_closing"] as const).map(type => (
+          {visibleTypes.map(type => (
             <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} />
           ))}
           <ManagerSignoffCard siteId={selectedSiteId} date={date} existing={signoff} onSaved={load} />

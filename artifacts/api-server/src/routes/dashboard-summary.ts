@@ -111,7 +111,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
   // A site has one expected AM pair and one expected PM pair. Each branch is
   // complete when any of its real checklist types has been submitted; this
-  // keeps KitchenTrack and SafeTrack checklists under the same definition.
+  // keeps KitchenTrack and PremisesTrack checklists under the same definition.
   const checklistTotals: ChecklistTotals = {
     date: today,
     expectedAmPairs: allSites.length,
@@ -154,7 +154,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   }
 
   // ── Daily AM ─────────────────────────────────────────────────────────────────
-  const amEnabled = entitled("kitchentrack") || entitled("safetrack") || entitled("dailytrack_am");
+  const amEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_am");
   {
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -191,7 +191,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   }
 
   // ── Daily PM / Sign-off ───────────────────────────────────────────────────────
-  const pmEnabled = entitled("kitchentrack") || entitled("safetrack") || entitled("dailytrack_pm");
+  const pmEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_pm");
   {
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";

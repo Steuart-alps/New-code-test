@@ -76,7 +76,7 @@ function useNavGroups() {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
 
-  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string; comingSoon?: boolean }[] }[] = [
+  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }[] }[] = [
     {
       title: "COMPLYTRACK",
       items: [
@@ -108,8 +108,8 @@ function useNavGroups() {
         { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack", comingSoon: true },
         { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
-        { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKey: "dailytrack_am" },
-        { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKey: "dailytrack_pm" },
+        { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKeys: ["dailytrack_am", "kitchentrack", "premisestrack"] },
+        { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKeys: ["dailytrack_pm", "kitchentrack", "premisestrack"] },
       ],
     },
   ];
@@ -176,7 +176,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
-                  const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
+                   const isLocked = item.serviceKeys
+                     ? !item.serviceKeys.some(hasService)
+                     : item.serviceKey ? !hasService(item.serviceKey) : false;
                   const isComingSoon = (item as any).comingSoon === true;
                   const inner = (
                     <div className={cn(
@@ -374,7 +376,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
               </span>
               {group.items.map((item) => {
                 const isActive = location === item.href;
-                const isLocked = item.serviceKey ? !hasService(item.serviceKey) : false;
+                const isLocked = item.serviceKeys
+                  ? !item.serviceKeys.some(hasService)
+                  : item.serviceKey ? !hasService(item.serviceKey) : false;
                 return (
                   <Link key={item.href} href={item.href} className="flex-shrink-0">
                     <div className={cn(

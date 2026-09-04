@@ -29,7 +29,8 @@
     "test:track-actions-trigger": "bash tests/run-track-actions-trigger.sh",
     "test:track-action-templates": "bash tests/run-track-action-templates.sh",
     "test:room-track": "bash tests/run-room-track-routes.sh",
-    "test:guidance-register": "node tests/guidance-register.mjs"
+    "test:guidance-register": "node tests/guidance-register.mjs",
+    "test:daily-checklist-entitlements": "node tests/daily-checklist-entitlements.mjs"
     ,"test:export-attachment-acl": "node tests/export-attachment-acl.mjs"
   },
   "dependencies": {

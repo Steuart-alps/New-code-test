@@ -415,10 +415,13 @@ function KitchenTrackOverdueBadge() {
 export default function Dashboard() {
   const { hasService, services } = useAuth();
   const canAdmin = useCanAdmin();
-  const hasDailytrackAm = hasService("dailytrack_am");
-  const hasDailytrackPm = hasService("dailytrack_pm");
-  const hasDailytrack = hasDailytrackAm || hasDailytrackPm;
+  const hasStandaloneDailytrackAm = hasService("dailytrack_am");
+  const hasStandaloneDailytrackPm = hasService("dailytrack_pm");
   const hasKitchentrack = hasService("kitchentrack");
+  const hasPremisestrack = hasService("premisestrack");
+  const hasDailytrackAm = hasStandaloneDailytrackAm || hasKitchentrack || hasPremisestrack;
+  const hasDailytrackPm = hasStandaloneDailytrackPm || hasKitchentrack || hasPremisestrack;
+  const hasDailytrack = hasDailytrackAm || hasDailytrackPm;
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
   const [notificationEmail, setNotificationEmail] = useState("");
@@ -496,8 +499,10 @@ export default function Dashboard() {
           signoffRes.json() as Promise<DailySignoffRecord[]>,
         ]);
         const requiredTypes = [
-          ...(hasDailytrackAm ? ["kitchen_opening", "premises_opening"] : []),
-          ...(hasDailytrackPm ? ["kitchen_closing", "premises_closing"] : []),
+          ...(hasStandaloneDailytrackAm || hasKitchentrack ? ["kitchen_opening"] : []),
+          ...(hasStandaloneDailytrackAm || hasPremisestrack ? ["premises_opening"] : []),
+          ...(hasStandaloneDailytrackPm || hasKitchentrack ? ["kitchen_closing"] : []),
+          ...(hasStandaloneDailytrackPm || hasPremisestrack ? ["premises_closing"] : []),
         ];
         let submittedAll = 0;
         let inProgress = 0;
@@ -535,7 +540,16 @@ export default function Dashboard() {
     })();
 
     return () => { cancelled = true; };
-  }, [hasDailytrack, hasDailytrackAm, hasDailytrackPm, siteId, sites]);
+  }, [
+    hasDailytrack,
+    hasDailytrackPm,
+    hasKitchentrack,
+    hasPremisestrack,
+    hasStandaloneDailytrackAm,
+    hasStandaloneDailytrackPm,
+    siteId,
+    sites,
+  ]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
