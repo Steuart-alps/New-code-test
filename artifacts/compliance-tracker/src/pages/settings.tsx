@@ -1245,8 +1245,9 @@ function BillingCard() {
             ) : (
               <div className="divide-y divide-border">
                 {servicesConfig.catalog
-                  // doctrack is included free with core; safetrack is the legacy key (merged into doctrack)
-                  .filter(c => c.key !== "core" && c.key !== "bundle" && c.key !== "doctrack" && c.key !== "safetrack")
+                  // DocTrack is included free with core; all other add-ons are
+                  // independently purchasable from this account.
+                  .filter(c => c.key !== "core" && c.key !== "bundle" && c.key !== "doctrack")
                   .map(service => {
                   // "Active" means it's on the paid subscription — not merely
                   // entitled via a trial (trials unlock everything for free).

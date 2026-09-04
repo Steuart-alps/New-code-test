@@ -252,7 +252,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
         return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });
       }
       for (const addon of requested) {
-    const price = await getServicePrice(service);
+        const price = await getServicePrice(addon);
         if (!price) return res.status(400).json({ error: `Price not configured for ${addon}` });
         lineItems.push({ price: price.priceId, quantity });
       }

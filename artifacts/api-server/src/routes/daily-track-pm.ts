@@ -10,9 +10,8 @@ const router = Router();
 
 const PM_TYPES = ["kitchen_closing", "premises_closing"] as const;
 
-// The router-level guard only requires SOME purchased branch (kitchentrack or
-// safetrack), since this router covers both. Individual checklist writes are
-// checked against the specific branch the checklistType belongs to.
+// KitchenTrack/SafeTrack subscribers retain access to their matching checklist,
+// while the standalone DailyTrack PM add-on grants access to every PM checklist.
 function serviceForType(type: (typeof PM_TYPES)[number]): "kitchentrack" | "safetrack" {
   return type === "kitchen_closing" ? "kitchentrack" : "safetrack";
 }
@@ -164,7 +163,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   const requiredService = serviceForType(data.checklistType);
-  if (!(await requireAnyEntitlement(clientId, requiredService))) {
+  if (!(await requireAnyEntitlement(clientId, "dailytrack_pm", requiredService))) {
     return res.status(403).json({
       error: `${SERVICES[requiredService].label} is not enabled for this account`,
       code: "SERVICE_NOT_ENABLED",
@@ -192,7 +191,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!existing || !(PM_TYPES as readonly string[]).includes(existing.checklistType)) return res.status(404).json({ error: "Not found" });
   if (existing.submittedAt) return res.status(409).json({ error: "Checklist already submitted" });
   const requiredService = serviceForType(existing.checklistType as (typeof PM_TYPES)[number]);
-  if (!(await requireAnyEntitlement(clientId, requiredService))) {
+  if (!(await requireAnyEntitlement(clientId, "dailytrack_pm", requiredService))) {
     return res.status(403).json({
       error: `${SERVICES[requiredService].label} is not enabled for this account`,
       code: "SERVICE_NOT_ENABLED",
