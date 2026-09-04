@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, MinusCircle, SlidersHorizontal, Sunrise, Sunset,
+  CheckCircle2, MinusCircle, SlidersHorizontal,
   UtensilsCrossed, MapPin, UserPlus, Mail, Settings2,
 } from "lucide-react";
 import {
@@ -38,11 +38,21 @@ interface TrackSummary {
 
 interface ChecklistTotals {
   date: string;
-  expectedAmPairs: number;
-  completedAmPairs: number;
-  expectedPmPairs: number;
-  completedPmPairs: number;
-  completedSitePairs: number;
+  totalSites: number;
+  submittedAll: number;
+  inProgress: number;
+  notStarted: number;
+}
+
+interface DailyChecklistRecord {
+  checklistType: string;
+  siteId?: number | null;
+  submittedAt?: string | null;
+}
+
+interface DailySignoffRecord {
+  siteId?: number | null;
+  submittedAt?: string | null;
 }
 
 // ── Status styling ─────────────────────────────────────────────────────────────
@@ -322,19 +332,25 @@ function SetupChecklist({
 
 function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
   if (!totals && !loading) return null;
-  const totalSites = totals?.expectedAmPairs ?? 0;
-  const amComplete = totals?.completedAmPairs ?? 0;
-  const pmComplete = totals?.completedPmPairs ?? 0;
-  const totalComplete = totals?.completedSitePairs ?? 0;
-  const allDone = totalSites > 0 && totalComplete === totalSites;
+  const allDone = Boolean(totals && totals.totalSites > 0 && totals.submittedAll === totals.totalSites);
+  const dateLabel = totals
+    ? new Date(`${totals.date}T12:00:00`).toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    : "";
 
   return (
     <div className={cn(
-      "rounded-lg border border-border/60 bg-card px-4 py-3 flex items-center gap-4 flex-wrap",
+      "rounded-lg border border-border/60 bg-card px-4 py-3",
       allDone ? "border-l-4 border-l-emerald-500" : "border-l-4 border-l-amber-400",
     )}>
-      <div className="flex items-center gap-2 flex-1 min-w-0">
-        <span className="font-medium text-sm">Today's Checklists</span>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-medium text-sm">Today's checklists</p>
+          {dateLabel && <p className="text-xs text-muted-foreground mt-0.5">{dateLabel}</p>}
+        </div>
         {loading ? (
           <span className="text-xs text-muted-foreground animate-pulse">Loading…</span>
         ) : (
@@ -342,25 +358,20 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
             "text-xs px-2 py-0.5 rounded-full font-medium",
             allDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
           )}>
-            {totalComplete}/{totalSites} sites complete
+            {totals?.submittedAll ?? 0}/{totals?.totalSites ?? 0} sites fully complete
           </span>
         )}
       </div>
       {!loading && (
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Sunrise className="w-3.5 h-3.5 text-amber-500" />
-            AM: <span className={cn("ml-0.5 font-medium", amComplete === totalSites ? "text-emerald-600" : "text-foreground")}>{amComplete}/{totalSites}</span>
-          </span>
-          <span className="flex items-center gap-1">
-            <Sunset className="w-3.5 h-3.5 text-violet-500" />
-            PM: <span className={cn("ml-0.5 font-medium", pmComplete === totalSites ? "text-emerald-600" : "text-foreground")}>{pmComplete}/{totalSites}</span>
-          </span>
+        <div className="mt-3 flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
+          <span className="text-emerald-700"><strong>{totals?.submittedAll ?? 0}</strong> Submitted all</span>
+          <span className="text-amber-700"><strong>{totals?.inProgress ?? 0}</strong> In progress</span>
+          <span className="text-muted-foreground"><strong className="text-foreground">{totals?.notStarted ?? 0}</strong> Not started</span>
           <Link
             href="/daily-track-status"
-            className="flex cursor-pointer items-center gap-0.5 rounded-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="ml-auto flex cursor-pointer items-center gap-1 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
-            View <ArrowRight className="w-3 h-3" />
+            View full status <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
       )}
@@ -404,7 +415,9 @@ function KitchenTrackOverdueBadge() {
 export default function Dashboard() {
   const { hasService, services } = useAuth();
   const canAdmin = useCanAdmin();
-  const hasDailytrack = hasService("dailytrack_am");
+  const hasDailytrackAm = hasService("dailytrack_am");
+  const hasDailytrackPm = hasService("dailytrack_pm");
+  const hasDailytrack = hasDailytrackAm || hasDailytrackPm;
   const hasKitchentrack = hasService("kitchentrack");
   const { data: sites = [] } = useListSites();
   const [teamCount, setTeamCount] = useState(0);
@@ -412,6 +425,7 @@ export default function Dashboard() {
   const [siteId, setSiteId] = useState<string>("all");
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
+  const [checklistLoading, setChecklistLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -443,7 +457,6 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
       setTracks(json.tracks ?? []);
-      setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -452,6 +465,77 @@ export default function Dashboard() {
   }, [siteId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!hasDailytrack) {
+      setChecklistTotals(null);
+      return;
+    }
+
+    let cancelled = false;
+    const today = new Date().toISOString().slice(0, 10);
+    const visibleSites = siteId === "all"
+      ? sites
+      : sites.filter((site: any) => String(site.id) === siteId);
+
+    (async () => {
+      setChecklistLoading(true);
+      try {
+        const params = new URLSearchParams({ date: today });
+        if (siteId !== "all") params.set("siteId", siteId);
+        const [amRes, pmRes, signoffRes] = await Promise.all([
+          apiFetch(`/daily-track-am?${params}`),
+          apiFetch(`/daily-track-pm?${params}`),
+          apiFetch(`/daily-track-pm/signoffs?${params}`),
+        ]);
+        if (!amRes.ok || !pmRes.ok || !signoffRes.ok) throw new Error("Unable to load checklist status");
+
+        const [amRows, pmRows, signoffs] = await Promise.all([
+          amRes.json() as Promise<DailyChecklistRecord[]>,
+          pmRes.json() as Promise<DailyChecklistRecord[]>,
+          signoffRes.json() as Promise<DailySignoffRecord[]>,
+        ]);
+        const requiredTypes = [
+          ...(hasDailytrackAm ? ["kitchen_opening", "premises_opening"] : []),
+          ...(hasDailytrackPm ? ["kitchen_closing", "premises_closing"] : []),
+        ];
+        let submittedAll = 0;
+        let inProgress = 0;
+        let notStarted = 0;
+
+        for (const site of visibleSites) {
+          const records = [...amRows, ...pmRows].filter((row) => row.siteId === site.id);
+          const signoff = signoffs.find((row) => row.siteId === site.id);
+          const hasStarted = records.length > 0 || Boolean(signoff);
+          const submittedTypes = new Set(
+            records.filter((row) => row.submittedAt).map((row) => row.checklistType),
+          );
+          const isComplete = requiredTypes.every((type) => submittedTypes.has(type))
+            && (!hasDailytrackPm || Boolean(signoff?.submittedAt));
+
+          if (isComplete) submittedAll++;
+          else if (hasStarted) inProgress++;
+          else notStarted++;
+        }
+
+        if (!cancelled) {
+          setChecklistTotals({
+            date: today,
+            totalSites: visibleSites.length,
+            submittedAll,
+            inProgress,
+            notStarted,
+          });
+        }
+      } catch {
+        if (!cancelled) setChecklistTotals(null);
+      } finally {
+        if (!cancelled) setChecklistLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [hasDailytrack, hasDailytrackAm, hasDailytrackPm, siteId, sites]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
@@ -525,7 +609,7 @@ export default function Dashboard() {
         )}
 
         {/* DailyTrack snapshot */}
-        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={loading} />}
+        {hasDailytrack && <DailyTrackSnapshotCard totals={checklistTotals} loading={checklistLoading} />}
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
