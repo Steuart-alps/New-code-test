@@ -13,3 +13,5 @@ export {
   SendRemindersResponse,
   TestEmailResponse,
 } from "./generated/api";
+export * from './generated/api';
+export * from './generated/types';
