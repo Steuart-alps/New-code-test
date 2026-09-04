@@ -691,25 +691,35 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const openInspections = await db.execute(sql`
-          SELECT id, inspection_type, inspection_date, next_inspection_date, status, site_id
-          FROM premises_inspections
-          WHERE client_id = ${clientId}
-            AND status IN ('open', 'actioned')
-            ${siteClause}
-          ORDER BY
-            CASE WHEN next_inspection_date < ${today} THEN 0 ELSE 1 END,
-            next_inspection_date ASC NULLS LAST
-          LIMIT 10
-        `);
-        const overdue = rows(openInspections).filter(
-          (i: any) => i.next_inspection_date && i.next_inspection_date < today,
-        );
-        const total = rows(openInspections).length;
+        const [openInspections, activeCounts] = await Promise.all([
+          db.execute(sql`
+            SELECT id, inspection_type, inspection_date, next_inspection_date, status, site_id
+            FROM premises_inspections
+            WHERE client_id = ${clientId}
+              AND status IN ('open', 'actioned')
+              ${siteClause}
+            ORDER BY
+              CASE WHEN next_inspection_date < ${today} THEN 0 ELSE 1 END,
+              next_inspection_date ASC NULLS LAST
+            LIMIT 10
+          `),
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE next_inspection_date < ${today})::int AS overdue
+            FROM premises_inspections
+            WHERE client_id = ${clientId}
+              AND status IN ('open', 'actioned')
+              ${siteClause}
+          `),
+        ]);
+        const countRow = rows(activeCounts)[0] ?? {};
+        const overdueCount = Number(countRow.overdue ?? 0);
+        const total = Number(countRow.total ?? 0);
 
-        if (overdue.length > 0) {
+        if (overdueCount > 0) {
           status = "overdue";
-          badge = `${overdue.length} overdue inspection${overdue.length > 1 ? "s" : ""}`;
+          badge = `${overdueCount} overdue inspection${overdueCount > 1 ? "s" : ""}`;
         } else if (total > 0) {
           status = "attention";
           badge = `${total} open inspection${total > 1 ? "s" : ""}`;

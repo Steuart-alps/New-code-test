@@ -1,12 +1,28 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { premisesInspectionsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId } from "../middleware/requireAuth";
+import { eq, and, or, isNull, inArray, desc, gte, lte, lt, sql } from "drizzle-orm";
+import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { z } from "zod";
 
 const router = Router();
+
+function allowedSitesSubquery(clientId: number, departmentId: number) {
+  return db.select({ id: sitesTable.id }).from(sitesTable).where(and(
+    eq(sitesTable.clientId, clientId),
+    or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+  ));
+}
+
+function addDepartmentScope(conditions: any[], clientId: number, departmentId: number | null) {
+  if (departmentId !== null) {
+    conditions.push(or(
+      isNull(premisesInspectionsTable.siteId),
+      inArray(premisesInspectionsTable.siteId, allowedSitesSubquery(clientId, departmentId)),
+    ));
+  }
+}
 
 // ── Summary ─────────────────────────────────────────────────────────────────
 
@@ -16,20 +32,22 @@ router.get("/summary", requireAuth, async (req, res) => {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const conditions = [eq(premisesInspectionsTable.clientId, clientId)];
+  addDepartmentScope(conditions, clientId, getActiveDepartmentId(req));
   const [counts, overdue] = await Promise.all([
     db.select({
       status: premisesInspectionsTable.status,
       count:  sql<number>`count(*)::int`,
     })
       .from(premisesInspectionsTable)
-      .where(eq(premisesInspectionsTable.clientId, clientId))
+      .where(and(...conditions))
       .groupBy(premisesInspectionsTable.status),
     db.select({ count: sql<number>`count(*)::int` })
       .from(premisesInspectionsTable)
       .where(and(
-        eq(premisesInspectionsTable.clientId, clientId),
-        eq(premisesInspectionsTable.status, "open"),
-        lte(premisesInspectionsTable.inspectionDate, today),
+        inArray(premisesInspectionsTable.status, ["open", "actioned"]),
+        ...conditions,
+        lt(premisesInspectionsTable.nextInspectionDate, today),
       )),
   ]);
 
@@ -49,6 +67,7 @@ router.get("/summary", requireAuth, async (req, res) => {
 
 const InspectionBody = z.object({
   inspectionDate: z.string().min(1),
+  nextInspectionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   // Validated against the client's effective inspection-type list at request time.
   inspectionType: z.string().min(1).max(60).default("routine"),
   area:           z.string().optional().nullable(),
@@ -64,11 +83,15 @@ const InspectionBody = z.object({
 // Ensure a provided siteId actually belongs to the caller's client. Returns
 // true when there is nothing to check (no siteId) or the site is owned by the
 // client; false on a cross-tenant mismatch.
-async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+async function siteIsAccessible(siteId: number | null | undefined, clientId: number, departmentId: number | null): Promise<boolean> {
   if (siteId == null) return true;
+  const conditions = [eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)];
+  if (departmentId !== null) {
+    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)) as any);
+  }
   const [site] = await db.select({ id: sitesTable.id })
     .from(sitesTable)
-    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)));
+    .where(and(...conditions));
   return !!site;
 }
 
@@ -78,6 +101,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const { from, to, siteId, type, status } = req.query as Record<string, string>;
   const conds = [eq(premisesInspectionsTable.clientId, clientId)];
+  addDepartmentScope(conds, clientId, getActiveDepartmentId(req));
   if (from)   conds.push(gte(premisesInspectionsTable.inspectionDate, from));
   if (to)     conds.push(lte(premisesInspectionsTable.inspectionDate, to));
   if (siteId && !isNaN(parseInt(siteId, 10)))
@@ -103,13 +127,14 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!allowedTypes.includes(d.inspectionType))
     return res.status(400).json({ error: "Invalid inspection type" });
 
-  if (!(await siteBelongsToClient(d.siteId, clientId)))
+  if (!(await siteIsAccessible(d.siteId, clientId, getActiveDepartmentId(req))))
     return res.status(400).json({ error: "Invalid siteId for this client" });
 
   const [row] = await db.insert(premisesInspectionsTable).values({
     clientId,
     siteId:         d.siteId ?? null,
     inspectionDate: d.inspectionDate,
+    nextInspectionDate: d.nextInspectionDate ?? null,
     inspectionType: d.inspectionType,
     area:           d.area ?? null,
     findings:       d.findings ?? null,
@@ -136,21 +161,28 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 
   // Allow a value unchanged from the stored record even if it is no longer in
   // the client's effective list; reject only NEW values not in the list.
-  const [current] = await db.select({ inspectionType: premisesInspectionsTable.inspectionType })
+  const [current] = await db.select({
+    inspectionType: premisesInspectionsTable.inspectionType,
+    siteId: premisesInspectionsTable.siteId,
+  })
     .from(premisesInspectionsTable)
     .where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId))).limit(1);
-  if (d.inspectionType !== current?.inspectionType) {
+  if (!current) return res.status(404).json({ error: "Not found" });
+  if (!(await siteIsAccessible(current.siteId, clientId, getActiveDepartmentId(req))))
+    return res.status(403).json({ error: "Forbidden" });
+  if (d.inspectionType !== current.inspectionType) {
     const allowedTypes = await getEffectiveOptionList(clientId, "premises_inspection_types");
     if (!allowedTypes.includes(d.inspectionType))
       return res.status(400).json({ error: "Invalid inspection type" });
   }
 
-  if (!(await siteBelongsToClient(d.siteId, clientId)))
+  if (!(await siteIsAccessible(d.siteId, clientId, getActiveDepartmentId(req))))
     return res.status(400).json({ error: "Invalid siteId for this client" });
 
   await db.update(premisesInspectionsTable).set({
     siteId:         d.siteId ?? null,
     inspectionDate: d.inspectionDate,
+    nextInspectionDate: d.nextInspectionDate ?? null,
     inspectionType: d.inspectionType,
     area:           d.area ?? null,
     findings:       d.findings ?? null,
@@ -169,6 +201,13 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const [current] = await db.select({ siteId: premisesInspectionsTable.siteId })
+    .from(premisesInspectionsTable)
+    .where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId)))
+    .limit(1);
+  if (!current) return res.status(404).json({ error: "Not found" });
+  if (!(await siteIsAccessible(current.siteId, clientId, getActiveDepartmentId(req))))
+    return res.status(403).json({ error: "Forbidden" });
   await db.delete(premisesInspectionsTable)
     .where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId)));
   res.json({ ok: true });

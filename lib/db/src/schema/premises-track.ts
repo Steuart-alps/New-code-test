@@ -5,6 +5,7 @@ export const premisesInspectionsTable = pgTable("premises_inspections", {
   clientId:        integer("client_id").notNull(),
   siteId:          integer("site_id"),
   inspectionDate:  date("inspection_date").notNull(),
+  nextInspectionDate: date("next_inspection_date"),
   inspectionType:  text("inspection_type").notNull().default("routine"),
   area:            text("area"),
   findings:        text("findings"),

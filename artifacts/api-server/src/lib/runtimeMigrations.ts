@@ -1882,6 +1882,7 @@ async function migratePremisesTrack() {
       "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "site_id"          integer REFERENCES "sites"("id") ON DELETE SET NULL,
       "inspection_date"  date NOT NULL,
+      "next_inspection_date" date,
       "inspection_type"  text NOT NULL DEFAULT 'routine',
       "area"             text,
       "findings"         text,
@@ -1895,6 +1896,7 @@ async function migratePremisesTrack() {
       "updated_at"       timestamp NOT NULL DEFAULT now()
     )
   `);
+  await db.execute(sql`ALTER TABLE "premises_inspections" ADD COLUMN IF NOT EXISTS "next_inspection_date" date`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_premises_inspections_client" ON "premises_inspections" ("client_id", "inspection_date")`);
 }
 

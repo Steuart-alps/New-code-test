@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -88,18 +88,19 @@ function StatusBadge({ status }: { status: string }) {
 
 interface PremisesInspection {
   id: number;
-  client_id: number;
-  site_id: number | null;
-  inspection_date: string;
-  inspection_type: string;
+  clientId: number;
+  siteId: number | null;
+  inspectionDate: string;
+  nextInspectionDate: string | null;
+  inspectionType: string;
   area: string | null;
   findings: string | null;
-  hazard_details: string | null;
-  action_required: string | null;
-  action_taken: string | null;
+  hazardDetails: string | null;
+  actionRequired: string | null;
+  actionTaken: string | null;
   status: string;
-  inspected_by: string | null;
-  created_at: string;
+  inspectedBy: string | null;
+  createdAt: string;
 }
 
 interface PremisesSummary {
@@ -127,22 +128,40 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
   const [saving, setSaving] = useState(false);
   // Keep the record's stored type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
-  const currentType = inspection?.inspection_type;
+  const currentType = inspection?.inspectionType;
   const formInspectionTypes = currentType && !inspectionTypes.includes(currentType)
     ? [...inspectionTypes, currentType]
     : inspectionTypes;
   const [form, setForm] = useState(() => ({
-    inspectionDate: inspection?.inspection_date ?? new Date().toISOString().slice(0, 10),
-    inspectionType: inspection?.inspection_type ?? "routine",
+    inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
+    nextInspectionDate: inspection?.nextInspectionDate ?? "",
+    inspectionType: inspection?.inspectionType ?? "routine",
     area:           inspection?.area ?? "",
     findings:       inspection?.findings ?? "",
-    hazardDetails:  inspection?.hazard_details ?? "",
-    actionRequired: inspection?.action_required ?? "",
-    actionTaken:    inspection?.action_taken ?? "",
+    hazardDetails:  inspection?.hazardDetails ?? "",
+    actionRequired: inspection?.actionRequired ?? "",
+    actionTaken:    inspection?.actionTaken ?? "",
     status:         inspection?.status ?? "open",
-    inspectedBy:    inspection?.inspected_by ?? "",
-    siteId:         String(inspection?.site_id ?? ""),
+    inspectedBy:    inspection?.inspectedBy ?? "",
+    siteId:         inspection?.siteId == null ? "all" : String(inspection.siteId),
   }));
+
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
+      nextInspectionDate: inspection?.nextInspectionDate ?? "",
+      inspectionType: inspection?.inspectionType ?? "routine",
+      area: inspection?.area ?? "",
+      findings: inspection?.findings ?? "",
+      hazardDetails: inspection?.hazardDetails ?? "",
+      actionRequired: inspection?.actionRequired ?? "",
+      actionTaken: inspection?.actionTaken ?? "",
+      status: inspection?.status ?? "open",
+      inspectedBy: inspection?.inspectedBy ?? "",
+      siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
+    });
+  }, [open, inspection]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
@@ -153,6 +172,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
     try {
       const payload = {
         inspectionDate: form.inspectionDate,
+        nextInspectionDate: form.nextInspectionDate || null,
         inspectionType: form.inspectionType,
         area:           form.area || null,
         findings:       form.findings || null,
@@ -161,7 +181,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
         actionTaken:    form.actionTaken || null,
         status:         form.status,
         inspectedBy:    form.inspectedBy || null,
-        siteId:         form.siteId ? parseInt(form.siteId, 10) : null,
+        siteId:         form.siteId !== "all" ? parseInt(form.siteId, 10) : null,
       };
       if (isEdit) {
         await apiFetch(`/${inspection.id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -190,6 +210,10 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Input type="date" value={form.inspectionDate} onChange={set("inspectionDate")} className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
+            <Label>Next inspection due</Label>
+            <Input type="date" value={form.nextInspectionDate} onChange={set("nextInspectionDate")} className="rounded-sm" />
+          </div>
+          <div className="space-y-1.5">
             <Label>Type</Label>
             <Select value={form.inspectionType} onValueChange={v => setForm(f => ({ ...f, inspectionType: v }))}>
               <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
@@ -212,7 +236,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
               <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
                 <SelectTrigger className="rounded-sm"><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All sites</SelectItem>
+                  <SelectItem value="all">All sites</SelectItem>
                   {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -332,16 +356,17 @@ export default function PremisesTrackPage() {
       await apiFetch(`/${row.id}`, {
         method: "PUT",
         body: JSON.stringify({
-          inspectionDate: row.inspection_date,
-          inspectionType: row.inspection_type,
+          inspectionDate: row.inspectionDate,
+          nextInspectionDate: row.nextInspectionDate,
+          inspectionType: row.inspectionType,
           area:           row.area,
           findings:       row.findings,
-          hazardDetails:  row.hazard_details,
-          actionRequired: row.action_required,
-          actionTaken:    row.action_taken,
+          hazardDetails:  row.hazardDetails,
+          actionRequired: row.actionRequired,
+          actionTaken:    row.actionTaken,
           status,
-          inspectedBy:    row.inspected_by,
-          siteId:         row.site_id,
+          inspectedBy:    row.inspectedBy,
+          siteId:         row.siteId,
         }),
       });
       toast({ title: `Marked ${STATUS_LABELS[status] ?? status}` });
@@ -354,7 +379,7 @@ export default function PremisesTrackPage() {
   // ── Filtered list (text search on client) ────────────────────────────────────
 
   const filtered = inspections.filter(r =>
-    !q || [r.area, r.findings, r.hazard_details, r.action_required, r.action_taken, r.inspected_by]
+    !q || [r.area, r.findings, r.hazardDetails, r.actionRequired, r.actionTaken, r.inspectedBy]
       .some(s => s?.toLowerCase().includes(q.toLowerCase()))
   );
 
@@ -369,7 +394,7 @@ export default function PremisesTrackPage() {
     (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const handleExportLog = () => {
-    const sorted = [...inspections].sort((a, b) => (a.inspection_date < b.inspection_date ? 1 : -1));
+    const sorted = [...inspections].sort((a, b) => (a.inspectionDate < b.inspectionDate ? 1 : -1));
     const openCount = inspections.filter(r => r.status === "open").length;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Premises Safety Logbook</title>
 <style>
@@ -391,15 +416,15 @@ export default function PremisesTrackPage() {
 ${sorted.length === 0 ? `<p class="empty">No inspections recorded.</p>` : `<table>
 <tr><th>Date</th><th>Site</th><th>Type</th><th>Area</th><th>Findings</th><th>Hazard</th><th>Action required</th><th>Action taken</th><th>Inspected by</th><th>Status</th></tr>
 ${sorted.map(r => `<tr>
-  <td>${fmt(r.inspection_date) ?? esc(r.inspection_date)}</td>
-  <td>${esc(siteName(r.site_id))}</td>
-  <td>${esc(TYPE_LABELS[r.inspection_type] ?? r.inspection_type)}</td>
+  <td>${fmt(r.inspectionDate) ?? esc(r.inspectionDate)}</td>
+  <td>${esc(siteName(r.siteId))}</td>
+  <td>${esc(TYPE_LABELS[r.inspectionType] ?? r.inspectionType)}</td>
   <td>${esc(r.area)}</td>
   <td>${esc(r.findings)}</td>
-  <td>${esc(r.hazard_details)}</td>
-  <td>${esc(r.action_required)}</td>
-  <td>${esc(r.action_taken)}</td>
-  <td>${esc(r.inspected_by)}</td>
+  <td>${esc(r.hazardDetails)}</td>
+  <td>${esc(r.actionRequired)}</td>
+  <td>${esc(r.actionTaken)}</td>
+  <td>${esc(r.inspectedBy)}</td>
   <td>${esc(STATUS_LABELS[r.status] ?? r.status)}</td>
 </tr>`).join("")}
 </table>`}
@@ -555,20 +580,22 @@ ${sorted.map(r => `<tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => {
-                  const isOverdue = r.status === "open" && r.inspection_date <= today;
+                   const isOverdue = (r.status === "open" || r.status === "actioned")
+                     && !!r.nextInspectionDate
+                     && r.nextInspectionDate < today;
                   return (
                     <tr key={r.id} className={cn("group border-t border-border hover:bg-muted/20", i === 0 && "border-t-0")}>
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium">{fmt(r.inspection_date)}</p>
-                        {r.inspected_by && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{r.inspected_by}</p>}
+                         <p className="text-sm font-medium">{fmt(r.inspectionDate)}</p>
+                         {r.inspectedBy && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[120px]">{r.inspectedBy}</p>}
                       </td>
-                      <td className="px-4 py-3 text-xs">{TYPE_LABELS[r.inspection_type] ?? r.inspection_type}</td>
+                       <td className="px-4 py-3 text-xs">{TYPE_LABELS[r.inspectionType] ?? r.inspectionType}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted-foreground">
                         {r.area ?? <span className="text-muted-foreground/40">—</span>}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell">
                         <p className="text-xs text-muted-foreground line-clamp-2 max-w-xs">
-                          {r.findings ?? r.hazard_details ?? <span className="text-muted-foreground/40">—</span>}
+                           {r.findings ?? r.hazardDetails ?? <span className="text-muted-foreground/40">—</span>}
                         </p>
                       </td>
                       <td className="px-4 py-3">

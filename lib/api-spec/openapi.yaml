@@ -2735,6 +2735,8 @@ components:
           nullable: true
         inspectionDate:
           type: string
+        nextInspectionDate:
+          type: ["string", "null"]
         inspectionType:
           type: string
         area:
@@ -2778,6 +2780,8 @@ components:
       properties:
         inspectionDate:
           type: string
+        nextInspectionDate:
+          type: ["string", "null"]
         inspectionType:
           type: string
         area:
