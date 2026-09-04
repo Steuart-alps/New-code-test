@@ -15,6 +15,7 @@ import { useListSites } from "@workspace/api-client-react";
 import {
   Plus, Pencil, Trash2, Search, FileText, ClipboardList, BookMarked,
   Upload, Download, X, Users, CheckCircle2, Clock, Loader2, CheckSquare,
+  GraduationCap, AlertTriangle,
 } from "lucide-react";
 import { SignaturePad } from "@/components/signature-pad";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -44,6 +45,11 @@ interface Handbook extends FileAttachment {
   id: number; title: string; section?: string | null; content?: string | null;
   version: string; publishedAt?: string | null; siteId?: number | null;
   requiresAcknowledgement: boolean; createdAt: string;
+}
+interface TrainingRecord {
+  id: number; staffName: string; trainingType: string; completedAt: string;
+  expiryDate?: string | null; notes?: string | null; siteId?: number | null;
+  createdAt: string;
 }
 
 interface StaffMember {
@@ -341,7 +347,7 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
 
 function ListTable({ headers, rows, onEdit, onDelete, onDownload, onAcknowledgements, canAdmin }: {
   headers: string[];
-  rows: { id: number; cells: React.ReactNode[]; hasFile?: boolean; requiresAcknowledgement?: boolean }[];
+  rows: { id: number; cells: React.ReactNode[]; hasFile?: boolean; requiresAcknowledgement?: boolean; className?: string }[];
   onEdit?: (id: number) => void;
   onDelete: (id: number) => void;
   onDownload?: (id: number) => void;
@@ -359,7 +365,7 @@ function ListTable({ headers, rows, onEdit, onDelete, onDownload, onAcknowledgem
         </thead>
         <tbody className="divide-y divide-border">
           {rows.map(r => (
-            <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+            <tr key={r.id} className={cn("hover:bg-muted/30 transition-colors", r.className)}>
               {r.cells.map((c, i) => <td key={i} className="px-4 py-3 text-sm">{c}</td>)}
               <td className="px-4 py-3">
                 <div className="flex gap-1 justify-end">
@@ -422,6 +428,7 @@ export default function SafeTrackPage() {
   const [ras, setRas] = useState<RiskAssessment[]>([]);
   const [sops, setSops] = useState<Sop[]>([]);
   const [handbook, setHandbook] = useState<Handbook[]>([]);
+  const [training, setTraining] = useState<TrainingRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -437,12 +444,13 @@ export default function SafeTrackPage() {
   async function load() {
     setLoading(true);
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4] = await Promise.all([
         apiFetch(`${base}/risk-assessments`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/sops`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/handbook`).then(r => r.ok ? r.json() : []),
+        apiFetch(`${base}/training-records`).then(r => r.ok ? r.json() : []),
       ]);
-      setRas(r1); setSops(r2); setHandbook(r3);
+      setRas(r1); setSops(r2); setHandbook(r3); setTraining(r4);
     } finally { setLoading(false); }
   }
 
@@ -566,10 +574,75 @@ export default function SafeTrackPage() {
       ],
     }));
 
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  function daysUntil(date?: string | null) {
+    if (!date) return null;
+    const [year, month, day] = date.split("-").map(Number);
+    return Math.floor((Date.UTC(year, month - 1, day) - todayUtc) / 86_400_000);
+  }
+  function expiryRank(record: TrainingRecord) {
+    const days = daysUntil(record.expiryDate);
+    if (days === null) return 3;
+    if (days < 0) return 0;
+    if (days <= 30) return 1;
+    return 2;
+  }
+
+  const expiringTrainingCount = training.filter(record => {
+    const days = daysUntil(record.expiryDate);
+    return days !== null && days >= 0 && days <= 30;
+  }).length;
+  const overdueTrainingCount = training.filter(record => {
+    const days = daysUntil(record.expiryDate);
+    return days !== null && days < 0;
+  }).length;
+
+  const trainingRows = training
+    .filter(record => !q || [record.staffName, record.trainingType, record.notes].some(value => value?.toLowerCase().includes(q)))
+    .sort((a, b) =>
+      expiryRank(a) - expiryRank(b) ||
+      (a.expiryDate ?? "9999-12-31").localeCompare(b.expiryDate ?? "9999-12-31") ||
+      a.staffName.localeCompare(b.staffName)
+    )
+    .map(record => {
+      const days = daysUntil(record.expiryDate);
+      const overdue = days !== null && days < 0;
+      const expiringSoon = days !== null && days >= 0 && days <= 30;
+      return {
+        id: record.id,
+        className: overdue ? "bg-rose-50/70" : expiringSoon ? "bg-amber-50/70" : undefined,
+        cells: [
+          <div>
+            <span className="font-medium">{record.staffName}</span>
+            {(overdue || expiringSoon) && (
+              <div className={cn("mt-1 text-xs font-medium", overdue ? "text-rose-700" : "text-amber-700")}>
+                {overdue ? "Expired" : "Expiring soon"}
+              </div>
+            )}
+          </div>,
+          <span>{record.trainingType}</span>,
+          <span className="text-muted-foreground">{record.completedAt}</span>,
+          <span className={cn("font-medium", overdue && "text-rose-700", expiringSoon && "text-amber-700")}>
+            {record.expiryDate ?? "No expiry"}
+            {days !== null && (
+              <span className="block text-xs font-normal">
+                {days < 0 ? `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue` :
+                  days === 0 ? "Expires today" :
+                  `${days} day${days === 1 ? "" : "s"} remaining`}
+              </span>
+            )}
+          </span>,
+          <span className="text-muted-foreground">{siteName(record.siteId) ?? "All sites"}</span>,
+        ],
+      };
+    });
+
   const tabConfig = {
     risk:     { label: "Risk Assessments", singularLabel: "Risk Assessment",  icon: FileText,      sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], rows: raRows },
     sops:     { label: "SOPs",             singularLabel: "SOP",              icon: ClipboardList, sub: "sops",             headers: ["Title", "Status", "Version", "Scope", "Site"],            rows: sopRows },
     handbook: { label: "Staff Handbook",   singularLabel: "Handbook Entry",   icon: BookMarked,    sub: "handbook",         headers: ["Title", "Status", "Version", "Section", "Site"],          rows: handbookRows },
+    training: { label: "Training Records", singularLabel: "Training Record", icon: GraduationCap, sub: "training-records", headers: ["Staff Member", "Training", "Completed", "Expiry", "Site"], rows: trainingRows },
   } as const;
 
   type TabKey = keyof typeof tabConfig;
@@ -581,6 +654,7 @@ export default function SafeTrackPage() {
     risk: "safe_risk_assessment",
     sops: "safe_sop",
     handbook: "safe_handbook",
+    training: "safe_training_record",
   };
 
   function openAck(id: number, title: string) {
@@ -616,6 +690,22 @@ export default function SafeTrackPage() {
           const cfg = tabConfig[key as TabKey];
           return (
             <TabsContent key={key} value={key}>
+              {key === "training" && (expiringTrainingCount > 0 || overdueTrainingCount > 0) && (
+                <div className={cn(
+                  "mb-4 flex items-start gap-3 rounded-lg border p-4",
+                  overdueTrainingCount > 0 ? "border-rose-200 bg-rose-50 text-rose-800" : "border-amber-200 bg-amber-50 text-amber-800",
+                )}>
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Training certificates need attention</p>
+                    <p className="mt-0.5 text-sm">
+                      {overdueTrainingCount > 0 && `${overdueTrainingCount} expired`}
+                      {overdueTrainingCount > 0 && expiringTrainingCount > 0 && " · "}
+                      {expiringTrainingCount > 0 && `${expiringTrainingCount} expire${expiringTrainingCount === 1 ? "s" : ""} in the next 30 days`}
+                    </p>
+                  </div>
+                </div>
+              )}
               {loading ? (
                 <div className="flex justify-center py-12">
                   <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -629,7 +719,7 @@ export default function SafeTrackPage() {
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
                   rows={cfg.rows}
-                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : handbook).find((r: any) => r.id === id)) : undefined}
+                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "handbook" ? handbook : training).find((r: any) => r.id === id)) : undefined}
                   onDelete={id => handleDelete(cfg.sub, id)}
                   onDownload={id => handleDownload(cfg.sub, id)}
                   onAcknowledgements={id => {
@@ -656,6 +746,7 @@ export default function SafeTrackPage() {
             {tab === "risk"     && <RaForm form={form} setForm={setForm} />}
             {tab === "sops"     && <SopForm form={form} setForm={setForm} />}
             {tab === "handbook" && <HandbookForm form={form} setForm={setForm} />}
+            {tab === "training" && <TrainingForm form={form} setForm={setForm} />}
 
             <div className="space-y-1.5">
               <Label>Site (optional)</Label>
@@ -663,7 +754,7 @@ export default function SafeTrackPage() {
             </div>
 
             {/* Required reading toggle */}
-            <div className="flex items-center gap-2 pt-1">
+            {tab !== "training" && <div className="flex items-center gap-2 pt-1">
               <Checkbox
                 id="requires-ack"
                 checked={!!form.requiresAcknowledgement}
@@ -672,17 +763,17 @@ export default function SafeTrackPage() {
               <Label htmlFor="requires-ack" className="cursor-pointer font-normal">
                 Requires staff acknowledgement
               </Label>
-            </div>
-            {form.requiresAcknowledgement && (
+            </div>}
+            {tab !== "training" && form.requiresAcknowledgement && (
               <p className="text-xs text-muted-foreground -mt-2 ml-6">
                 A <Users className="inline w-3 h-3" /> button will appear in the list so you can track which staff have confirmed they've read this.
               </p>
             )}
 
-            <FileUploadField form={form} setForm={setForm} />
+            {tab !== "training" && <FileUploadField form={form} setForm={setForm} />}
 
             {/* Photos — only available once the record exists (needs a real id) */}
-            {editing?.id ? (
+            {tab !== "training" && (editing?.id ? (
               <div className="pt-1 border-t">
                 <CheckPhotoUploader
                   entityType={PHOTO_ENTITY_TYPE[tab as TabKey]}
@@ -693,7 +784,7 @@ export default function SafeTrackPage() {
               <p className="text-xs text-muted-foreground pt-1 border-t">
                 Save this record first, then re-open it to attach photos.
               </p>
-            )}
+            ))}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} type="button">Cancel</Button>
@@ -784,5 +875,27 @@ function HandbookForm({ form, setForm }: { form: any; setForm: any }) {
       </F>
     </div>
     <SignaturePad label="Staff Signature" value={form.signature ?? null} onChange={sig => setForm({ ...form, signature: sig })} />
+  </>;
+}
+
+function TrainingForm({ form, setForm }: { form: any; setForm: any }) {
+  return <>
+    <F label="Staff Member *">
+      <Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Staff member's name" autoFocus />
+    </F>
+    <F label="Training / Certificate *">
+      <Input value={form.trainingType ?? ""} onChange={e => setForm({ ...form, trainingType: e.target.value })} placeholder="e.g. First Aid at Work" />
+    </F>
+    <div className="grid grid-cols-2 gap-4">
+      <F label="Completed *">
+        <Input type="date" value={form.completedAt ?? ""} onChange={e => setForm({ ...form, completedAt: e.target.value })} />
+      </F>
+      <F label="Expiry Date">
+        <Input type="date" value={form.expiryDate ?? ""} onChange={e => setForm({ ...form, expiryDate: e.target.value || null })} />
+      </F>
+    </div>
+    <F label="Notes">
+      <Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} />
+    </F>
   </>;
 }
