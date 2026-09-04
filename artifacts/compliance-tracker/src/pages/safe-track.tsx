@@ -15,12 +15,80 @@ import { useListSites } from "@workspace/api-client-react";
 import {
   Plus, Pencil, Trash2, Search, FileText, ClipboardList, BookMarked,
   Upload, Download, X, Users, CheckCircle2, Clock, Loader2, CheckSquare,
-  GraduationCap, AlertTriangle,
+  GraduationCap, AlertTriangle, Printer,
 } from "lucide-react";
 import { SignaturePad } from "@/components/signature-pad";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+
+const INDUCTION_SECTIONS = [
+  { key: "accident_hazard", label: "Accident & Hazard Reporting" },
+  { key: "asbestos", label: "Asbestos Log" },
+  { key: "coshh", label: "COSHH" },
+  { key: "communication_hs", label: "Communication & Consultation on H&S" },
+  { key: "dse", label: "Display Screen Equipment (DSE)" },
+  { key: "fire_emergency", label: "Fire & Emergency Procedures" },
+  { key: "first_aid", label: "First Aid Provision" },
+  { key: "hs_policy", label: "Health & Safety Policy Statement" },
+  { key: "housekeeping_fire", label: "Housekeeping — Fire Safety" },
+  { key: "housekeeping_elec", label: "Housekeeping — Electrical Safety" },
+  { key: "housekeeping_general", label: "Housekeeping — General Workplace Safety" },
+  { key: "infection_control", label: "Infection Control" },
+  { key: "manual_handling", label: "Manual Handling" },
+  { key: "vehicle_movement", label: "Vehicle Movement" },
+  { key: "falls_height", label: "Falls from Height" },
+  { key: "work_equipment", label: "Work Equipment" },
+  { key: "working_at_height", label: "Working at Height" },
+  { key: "lone_working", label: "Lone Working / Personal Safety" },
+  { key: "medicines", label: "Medicines" },
+  { key: "mobile_phone", label: "Mobile Phone Use" },
+  { key: "ppe", label: "Personal Protective Equipment (PPE)" },
+  { key: "risk_assessments", label: "Risk Assessments" },
+  { key: "wellbeing", label: "Wellbeing" },
+  { key: "workplace_facilities", label: "Workplace Facilities" },
+] as const;
+
+type SectionKey = typeof INDUCTION_SECTIONS[number]["key"];
+type ChecklistStatus = "yes" | "no" | "na" | "";
+interface ChecklistItem { key: SectionKey; status: ChecklistStatus; comments: string }
+interface InductionChecklist { jobTitle: string; department: string; items: ChecklistItem[] }
+
+function defaultChecklist(): InductionChecklist {
+  return {
+    jobTitle: "",
+    department: "",
+    items: INDUCTION_SECTIONS.map(section => ({ key: section.key, status: "", comments: "" })),
+  };
+}
+
+function parseChecklist(raw?: string | null): InductionChecklist {
+  if (!raw) return defaultChecklist();
+  try {
+    const parsed = JSON.parse(raw) as Partial<InductionChecklist>;
+    const existing = new Map((parsed.items ?? []).map(item => [item.key, item]));
+    return {
+      jobTitle: parsed.jobTitle ?? "",
+      department: parsed.department ?? "",
+      items: INDUCTION_SECTIONS.map(section => ({
+        key: section.key,
+        status: existing.get(section.key)?.status ?? "",
+        comments: existing.get(section.key)?.comments ?? "",
+      })),
+    };
+  } catch {
+    return defaultChecklist();
+  }
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,6 +118,11 @@ interface TrainingRecord {
   id: number; staffName: string; trainingType: string; completedAt: string;
   expiryDate?: string | null; notes?: string | null; siteId?: number | null;
   createdAt: string;
+}
+
+interface Induction {
+  id: number; staffName: string; startDate: string; completedAt?: string | null;
+  checklist?: string | null; notes?: string | null; siteId?: number | null; createdAt: string;
 }
 
 interface StaffMember {
@@ -345,12 +418,13 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
 
 // ── Generic list table ────────────────────────────────────────────────────────
 
-function ListTable({ headers, rows, onEdit, onDelete, onDownload, onAcknowledgements, canAdmin }: {
+function ListTable({ headers, rows, onEdit, onDelete, onDownload, onPrint, onAcknowledgements, canAdmin }: {
   headers: string[];
   rows: { id: number; cells: React.ReactNode[]; hasFile?: boolean; requiresAcknowledgement?: boolean; className?: string }[];
   onEdit?: (id: number) => void;
   onDelete: (id: number) => void;
   onDownload?: (id: number) => void;
+  onPrint?: (id: number) => void;
   onAcknowledgements?: (id: number) => void;
   canAdmin: boolean;
 }) {
@@ -369,6 +443,11 @@ function ListTable({ headers, rows, onEdit, onDelete, onDownload, onAcknowledgem
               {r.cells.map((c, i) => <td key={i} className="px-4 py-3 text-sm">{c}</td>)}
               <td className="px-4 py-3">
                 <div className="flex gap-1 justify-end">
+                  {onPrint && (
+                    <Button variant="outline" size="sm" className="h-7 whitespace-nowrap gap-1.5" title="Print or save as PDF" onClick={() => onPrint(r.id)}>
+                      <Printer className="w-3.5 h-3.5" /> Print / Export PDF
+                    </Button>
+                  )}
                   {r.requiresAcknowledgement && onAcknowledgements && (
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600" title="Staff acknowledgements" onClick={() => onAcknowledgements(r.id)}>
                       <Users className="w-3.5 h-3.5" />
@@ -429,6 +508,7 @@ export default function SafeTrackPage() {
   const [sops, setSops] = useState<Sop[]>([]);
   const [handbook, setHandbook] = useState<Handbook[]>([]);
   const [training, setTraining] = useState<TrainingRecord[]>([]);
+  const [inductions, setInductions] = useState<Induction[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -444,13 +524,14 @@ export default function SafeTrackPage() {
   async function load() {
     setLoading(true);
     try {
-      const [r1, r2, r3, r4] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         apiFetch(`${base}/risk-assessments`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/sops`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/handbook`).then(r => r.ok ? r.json() : []),
         apiFetch(`${base}/training-records`).then(r => r.ok ? r.json() : []),
+        apiFetch(`${base}/inductions`).then(r => r.ok ? r.json() : []),
       ]);
-      setRas(r1); setSops(r2); setHandbook(r3); setTraining(r4);
+      setRas(r1); setSops(r2); setHandbook(r3); setTraining(r4); setInductions(r5);
     } finally { setLoading(false); }
   }
 
@@ -485,6 +566,51 @@ export default function SafeTrackPage() {
     } catch (err: any) {
       toast({ title: "Download failed", description: err.message, variant: "destructive" });
     }
+  }
+
+  function printInduction(record: Induction) {
+    const checklist = parseChecklist(record.checklist);
+    const site = siteName(record.siteId) ?? "All sites";
+    const statusLabel: Record<ChecklistStatus, string> = { yes: "Yes", no: "No", na: "N/A", "": "Not recorded" };
+    const rows = INDUCTION_SECTIONS.map((section, index) => {
+      const item = checklist.items.find(entry => entry.key === section.key);
+      return `<tr><td class="number">${index + 1}</td><td>${escapeHtml(section.label)}</td><td class="status ${escapeHtml(item?.status || "blank")}">${escapeHtml(statusLabel[item?.status ?? ""])}</td><td>${escapeHtml(item?.comments || "—")}</td></tr>`;
+    }).join("");
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast({ title: "Print window blocked", description: "Allow pop-ups for this site and try again.", variant: "destructive" });
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.write(`<!doctype html><html><head><title>Staff Induction - ${escapeHtml(record.staffName)}</title>
+      <style>
+        @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt}
+        h1{font-size:20pt;margin:0 0 4px;color:#173b57}.subtitle{margin:0 0 16px;color:#52606d}
+        .meta{display:grid;grid-template-columns:1fr 1fr;border:1px solid #9aa5b1;margin-bottom:14px}
+        .meta div{padding:7px 9px;border-bottom:1px solid #cbd2d9}.meta div:nth-child(odd){border-right:1px solid #cbd2d9}.meta div:nth-last-child(-n+2){border-bottom:0}
+        .label{font-size:8pt;text-transform:uppercase;color:#616e7c;display:block;margin-bottom:2px}.value{font-weight:600}
+        table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #9aa5b1;padding:5px 6px;text-align:left;vertical-align:top}
+        th{background:#e8f1f7;font-size:8pt;text-transform:uppercase}th:nth-child(1){width:7%}th:nth-child(2){width:35%}th:nth-child(3){width:14%}th:nth-child(4){width:44%}
+        .number,.status{text-align:center}.yes{color:#137333;font-weight:bold}.no{color:#b3261e;font-weight:bold}.na{color:#52606d;font-weight:bold}.blank{color:#7b8794}
+        .notes{border:1px solid #9aa5b1;margin-top:14px;padding:9px;min-height:58px;white-space:pre-wrap}
+        .footer{margin-top:12px;font-size:8pt;color:#616e7c}.controls{margin-bottom:14px}.controls button{background:#173b57;color:white;border:0;padding:9px 14px;border-radius:4px;font-weight:600;cursor:pointer}
+        tr{break-inside:avoid}@media print{.controls{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+      </style></head><body>
+      <div class="controls"><button onclick="window.print()">Print / Save as PDF</button></div>
+      <h1>Staff Induction Form</h1><p class="subtitle">Health &amp; Safety Induction Record</p>
+      <section class="meta">
+        <div><span class="label">Employee name</span><span class="value">${escapeHtml(record.staffName)}</span></div>
+        <div><span class="label">Job title</span><span class="value">${escapeHtml(checklist.jobTitle || "—")}</span></div>
+        <div><span class="label">Department</span><span class="value">${escapeHtml(checklist.department || "—")}</span></div>
+        <div><span class="label">Site</span><span class="value">${escapeHtml(site)}</span></div>
+        <div><span class="label">Start date</span><span class="value">${escapeHtml(record.startDate)}</span></div>
+        <div><span class="label">Induction completed</span><span class="value">${escapeHtml(record.completedAt || "Not yet completed")}</span></div>
+      </section>
+      <table><thead><tr><th>No.</th><th>Induction section</th><th>Status</th><th>Comments</th></tr></thead><tbody>${rows}</tbody></table>
+      <section class="notes"><span class="label">Manager sign-off notes</span>${escapeHtml(record.notes || "No sign-off notes recorded.")}</section>
+      <p class="footer">Once the employee and manager have signed to confirm the induction is complete, place this form on the employee's personnel file.</p>
+      <script>window.addEventListener("load",()=>window.print())<\/script></body></html>`);
+    printWindow.document.close();
   }
 
   async function handleSave(sub: string) {
@@ -638,11 +764,32 @@ export default function SafeTrackPage() {
       };
     });
 
+  const inductionRows = inductions
+    .filter(record => !q || [record.staffName, parseChecklist(record.checklist).jobTitle, parseChecklist(record.checklist).department].some(value => value.toLowerCase().includes(q)))
+    .map(record => {
+      const checklist = parseChecklist(record.checklist);
+      const answered = checklist.items.filter(item => item.status !== "").length;
+      return {
+        id: record.id,
+        cells: [
+          <span className="font-medium">{record.staffName}</span>,
+          <span className="text-muted-foreground text-xs">{checklist.jobTitle || "—"}{checklist.department ? ` · ${checklist.department}` : ""}</span>,
+          <span className="text-muted-foreground">{record.startDate}</span>,
+          record.completedAt
+            ? <Badge className="bg-emerald-100 text-emerald-800 text-xs font-normal">Complete</Badge>
+            : <Badge variant="secondary" className="text-xs font-normal">In progress</Badge>,
+          <span className="text-muted-foreground">{answered}/{INDUCTION_SECTIONS.length}</span>,
+          <span className="text-muted-foreground">{siteName(record.siteId) ?? "All sites"}</span>,
+        ],
+      };
+    });
+
   const tabConfig = {
     risk:     { label: "Risk Assessments", singularLabel: "Risk Assessment",  icon: FileText,      sub: "risk-assessments", headers: ["Title", "Status", "Assessed By", "Review Date", "Site"], rows: raRows },
     sops:     { label: "SOPs",             singularLabel: "SOP",              icon: ClipboardList, sub: "sops",             headers: ["Title", "Status", "Version", "Scope", "Site"],            rows: sopRows },
     handbook: { label: "Staff Handbook",   singularLabel: "Handbook Entry",   icon: BookMarked,    sub: "handbook",         headers: ["Title", "Status", "Version", "Section", "Site"],          rows: handbookRows },
     training: { label: "Training Records", singularLabel: "Training Record", icon: GraduationCap, sub: "training-records", headers: ["Staff Member", "Training", "Completed", "Expiry", "Site"], rows: trainingRows },
+    inductions: { label: "Inductions", singularLabel: "Induction", icon: Users, sub: "inductions", headers: ["Staff", "Role / Dept", "Start Date", "Status", "Progress", "Site"], rows: inductionRows },
   } as const;
 
   type TabKey = keyof typeof tabConfig;
@@ -655,6 +802,7 @@ export default function SafeTrackPage() {
     sops: "safe_sop",
     handbook: "safe_handbook",
     training: "safe_training_record",
+    inductions: "safe_induction",
   };
 
   function openAck(id: number, title: string) {
@@ -719,9 +867,13 @@ export default function SafeTrackPage() {
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
                   rows={cfg.rows}
-                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "handbook" ? handbook : training).find((r: any) => r.id === id)) : undefined}
+                  onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "handbook" ? handbook : tab === "training" ? training : inductions).find((r: any) => r.id === id)) : undefined}
                   onDelete={id => handleDelete(cfg.sub, id)}
                   onDownload={id => handleDownload(cfg.sub, id)}
+                  onPrint={key === "inductions" ? id => {
+                    const record = inductions.find(induction => induction.id === id);
+                    if (record) printInduction(record);
+                  } : undefined}
                   onAcknowledgements={id => {
                     const item = (tab === "risk" ? ras : tab === "sops" ? sops : handbook).find((r: any) => r.id === id);
                     if (item) openAck(id, item.title);
@@ -747,6 +899,7 @@ export default function SafeTrackPage() {
             {tab === "sops"     && <SopForm form={form} setForm={setForm} />}
             {tab === "handbook" && <HandbookForm form={form} setForm={setForm} />}
             {tab === "training" && <TrainingForm form={form} setForm={setForm} />}
+            {tab === "inductions" && <InductionForm form={form} setForm={setForm} />}
 
             <div className="space-y-1.5">
               <Label>Site (optional)</Label>
@@ -754,7 +907,7 @@ export default function SafeTrackPage() {
             </div>
 
             {/* Required reading toggle */}
-            {tab !== "training" && <div className="flex items-center gap-2 pt-1">
+            {!["training", "inductions"].includes(tab) && <div className="flex items-center gap-2 pt-1">
               <Checkbox
                 id="requires-ack"
                 checked={!!form.requiresAcknowledgement}
@@ -764,16 +917,16 @@ export default function SafeTrackPage() {
                 Requires staff acknowledgement
               </Label>
             </div>}
-            {tab !== "training" && form.requiresAcknowledgement && (
+            {!["training", "inductions"].includes(tab) && form.requiresAcknowledgement && (
               <p className="text-xs text-muted-foreground -mt-2 ml-6">
                 A <Users className="inline w-3 h-3" /> button will appear in the list so you can track which staff have confirmed they've read this.
               </p>
             )}
 
-            {tab !== "training" && <FileUploadField form={form} setForm={setForm} />}
+            {!["training", "inductions"].includes(tab) && <FileUploadField form={form} setForm={setForm} />}
 
             {/* Photos — only available once the record exists (needs a real id) */}
-            {tab !== "training" && (editing?.id ? (
+            {!["training", "inductions"].includes(tab) && (editing?.id ? (
               <div className="pt-1 border-t">
                 <CheckPhotoUploader
                   entityType={PHOTO_ENTITY_TYPE[tab as TabKey]}
@@ -897,5 +1050,45 @@ function TrainingForm({ form, setForm }: { form: any; setForm: any }) {
     <F label="Notes">
       <Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} />
     </F>
+  </>;
+}
+
+function InductionForm({ form, setForm }: { form: any; setForm: any }) {
+  const checklist = parseChecklist(form.checklist);
+  function updateChecklist(next: InductionChecklist) {
+    setForm((current: any) => ({ ...current, checklist: JSON.stringify(next) }));
+  }
+  function updateItem(key: SectionKey, patch: Partial<ChecklistItem>) {
+    updateChecklist({ ...checklist, items: checklist.items.map(item => item.key === key ? { ...item, ...patch } : item) });
+  }
+  return <>
+    <F label="Staff Name *"><Input value={form.staffName ?? ""} onChange={e => setForm({ ...form, staffName: e.target.value })} placeholder="Full name" autoFocus /></F>
+    <div className="grid grid-cols-2 gap-4">
+      <F label="Job Title"><Input value={checklist.jobTitle} onChange={e => updateChecklist({ ...checklist, jobTitle: e.target.value })} /></F>
+      <F label="Department"><Input value={checklist.department} onChange={e => updateChecklist({ ...checklist, department: e.target.value })} /></F>
+      <F label="Start Date *"><Input type="date" value={form.startDate ?? ""} onChange={e => setForm({ ...form, startDate: e.target.value })} /></F>
+      <F label="Completed Date"><Input type="date" value={form.completedAt ?? ""} onChange={e => setForm({ ...form, completedAt: e.target.value || null })} /></F>
+    </div>
+    <div className="space-y-2">
+      <Label>H&amp;S Induction Checklist</Label>
+      <div className="border rounded-lg divide-y">
+        {checklist.items.map((item, index) => (
+          <div key={item.key} className="p-3 space-y-2">
+            <div className="flex justify-between gap-3">
+              <span className="text-sm font-medium">{index + 1}. {INDUCTION_SECTIONS[index].label}</span>
+              <div className="flex gap-1">
+                {(["yes", "no", "na"] as const).map(status => (
+                  <Button key={status} type="button" size="sm" variant={item.status === status ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => updateItem(item.key, { status: item.status === status ? "" : status })}>
+                    {status === "na" ? "N/A" : status === "yes" ? "Yes" : "No"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <Input className="h-8 text-xs" placeholder="Comments…" value={item.comments} onChange={e => updateItem(item.key, { comments: e.target.value })} />
+          </div>
+        ))}
+      </div>
+    </div>
+    <F label="Notes / Sign-off Comments"><Textarea value={form.notes ?? ""} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} /></F>
   </>;
 }
