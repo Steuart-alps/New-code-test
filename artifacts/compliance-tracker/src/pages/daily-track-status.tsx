@@ -218,6 +218,7 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
   const today = new Date().toISOString().slice(0, 10);
   const lastMonth = shiftMonth(today.slice(0, 7), -1);
   const [month, setMonth] = useState(lastMonth);
+  const [siteId, setSiteId] = useState<"all" | number>("all");
   const [rows, setRows] = useState<{ checklists: HistoryChecklist[]; signoffs: HistorySignoff[] } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -239,33 +240,45 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
     return () => { cancelled = true; };
   }, [from, to]);
 
-  const expectedPerDay = sites.length * COLUMNS.length;
-  const siteIds = new Set(sites.map(s => s.id));
+  const selectedSites = siteId === "all" ? sites : sites.filter(site => site.id === siteId);
+  const expectedPerDay = selectedSites.length * COLUMNS.length;
+  const siteIds = new Set(selectedSites.map(s => s.id));
+  const checklistTypes = new Set(COLUMNS.filter(column => column.key !== "signoff").map(column => column.key));
 
-  const dayStatuses: { date: string; status: DayStatus; submitted: number }[] = [];
+  const dayStatuses: { date: string; status: DayStatus; submitted: number; started: number }[] = [];
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${month}-${String(d).padStart(2, "0")}`;
-    if (date >= today) { dayStatuses.push({ date, status: "future", submitted: 0 }); continue; }
+    if (date > today) { dayStatuses.push({ date, status: "future", submitted: 0, started: 0 }); continue; }
     // Count distinct (site, requirement) pairs so duplicate or site-less rows
     // can't make an incomplete day look complete.
+    const started = new Set<string>();
     const done = new Set<string>();
     for (const c of rows?.checklists ?? []) {
-      if (c.checkDate === date && c.submittedAt && c.siteId != null && siteIds.has(c.siteId)) {
-        done.add(`${c.siteId}:${c.checklistType}`);
+      if (
+        c.checkDate === date
+        && c.siteId != null
+        && siteIds.has(c.siteId)
+        && checklistTypes.has(c.checklistType as Exclude<ColKey, "signoff">)
+      ) {
+        const key = `${c.siteId}:${c.checklistType}`;
+        started.add(key);
+        if (c.submittedAt) done.add(key);
       }
     }
     for (const s of rows?.signoffs ?? []) {
-      if (s.signoffDate === date && s.submittedAt && s.siteId != null && siteIds.has(s.siteId)) {
-        done.add(`${s.siteId}:signoff`);
+      if (s.signoffDate === date && s.siteId != null && siteIds.has(s.siteId)) {
+        const key = `${s.siteId}:signoff`;
+        started.add(key);
+        if (s.submittedAt) done.add(key);
       }
     }
     const submitted = done.size;
     const status: DayStatus =
       expectedPerDay === 0 ? "missing"
       : submitted >= expectedPerDay ? "complete"
-      : submitted > 0 ? "partial"
+      : started.size > 0 ? "partial"
       : "missing";
-    dayStatuses.push({ date, status, submitted });
+    dayStatuses.push({ date, status, submitted, started: started.size });
   }
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday = 0
@@ -280,12 +293,24 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
             Spot patterns — days where checklists were incomplete or missing. Click a day to inspect it.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setMonth(shiftMonth(month, -1))}>←</Button>
-          <span className="text-sm font-medium min-w-[130px] text-center">{monthLabel(month)}</span>
-          <Button variant="outline" size="sm" className="h-8 px-2"
-            disabled={month >= today.slice(0, 7)}
-            onClick={() => setMonth(shiftMonth(month, 1))}>→</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Label className="sr-only" htmlFor="month-overview-site">Site</Label>
+          <select
+            id="month-overview-site"
+            value={siteId}
+            onChange={event => setSiteId(event.target.value === "all" ? "all" : Number(event.target.value))}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="all">All sites</option>
+            {sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+          </select>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setMonth(shiftMonth(month, -1))}>←</Button>
+            <span className="text-sm font-medium min-w-[130px] text-center">{monthLabel(month)}</span>
+            <Button variant="outline" size="sm" className="h-8 px-2"
+              disabled={month >= today.slice(0, 7)}
+              onClick={() => setMonth(shiftMonth(month, 1))}>→</Button>
+          </div>
         </div>
       </div>
 
@@ -300,17 +325,17 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
               <div key={d} className="text-[10px] text-muted-foreground text-center font-medium">{d}</div>
             ))}
             {Array.from({ length: firstWeekday }).map((_, i) => <div key={`pad-${i}`} />)}
-            {dayStatuses.map(({ date, status, submitted }) => (
+            {dayStatuses.map(({ date, status, submitted, started }) => (
               <button
                 key={date}
                 disabled={status === "future"}
                 onClick={() => onPickDay(date)}
-                title={status === "future" ? "" : `${date} — ${submitted}/${expectedPerDay} submitted`}
+                title={status === "future" ? "" : `${date} — ${submitted}/${expectedPerDay} submitted, ${started} started`}
                 className={cn(
                   "aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-transform",
                   status === "complete" && "bg-emerald-100 text-emerald-700 hover:scale-105",
                   status === "partial" && "bg-amber-100 text-amber-700 hover:scale-105",
-                  status === "missing" && "bg-red-100 text-red-700 hover:scale-105",
+                  status === "missing" && "bg-muted text-muted-foreground hover:scale-105",
                   status === "future" && "bg-muted/30 text-muted-foreground/40",
                 )}
               >
@@ -321,7 +346,7 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
           <div className="flex flex-wrap items-center gap-4 mt-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-300" /> All submitted</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" /> Partially complete</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-100 border border-red-300" /> Nothing submitted</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-muted border border-border" /> Nothing started</span>
             {sites.length > 0 && (
               <span className="ml-auto font-medium text-foreground">
                 {incompleteDays} day{incompleteDays !== 1 ? "s" : ""} with gaps in {monthLabel(month)}
