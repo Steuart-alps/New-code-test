@@ -1,0 +1,14 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 375094de9dc3ef591abe39fa4f415dd715708efa..63c7e660b2de18e598c2da0bc28fc6b70a5fd8f2 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -996,6 +996,9 @@ var globalOptions = {
+   disabledTypes: []
+ };
+ function imageSize(input) {
++  if (typeof input === "string") {
++    input = require("node:fs").readFileSync(input);
++  }
+   const type = detector(input);
+   if (typeof type !== "undefined") {
+     if (globalOptions.disabledTypes.indexOf(type) > -1) {
