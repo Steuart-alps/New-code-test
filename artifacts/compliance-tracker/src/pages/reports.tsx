@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from "recharts";
-import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle } from "lucide-react";
+import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, ShieldAlert, CheckCircle2, XCircle, Clock, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -85,6 +85,52 @@ interface TrendData {
   series: TrendSeries[];
 }
 
+interface RiskReportData {
+  generatedAt: string;
+  scope: { siteId: number | null; departmentId: number | null; departmentName?: string | null };
+  summary: {
+    staffTotal: number;
+    documentTotal: number;
+    relevantTotal: number;
+    acknowledged: number;
+    pending: number;
+    expired: number;
+    missing: number;
+    completionPct: number;
+  };
+  documents: Array<{
+    id: number;
+    title: string;
+    siteId: number | null;
+    siteName?: string;
+    department: string | null;
+    annualAcknowledgement: boolean;
+  }>;
+  staff: Array<{
+    id: number;
+    name: string;
+    jobTitle: string;
+    department: string | null;
+    siteId: number | null;
+    siteName?: string;
+    totals: {
+      relevant: number;
+      acknowledged: number;
+      pending: number;
+      expired: number;
+      missing: number;
+    };
+    cells: Array<{
+      documentId: number;
+      status: 'acknowledged' | 'pending' | 'expired' | 'missing';
+      acknowledgedAt?: string;
+      signature?: string;
+      acknowledgedByName?: string;
+      expiryDate?: string;
+    }>;
+  }>;
+}
+
 // ─── CSV export ─────────────────────────────────────────────────────────────
 
 function exportComplianceCsv(data: ReportData) {
@@ -126,6 +172,63 @@ function exportTrendCsv(data: TrendData) {
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href = url; a.download = `compliance-trend-${data.from}-to-${data.to}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportRiskCsv(data: RiskReportData) {
+  const lines: string[] = [];
+  lines.push("RISK ASSESSMENT SIGN-OFF REGISTER");
+  lines.push(`Generated at,${new Date(data.generatedAt).toLocaleString()}`);
+  lines.push("");
+
+  const header = ["Staff Member", "Job Title", "Department", "Site", "Relevant", "Acknowledged", "Completion", "Status"];
+  for (const doc of data.documents) {
+    header.push(`"${doc.title.replace(/"/g, '""')}"`);
+  }
+  lines.push(header.join(","));
+
+  for (const s of data.staff) {
+    const pct = s.totals.relevant > 0 ? Math.round((s.totals.acknowledged / s.totals.relevant) * 100) : 0;
+    let overallStatus = "COMPLIANT";
+    if (s.totals.expired > 0) overallStatus = "EXPIRED";
+    else if (s.totals.missing > 0) overallStatus = "MISSING";
+    else if (s.totals.pending > 0) overallStatus = "PENDING";
+    else if (s.totals.relevant === 0) overallStatus = "N/A";
+
+    const row = [
+      `"${s.name}"`,
+      `"${s.jobTitle || ""}"`,
+      `"${s.department || ""}"`,
+      `"${s.siteName || ""}"`,
+      s.totals.relevant,
+      s.totals.acknowledged,
+      s.totals.relevant > 0 ? `${pct}%` : "N/A",
+      overallStatus
+    ];
+
+    for (const doc of data.documents) {
+      const cell = s.cells.find(c => c.documentId === doc.id);
+      if (!cell) {
+        row.push("N/A");
+      } else {
+        if (cell.status === "acknowledged") {
+          row.push(`"Ack: ${new Date(cell.acknowledgedAt!).toLocaleDateString()}"`);
+        } else if (cell.status === "expired") {
+          row.push('"Expired"');
+        } else if (cell.status === "missing") {
+          row.push('"Missing"');
+        } else {
+          row.push('"Pending"');
+        }
+      }
+    }
+    lines.push(row.join(","));
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `risk-signoff-report.csv`; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -644,9 +747,254 @@ function TrendTab({
   );
 }
 
+// ─── Risk tab ────────────────────────────────────────────────────────────────
+
+function RiskTab({
+  sites, departments,
+}: {
+  sites: Site[]; departments: Department[];
+}) {
+  const [siteId,       setSiteId]       = useState("all");
+  const [departmentId, setDepartmentId] = useState("all");
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [data,         setData]         = useState<RiskReportData | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const visibleStaff = useMemo(() => {
+    if (!data || statusFilter === "all") return data?.staff ?? [];
+    return data.staff.filter(staff => staff.cells.some(cell => cell.status === statusFilter));
+  }, [data, statusFilter]);
+
+  const runReport = useCallback(async () => {
+    setError(null); setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (siteId       !== "all") params.set("siteId",       siteId);
+      if (departmentId !== "all") params.set("departmentId", departmentId);
+      const res = await apiFetch(`/reports/risk-acknowledgements?${params}`);
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as any;
+        throw new Error(json.error ?? `Server error ${res.status}`);
+      }
+      setData(await res.json());
+    } catch (e: any) {
+      setError(e.message ?? "Failed to load report");
+    } finally { setLoading(false); }
+  }, [siteId, departmentId]);
+
+  return (
+    <>
+      <div className="mb-6 flex flex-wrap gap-3 items-end print:hidden">
+        <div className="flex flex-col gap-1">
+          <Label>Department</Label>
+          <Select value={departmentId} onValueChange={setDepartmentId}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="All departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All departments</SelectItem>
+              {departments.map(d => (
+                <SelectItem key={d.id} value={String(d.id)}>{d.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label>Site</Label>
+          <Select value={siteId} onValueChange={setSiteId}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="All sites" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sites</SelectItem>
+              {sites.map(s => (
+                <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label>Sign-off status</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="acknowledged">Signed</SelectItem>
+              <SelectItem value="missing">Missing</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button onClick={runReport} disabled={loading} className="self-end bg-[#2B4B6F] hover:bg-[#1A2E44] text-white">
+          {loading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <FileCheck className="h-4 w-4 mr-2" />}
+          {loading ? "Running…" : "Run Report"}
+        </Button>
+
+        {data && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => exportRiskCsv({ ...data, staff: visibleStaff })}
+              className="self-end"
+            >
+              <Download className="h-4 w-4 mr-2" />Export CSV
+            </Button>
+            <Button variant="outline" onClick={() => window.print()} className="self-end">
+              <Printer className="h-4 w-4 mr-2" />Print
+            </Button>
+          </>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-6 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 print:hidden">
+          <AlertCircle className="h-4 w-4 shrink-0" />{error}
+        </div>
+      )}
+
+      {!data && !loading && !error && (
+        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-muted py-20 text-center print:hidden">
+          <ShieldAlert className="h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-lg font-medium text-foreground">Risk Assessment Compliance</p>
+          <p className="text-sm text-muted-foreground mt-1">Select filters and run the report to view staff acknowledgement status</p>
+        </div>
+      )}
+
+      {data && (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight text-[#162D42]">Risk Acknowledgement Register</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Generated {new Date(data.generatedAt).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-4">
+              <div className="flex flex-col bg-muted/50 px-4 py-2 rounded-lg border">
+                <span className="text-xs text-muted-foreground uppercase font-semibold">Staff Count</span>
+                <span className="text-xl font-bold">{data.summary.staffTotal}</span>
+              </div>
+              <div className="flex flex-col bg-muted/50 px-4 py-2 rounded-lg border">
+                <span className="text-xs text-muted-foreground uppercase font-semibold">Exceptions</span>
+                <span className={cn("text-xl font-bold", data.summary.expired + data.summary.missing > 0 ? "text-red-600" : "text-muted-foreground")}>
+                  {data.summary.expired + data.summary.missing}
+                </span>
+              </div>
+              <div className="flex flex-col bg-[#F4F7FA] px-4 py-2 rounded-lg border border-[#2B4B6F]/20">
+                <span className="text-xs text-[#2B4B6F] uppercase font-semibold">Completion</span>
+                <span className={cn(
+                  "text-xl font-bold",
+                  data.summary.completionPct >= 90 ? "text-green-600" :
+                  data.summary.completionPct >= 70 ? "text-amber-600" : "text-red-600"
+                )}>
+                  {data.summary.completionPct.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <Card className="overflow-hidden border-border/50 shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30 text-left text-muted-foreground">
+                    <th className="py-3 px-4 font-semibold sticky left-0 bg-background z-10 w-56 min-w-[14rem] shadow-[1px_0_0_0_var(--border)]">Staff Member</th>
+                    <th className="py-3 px-4 font-semibold whitespace-nowrap min-w-[10rem]">Site / Dept</th>
+                    <th className="py-3 px-4 font-semibold text-center whitespace-nowrap">Status</th>
+                    {data.documents.map(doc => (
+                      <th key={doc.id} className="py-3 px-3 font-medium text-center text-xs whitespace-nowrap min-w-[6rem] max-w-[10rem] truncate border-l border-border/50" title={doc.title}>
+                        {doc.title}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {visibleStaff.length === 0 ? (
+                    <tr><td colSpan={3 + data.documents.length} className="py-8 text-center text-muted-foreground">No staff matched the filters</td></tr>
+                  ) : visibleStaff.map(s => {
+                    const pct = s.totals.relevant > 0 ? (s.totals.acknowledged / s.totals.relevant) * 100 : 0;
+                    return (
+                      <tr key={s.id} className="hover:bg-muted/10 transition-colors group">
+                        <td className="py-2.5 px-4 sticky left-0 bg-background group-hover:bg-muted/30 transition-colors z-10 shadow-[1px_0_0_0_var(--border)]">
+                          <div className="font-medium text-foreground truncate" title={s.name}>{s.name}</div>
+                          <div className="text-xs text-muted-foreground truncate mt-0.5" title={s.jobTitle}>{s.jobTitle || "—"}</div>
+                        </td>
+                        <td className="py-2.5 px-4 whitespace-nowrap">
+                          <div className="text-sm font-medium">{s.siteName || "—"}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{s.department || "—"}</div>
+                        </td>
+                        <td className="py-2.5 px-4 whitespace-nowrap text-center">
+                          {s.totals.relevant === 0 ? (
+                            <span className="inline-block rounded px-2 py-0.5 text-[11px] font-medium bg-muted text-muted-foreground">N/A</span>
+                          ) : (
+                            <span className={cn(
+                              "inline-block rounded-full px-2 py-0.5 text-xs font-bold tabular-nums border",
+                              pct >= 100 ? "bg-green-50 text-green-700 border-green-200" :
+                              s.totals.expired > 0 ? "bg-red-50 text-red-700 border-red-200" :
+                              "bg-amber-50 text-amber-700 border-amber-200"
+                            )}>
+                              {pct.toFixed(0)}%
+                            </span>
+                          )}
+                        </td>
+                        {data.documents.map(doc => {
+                          const cell = s.cells.find(c => c.documentId === doc.id);
+                          if (!cell) {
+                            return <td key={doc.id} className="py-2.5 px-3 text-center text-muted-foreground/30 border-l border-border/50">—</td>;
+                          }
+
+                          let icon, colorClass, titleText;
+                           if (cell.status === "acknowledged") {
+                            icon = <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />;
+                            colorClass = "text-green-600";
+                            titleText = `Acknowledged on ${new Date(cell.acknowledgedAt!).toLocaleDateString()}`;
+                          } else if (cell.status === "expired") {
+                            icon = <XCircle className="h-4 w-4" strokeWidth={2.5} />;
+                            colorClass = "text-red-600";
+                            titleText = `Expired on ${new Date(cell.expiryDate!).toLocaleDateString()}`;
+                           } else if (cell.status === "missing") {
+                             icon = <XCircle className="h-4 w-4" strokeWidth={2.5} />;
+                             colorClass = "text-red-600";
+                             titleText = "No acknowledgement recorded";
+                          } else {
+                            icon = <Clock className="h-4 w-4" strokeWidth={2.5} />;
+                            colorClass = "text-amber-500";
+                            titleText = "Pending acknowledgement";
+                          }
+
+                          return (
+                            <td key={doc.id} className="py-2.5 px-3 text-center align-middle border-l border-border/50" title={titleText}>
+                              <div className={cn("flex justify-center", colorClass)}>
+                                {icon}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+    </>
+  );
+}
+
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "compliance" | "trend";
+type ActiveTab = "compliance" | "trend" | "risk";
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("compliance");
@@ -681,15 +1029,19 @@ export default function ReportsPage() {
   return (
     <AppLayout title="Reports">
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
-      <div className="mb-6 flex gap-1 border-b">
-        {([ ["compliance", BarChart2, "Compliance"], ["trend", TrendingUp, "Trend"] ] as const).map(([tab, Icon, label]) => (
+      <div className="mb-6 flex gap-1 border-b print:hidden">
+        {([
+          ["compliance", BarChart2, "Compliance"],
+          ["trend", TrendingUp, "Trend"],
+          ["risk", FileCheck, "Risk Sign-off"]
+        ] as const).map(([tab, Icon, label]) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
               "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
               activeTab === tab
-                ? "border-primary text-primary"
+                ? "border-[#2B4B6F] text-[#2B4B6F]"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
@@ -705,8 +1057,10 @@ export default function ReportsPage() {
         </div>
       ) : activeTab === "compliance" ? (
         <ComplianceTab sites={sites} departments={departments} />
-      ) : (
+      ) : activeTab === "trend" ? (
         <TrendTab sites={sites} departments={departments} />
+      ) : (
+        <RiskTab sites={sites} departments={departments} />
       )}
     </AppLayout>
   );

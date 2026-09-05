@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { z } from "zod";
 
 const router = Router();
+type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
 
 // ─── Shared schemas ───────────────────────────────────────────────────────────
 
@@ -19,6 +20,239 @@ const trendSchema = z.object({
   months:       z.coerce.number().int().min(2).max(24).default(6),
   siteId:       z.coerce.number().int().positive().optional(),
   departmentId: z.coerce.number().int().positive().optional(),
+});
+
+const riskAcknowledgementsSchema = z.object({
+  siteId: z.coerce.number().int().positive().optional(),
+  departmentId: z.coerce.number().int().positive().optional(),
+});
+
+// ─── GET /reports/risk-acknowledgements ──────────────────────────────────────
+
+router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
+  // Do not accept a tenant identifier in this report's payload. getClientId is
+  // the single source of the tenant context (including consultant access).
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const parsed = riskAcknowledgementsSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
+  }
+
+  const { siteId, departmentId } = parsed.data;
+  const activeDepartmentId = getActiveDepartmentId(req);
+  if (
+    activeDepartmentId !== null
+    && departmentId !== undefined
+    && departmentId !== activeDepartmentId
+  ) {
+    return res.status(403).json({ error: "Department scope cannot be changed" });
+  }
+
+  // A scoped caller's department is always authoritative, whether or not it was
+  // supplied in the query string.
+  const effectiveDepartmentId = activeDepartmentId ?? departmentId;
+  let departmentName: string | null = null;
+  if (effectiveDepartmentId !== undefined && effectiveDepartmentId !== null) {
+    const departmentResult = await db.execute(sql`
+      SELECT name
+      FROM departments
+      WHERE id = ${effectiveDepartmentId} AND client_id = ${clientId}
+      LIMIT 1
+    `);
+    const department = (departmentResult.rows ?? [])[0] as { name: string } | undefined;
+    if (!department) return res.status(400).json({ error: "Department not found" });
+    departmentName = department.name;
+  }
+
+  if (siteId !== undefined) {
+    const siteResult = await db.execute(sql`
+      SELECT department_id
+      FROM sites
+      WHERE id = ${siteId} AND client_id = ${clientId}
+      LIMIT 1
+    `);
+    const site = (siteResult.rows ?? [])[0] as { department_id: number | null } | undefined;
+    if (!site) return res.status(400).json({ error: "Site not found" });
+    if (
+      activeDepartmentId !== null
+      && site.department_id !== null
+      && Number(site.department_id) !== activeDepartmentId
+    ) {
+      return res.status(403).json({ error: "Site is outside your department scope" });
+    }
+  }
+
+  const staffWhere = sql`
+    sr.client_id = ${clientId}
+    AND sr.active = true
+    ${siteId !== undefined ? sql`AND sr.site_id = ${siteId}` : sql``}
+    ${departmentName !== null ? sql`AND sr.department = ${departmentName}` : sql``}
+  `;
+
+  const documentScope = sql`
+    d.client_id = ${clientId}
+    AND d.category = 'risk_assessment'
+    AND d.requires_acknowledgement = true
+    ${siteId !== undefined ? sql`AND (d.site_id IS NULL OR d.site_id = ${siteId})` : sql``}
+    ${departmentName !== null ? sql`AND (d.department IS NULL OR d.department = ${departmentName})` : sql``}
+    ${activeDepartmentId !== null ? sql`
+      AND (
+        d.site_id IS NULL
+        OR EXISTS (
+          SELECT 1 FROM sites scoped_site
+          WHERE scoped_site.id = d.site_id
+            AND scoped_site.client_id = ${clientId}
+            AND (scoped_site.department_id IS NULL OR scoped_site.department_id = ${activeDepartmentId})
+        )
+      )
+    ` : sql``}
+  `;
+
+  const [staffResult, documentResult, matrixResult] = await Promise.all([
+    db.execute(sql`
+      SELECT sr.id, sr.name, sr.job_title, sr.department, sr.site_id, s.name AS site_name
+      FROM staff_roster sr
+      LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = ${clientId}
+      WHERE ${staffWhere}
+      ORDER BY sr.name ASC, sr.id ASC
+    `),
+    db.execute(sql`
+      SELECT
+        d.id, d.title, d.category, d.site_id, s.name AS site_name,
+        d.department, d.requires_acknowledgement, d.annual_acknowledgement,
+        d.created_at, d.updated_at
+      FROM doc_track_documents d
+      LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = ${clientId}
+      WHERE ${documentScope}
+      ORDER BY d.title ASC, d.id ASC
+    `),
+    db.execute(sql`
+      SELECT
+        sr.id AS staff_id,
+        d.id AS document_id,
+        d.title AS document_title,
+        d.category AS document_category,
+        d.site_id AS document_site_id,
+        ds.name AS document_site_name,
+        d.department AS document_department,
+        d.requires_acknowledgement,
+        d.annual_acknowledgement,
+        d.created_at AS document_created_at,
+        d.updated_at AS document_updated_at,
+        ack.acknowledged_at,
+        ack.signature,
+        acknowledged_by.name AS acknowledged_by_name,
+        training.expiry_date,
+        CASE
+          WHEN ack.id IS NULL THEN 'missing'
+          WHEN ack.train_track_record_id IS NOT NULL AND training.id IS NULL THEN 'pending'
+          WHEN training.expiry_date IS NOT NULL AND training.expiry_date < CURRENT_DATE THEN 'expired'
+          ELSE 'acknowledged'
+        END AS acknowledgement_status
+      FROM staff_roster sr
+      JOIN doc_track_documents d
+        ON d.client_id = sr.client_id
+       AND d.category = 'risk_assessment'
+       AND d.requires_acknowledgement = true
+       AND (d.site_id IS NULL OR d.site_id = sr.site_id)
+       AND (d.department IS NULL OR d.department = sr.department)
+      LEFT JOIN sites ds ON ds.id = d.site_id AND ds.client_id = ${clientId}
+      LEFT JOIN LATERAL (
+        SELECT a.id, a.acknowledged_at, a.signature, a.acknowledged_by, a.train_track_record_id
+        FROM doc_acknowledgements a
+        WHERE a.document_id = d.id
+          AND a.staff_roster_id = sr.id
+          AND a.client_id = ${clientId}
+        ORDER BY a.acknowledged_at DESC, a.id DESC
+        LIMIT 1
+      ) ack ON true
+      LEFT JOIN train_track_records training
+        ON training.id = ack.train_track_record_id
+       AND training.client_id = ${clientId}
+      LEFT JOIN users acknowledged_by
+        ON acknowledged_by.id = ack.acknowledged_by
+       AND acknowledged_by.client_id = ${clientId}
+      WHERE ${staffWhere}
+      ORDER BY d.title ASC, d.id ASC, sr.name ASC, sr.id ASC
+    `),
+  ]);
+
+  const documents = (documentResult.rows as any[]).map((row) => ({
+    id: Number(row.id),
+    title: row.title,
+    category: row.category,
+    siteId: row.site_id === null ? null : Number(row.site_id),
+    siteName: row.site_name ?? null,
+    department: row.department ?? null,
+    requiresAcknowledgement: Boolean(row.requires_acknowledgement),
+    annualAcknowledgement: Boolean(row.annual_acknowledgement),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+  const cellsByStaff = new Map<number, any[]>();
+  for (const row of matrixResult.rows as any[]) {
+    const documentId = Number(row.document_id);
+    const staffId = Number(row.staff_id);
+    const cells = cellsByStaff.get(staffId) ?? [];
+    cells.push({
+      documentId,
+      status: row.acknowledgement_status as "acknowledged" | "pending" | "expired" | "missing",
+      acknowledgedAt: row.acknowledged_at ?? null,
+      signature: row.signature ?? null,
+      acknowledgedByName: row.acknowledged_by_name ?? null,
+      expiryDate: row.expiry_date ?? null,
+    });
+    cellsByStaff.set(staffId, cells);
+  }
+
+  const summaryCounts = { relevant: 0, acknowledged: 0, pending: 0, expired: 0, missing: 0 };
+  const staff = (staffResult.rows as any[]).map((row) => {
+    const cells = cellsByStaff.get(Number(row.id)) ?? [];
+    const totals = { relevant: cells.length, acknowledged: 0, pending: 0, expired: 0, missing: 0 };
+    for (const cell of cells) {
+      const status = cell.status as RiskAcknowledgementStatus;
+      totals[status]++;
+      summaryCounts[status]++;
+      summaryCounts.relevant++;
+    }
+    return {
+      id: Number(row.id),
+      name: row.name,
+      jobTitle: row.job_title ?? null,
+      department: row.department ?? null,
+      siteId: row.site_id === null ? null : Number(row.site_id),
+      siteName: row.site_name ?? null,
+      cells,
+      totals,
+    };
+  });
+
+  const completionPct = summaryCounts.relevant > 0
+    ? Math.round((summaryCounts.acknowledged / summaryCounts.relevant) * 1000) / 10
+    : 0;
+
+  return res.json({
+    generatedAt: new Date().toISOString(),
+    scope: {
+      siteId: siteId ?? null,
+      departmentId: effectiveDepartmentId ?? null,
+      departmentName,
+    },
+    documents,
+    staff,
+    summary: {
+      staffTotal: staff.length,
+      documentTotal: documents.length,
+      relevantTotal: summaryCounts.relevant,
+      acknowledged: summaryCounts.acknowledged,
+      pending: summaryCounts.pending,
+      expired: summaryCounts.expired,
+      missing: summaryCounts.missing,
+      completionPct,
+    },
+  });
 });
 
 // ─── GET /reports/compliance ─────────────────────────────────────────────────
