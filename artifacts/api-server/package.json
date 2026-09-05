@@ -39,6 +39,7 @@
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
     "test:bike-overdue-reminders": "node tests/bike-overdue-reminders.mjs",
+    "test:bike-hire-export": "bash tests/run-bike-hire-export.sh",
     "test:pesttrack-billing": "node tests/pesttrack-billing.mjs",
     "test:riddor-audit-history": "bash tests/run-riddor-audit-history.sh",
     "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",

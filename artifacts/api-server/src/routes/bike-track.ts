@@ -3,8 +3,9 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
 
 const router = Router();
 
@@ -170,6 +171,83 @@ router.delete("/bikes/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 // ── Hire Records ──────────────────────────────────────────────────────────────
+
+const exportQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  format: z.enum(["csv", "pdf"]).default("csv"),
+}).refine(({ from, to }) => from <= to, { message: "From date must be on or before to date" });
+
+function csvCell(value: string): string {
+  // Spreadsheet applications may evaluate formula-prefixed cells even when
+  // they are CSV-quoted. Prefix untrusted formula-like values with an
+  // apostrophe so guest-entered data is always opened as literal text.
+  const safeValue = /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safeValue.replace(/"/g, "\"\"")}"`;
+}
+
+router.get("/hires/export", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = exportQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "A valid from date, to date and format are required" });
+  const { from, to, format } = parsed.data;
+
+  const result = await db.execute(sql`
+    SELECT h.guest_name, h.guest_contact, b.ref AS bike_ref, h.hire_date,
+           COALESCE(h.return_date_actual, h.return_date_expected) AS return_date,
+           pre.overall_result AS pre_check_result,
+           post.overall_result AS post_check_result,
+           h.deposit_pence, h.notes
+    FROM bike_hire_records h
+    JOIN bikes b ON b.id = h.bike_id AND b.client_id = h.client_id
+    LEFT JOIN bike_checks pre
+      ON pre.hire_record_id = h.id AND pre.client_id = h.client_id AND pre.check_type = 'pre_hire'
+    LEFT JOIN bike_checks post
+      ON post.hire_record_id = h.id AND post.client_id = h.client_id AND post.check_type = 'post_return'
+    WHERE h.client_id = ${clientId}
+      AND h.hire_date >= ${from}
+      AND h.hire_date <= ${to}
+    ORDER BY h.hire_date ASC, h.id ASC
+  `);
+  const rows = (result.rows ?? []).map((row: any): BikeHireRegisterRow => ({
+    guestName: row.guest_name ?? "",
+    guestContact: row.guest_contact ?? "",
+    bikeRef: row.bike_ref ?? "",
+    hireDate: row.hire_date ?? "",
+    returnDate: row.return_date ?? "",
+    preCheckResult: row.pre_check_result ?? "",
+    postCheckResult: row.post_check_result ?? "",
+    deposit: row.deposit_pence == null ? "" : `£${(Number(row.deposit_pence) / 100).toFixed(2)}`,
+    notes: row.notes ?? "",
+  }));
+  const filename = `bike-hire-register-${from}-to-${to}.${format}`;
+
+  if (format === "pdf") {
+    const pdf = createBikeHireRegisterPdf({
+      from,
+      to,
+      generatedAt: new Date().toLocaleDateString("en-GB"),
+      rows,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdf.length);
+    return res.send(pdf);
+  }
+
+  const headings = ["Guest name", "Contact", "Bike ref", "Hire date", "Return date", "Pre-check result", "Post-check result", "Deposit", "Notes"];
+  const csv = [
+    headings.map(csvCell).join(","),
+    ...rows.map((row) => [
+      row.guestName, row.guestContact, row.bikeRef, row.hireDate, row.returnDate,
+      row.preCheckResult, row.postCheckResult, row.deposit, row.notes,
+    ].map(csvCell).join(",")),
+  ].join("\r\n");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(`\uFEFF${csv}`);
+});
 
 router.get("/hires", requireAuth, async (req, res) => {
   const clientId = getClientId(req);

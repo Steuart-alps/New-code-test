@@ -30,7 +30,7 @@ import {
 import {
   Bike, Plus, AlertTriangle, CheckCircle2, Clock, Wrench, Lock,
   User, Phone, Calendar, ChevronRight, ChevronLeft, Pencil, Trash2,
-  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings, Printer,
+  Search, Check, X, Minus, RotateCcw, Archive, Filter, ClipboardCheck, Settings, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
@@ -169,6 +169,14 @@ function daysUntil(d: string | null): number | null {
 function todayIso() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function currentMonthRange() {
+  const now = new Date();
+  const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const to = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
+  return { from, to };
 }
 
 function autoNextService(serviceDate: string, serviceType: string): string | null {
@@ -1116,61 +1124,37 @@ export default function BikeTrackPage() {
   const overdueHires = useMemo(() => activeHires.filter(h => h.returnDateExpected && (daysUntil(h.returnDateExpected) ?? 1) < 0), [activeHires]);
 
   // ── Export hire register (for insurance / liability) ──────────────────────────
-
-  const esc = (s: string | null | undefined) =>
-    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
+  const defaultExportRange = useMemo(currentMonthRange, []);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState(defaultExportRange.from);
+  const [exportTo, setExportTo] = useState(defaultExportRange.to);
+  const [exportFormat, setExportFormat] = useState<"csv" | "pdf">("csv");
   const [exporting, setExporting] = useState(false);
 
   async function handleExportRegister() {
+    if (!exportFrom || !exportTo || exportFrom > exportTo) {
+      toast({ title: "Check the date range", description: "The from date must be on or before the to date.", variant: "destructive" });
+      return;
+    }
     setExporting(true);
     try {
-      // Fetch the full register regardless of the current tab filter
-      const allHires: HireRow[] = await apiFetch("/bike-track/hires?status=all");
-      const rows = [...allHires].sort((a, b) => (a.hireDate < b.hireDate ? 1 : -1));
-
-      const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bike Hire Register</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .empty { font-size: 11px; color: #777; font-style: italic; }
-  @media print { body { margin: 12mm; } }
-</style></head><body>
-<h1>Bike Hire Register</h1>
-<div class="meta">Generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for insurance &amp; liability records</div>
-<div class="meta">Total hires: ${rows.length}</div>
-
-<h2>Hire records</h2>
-${rows.length === 0 ? `<p class="empty">No hire records.</p>` : `<table>
-<tr><th>Guest name</th><th>Contact</th><th>Bike ref</th><th>Bike</th><th>Hire date</th><th>Expected return</th><th>Actual return</th><th>Status</th></tr>
-${rows.map(h => `<tr>
-  <td>${esc(h.guestName)}</td>
-  <td>${esc(h.guestContact)}</td>
-  <td>${esc(h.bikeRef)}</td>
-  <td>${esc([h.bikeName, BIKE_TYPES[h.bikeType] ?? h.bikeType].filter(Boolean).join(" · "))}</td>
-  <td>${fmt(h.hireDate)}</td>
-  <td>${fmt(h.returnDateExpected)}</td>
-  <td>${fmt(h.returnDateActual)}</td>
-  <td>${esc(statusLabel(h.status))}</td>
-</tr>`).join("")}
-</table>`}
-</body></html>`;
-      const win = window.open("", "_blank");
-      if (!win) {
-        toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the register.", variant: "destructive" });
-        return;
+      const params = new URLSearchParams({ from: exportFrom, to: exportTo, format: exportFormat });
+      const response = await fetch(`${baseUrl}/bike-track/hires/export?${params}`, { credentials: "include" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error ?? "The register could not be downloaded");
       }
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-      setTimeout(() => win.print(), 250);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `bike-hire-register-${exportFrom}-to-${exportTo}.${exportFormat}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+      toast({ title: "Register downloaded", description: `${exportFormat.toUpperCase()} for ${exportFrom} to ${exportTo}` });
     } catch (e: any) {
       toast({ title: "Export failed", description: e.message, variant: "destructive" });
     } finally {
@@ -1221,11 +1205,6 @@ ${rows.map(h => `<tr>
           Bike hire logbook — fleet management, guest hires, safety checks and service planning based on use and risk
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={handleExportRegister} disabled={exporting}
-            className="gap-2 rounded-sm"
-            title="Print or save the bike hire register for insurance & liability records">
-            <Printer className="w-4 h-4" /> {exporting ? "Preparing…" : "Export hire register"}
-          </Button>
           {canAdmin && <BikeConfigDialog />}
           <Button onClick={() => setShowNewHire(true)} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> New Hire
@@ -1479,6 +1458,11 @@ ${rows.map(h => `<tr>
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search guest or bike…" className="pl-8 h-8 rounded-sm text-sm" />
             </div>
+            {canAdmin && (
+              <Button variant="outline" onClick={() => setExportOpen(true)} size="sm" className="rounded-sm gap-1.5">
+                <Download className="w-3.5 h-3.5" /> Download register
+              </Button>
+            )}
             <Button onClick={() => setShowNewHire(true)} size="sm" className="rounded-sm gap-1.5 ml-auto">
               <Plus className="w-3.5 h-3.5" /> New Hire
             </Button>
@@ -1570,6 +1554,42 @@ ${rows.map(h => `<tr>
           )}
         </div>
       )}
+
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-md rounded-sm">
+          <DialogHeader>
+            <DialogTitle>Download bike hire register</DialogTitle>
+            <p className="text-sm text-muted-foreground">Choose the hire-date range and file format for your insurance and liability records.</p>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="register-from">From</Label>
+              <Input id="register-from" type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="register-to">To</Label>
+              <Input id="register-to" type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label>Format</Label>
+              <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as "csv" | "pdf")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="csv">CSV spreadsheet</SelectItem>
+                  <SelectItem value="pdf">PDF document</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>Cancel</Button>
+            <Button onClick={handleExportRegister} disabled={exporting || !exportFrom || !exportTo}>
+              <Download className="w-4 h-4 mr-2" />
+              {exporting ? "Preparing…" : `Download ${exportFormat.toUpperCase()}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Services tab ─────────────────────────────────────────────────────── */}
       {activeTab === "services" && (
