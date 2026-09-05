@@ -55,7 +55,7 @@ import {
   ShieldCheck,
   FileText,
   Printer,
-  Grid3x3,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SignaturePad } from "@/components/signature-pad";
@@ -542,68 +542,65 @@ ${rows.map(r => `<tr>
     openPrintWindow(html);
   }
 
-  // Training matrix — rows = staff, columns = training types, cells = status
-  function handlePrintMatrix() {
-    // Build from certificates (the records with expiry-based status).
-    const staffNames = Array.from(new Set(certs.map(r => r.staff_name))).sort((a, b) => a.localeCompare(b));
-    const types = Array.from(new Set(certs.map(r => r.training_type ?? "Other"))).sort((a, b) => a.localeCompare(b));
+  // Training matrix CSV — rows = staff, columns = training types, cells = current status.
+  function handleDownloadMatrix() {
+    const matrixCerts = siteFilter === "all"
+      ? certs
+      : certs.filter(r => String(r.site_id) === siteFilter);
+    const staffNames = Array.from(new Set(matrixCerts.map(r => r.staff_name)))
+      .sort((a, b) => a.localeCompare(b));
+    const types = Array.from(new Set(matrixCerts.map(r => r.training_type ?? "Other")))
+      .sort((a, b) => a.localeCompare(b));
 
-    // Latest cert per staff+type (by completed date).
+    if (staffNames.length === 0 || types.length === 0) {
+      toast({
+        title: "No certificates to export",
+        description: siteFilter === "all"
+          ? "Add a training certificate before downloading the matrix."
+          : "No training certificates are recorded for the selected site.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Use the latest completed certificate for each staff member and training type.
     const cellMap = new Map<string, TrainingRecord>();
-    for (const r of certs) {
+    for (const r of matrixCerts) {
       const key = `${r.staff_name}||${r.training_type ?? "Other"}`;
       const existing = cellMap.get(key);
       if (!existing || r.completed_date > existing.completed_date) cellMap.set(key, r);
     }
 
-    const cell = (staff: string, type: string) => {
+    const cell = (staff: string, type: string): string => {
       const r = cellMap.get(`${staff}||${type}`);
-      if (!r) return `<td style="background:#f7f7f7;color:#999;text-align:center">Missing</td>`;
+      if (!r) return "—";
       const status = getCertStatus(r.expiry_date);
-      const cfg = {
-        expired:       { bg: "#fdecec", fg: "#b42318", label: "Expired" },
-        expiring_soon: { bg: "#fdf3e0", fg: "#b25f00", label: "Expiring" },
-        valid:         { bg: "#e9f7ef", fg: "#1a7f4b", label: "Valid" },
-        no_expiry:     { bg: "#f1f1f1", fg: "#555",    label: "No expiry" },
-      }[status];
-      const dates = r.expiry_date
-        ? `${esc(formatDate(r.completed_date))} → ${esc(formatDate(r.expiry_date))}`
-        : esc(formatDate(r.completed_date));
-      return `<td style="background:${cfg.bg};color:${cfg.fg}"><strong>${cfg.label}</strong><br><span style="font-size:9px;color:#555">${dates}</span></td>`;
+      const label = status === "expiring_soon"
+        ? "Expiring Soon"
+        : status === "no_expiry"
+          ? "Valid"
+          : STATUS_CFG[status].label;
+      return r.expiry_date ? `${label} (${formatDate(r.expiry_date)})` : label;
     };
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Training Matrix</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 12px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  th.staff, td.staff { background: #f0ede2; font-weight: bold; white-space: nowrap; }
-  .empty { font-size: 11px; color: #777; font-style: italic; }
-  .legend { font-size: 10px; color: #555; margin-top: 12px; }
-  .legend span { display: inline-block; margin-right: 12px; padding: 1px 6px; border: 1px solid #ccc; }
-  @media print { body { margin: 10mm; } @page { size: landscape; } }
-</style></head><body>
-<h1>Training Matrix</h1>
-<div class="meta">${esc(companyName)} — training certificate status — generated ${esc(todayLabel)}</div>
-${staffNames.length === 0 || types.length === 0
-  ? `<p class="empty">No training certificates recorded.</p>`
-  : `<table>
-<tr><th class="staff">Staff member</th>${types.map(t => `<th>${esc(t)}</th>`).join("")}</tr>
-${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell(s, t)).join("")}</tr>`).join("")}
-</table>
-<div class="legend">
-  <span style="background:#e9f7ef;color:#1a7f4b">Valid</span>
-  <span style="background:#fdf3e0;color:#b25f00">Expiring (≤30 days)</span>
-  <span style="background:#fdecec;color:#b42318">Expired</span>
-  <span style="background:#f1f1f1;color:#555">No expiry</span>
-  <span style="background:#f7f7f7;color:#999">Missing / not held</span>
-</div>`}
-<div style="margin-top:24px;font-size:10.5px;color:#777;border-top:1px solid #ccc;padding-top:6px">${esc(companyName)} · Generated by ${esc(user?.name ?? "")} on ${esc(todayLabel)}</div>
-</body></html>`;
-    openPrintWindow(html);
+    const csvValue = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
+    const rows = [
+      ["Staff member", ...types],
+      ...staffNames.map(staff => [staff, ...types.map(type => cell(staff, type))]),
+    ];
+    const csv = rows.map(row => row.map(csvValue).join(",")).join("\r\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const selectedSite = sites.find(site => String(site.id) === siteFilter)?.name;
+    const safeSite = (selectedSite ?? "all-sites").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+    link.href = url;
+    link.download = `training-matrix-${safeSite}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast({ title: "Training matrix downloaded" });
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -690,11 +687,11 @@ ${staffNames.map(s => `<tr><td class="staff">${esc(s)}</td>${types.map(t => cell
           />
           <Button
             variant="outline"
-            onClick={handlePrintMatrix}
+            onClick={handleDownloadMatrix}
             className="gap-2 rounded-sm"
-            title="Print a training matrix showing every staff member's certificate status"
+            title="Download a CSV training matrix for the selected site"
           >
-            <Grid3x3 className="w-4 h-4" /> Training matrix
+            <Download className="w-4 h-4" /> Download Matrix
           </Button>
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Add Record
