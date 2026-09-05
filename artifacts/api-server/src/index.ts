@@ -23,8 +23,8 @@ import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
 import { runCancellationDetectionJob, runCancellationWarningJob, runDataDeletionJob } from "./lib/offboarding";
 import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
-import { runSafeTrackAckReminderJob } from "./lib/safeTrackAckReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
+import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 
 const rawPort = process.env["PORT"];
 
@@ -252,15 +252,7 @@ function startScheduler() {
   // Alert client admins weekly (Monday 09:30) when staff haven't acknowledged
   // required SafeTrack documents (risk assessments, SOPs, handbook entries)
   // within 7 days of publication.
-  cron.schedule("30 9 * * 1", async () => {
-    logger.info("Running SafeTrack acknowledgement reminder job...");
-    try {
-      const result = await runSafeTrackAckReminderJob();
-      logger.info({ result }, "SafeTrack acknowledgement reminder job complete");
-    } catch (err) {
-      logger.error({ err }, "SafeTrack acknowledgement reminder job failed");
-    }
-  });
+  registerSafeTrackAckReminderSchedule(cron.schedule);
   logger.info("SafeTrack acknowledgement reminder scheduler started (weekly Monday at 09:30)");
 }
 

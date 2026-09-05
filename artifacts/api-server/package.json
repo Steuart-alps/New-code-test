@@ -20,6 +20,7 @@
     "test:config": "node tests/config-endpoints.mjs",
     "test:config:ci": "bash tests/run-config-endpoints.sh",
     "test:training-expiry": "node tests/training-expiry-reminders.mjs",
+    "test:safe-track-ack-reminders": "node tests/safe-track-ack-reminders.mjs",
     "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",
     "test:discounts": "node tests/discount-codes.mjs",
     "test:discounts:ci": "bash tests/run-discount-codes.sh",
@@ -35,6 +36,7 @@
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:riddor-audit-history": "bash tests/run-riddor-audit-history.sh",
+    "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:twofa-recovery": "bash tests/run-twofa-recovery.sh"
   },

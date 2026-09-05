@@ -322,6 +322,7 @@ export async function runRuntimeMigrations() {
     await migrateStaffRoster();
     await migrateDocAcknowledgements();
     await migrateSignatures();
+    await migrateSafeTrackAckReminderLog();
     await migrateDocDepartment();
     await migratePoolTrack();
     await migrateCheckPhotos();
@@ -1138,6 +1139,7 @@ async function migrateSignatures() {
     await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "file_size" bigint`));
     await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "mime_type" text`));
     await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "requires_acknowledgement" boolean NOT NULL DEFAULT false`));
+    await db.execute(sql.raw(`ALTER TABLE "${tbl}" ADD COLUMN IF NOT EXISTS "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL`));
   }
   // SafeTrack acknowledgements table
   await db.execute(sql`
@@ -1156,6 +1158,21 @@ async function migrateSignatures() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_safe_track_acks_doc" ON "safe_track_acknowledgements" ("document_type", "document_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_safe_track_acks_client" ON "safe_track_acknowledgements" ("client_id")`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "IDX_safe_track_acks_unique" ON "safe_track_acknowledgements" ("document_type", "document_id", "staff_roster_id") WHERE "staff_roster_id" IS NOT NULL`);
+}
+
+// ---- SafeTrack acknowledgement reminder de-duplication ----
+async function migrateSafeTrackAckReminderLog() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_track_ack_reminder_log" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "sent_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_safe_track_ack_reminder_client"
+    ON "safe_track_ack_reminder_log" ("client_id", "sent_at")
+  `);
 }
 
 // ---- Department field on documents + sign-off token on clients ----
@@ -1916,6 +1933,23 @@ async function migrateComplianceAuditTrail() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_audit_events_client_entity" ON "audit_events" ("client_id", "entity_type", "entity_id", "created_at" DESC)`);
   await db.execute(sql`ALTER TABLE "audit_events" DROP CONSTRAINT IF EXISTS "audit_events_client_id_clients_id_fk"`);
   await db.execute(sql`ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE RESTRICT`);
+  // Audit evidence is deliberately insert-only. Application routes use the
+  // appendAuditEvent helper, but this database guard also protects records
+  // from an accidental future route or direct ORM mutation.
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "prevent_audit_event_mutation"()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'Audit events are append-only';
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS "audit_events_immutable" ON "audit_events"`);
+  await db.execute(sql`
+    CREATE TRIGGER "audit_events_immutable"
+    BEFORE UPDATE OR DELETE ON "audit_events"
+    FOR EACH ROW EXECUTE FUNCTION "prevent_audit_event_mutation"()
+  `);
 }
 
 async function migrateSousVide() {

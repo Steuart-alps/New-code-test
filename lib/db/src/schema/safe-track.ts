@@ -2,11 +2,13 @@ import { pgTable, serial, text, timestamp, integer, date, bigint, boolean } from
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { departmentsTable } from "./departments";
 
 export const safeRiskAssessmentsTable = pgTable("safe_risk_assessments", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description"),
   assessedBy: text("assessed_by"),
@@ -28,6 +30,7 @@ export const safeSopsTable = pgTable("safe_sops", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   scope: text("scope"),
   content: text("content"),
@@ -48,6 +51,7 @@ export const safeTrainingRecordsTable = pgTable("safe_training_records", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
+  departmentId: integer("department_id").references(() => departmentsTable.id, { onDelete: "set null" }),
   staffName: text("staff_name").notNull(),
   trainingType: text("training_type").notNull(),
   completedAt: date("completed_at").notNull(),

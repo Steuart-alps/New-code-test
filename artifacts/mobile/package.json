@@ -7,7 +7,10 @@
     "dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear",
+    "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear",
+    "validate:production": "pnpm run export:ios && pnpm run export:android"
   },
   "devDependencies": {
     "@babel/core": "^7.29.6",

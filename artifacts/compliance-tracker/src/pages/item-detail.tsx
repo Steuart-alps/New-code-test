@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,8 @@ import {
   useListCategories,
 } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { apiFetch } from "@/lib/api";
 import { format } from "date-fns";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
@@ -32,6 +34,26 @@ function fmt(d: any) {
   try { return format(new Date(d), "EEE, d MMM yyyy"); } catch { return "—"; }
 }
 
+type AuditEvent = {
+  id: number;
+  actorName: string | null;
+  action: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+function auditSummary(event: AuditEvent) {
+  if (event.action === "created") return "Created this compliance check";
+  if (event.action === "deleted") return "Deleted this compliance check";
+  const beforeStatus = event.before?.status;
+  const afterStatus = event.after?.status;
+  if (event.action === "status_changed" || beforeStatus !== afterStatus) {
+    return `Changed status from ${String(beforeStatus ?? "unset").replace("_", " ")} to ${String(afterStatus ?? "unset").replace("_", " ")}`;
+  }
+  return "Updated this compliance check";
+}
+
 export default function ItemDetailPage() {
   const [, params] = useRoute("/items/:id");
   const id = params ? Number(params.id) : NaN;
@@ -43,11 +65,33 @@ export default function ItemDetailPage() {
   const { data: categories = [] } = useListCategories();
 
   const { deleteItem, deleteItemCertificate } = useAppMutations();
+  const { activeClientId } = useAuth();
+  const canAdmin = useCanAdmin();
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [certOpen, setCertOpen] = useState(false);
   const [editingCert, setEditingCert] = useState<any>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditError, setAuditError] = useState(false);
+
+  useEffect(() => {
+    // Clear a prior item's entries immediately when a route or consultant
+    // tenant context changes, rather than briefly rendering stale evidence.
+    setAuditEvents([]);
+    setAuditError(false);
+    if (!canAdmin || !Number.isFinite(id)) return;
+    let cancelled = false;
+    const clientQuery = activeClientId ? `&clientId=${activeClientId}` : "";
+    void apiFetch(`/audit-events?entityType=compliance_item&entityId=${id}${clientQuery}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load audit history");
+        return response.json() as Promise<AuditEvent[]>;
+      })
+      .then((events) => { if (!cancelled) setAuditEvents(events); })
+      .catch(() => { if (!cancelled) setAuditError(true); });
+    return () => { cancelled = true; };
+  }, [activeClientId, canAdmin, id]);
 
   if (isLoading) {
     return <AppLayout title="Compliance Check"><div className="py-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div></AppLayout>;
@@ -254,6 +298,27 @@ export default function ItemDetailPage() {
               )}
             </div>
           </Card>
+           {canAdmin && (
+             <Card className="p-5 bg-card/60 backdrop-blur-md shadow-lg border-border/50">
+               <h3 className="font-display text-sm font-bold mb-4 text-muted-foreground uppercase tracking-wider">Inspection audit trail</h3>
+               {auditError ? (
+                 <p className="text-sm text-muted-foreground">Audit history could not be loaded.</p>
+               ) : auditEvents.length === 0 ? (
+                 <p className="text-sm text-muted-foreground">No recorded changes yet.</p>
+               ) : (
+                 <ol className="space-y-4">
+                   {auditEvents.map((event) => (
+                     <li key={event.id} className="border-l-2 border-primary/30 pl-3">
+                       <p className="text-sm font-medium">{auditSummary(event)}</p>
+                       <p className="mt-1 text-xs text-muted-foreground">
+                         {event.actorName ?? "Former user"} · {fmt(event.createdAt)}
+                       </p>
+                     </li>
+                   ))}
+                 </ol>
+               )}
+             </Card>
+           )}
         </div>
       </div>
 

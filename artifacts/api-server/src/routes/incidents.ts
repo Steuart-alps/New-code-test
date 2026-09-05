@@ -43,7 +43,16 @@ const createSchema = z.object({
   submissionEvidence: z.string().max(5000).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial();
+// Creation constrains new values to the same bounds as an option-list item.
+// Do not apply that upper bound to an update, though: an old record may
+// legitimately contain a value from before option lists (or their length
+// limit) were introduced. The route below permits that value only when it is
+// exactly the value already stored; every changed value is still checked
+// against the current, tenant-scoped option list.
+const updateSchema = createSchema.partial().extend({
+  incidentType: z.string().min(1).optional(),
+  severity: z.string().min(1).optional(),
+});
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id })
@@ -59,7 +68,9 @@ function validateRiddorRecord(data: {
   hseReference?: string | null; hseReportDate?: string | null; submittedAt?: string | null;
   submissionEvidence?: string | null;
 }) {
-  if (!data.riddorRationale?.trim()) return "Record the rationale for the RIDDOR decision";
+  if ((data.riddorReportable || data.reportedToHse) && !data.riddorRationale?.trim()) {
+    return "Record the rationale for the RIDDOR decision";
+  }
   if (data.reportedToHse) {
     if (!data.hseReference?.trim()) return "An HSE submission reference is required";
     if (!data.hseReportDate) return "The HSE submission date is required";

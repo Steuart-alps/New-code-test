@@ -162,6 +162,17 @@ task = "shell.exec"
 args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/compliance-tracker run build"
 
 [[workflows.workflow]]
+name = "mobile-production-bundle"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mobile run validate:production"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
 name = "typecheck"
 author = "agent"
 

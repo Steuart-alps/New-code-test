@@ -33,6 +33,12 @@ async function verifySite(siteId: number | null | undefined, clientId: number) {
   return !!row;
 }
 
+async function verifyDepartment(departmentId: number | null | undefined, clientId: number) {
+  if (departmentId == null) return true;
+  const result = await db.execute(sql`SELECT id FROM departments WHERE id = ${departmentId} AND client_id = ${clientId} LIMIT 1`);
+  return (result.rows ?? []).length > 0;
+}
+
 function deptCondition(table: any, clientId: number, deptId: number | null) {
   if (deptId === null) return [];
   return [or(isNull(table.siteId), inArray(table.siteId, allowedSites(clientId, deptId))) as any];
@@ -62,6 +68,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if (!(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
         await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
@@ -85,6 +92,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if ("siteId" in data && !(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if ("departmentId" in data && !(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
         await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
@@ -274,6 +282,7 @@ const raCreate = z.object({
   status: z.enum(["draft", "published", "under_review"]).optional(),
   version: z.string().max(20).optional(),
   siteId: z.number().int().nullable().optional(),
+  departmentId: z.number().int().nullable().optional(),
   signature: signatureField,
   requiresAcknowledgement: z.boolean().optional(),
 }).merge(fileFields);
@@ -293,6 +302,7 @@ const sopCreate = z.object({
   version: z.string().max(20).optional(),
   publishedAt: z.string().datetime().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
+  departmentId: z.number().int().nullable().optional(),
   signature: signatureField,
   requiresAcknowledgement: z.boolean().optional(),
 }).merge(fileFields);
@@ -312,6 +322,7 @@ const trCreate = z.object({
   expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   siteId: z.number().int().nullable().optional(),
+  departmentId: z.number().int().nullable().optional(),
 });
 
 router.use("/training-records", crudFor(safeTrainingRecordsTable, trCreate, trCreate.partial()));
