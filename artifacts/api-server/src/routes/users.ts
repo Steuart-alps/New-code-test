@@ -222,28 +222,6 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
   res.json({ ok: true });
 });
 
-// DELETE /users/:id/2fa — admin disables 2FA for a user (Task #53)
-router.delete("/users/:id/2fa", requireAuth, requireClientAdmin, async (req, res) => {
-  const actor = req.currentUser!;
-  const id = Number(req.params.id);
-
-  const targetRows = await db.select().from(usersTable).where(eq(usersTable.id, id));
-  const target = targetRows[0];
-  if (!target) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-  if (target.id !== actor.id && !canAccessClient(req, target.clientId)) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
-
-  await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-    .where(eq(usersTable.id, id));
-  res.json({ ok: true });
-});
-
 // POST /users/:id/reset-2fa — admin clears a locked-out user's 2FA so they can
 // sign in with just their password and re-enrol.
 router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req, res) => {

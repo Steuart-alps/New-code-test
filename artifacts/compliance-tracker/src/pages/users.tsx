@@ -70,6 +70,7 @@ function UserDialog({
     active: true,
   });
   const [saving, setSaving] = useState(false);
+  const [resettingTwoFactor, setResettingTwoFactor] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -118,6 +119,27 @@ function UserDialog({
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function resetTwoFactor() {
+    if (!user) return;
+    if (!confirm(`Reset two-factor authentication for ${user.name}? They will be able to sign in with just their password and can re-enrol with a new device.`)) return;
+
+    setResettingTwoFactor(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/users/${user.id}/reset-2fa`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to reset two-factor authentication");
+      }
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to reset two-factor authentication");
+    } finally {
+      setResettingTwoFactor(false);
     }
   }
 
@@ -185,6 +207,24 @@ function UserDialog({
             </div>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
+          {user?.totpEnabled && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-medium text-amber-900">Two-factor authentication is enabled</p>
+              <p className="mt-1 text-xs text-amber-800">
+                Reset it only if this user is locked out. They can enrol a new device after signing in.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 border-amber-300 text-amber-900 hover:bg-amber-100"
+                onClick={resetTwoFactor}
+                disabled={resettingTwoFactor || saving}
+              >
+                <ShieldOff className="mr-2 h-4 w-4" />
+                {resettingTwoFactor ? "Resetting..." : "Reset 2FA"}
+              </Button>
+            </div>
+          )}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving ? "Saving..." : user ? "Save Changes" : "Add User"}</Button>
@@ -241,12 +281,6 @@ export default function UsersPage() {
       method: "PUT",
       body: JSON.stringify({ isMaintenanceManager: !user.isMaintenanceManager }),
     });
-    load();
-  }
-
-  async function disableTwoFactor(user: User) {
-    if (!confirm(`Disable two-factor authentication for ${user.name}? They will be able to sign in with just their password and can re-enrol with a new device.`)) return;
-    await apiFetch(`/users/${user.id}/2fa`, { method: "DELETE" });
     load();
   }
 
@@ -346,17 +380,6 @@ export default function UsersPage() {
                               title={u.isMaintenanceManager ? "Remove maintenance manager access" : "Make maintenance manager (FixTrack full access)"}
                             >
                               <Wrench className={`w-4 h-4 ${u.isMaintenanceManager ? "text-amber-600" : "text-muted-foreground"}`} />
-                            </Button>
-                          )}
-                          {canAdmin && u.totpEnabled && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => disableTwoFactor(u)}
-                              title="Disable two-factor authentication"
-                            >
-                              <ShieldOff className="w-4 h-4 text-amber-600" />
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
