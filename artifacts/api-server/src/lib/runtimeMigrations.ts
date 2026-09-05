@@ -429,9 +429,29 @@ export async function runRuntimeMigrations() {
         UNIQUE ("contractor_id")
       )
     `);
+    // A token can be withdrawn without deleting its issuance/audit history.
+    // issued_by is deliberately nullable for scheduler-issued legacy links.
+    await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ADD COLUMN IF NOT EXISTS "issued_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_tokens_token"
       ON "contractor_portal_tokens" ("token")
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "contractor_portal_audit_log" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "contractor_id" integer NOT NULL REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "actor_type" text NOT NULL CHECK ("actor_type" IN ('manager', 'contractor')),
+        "actor_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "event_type" text NOT NULL,
+        "details" jsonb NOT NULL DEFAULT '{}'::jsonb,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_audit_client_contractor"
+      ON "contractor_portal_audit_log" ("client_id", "contractor_id", "created_at" DESC)
     `);
 
     // Deduplication log for TrainTrack staff-training-expiry reminders. One row
@@ -1512,6 +1532,21 @@ async function migrateCheckPhotos() {
     CREATE INDEX IF NOT EXISTS "IDX_check_photos_entity"
     ON "check_photos" ("client_id", "entity_type", "entity_id")
   `);
+  // Older callers could attach the same object path more than once. Preserve
+  // the oldest row, remove redundant references, then prevent recurrence.
+  // This makes backing-object deletion deterministic while the DELETE route
+  // still checks for a remaining tenant reference for rollout safety.
+  await db.execute(sql`
+    DELETE FROM "check_photos" duplicate
+    USING "check_photos" keeper
+    WHERE duplicate.client_id = keeper.client_id
+      AND duplicate.object_path = keeper.object_path
+      AND duplicate.id > keeper.id
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_check_photos_client_object_path"
+    ON "check_photos" ("client_id", "object_path")
+  `);
 
   // Manager-configurable photo requirements per entity type
   await db.execute(sql`
@@ -2353,9 +2388,31 @@ async function migrateOffboardingColumns() {
       user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       cutoff_key text NOT NULL,
       claimed_at timestamptz NOT NULL DEFAULT now(),
+      state text NOT NULL DEFAULT 'pending',
+      lease_token text,
+      lease_expires_at timestamptz,
+      handoff_at timestamptz,
       sent_at timestamptz,
       UNIQUE (client_id, user_id, cutoff_key)
     )
+  `);
+  await db.execute(sql`ALTER TABLE "cancellation_warning_deliveries" ADD COLUMN IF NOT EXISTS "state" text NOT NULL DEFAULT 'pending'`);
+  await db.execute(sql`ALTER TABLE "cancellation_warning_deliveries" ADD COLUMN IF NOT EXISTS "lease_token" text`);
+  await db.execute(sql`ALTER TABLE "cancellation_warning_deliveries" ADD COLUMN IF NOT EXISTS "lease_expires_at" timestamptz`);
+  await db.execute(sql`ALTER TABLE "cancellation_warning_deliveries" ADD COLUMN IF NOT EXISTS "handoff_at" timestamptz`);
+  await db.execute(sql`
+    UPDATE "cancellation_warning_deliveries"
+       SET state = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END
+     WHERE state IS NULL OR state NOT IN ('pending', 'sending', 'handed_off', 'sent')
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_cancellation_warning_deliveries_retry"
+    ON "cancellation_warning_deliveries" ("client_id", "sent_at", "claimed_at")
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_cancellation_warning_delivery_lease"
+    ON "cancellation_warning_deliveries" ("lease_token")
+    WHERE "lease_token" IS NOT NULL
   `);
 }
 

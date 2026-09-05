@@ -127,18 +127,20 @@ export async function sendSystemEmail(opts: {
   subject: string;
   html: string;
   text?: string;
+  /** Stable provider key for workflows which must never duplicate a handoff. */
+  idempotencyKey?: string;
 }) {
   const resend = getResend();
   const rawFrom = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const email = extractEmail(rawFrom);
   const from = `ComplyTrack <${email}>`;
-  const result = await resend.emails.send({
+  const result = await (resend.emails.send as any)({
     from,
     to: opts.to,
     subject: opts.subject,
     html: opts.html,
     text: opts.text,
-  });
+  }, opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : undefined);
   if (result.error) {
     throw new Error(`Email delivery failed: ${result.error.message ?? result.error.name ?? "unknown error"}`);
   }

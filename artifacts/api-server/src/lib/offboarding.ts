@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { findLiveSubscription } from "./billing";
+import { randomUUID } from "crypto";
 
 const RETENTION_MONTHS = 12;
 
@@ -121,14 +122,64 @@ ComplyTrack
  * The email explains when access ends and prompts the user to export their
  * data before that date.
  */
+type SqlExecutor = (query: any) => Promise<{ rows?: unknown[] }>;
+
+export interface CancellationWarningDependencies {
+  /** Kept injectable so delivery behaviour can be regression-tested without Stripe or Postgres. */
+  execute?: SqlExecutor;
+  sendEmail?: typeof sendSystemEmail;
+  getAppUrl?: () => string;
+}
+
+type CancellationCandidate = {
+  customer: string;
+  access_ends_at: string | number | null;
+};
+
+/**
+ * Read the synced Stripe state immediately before delivery.  In particular, an
+ * old `customer.subscription.deleted` event must not warn a customer that has
+ * since renewed.  A scheduled cancellation remains eligible because its
+ * otherwise-live subscription has cancel_at_period_end set.
+ */
+async function getCurrentCancellation(
+  stripeCustomerId: string,
+  execute: SqlExecutor,
+): Promise<CancellationCandidate | null> {
+  const result = await execute(sql`
+    SELECT s.customer, COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+    FROM stripe.subscriptions s
+    WHERE s.customer = ${stripeCustomerId}
+      AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM stripe.subscriptions live
+        WHERE live.customer = s.customer
+          AND live.status IN ('active', 'trialing', 'past_due')
+          AND COALESCE(live.cancel_at_period_end, false) = false
+      )
+    ORDER BY s.current_period_end DESC NULLS LAST
+    LIMIT 1
+  `);
+  return ((result.rows ?? [])[0] as CancellationCandidate | undefined) ?? null;
+}
+
 export async function sendCancellationWarningEmail(opts: {
   stripeCustomerId: string;
   /** ISO date string or Unix timestamp when access ends. */
   accessEndsAt: string | number | null;
-}, deps: { sendEmail?: typeof sendSystemEmail } = {}): Promise<{ emailsSent: number }> {
+}, deps: CancellationWarningDependencies = {}): Promise<{ emailsSent: number }> {
   const sendEmail = deps.sendEmail ?? sendSystemEmail;
+  const execute: SqlExecutor = deps.execute ?? ((query) => db.execute(query) as Promise<{ rows?: unknown[] }>);
+
+  // Do not trust a delayed webhook's payload. processWebhook has already
+  // updated the synced Stripe tables, which lets this check also close the
+  // webhook/scheduler renewal race.
+  const cancellation = await getCurrentCancellation(opts.stripeCustomerId, execute);
+  if (!cancellation) return { emailsSent: 0 };
+
   // Resolve the client from the Stripe customer id.
-  const clientRows = await db.execute(sql`
+  const clientRows = await execute(sql`
     SELECT id, name FROM clients WHERE stripe_customer_id = ${opts.stripeCustomerId} LIMIT 1
   `);
   const client = (clientRows.rows ?? [])[0] as { id: number; name: string } | undefined;
@@ -137,7 +188,7 @@ export async function sendCancellationWarningEmail(opts: {
   // Senior account recipients are represented by client_admin in the current
   // role model. Consultants are deliberately excluded: this is the client's
   // billing/access warning, not an operational reminder.
-  const adminRows = await db.execute(sql`
+  const adminRows = await execute(sql`
     SELECT id, email, name FROM users
     WHERE client_id = ${client.id} AND active = true AND role = 'client_admin'
     LIMIT 10
@@ -147,45 +198,71 @@ export async function sendCancellationWarningEmail(opts: {
 
   // Resolve the access-end date from a Unix timestamp or ISO string.
   let accessEndsDate: Date | null = null;
-  if (opts.accessEndsAt) {
-    const val = opts.accessEndsAt;
+  if (cancellation.access_ends_at) {
+    const val = cancellation.access_ends_at;
     accessEndsDate = typeof val === "number"
       ? new Date(val * 1000)
       : new Date(val);
     if (isNaN(accessEndsDate.getTime())) accessEndsDate = null;
   }
 
-  const accessEndsStr = accessEndsDate
-    ? accessEndsDate.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
-    : "the end of your current billing period";
+  // A warning without a known future date is misleading and is not useful to
+  // someone trying to export before lockout. It will be retried after Stripe
+  // supplies a period end.
+  if (!accessEndsDate || accessEndsDate.getTime() <= Date.now()) return { emailsSent: 0 };
+  const accessEndsStr = accessEndsDate.toLocaleDateString(
+    "en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" },
+  );
   // A changed cutoff warrants a fresh notice; otherwise the same recipient is
   // sent at most once. This key is intentionally stable for a missing Stripe
   // date so webhook retries still dedupe.
-  const cutoffKey = accessEndsDate?.toISOString() ?? "period-end-unknown";
+  const cutoffKey = accessEndsDate.toISOString();
 
-  const settingsUrl = `${getPublicAppUrl()}/settings`;
-  const billingUrl = `${getPublicAppUrl()}/billing`;
+  const appUrl = deps.getAppUrl?.() ?? getPublicAppUrl();
+  const settingsUrl = `${appUrl}/settings`;
+  const billingUrl = `${appUrl}/billing`;
   const safeCompany = escapeHtml(client.name);
   const subject = "Your ComplyTrack access is ending — export your records";
 
   let sent = 0;
   for (const admin of admins) {
-    // Claim each recipient independently. A stale in-progress claim can be
-    // reclaimed after 15 minutes (e.g. worker crash); successful sends have
-    // sent_at set and can never be claimed again for this cutoff.
-    const claim = await db.execute(sql`
-      INSERT INTO cancellation_warning_deliveries (client_id, user_id, cutoff_key, claimed_at)
-      VALUES (${client.id}, ${admin.id}, ${cutoffKey}, now())
+    // A delivery is deliberately never re-claimed while sending/handed_off.
+    // Retrying an uncertain external side effect would be worse than requiring
+    // intervention. Known provider rejections are returned to pending below.
+    const leaseToken = randomUUID();
+    const claim = await execute(sql`
+      INSERT INTO cancellation_warning_deliveries
+        (client_id, user_id, cutoff_key, claimed_at, state, lease_token, lease_expires_at)
+      SELECT ${client.id}, ${admin.id}, ${cutoffKey}, now(), 'sending', ${leaseToken},
+        now() + interval '15 minutes'
+      WHERE EXISTS (
+        SELECT 1
+        FROM stripe.subscriptions s
+        WHERE s.customer = ${opts.stripeCustomerId}
+          AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
+          -- Do not send a stale date if a concurrent Stripe update moved the
+          -- cutoff after the initial read; that update will claim its own key.
+          AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+          AND NOT EXISTS (
+            SELECT 1 FROM stripe.subscriptions live
+            WHERE live.customer = s.customer
+              AND live.status IN ('active', 'trialing', 'past_due')
+              AND COALESCE(live.cancel_at_period_end, false) = false
+          )
+      )
       ON CONFLICT (client_id, user_id, cutoff_key) DO UPDATE
-        SET claimed_at = now()
-        WHERE cancellation_warning_deliveries.sent_at IS NULL
-          AND cancellation_warning_deliveries.claimed_at < now() - interval '15 minutes'
-      RETURNING id
+        SET claimed_at = now(),
+            state = 'sending',
+            lease_token = ${leaseToken},
+            lease_expires_at = now() + interval '15 minutes'
+        WHERE cancellation_warning_deliveries.state = 'pending'
+      RETURNING id, lease_token
     `).catch((err) => {
       logger.error({ err, clientId: client.id, userId: admin.id }, "Could not claim cancellation warning delivery");
       return { rows: [] };
     });
-    if ((claim.rows ?? []).length === 0) continue;
+    const delivery = (claim.rows ?? [])[0] as { id: number; lease_token: string } | undefined;
+    if (!delivery) continue;
     const safeName = escapeHtml(admin.name ?? admin.email);
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -232,23 +309,82 @@ Best regards,
 ComplyTrack
 `.trim();
 
+    // This is the final authority check and the durable handoff transition.
+    // It includes the renewal test in the same SQL statement as ownership, so
+    // a webhook/scheduler worker cannot hand off a warning after a renewal
+    // landed between its initial read and this point.
+    const handoff = await execute(sql`
+      UPDATE cancellation_warning_deliveries d
+         SET state = 'handed_off', handoff_at = now(), lease_expires_at = NULL
+       WHERE d.id = ${delivery.id}
+         AND d.lease_token = ${delivery.lease_token}
+         AND d.state = 'sending'
+         AND EXISTS (
+           SELECT 1 FROM stripe.subscriptions s
+            WHERE s.customer = ${opts.stripeCustomerId}
+              AND (s.status = 'canceled' OR s.cancel_at_period_end = true)
+              AND COALESCE(s.cancel_at, s.current_period_end) = ${cancellation.access_ends_at}
+              AND NOT EXISTS (
+                SELECT 1 FROM stripe.subscriptions live
+                 WHERE live.customer = s.customer
+                   AND live.status IN ('active', 'trialing', 'past_due')
+                   AND COALESCE(live.cancel_at_period_end, false) = false
+              )
+         )
+      RETURNING id
+    `).catch((err) => {
+      logger.error({ err, clientId: client.id, userId: admin.id }, "Could not persist cancellation warning handoff");
+      return { rows: [] };
+    });
+    if ((handoff.rows ?? []).length === 0) {
+      // A renewal (or another state transition) won. Only this lease may
+      // release its own pre-handoff state; never disturb another worker.
+      await execute(sql`
+        UPDATE cancellation_warning_deliveries
+           SET state = 'pending', lease_token = NULL, lease_expires_at = NULL
+         WHERE id = ${delivery.id} AND lease_token = ${delivery.lease_token}
+           AND state = 'sending'
+      `).catch(() => {});
+      continue;
+    }
+
     try {
-      await sendEmail({ to: admin.email, subject, html, text });
-      await db.execute(sql`
-        UPDATE cancellation_warning_deliveries SET sent_at = now()
-         WHERE client_id = ${client.id} AND user_id = ${admin.id}
-           AND cutoff_key = ${cutoffKey} AND sent_at IS NULL
+      await sendEmail({
+        to: admin.email,
+        subject,
+        html,
+        text,
+        // Provider-level idempotency protects the known-error retry path too.
+        idempotencyKey: `cancellation-warning:${client.id}:${admin.id}:${cutoffKey}`,
+      });
+    } catch (err) {
+      // This provider call explicitly rejected the message, so this same
+      // handoff owner may make it pending for a later retry. Do not release an
+      // accepted/unknown handoff, and do not permit a late lease to release a
+      // newer attempt.
+      await execute(sql`
+        UPDATE cancellation_warning_deliveries
+           SET state = 'pending', lease_token = NULL, lease_expires_at = NULL
+         WHERE id = ${delivery.id} AND lease_token = ${delivery.lease_token}
+           AND state = 'handed_off' AND sent_at IS NULL
+      `).catch(() => {});
+      logger.warn({ err, clientId: client.id, adminEmail: admin.email }, "Cancellation warning email failed for admin");
+      continue;
+    }
+
+    try {
+      await execute(sql`
+        UPDATE cancellation_warning_deliveries
+           SET state = 'sent', sent_at = now()
+         WHERE id = ${delivery.id} AND lease_token = ${delivery.lease_token}
+           AND state = 'handed_off'
       `);
       sent++;
     } catch (err) {
-      // Release only this failed recipient. Successful sibling recipients keep
-      // their sent marker, so the next run retries precisely the failures.
-      await db.execute(sql`
-        DELETE FROM cancellation_warning_deliveries
-         WHERE client_id = ${client.id} AND user_id = ${admin.id}
-           AND cutoff_key = ${cutoffKey} AND sent_at IS NULL
-      `).catch(() => {});
-      logger.warn({ err, clientId: client.id, adminEmail: admin.email }, "Cancellation warning email failed for admin");
+      // The provider accepted the message. Its durable handed_off state is
+      // intentionally retained and is terminal/fail-closed; never release it.
+      logger.error({ err, clientId: client.id, userId: admin.id },
+        "Cancellation warning accepted but sent finalization failed");
     }
   }
   return { emailsSent: sent };
@@ -259,14 +395,22 @@ ComplyTrack
  * Stripe's synced subscription data is the billing source of truth; unlike
  * trial reminders this never uses trial dates or trial status.
  */
-export async function runCancellationWarningJob(): Promise<{ emailsSent: number }> {
-  const candidates = await db.execute(sql`
-    SELECT DISTINCT ON (c.id) c.id, s.customer,
-      COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
-    FROM clients c
-    JOIN stripe.subscriptions s ON s.customer = c.stripe_customer_id
-    WHERE s.status = 'canceled' OR s.cancel_at_period_end = true
-    ORDER BY c.id, s.current_period_end DESC NULLS LAST
+export async function runCancellationWarningJob(
+  deps: CancellationWarningDependencies = {},
+): Promise<{ emailsSent: number }> {
+  const execute: SqlExecutor = deps.execute ?? ((query) => db.execute(query) as Promise<{ rows?: unknown[] }>);
+  const candidates = await execute(sql`
+    WITH current_subscriptions AS (
+      SELECT DISTINCT ON (c.id) c.id, s.customer, s.status, s.cancel_at_period_end,
+        COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+      FROM clients c
+      JOIN stripe.subscriptions s ON s.customer = c.stripe_customer_id
+      ORDER BY c.id, s.current_period_end DESC NULLS LAST
+    )
+    SELECT id, customer, access_ends_at
+    FROM current_subscriptions
+    WHERE (status = 'canceled' OR cancel_at_period_end = true)
+      AND access_ends_at > now()
   `).catch((err) => {
     logger.warn({ err }, "Cancellation warning reconciliation unavailable");
     return { rows: [] };
@@ -274,11 +418,16 @@ export async function runCancellationWarningJob(): Promise<{ emailsSent: number 
 
   let emailsSent = 0;
   for (const row of candidates.rows as Array<{ customer: string; access_ends_at: string | number | null }>) {
-    const result = await sendCancellationWarningEmail({
-      stripeCustomerId: String(row.customer),
-      accessEndsAt: row.access_ends_at,
-    });
-    emailsSent += result.emailsSent;
+    try {
+      const result = await sendCancellationWarningEmail({
+        stripeCustomerId: String(row.customer),
+        accessEndsAt: row.access_ends_at,
+      }, deps);
+      emailsSent += result.emailsSent;
+    } catch (err) {
+      // One tenant's bad delivery state must not prevent retries for the rest.
+      logger.warn({ err, stripeCustomerId: row.customer }, "Cancellation warning reconciliation failed for client");
+    }
   }
   return { emailsSent };
 }

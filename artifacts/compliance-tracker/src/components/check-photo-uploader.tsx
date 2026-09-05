@@ -133,12 +133,12 @@ export function CheckPhotoUploader({
     // Reset input so same file can be re-selected
     if (fileInputRef.current) fileInputRef.current.value = "";
 
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Images only", description: "Please select an image file.", variant: "destructive" });
+    if (!["image/jpeg", "image/png"].includes(file.type)) {
+      toast({ title: "JPEG or PNG only", description: "Please select a JPEG or PNG image.", variant: "destructive" });
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Maximum 20 MB per photo.", variant: "destructive" });
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Maximum 10 MB per photo.", variant: "destructive" });
       return;
     }
 
@@ -227,7 +227,7 @@ export function CheckPhotoUploader({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png"
             capture="environment"
             className="hidden"
             onChange={handleFileChange}
@@ -266,7 +266,7 @@ export function CheckPhotoUploader({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png"
             capture="environment"
             className="hidden"
             onChange={handleFileChange}

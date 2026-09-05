@@ -184,6 +184,7 @@ export async function generateOrRefreshPortalToken(
     ON CONFLICT (contractor_id) DO UPDATE SET
       token      = EXCLUDED.token,
       expires_at = EXCLUDED.expires_at,
+      revoked_at = NULL,
       created_at = now()
   `);
   return token;

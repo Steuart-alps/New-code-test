@@ -1,0 +1,1 @@
+export { detectUploadType, validateUploadContent, validatePdfInWorker } from "../src/lib/objectStorage";

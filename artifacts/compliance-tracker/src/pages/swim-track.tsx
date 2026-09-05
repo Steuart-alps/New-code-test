@@ -1041,6 +1041,7 @@ export default function SwimTrackPage() {
                       <th className="text-right font-medium py-2 pr-4 hidden sm:table-cell">Bathers</th>
                       <th className="text-left font-medium py-2 pr-4">Scan done</th>
                       <th className="text-left font-medium py-2 pr-4 hidden lg:table-cell">Observations</th>
+                      <th className="w-14" />
                       <th className="w-16" />
                     </tr>
                   </thead>
@@ -1061,6 +1062,9 @@ export default function SwimTrackPage() {
                         </td>
                         <td className="py-2 pr-4 text-muted-foreground text-xs max-w-xs truncate hidden lg:table-cell">
                           {c.observations ?? "—"}
+                        </td>
+                        <td className="py-2 px-2">
+                          <CheckPhotoUploader entityType="swim_surveillance_check" entityId={c.id} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"
@@ -1125,6 +1129,7 @@ export default function SwimTrackPage() {
                         </th>
                       ))}
                       <th className="text-left font-medium py-2 pr-4">Result</th>
+                      <th className="w-14" />
                       <th className="w-16" />
                     </tr>
                   </thead>
@@ -1152,6 +1157,9 @@ export default function SwimTrackPage() {
                               : <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded-full flex items-center gap-1 w-fit">
                                   <XCircle className="w-3 h-3" /> Fail
                                 </span>}
+                          </td>
+                          <td className="py-2 px-2">
+                            <CheckPhotoUploader entityType="swim_first_aid_check" entityId={f.id} compact />
                           </td>
                           <td className="py-2 text-right">
                             <Button size="icon" variant="ghost" className="h-7 w-7"

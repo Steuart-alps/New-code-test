@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { contractorsTable } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -42,6 +43,27 @@ const CertificateBody = z.object({
 const UpdateContractorBody = CreateContractorBody;
 
 const router: IRouter = Router();
+
+const PortalLinkBody = z.object({
+  // Short defaults reduce the impact of a forwarded link; managers may choose
+  // a longer period when a contractor needs time to retrieve documents.
+  expiresInDays: z.coerce.number().int().min(1).max(90).default(30),
+});
+
+async function portalAudit(
+  clientId: number,
+  contractorId: number,
+  actorUserId: number | undefined,
+  eventType: string,
+  details: Record<string, unknown> = {},
+) {
+  await db.execute(sql`
+    INSERT INTO contractor_portal_audit_log
+      (client_id, contractor_id, actor_type, actor_user_id, event_type, details)
+    VALUES
+      (${clientId}, ${contractorId}, 'manager', ${actorUserId ?? null}, ${eventType}, ${JSON.stringify(details)}::jsonb)
+  `);
+}
 
 /** Sanitise the trades array from the request body. */
 function parseTrades(raw: unknown): string[] {
@@ -166,6 +188,68 @@ router.delete("/contractors/:id", requireAuth, requireClientAdmin, async (req, r
   }
 
   await db.delete(contractorsTable).where(eq(contractorsTable.id, id));
+  res.status(204).send();
+});
+
+// ── Manager-issued contractor self-service links ───────────────────────────
+// The plaintext bearer token is returned only at issuance time. Reissuing a
+// link atomically replaces the prior token; revocation preserves its audit row.
+router.post("/contractors/:id/portal-link", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  if (!Number.isInteger(contractorId) || contractorId <= 0) {
+    res.status(400).json({ error: "Invalid contractor ID" });
+    return;
+  }
+  const body = PortalLinkBody.parse(req.body ?? {});
+  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!contractor || !canAccessClient(req, contractor.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000);
+  await db.execute(sql`
+    INSERT INTO contractor_portal_tokens
+      (client_id, contractor_id, token, expires_at, revoked_at, issued_by, created_at)
+    VALUES
+      (${contractor.clientId}, ${contractor.id}, ${token}, ${expiresAt}, NULL, ${req.currentUser?.id ?? null}, now())
+    ON CONFLICT (contractor_id) DO UPDATE SET
+      client_id = EXCLUDED.client_id,
+      token = EXCLUDED.token,
+      expires_at = EXCLUDED.expires_at,
+      revoked_at = NULL,
+      issued_by = EXCLUDED.issued_by,
+      created_at = now()
+  `);
+  await portalAudit(contractor.clientId, contractor.id, req.currentUser?.id, "link_issued", {
+    expiresAt: expiresAt.toISOString(),
+  });
+  const appUrl = (process.env.PUBLIC_APP_URL || "").replace(/\/$/, "");
+  res.status(201).json({
+    token,
+    expiresAt: expiresAt.toISOString(),
+    portalUrl: `${appUrl}/contractor-portal/${token}`,
+  });
+});
+
+router.delete("/contractors/:id/portal-link", requireAuth, requireClientAdmin, async (req, res) => {
+  const contractorId = Number(req.params.id);
+  if (!Number.isInteger(contractorId) || contractorId <= 0) {
+    res.status(400).json({ error: "Invalid contractor ID" });
+    return;
+  }
+  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
+  if (!contractor || !canAccessClient(req, contractor.clientId)) {
+    res.status(404).json({ error: "Contractor not found" });
+    return;
+  }
+  await db.execute(sql`
+    UPDATE contractor_portal_tokens SET revoked_at = now()
+    WHERE contractor_id = ${contractor.id} AND client_id = ${contractor.clientId}
+      AND revoked_at IS NULL
+  `);
+  await portalAudit(contractor.clientId, contractor.id, req.currentUser?.id, "link_revoked");
   res.status(204).send();
 });
 

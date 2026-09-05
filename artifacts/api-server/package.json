@@ -11,6 +11,7 @@
     "test:isolation": "node tests/tenant-isolation.mjs",
     "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
     "test:trial-reminders": "node tests/trial-reminders.mjs",
+    "test:cancellation-warnings": "node tests/cancellation-warning.mjs",
     "test:modules": "node tests/module-routes.mjs",
     "test:modules:ci": "bash tests/run-module-routes.sh",
     "test:dept-isolation": "node tests/dept-isolation.mjs",
@@ -33,13 +34,17 @@
     "test:guidance-register": "node tests/guidance-register.mjs",
     "test:daily-checklist-entitlements": "node tests/daily-checklist-entitlements.mjs",
     "test:export-attachment-acl": "node tests/export-attachment-acl.mjs",
+    "test:photo-attachments": "node tests/photo-attachments.mjs",
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
+    "test:pesttrack-billing": "node tests/pesttrack-billing.mjs",
     "test:riddor-audit-history": "bash tests/run-riddor-audit-history.sh",
     "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
-    "test:twofa-recovery": "bash tests/run-twofa-recovery.sh"
+    "test:twofa-recovery": "bash tests/run-twofa-recovery.sh",
+    "test:contractor-upload-signatures": "node tests/contractor-upload-signatures.mjs",
+    "test:contractor-portal": "bash tests/run-contractor-portal.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

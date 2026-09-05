@@ -155,7 +155,9 @@ export default function ContractorPortalPage() {
       if (certFile) {
         setCertUploading(true);
         // Step 1: get presigned URL
-        const urlRes = await fetch(apiUrl(`${token}/upload-url`), { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const allowedTypes = ["application/pdf", "image/jpeg", "image/png"];
+        if (!allowedTypes.includes(certFile.type.toLowerCase())) throw new Error("Certificate files must be PDF, JPEG, or PNG");
+        const urlRes = await fetch(apiUrl(`${token}/upload-url`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contentType: certFile.type }) });
         if (!urlRes.ok) throw new Error("Could not get upload URL");
         const { uploadUrl, objectPath: op } = await urlRes.json();
         // Step 2: upload directly to GCS
@@ -174,7 +176,6 @@ export default function ContractorPortalPage() {
           issuer: certIssuer.trim() || null,
           completedDate: certCompleted || null,
           expiryDate: certExpiry || null,
-          notes: certNotes.trim() || null,
           objectPath,
         }),
       });

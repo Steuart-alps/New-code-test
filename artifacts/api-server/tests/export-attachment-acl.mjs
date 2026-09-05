@@ -15,7 +15,10 @@ try {
   await build({
     entryPoints: [path.join(dir, "export-attachment-acl.entry.ts")],
     bundle: true, platform: "node", format: "esm", outfile, logLevel: "silent",
-    external: ["pg-native", "pino", "pino-pretty", "resend", "@google-cloud/*"],
+    external: [
+      "pg-native", "pino", "pino-pretty", "resend", "@google-cloud/*",
+      "sharp", "pdfjs-dist/*",
+    ],
     banner: {
       js: `import { createRequire as __createRequire } from 'node:module'; globalThis.require = __createRequire(import.meta.url);`,
     },
