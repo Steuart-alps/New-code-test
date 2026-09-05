@@ -4,6 +4,7 @@ export const SIGNUP_SERVICE_KEYS = [
   "legionellatrack",
   "fixtrack",
   "safetrack",
+  "doctrack",
   "premisestrack",
   "traintrack",
   "hottubtrack",

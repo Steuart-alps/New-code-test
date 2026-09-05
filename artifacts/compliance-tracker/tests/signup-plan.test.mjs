@@ -35,4 +35,9 @@ assert.deepEqual(
   { bundle: false, services: ["safetrack"] },
 );
 
+assert.deepEqual(
+  parseSignupPlan("?modules=doctrack,traintrack"),
+  { bundle: false, services: ["doctrack", "traintrack"] },
+);
+
 console.log("Signup plan parsing tests passed.");

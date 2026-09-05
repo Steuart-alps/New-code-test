@@ -1228,14 +1228,6 @@ function BillingCard() {
             <CardDescription>Add or remove services from your account.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            {/* DocTrack is included free with every subscription */}
-            <div className="flex items-center gap-3 px-6 py-4 bg-cyan-50/60 border-b border-cyan-100">
-              <CheckCircle2 className="w-4 h-4 text-cyan-600 shrink-0" />
-              <div className="text-sm">
-                <span className="font-medium text-cyan-900">DocTrack included free</span>
-                <span className="text-cyan-700"> — document portal for risk assessments, SOPs &amp; staff handbook</span>
-              </div>
-            </div>
             {servicesConfig.bundle ? (
               <div className="p-6 text-center text-sm text-muted-foreground bg-primary/5">
                 <CheckCircle2 className="w-8 h-8 text-primary mx-auto mb-3" />
@@ -1245,9 +1237,7 @@ function BillingCard() {
             ) : (
               <div className="divide-y divide-border">
                 {servicesConfig.catalog
-                  // DocTrack is included free with core; all other add-ons are
-                  // independently purchasable from this account.
-                  .filter(c => c.key !== "core" && c.key !== "bundle" && c.key !== "doctrack")
+                  .filter(c => c.key !== "core" && c.key !== "bundle")
                   .map(service => {
                   // "Active" means it's on the paid subscription — not merely
                   // entitled via a trial (trials unlock everything for free).
