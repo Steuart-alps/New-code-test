@@ -28,3 +28,4 @@
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
 - [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
+- [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.

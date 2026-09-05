@@ -58,16 +58,34 @@ async function main() {
 
   const staff = await request("POST", "/staff-roster", { name: "Alex Staff" });
   requireSuccess("create roster staff", staff, 201);
+  const uploadRequest = await request("POST", "/doc-track/documents/request-upload", {
+    name: "annual-safety-policy.pdf",
+    contentType: "application/pdf",
+  });
+  requireSuccess("request document upload", uploadRequest, 200);
+  const uploaded = await fetch(uploadRequest.data.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/pdf" },
+    body: Buffer.from("%PDF-1.4\nDocTrack ACL test\n"),
+  });
+  check("upload document bytes", uploaded.ok);
+  if (!uploaded.ok) throw new Error(`document upload failed with status ${uploaded.status}`);
+
   const document = await request("POST", "/doc-track/documents", {
     title: "Annual safety policy",
     category: "policy",
     fileName: "annual-safety-policy.pdf",
     mimeType: "application/pdf",
-    objectPath: `test/doc-status-${Date.now()}.pdf`,
+    objectPath: uploadRequest.data.objectPath,
     requiresAcknowledgement: true,
     annualAcknowledgement: true,
   });
   requireSuccess("create acknowledgement document", document, 201);
+  requireSuccess(
+    "download tenant-owned document",
+    await request("GET", `/storage${uploadRequest.data.objectPath}`),
+    200,
+  );
 
   let listed = await request("GET", "/doc-track/documents");
   requireSuccess("list acknowledgement documents", listed, 200);

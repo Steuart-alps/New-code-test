@@ -156,7 +156,8 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
       visibility: "private",
     });
   } catch (err) {
-    req.log.warn({ err, objectPath }, "Could not set ACL policy on DocTrack upload");
+    req.log.error({ err, objectPath }, "Could not set ACL policy on DocTrack upload");
+    return res.status(500).json({ error: "Could not secure uploaded document" });
   }
 
   const result = await db.execute(sql`
