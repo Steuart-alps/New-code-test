@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useMemo, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Eye, EyeOff, ArrowLeft, ChevronDown,
 } from "lucide-react";
@@ -8,11 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import { parseSignupPlan, registrationPlanFields } from "@/lib/signup-plan";
 import alpsLogo from "@/assets/alps-logo.png";
 
 export default function SignupPage() {
   const [, navigate] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
+  const planSelection = useMemo(() => parseSignupPlan(search), [search]);
 
   const [name, setName]                 = useState("");
   const [orgName, setOrgName]           = useState("");
@@ -49,6 +52,7 @@ export default function SignupPage() {
           email,
           password,
           ...(businessType ? { businessType } : {}),
+          ...registrationPlanFields(planSelection),
         }),
       });
       const data = await res.json();

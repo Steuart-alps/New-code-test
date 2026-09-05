@@ -8,6 +8,7 @@
     "build": "node scripts/generate-seo.mjs && vite build --config vite.config.ts",
     "generate-seo": "node scripts/generate-seo.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
+    "test:signup-plan": "node tests/signup-plan.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

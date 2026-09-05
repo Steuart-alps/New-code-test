@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
+import { buildSignupPath } from "@/lib/signup-plan";
 import alpsLogo from "@/assets/alps-logo.png";
 
 // ─── Module definitions ────────────────────────────────────────────────────────
@@ -112,6 +113,26 @@ const MODULES = [
       "Track status from reported → in progress → resolved",
       "Assign issues and set target resolution dates",
       "Solution notes and resolution log",
+    ],
+  },
+  {
+    key: "safetrack",
+    label: "SafeTrack",
+    price: 10,
+    icon: ShieldCheck,
+    color: "text-blue-700",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    activeBorder: "border-blue-500",
+    activeBg: "bg-blue-50",
+    required: false,
+    description: "Workplace safety management — record risk assessments, incidents, toolbox talks, and corrective actions in one place.",
+    features: [
+      "Risk assessment records and review dates",
+      "Incident and near-miss reporting",
+      "Toolbox talk attendance records",
+      "Corrective action tracking",
+      "Timestamped safety audit history",
     ],
   },
   {
@@ -257,7 +278,7 @@ const TESTIMONIALS = [
 
 // ─── Pricing builder (interactive) ────────────────────────────────────────────
 
-function PricingBuilder({ onStart }: { onStart: (selected: string[]) => void }) {
+function PricingBuilder({ onStart }: { onStart: (selected: string[], bundle: boolean) => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(["core"]));
   const [bundleActive, setBundleActive] = useState(false);
 
@@ -397,7 +418,7 @@ function PricingBuilder({ onStart }: { onStart: (selected: string[]) => void }) 
         <div className="flex flex-col gap-3 sm:items-end">
           <Button
             size="lg"
-            onClick={() => onStart(Array.from(selected))}
+            onClick={() => onStart(Array.from(selected), bundleActive)}
             className="bg-primary hover:bg-primary/90 text-primary-foreground px-10 py-6 text-base rounded-[2px] w-full sm:w-auto"
           >
             Start free trial <ArrowRight className="w-5 h-5 ml-2" />
@@ -414,12 +435,8 @@ function PricingBuilder({ onStart }: { onStart: (selected: string[]) => void }) 
 export default function LandingPage() {
   const [, navigate] = useLocation();
 
-  function handleStart(selected: string[]) {
-    const addons = selected.filter(k => k !== "core");
-    const params = new URLSearchParams();
-    if (addons.length > 0) params.set("modules", addons.join(","));
-    const qs = params.toString();
-    navigate(`/signup${qs ? `?${qs}` : ""}`);
+  function handleStart(selected: string[], bundle: boolean) {
+    navigate(buildSignupPath(selected, bundle));
   }
 
   return (
