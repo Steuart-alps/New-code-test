@@ -2,9 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
 import { getObjectAclPolicy } from "../lib/objectAcl";
+import { createAcknowledgementRegisterPdf } from "../lib/acknowledgementRegisterPdf";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -276,6 +277,101 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
   `);
 
   res.json(result.rows ?? []);
+});
+
+// ── Export acknowledgement register as PDF ───────────────────────────────────
+
+router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const docId = parseInt(req.params.id as string);
+  if (isNaN(docId)) return res.status(400).json({ error: "Invalid id" });
+  if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  const documentResult = await db.execute(sql`
+    SELECT title, category, department
+    FROM doc_track_documents
+    WHERE id = ${docId} AND client_id = ${clientId}
+    LIMIT 1
+  `);
+  const document = (documentResult.rows ?? [])[0] as any;
+  if (!document) return res.status(404).json({ error: "Not found" });
+
+  const rosterResult = await db.execute(sql`
+    SELECT sr.id, sr.name
+    FROM staff_roster sr
+    WHERE sr.client_id = ${clientId}
+      AND sr.active = true
+      AND (${document.department}::text IS NULL OR sr.department = ${document.department})
+      ${getActiveDepartmentId(req) !== null ? sql`AND (sr.department IS NULL OR sr.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+    ORDER BY sr.name ASC
+  `);
+  const acknowledgementResult = await db.execute(sql`
+    SELECT a.staff_roster_id, a.staff_name, a.signature, a.acknowledged_at,
+      CASE
+        WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+        WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+        ELSE true
+      END AS is_current
+    FROM doc_acknowledgements a
+    LEFT JOIN train_track_records tr
+      ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
+    WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
+  `);
+
+  const acknowledgements = (acknowledgementResult.rows ?? []) as any[];
+  const currentByRosterId = new Map(
+    acknowledgements
+      .filter((ack) => ack.is_current && ack.staff_roster_id !== null)
+      .map((ack) => [Number(ack.staff_roster_id), ack]),
+  );
+  const acknowledgedDates = acknowledgements
+    .filter((ack) => ack.is_current && ack.acknowledged_at)
+    .map((ack) => new Date(ack.acknowledged_at))
+    .sort((a, b) => a.getTime() - b.getTime());
+  const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  const dateRange = acknowledgedDates.length
+    ? `${formatDate(acknowledgedDates[0])} to ${formatDate(acknowledgedDates[acknowledgedDates.length - 1])}`
+    : "No acknowledgements recorded";
+
+  const acknowledgedRows: any[] = [];
+  const outstandingRows: any[] = [];
+  for (const staff of (rosterResult.rows ?? []) as any[]) {
+    const acknowledgement = currentByRosterId.get(Number(staff.id));
+    if (acknowledgement) {
+      acknowledgedRows.push({
+        staffName: staff.name,
+        signature: acknowledgement.signature ?? "",
+        acknowledgedAt: formatDate(new Date(acknowledgement.acknowledged_at)),
+        status: "Acknowledged" as const,
+      });
+    } else {
+      outstandingRows.push({
+        staffName: staff.name,
+        signature: "",
+        acknowledgedAt: "",
+        status: "Outstanding" as const,
+      });
+    }
+  }
+
+  const pdf = createAcknowledgementRegisterPdf({
+    title: document.title,
+    category: String(document.category).replace(/_/g, " "),
+    generatedAt: formatDate(new Date()),
+    dateRange,
+    rows: [...acknowledgedRows, ...outstandingRows],
+  });
+  const safeTitle = String(document.title).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "document";
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}-acknowledgements.pdf"`);
+  res.setHeader("Content-Length", pdf.length);
+  res.send(pdf);
 });
 
 // ── Outstanding acknowledgements overview (managers) ────────────────────────

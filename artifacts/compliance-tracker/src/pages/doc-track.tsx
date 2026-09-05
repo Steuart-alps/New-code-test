@@ -135,7 +135,7 @@ function titleFromFileName(name: string): string {
 
 // ─── Acknowledgements Dialog ──────────────────────────────────────────────────
 
-function AcknowledgementsDialog({ doc, open, onClose }: { doc: Doc; open: boolean; onClose: () => void }) {
+function AcknowledgementsDialog({ doc, open, onClose, canExport }: { doc: Doc; open: boolean; onClose: () => void; canExport: boolean }) {
   const { toast } = useToast();
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [acks, setAcks] = useState<Acknowledgement[]>([]);
@@ -143,53 +143,28 @@ function AcknowledgementsDialog({ doc, open, onClose }: { doc: Doc; open: boolea
   const [checked, setChecked] = useState<Record<number, boolean>>({});
   const [sigs, setSigs] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [deptFilter, setDeptFilter] = useState("all");
 
-  function handlePrintRegister() {
-    const generated = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-    const ackedIds = new Set(acks.map(a => a.staff_roster_id));
-    const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
-    const esc = (s: string | null | undefined) =>
-      (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const fmtDate = (d: string | null | undefined) =>
-      d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "";
-
-    const ackedStaff = staff.filter(s => ackedIds.has(s.id));
-    const pendingStaff = staff.filter(s => !ackedIds.has(s.id));
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Acknowledgement Register — ${esc(doc.title)}</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 8px; }
-  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .pending { color: #a15c00; }
-  .footer { margin-top: 32px; font-size: 10px; color: #777; border-top: 1px solid #ccc; padding-top: 6px; }
-  @media print { body { margin: 12mm; } }
-</style></head><body>
-<h1>Document Acknowledgement Register</h1>
-<div class="meta">Document: <strong>${esc(doc.title)}</strong></div>
-<div class="meta">Category: ${esc(doc.category.replace(/_/g, " "))}${doc.department ? ` · Department: ${esc(doc.department)}` : ""}</div>
-<div class="meta">Generated: ${generated} · ${ackedStaff.length}/${staff.length} staff acknowledged</div>
-<table>
-<tr><th>Staff member</th><th>Status</th><th>Date acknowledged</th><th>Signature</th></tr>
-${ackedStaff.map(s => {
-  const a = ackedMap[s.id];
-  return `<tr><td>${esc(s.name)}</td><td>Acknowledged</td><td>${fmtDate(a?.acknowledged_at)}</td><td>${esc(a?.signature ?? "")}</td></tr>`;
-}).join("")}
-${pendingStaff.map(s => `<tr class="pending"><td>${esc(s.name)}</td><td>Outstanding</td><td></td><td></td></tr>`).join("")}
-</table>
-<div class="footer">Generated for audit purposes — ${esc(doc.title)}</div>
-</body></html>`;
-
-    const win = window.open("", "_blank");
-    if (!win) { toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to print.", variant: "destructive" }); return; }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
+  async function handleExportRegister() {
+    setExporting(true);
+    try {
+      const response = await apiFetch(`/doc-track/documents/${doc.id}/acknowledgements/export`);
+      if (!response.ok) throw new Error("Export failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${doc.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "document"}-acknowledgements.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "PDF export failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -385,9 +360,10 @@ ${pendingStaff.map(s => `<tr class="pending"><td>${esc(s.name)}</td><td>Outstand
           <span className="text-xs text-muted-foreground mr-auto">
             {totalAcked}/{staff.length} acknowledged overall · TrainTrack records created automatically
           </span>
-          {!loading && staff.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handlePrintRegister} className="gap-1.5" disabled={saving}>
-              <Printer className="w-3.5 h-3.5" /> Print / Export PDF
+          {canExport && !loading && staff.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleExportRegister} className="gap-1.5" disabled={saving || exporting}>
+              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+              Export PDF
             </Button>
           )}
           <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
@@ -1169,7 +1145,7 @@ export default function DocTrackPage() {
 
       {/* Acknowledgements dialog */}
       {ackDoc && (
-        <AcknowledgementsDialog doc={ackDoc} open={!!ackDoc} onClose={() => setAckDoc(null)} />
+        <AcknowledgementsDialog doc={ackDoc} open={!!ackDoc} onClose={() => setAckDoc(null)} canExport={isManager} />
       )}
 
       {/* Outstanding acknowledgements overview */}

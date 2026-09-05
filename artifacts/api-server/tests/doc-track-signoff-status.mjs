@@ -27,11 +27,17 @@ async function request(method, path, body) {
   });
   const setCookie = response.headers.get("set-cookie");
   if (setCookie) cookie = setCookie.split(";")[0];
+  const contentType = response.headers.get("content-type") ?? "";
   return {
     status: response.status,
-    data: (response.headers.get("content-type") ?? "").includes("application/json")
+    contentType,
+    disposition: response.headers.get("content-disposition"),
+    data: contentType.includes("application/json")
       ? await response.json()
       : null,
+    bytes: contentType.includes("application/json")
+      ? null
+      : Buffer.from(await response.arrayBuffer()),
   };
 }
 
@@ -55,6 +61,10 @@ async function main() {
     200,
   );
   requireSuccess("log in", await request("POST", "/auth/login", { email, password: "password-123" }), 200);
+  const managerCookie = cookie;
+  const me = await request("GET", "/auth/me");
+  const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
+  check("manager has client context", clientId != null);
 
   const staff = await request("POST", "/staff-roster", { name: "Alex Staff" });
   requireSuccess("create roster staff", staff, 201);
@@ -136,6 +146,34 @@ async function main() {
   row = listed.data?.find((item) => item.id === document.data?.id);
   check("renewed annual acknowledgement is current", row?.acknowledgement_status === "acknowledged");
 
+  const managerExport = await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`);
+  check("manager can export acknowledgement PDF", managerExport.status === 200);
+  check("export is a PDF attachment", managerExport.contentType === "application/pdf"
+    && managerExport.disposition?.includes("attachment")
+    && managerExport.bytes?.subarray(0, 8).toString() === "%PDF-1.4");
+  const pdfText = managerExport.bytes?.toString() ?? "";
+  check("PDF contains document and acknowledged staff", pdfText.includes("Annual safety policy") && pdfText.includes("Alex Staff"));
+
+  const staffEmail = `doc-export-staff-${Date.now()}@test.local`;
+  const viewerEmail = `doc-export-viewer-${Date.now()}@test.local`;
+  requireSuccess("create staff user", await request("POST", "/users", {
+    name: "Export Staff", email: staffEmail, password: "password-123", role: "client_staff", clientId,
+  }), 201);
+  requireSuccess("create viewer user", await request("POST", "/users", {
+    name: "Export Viewer", email: viewerEmail, password: "password-123", role: "client_viewer", clientId,
+  }), 201);
+
+  cookie = "";
+  requireSuccess("log in as staff", await request("POST", "/auth/login", { email: staffEmail, password: "password-123" }), 200);
+  check("staff cannot export aggregate acknowledgement PDF",
+    (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+
+  cookie = "";
+  requireSuccess("log in as viewer", await request("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), 200);
+  check("viewer cannot export aggregate acknowledgement PDF",
+    (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+
+  cookie = managerCookie;
   const preset = await request("PUT", "/pat-track/preset-templates/pest-control", {
     items: [{ name: "Electric ULV Fogger", type: "Portable Tool" }],
   });
