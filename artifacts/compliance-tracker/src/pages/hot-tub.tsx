@@ -143,6 +143,20 @@ function fmt(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function defaultDateRange() {
+  const to = new Date();
+  const from = new Date(to);
+  from.setMonth(from.getMonth() - 3);
+  return { from: dateInputValue(from), to: dateInputValue(to) };
+}
+
 function daysUntil(d: string | null) {
   if (!d) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -214,6 +228,8 @@ export default function HotTubPage() {
   const [filterType, setFilterType] = useState<CheckType | "all">("all");
   const [filterSite, setFilterSite] = useState("all");
   const [filterTub, setFilterTub] = useState("all");
+  const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
+  const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [showManageTubs, setShowManageTubs] = useState(false);
@@ -262,6 +278,8 @@ export default function HotTubPage() {
     if (filterType !== "all") rows = rows.filter(r => r.checkType === filterType);
     if (filterSite !== "all") rows = rows.filter(r => String(r.siteId) === filterSite);
     if (filterTub !== "all") rows = rows.filter(r => String(r.hotTubId) === filterTub);
+    if (filterFrom) rows = rows.filter(r => r.checkDate.slice(0, 10) >= filterFrom);
+    if (filterTo) rows = rows.filter(r => r.checkDate.slice(0, 10) <= filterTo);
     if (search.trim()) {
       const q = search.toLowerCase();
       rows = rows.filter(r =>
@@ -273,7 +291,7 @@ export default function HotTubPage() {
       );
     }
     return rows;
-  }, [checks, filterType, filterSite, filterTub, search, tubMap]);
+  }, [checks, filterType, filterSite, filterTub, filterFrom, filterTo, search, tubMap]);
 
   // ── Export printable log (for health inspections) ────────────────────────────
 
@@ -291,6 +309,9 @@ export default function HotTubPage() {
     if (filterTub !== "all") filterParts.push(`Tub: ${tubMap.get(Number(filterTub))?.name ?? filterTub}`);
     if (filterSite !== "all") filterParts.push(`Site: ${siteName(Number(filterSite))}`);
     if (filterType !== "all") filterParts.push(`Check type: ${CHECK_TYPE_LABELS[filterType as CheckType] ?? filterType}`);
+    if (filterFrom || filterTo) {
+      filterParts.push(`Date range: ${filterFrom ? fmt(filterFrom) : "earliest"} to ${filterTo ? fmt(filterTo) : "latest"}`);
+    }
     if (search.trim()) filterParts.push(`Search: "${search.trim()}"`);
     const filterLine = filterParts.length ? `Filters applied — ${filterParts.join(" · ")}` : "All records";
 
@@ -307,7 +328,8 @@ export default function HotTubPage() {
   th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
   th { background: #f0ede2; font-weight: bold; }
   .empty { font-size: 11px; color: #777; font-style: italic; }
-  @media print { body { margin: 12mm; } }
+  @page { size: landscape; margin: 10mm; }
+  @media print { body { margin: 0; } }
 </style></head><body>
 <h1>Hot Tub &amp; Spa Maintenance Log</h1>
 <div class="meta">${esc(user?.name ?? "")} — generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for health inspection</div>
@@ -468,8 +490,8 @@ ${rows.map(r => `<tr>
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
-            title="Print or save the hot tub maintenance log for health inspections">
-            <Printer className="w-4 h-4" /> Export log
+            title="Open the filtered maintenance log to print or save as PDF">
+            <Printer className="w-4 h-4" /> Download PDF
           </Button>
           {canAdmin && (
             <Button variant="outline" onClick={() => setShowManageTubs(true)} className="gap-2 rounded-sm">
@@ -615,6 +637,28 @@ ${rows.map(r => `<tr>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="hot-tub-filter-from" className="text-xs text-muted-foreground whitespace-nowrap">From</Label>
+          <Input
+            id="hot-tub-filter-from"
+            type="date"
+            value={filterFrom}
+            max={filterTo || undefined}
+            onChange={e => setFilterFrom(e.target.value)}
+            className="w-36 rounded-sm"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="hot-tub-filter-to" className="text-xs text-muted-foreground whitespace-nowrap">To</Label>
+          <Input
+            id="hot-tub-filter-to"
+            type="date"
+            value={filterTo}
+            min={filterFrom || undefined}
+            onChange={e => setFilterTo(e.target.value)}
+            className="w-36 rounded-sm"
+          />
+        </div>
         {sites.length > 0 && (
           <Select value={filterSite} onValueChange={setFilterSite}>
             <SelectTrigger className="w-40 rounded-sm">
