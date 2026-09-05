@@ -174,8 +174,8 @@ function startScheduler() {
   });
   logger.info("FixTrack overdue alert scheduler started (daily at 08:40)");
 
-  // Notify staff about overdue bike hires (hourly; each hire notified once).
-  cron.schedule("5 * * * *", async () => {
+  // Notify client admins about overdue bike hires (daily; each hire notified once).
+  cron.schedule("20 8 * * *", async () => {
     try {
       const result = await runBikeOverdueJob();
       if (result.hiresFound > 0) logger.info({ result }, "Bike overdue job complete");
@@ -183,7 +183,7 @@ function startScheduler() {
       logger.error({ err }, "Bike overdue job failed");
     }
   });
-  logger.info("Bike overdue notification scheduler started (hourly at :05)");
+  logger.info("Bike overdue notification scheduler started (daily at 08:20)");
 
   // Detect newly cancelled subscriptions and start the 12-month retention clock
   // (daily at 07:00; sends one offboarding email per client).

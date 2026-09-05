@@ -1,8 +1,8 @@
 /**
  * Overdue bike-hire notification job.
  *
- * Runs hourly. Finds active hires whose expected return time has passed and
- * emails the client's active staff so they can chase the hirer. Each hire is
+ * Runs daily. Finds active hires whose expected return date has passed and
+ * emails the client's active admins so they can chase the hirer. Each hire is
  * notified at most once (bike_hire_records.overdue_notified_at).
  */
 
@@ -23,20 +23,26 @@ interface OverdueHire {
   hirer_name: string;
   hirer_contact: string | null;
   expected_return: string;
-  bike_label: string | null;
+  bike_ref: string;
+  days_overdue: number;
 }
 
 function buildEmailHtml(hires: OverdueHire[], appUrl: string): string {
-  const fmtTime = (d: string) =>
-    new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const fmtDate = (d: string) =>
+    new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
   const rows = hires
     .map(
       (h) => `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
-          <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(h.hirer_name)}${h.bike_label ? ` — ${esc(h.bike_label)}` : ""}</div>
+          <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(h.bike_ref)} — ${esc(h.hirer_name)}</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px;">
-            Due back ${fmtTime(h.expected_return)}${h.hirer_contact ? ` · Contact: ${esc(h.hirer_contact)}` : ""}
+            Due back ${fmtDate(h.expected_return)} · ${h.days_overdue} day${h.days_overdue === 1 ? "" : "s"} overdue${h.hirer_contact ? ` · Contact: ${esc(h.hirer_contact)}` : ""}
           </div>
         </td>
       </tr>`,
@@ -82,20 +88,26 @@ export interface BikeOverdueJobResult {
 }
 
 type EmailSender = typeof sendEmail;
+type PushSender = typeof sendPushToUsers;
 
-export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<BikeOverdueJobResult> {
+export async function runBikeOverdueJob(
+  deps: { sendEmail?: EmailSender; sendPush?: PushSender } = {},
+): Promise<BikeOverdueJobResult> {
+  const send = deps.sendEmail ?? sendEmail;
+  const sendPush = deps.sendPush ?? sendPushToUsers;
   const result: BikeOverdueJobResult = { hiresFound: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
   const appUrl = getPublicAppUrl();
 
   // Active hires past their expected return that we haven't notified yet.
   const overdueResult = await db.execute(sql`
     SELECT h.id, h.client_id, h.guest_name AS hirer_name, h.guest_contact AS hirer_contact,
-           h.return_date_expected AS expected_return, b.name AS bike_label
+           h.return_date_expected AS expected_return, b.ref AS bike_ref,
+           (CURRENT_DATE - h.return_date_expected)::integer AS days_overdue
     FROM bike_hire_records h
     LEFT JOIN bikes b ON h.bike_id = b.id
     WHERE h.status = 'active'
       AND h.return_date_expected IS NOT NULL
-      AND h.return_date_expected < now()
+      AND h.return_date_expected < CURRENT_DATE
       AND h.overdue_notified_at IS NULL
     ORDER BY h.client_id, h.return_date_expected
   `);
@@ -116,7 +128,11 @@ export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<
       const users = await db
         .select({ id: usersTable.id, email: usersTable.email })
         .from(usersTable)
-        .where(and(eq(usersTable.clientId, clientId), eq(usersTable.active, true)))
+        .where(and(
+          eq(usersTable.clientId, clientId),
+          eq(usersTable.role, "client_admin"),
+          eq(usersTable.active, true),
+        ))
         .limit(20);
       const emails = users.map((u) => u.email).filter(Boolean) as string[];
       const userIds = [...new Set(users.map((u) => u.id))];
@@ -146,8 +162,8 @@ export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<
         throw sendErr;
       }
 
-      // Push staff a matching alert (best-effort; never blocks the job).
-      await sendPushToUsers(userIds, {
+      // Push admins a matching alert (best-effort; never blocks the job).
+      await sendPush(userIds, {
         title: "Bike hire overdue",
         body: `${toSend.length} bike hire${toSend.length !== 1 ? "s have" : " has"} not been returned on time.`,
         data: { route: "/(tabs)" },
@@ -155,7 +171,7 @@ export async function runBikeOverdueJob(send: EmailSender = sendEmail): Promise<
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;
-      logger.info({ clientId, hires: ids.length, emails: emails.length }, "Bike overdue notification sent");
+      logger.info({ clientId, hires: claimedIds.length, emails: emails.length }, "Bike overdue notification sent");
     } catch (err) {
       result.errors++;
       logger.error({ err, clientId }, "Bike overdue notification failed");
