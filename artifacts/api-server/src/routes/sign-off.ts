@@ -148,20 +148,32 @@ router.post("/:token/acknowledge", async (req, res) => {
     const { documentId, staffRosterId, staffName, signature, typedName } = parsed.data;
 
     const docResult = await db.execute(sql`
-      SELECT id, title, category, site_id FROM doc_track_documents
+      SELECT id, title, category, site_id, annual_acknowledgement FROM doc_track_documents
       WHERE id = ${documentId} AND client_id = ${client.id} AND requires_acknowledgement = true
       LIMIT 1
     `);
     const doc = (docResult.rows ?? [])[0] as any;
     if (!doc) return res.status(404).json({ error: "Document not found" });
 
-    // Idempotent — return 200 if already acknowledged
+    // Current acknowledgements are idempotent. Expired annual acknowledgements
+    // can be signed again and will replace the stale TrainTrack link.
     const existing = await db.execute(sql`
-      SELECT id FROM doc_acknowledgements
-      WHERE document_id = ${documentId} AND staff_roster_id = ${staffRosterId}
+      SELECT a.id,
+             CASE
+               WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+               WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+               ELSE true
+             END AS is_current
+      FROM doc_acknowledgements a
+      LEFT JOIN train_track_records tr
+        ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
+      WHERE a.document_id = ${documentId}
+        AND a.client_id = ${client.id}
+        AND a.staff_roster_id = ${staffRosterId}
       LIMIT 1
     `);
-    if ((existing.rows ?? []).length > 0) {
+    const existingAck = (existing.rows ?? [])[0] as any;
+    if (existingAck?.is_current) {
       return res.status(200).json({ alreadySigned: true });
     }
 
@@ -172,24 +184,35 @@ router.post("/:token/acknowledge", async (req, res) => {
     const trainResult = await db.execute(sql`
       INSERT INTO train_track_records
         (client_id, site_id, record_type, staff_name, document_title,
-         document_type, completed_date, notes, signature)
+         document_type, completed_date, expiry_date, notes, signature)
       VALUES
         (${client.id}, ${doc.site_id ?? null}, 'signoff', ${staffName},
          ${doc.title}, ${doc.category}, ${today}::date,
+          ${doc.annual_acknowledgement ? sql`(${today}::date + interval '1 year')::date` : sql`NULL::date`},
          ${"Document acknowledgement (staff self-sign)"},
          ${signatureValue})
       RETURNING id
     `);
     const trainId = ((trainResult.rows ?? [])[0] as any)?.id ?? null;
 
-    const ackResult = await db.execute(sql`
-      INSERT INTO doc_acknowledgements
-        (document_id, client_id, staff_roster_id, staff_name, signature, train_track_record_id)
-      VALUES
-        (${documentId}, ${client.id}, ${staffRosterId}, ${staffName},
-         ${signatureValue}, ${trainId})
-      RETURNING id, acknowledged_at
-    `);
+    const ackResult = existingAck
+      ? await db.execute(sql`
+          UPDATE doc_acknowledgements
+          SET staff_name = ${staffName},
+              signature = ${signatureValue},
+              train_track_record_id = ${trainId},
+              acknowledged_at = now()
+          WHERE id = ${existingAck.id} AND client_id = ${client.id}
+          RETURNING id, acknowledged_at
+        `)
+      : await db.execute(sql`
+          INSERT INTO doc_acknowledgements
+            (document_id, client_id, staff_roster_id, staff_name, signature, train_track_record_id)
+          VALUES
+            (${documentId}, ${client.id}, ${staffRosterId}, ${staffName},
+             ${signatureValue}, ${trainId})
+          RETURNING id, acknowledged_at
+        `);
 
     res.status(201).json((ackResult.rows ?? [])[0]);
   } catch (err: any) {

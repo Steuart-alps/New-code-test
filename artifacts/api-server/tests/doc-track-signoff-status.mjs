@@ -114,6 +114,28 @@ async function main() {
   check("DocTrack reconciles expired linked sign-off", row?.acknowledgement_status === "expired");
   check("expired acknowledgement count is returned", Number(row?.expired_acknowledgement_count) === 1);
 
+  let overview = await request("GET", "/doc-track/acknowledgements/outstanding");
+  requireSuccess("load outstanding acknowledgement overview", overview, 200);
+  let overviewRow = overview.data?.documents?.find((item) => item.id === document.data?.id);
+  check("expired annual sign-off appears outstanding", overviewRow?.outstanding?.some((item) => item.id === staff.data?.id));
+
+  const renewed = await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
+    acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "Alex Staff" }],
+  });
+  check("renew expired annual acknowledgement", renewed.status === 201 && renewed.data?.created === 1);
+  check(
+    "renewal creates a replacement TrainTrack sign-off",
+    typeof renewed.data?.records?.[0]?.train_track_record_id === "number"
+      && renewed.data.records[0].train_track_record_id !== trainRecordId,
+  );
+
+  overview = await request("GET", "/doc-track/acknowledgements/outstanding");
+  overviewRow = overview.data?.documents?.find((item) => item.id === document.data?.id);
+  check("renewed annual sign-off clears outstanding staff", overviewRow?.outstanding?.length === 0);
+  listed = await request("GET", "/doc-track/documents");
+  row = listed.data?.find((item) => item.id === document.data?.id);
+  check("renewed annual acknowledgement is current", row?.acknowledgement_status === "acknowledged");
+
   const preset = await request("PUT", "/pat-track/preset-templates/pest-control", {
     items: [{ name: "Electric ULV Fogger", type: "Portable Tool" }],
   });

@@ -306,12 +306,24 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   const staff = (staffResult.rows ?? []) as any[];
 
   const acksResult = await db.execute(sql`
-    SELECT document_id, staff_roster_id, staff_name, acknowledged_at, signature
-    FROM doc_acknowledgements
-    WHERE client_id = ${clientId}
+    SELECT a.document_id, a.staff_roster_id, a.staff_name, a.acknowledged_at, a.signature,
+           CASE
+             WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+             WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+             ELSE true
+           END AS is_current
+    FROM doc_acknowledgements a
+    LEFT JOIN train_track_records tr
+      ON tr.id = a.train_track_record_id
+     AND tr.client_id = a.client_id
+    WHERE a.client_id = ${clientId}
   `);
   const ackRows = (acksResult.rows ?? []) as any[];
-  const acked = new Set(ackRows.map((r) => `${r.document_id}:${r.staff_roster_id}`));
+  const acked = new Set(
+    ackRows
+      .filter((r) => r.is_current)
+      .map((r) => `${r.document_id}:${r.staff_roster_id}`),
+  );
 
   const documents = docs.map((d) => {
     // Documents scoped to a department only need acknowledgement from that department.
@@ -326,7 +338,11 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
       acknowledgedCount: relevant.length - outstanding.length,
       outstanding: outstanding.map((s) => ({ id: s.id, name: s.name, department: s.department })),
       acknowledged: ackRows
-        .filter((r) => r.document_id === d.id)
+        .filter((r) =>
+          r.document_id === d.id
+          && r.is_current
+          && relevant.some((s) => s.id === r.staff_roster_id),
+        )
         .map((r) => ({ name: r.staff_name, acknowledgedAt: r.acknowledged_at, signed: !!r.signature })),
     };
   });
@@ -444,22 +460,40 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   const created: any[] = [];
 
   for (const ack of toCreate) {
-    // Skip if already acknowledged. When there is no roster link (staff without
-    // a roster row) dedupe by the acknowledging user instead.
+    // Current acknowledgements are idempotent. Expired annual sign-offs (or
+    // acknowledgements whose linked TrainTrack record was removed) are renewed
+    // below by replacing the stale link while retaining the acknowledgement row.
     const existing = ack.staffRosterId !== null
       ? await db.execute(sql`
-          SELECT id FROM doc_acknowledgements
-          WHERE document_id = ${docId} AND client_id = ${clientId}
-            AND staff_roster_id = ${ack.staffRosterId}
+          SELECT a.id,
+                 CASE
+                   WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+                   WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+                   ELSE true
+                 END AS is_current
+          FROM doc_acknowledgements a
+          LEFT JOIN train_track_records tr
+            ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
+          WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
+            AND a.staff_roster_id = ${ack.staffRosterId}
           LIMIT 1
         `)
       : await db.execute(sql`
-          SELECT id FROM doc_acknowledgements
-          WHERE document_id = ${docId} AND client_id = ${clientId}
-            AND staff_roster_id IS NULL AND acknowledged_by = ${userId}
+          SELECT a.id,
+                 CASE
+                   WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+                   WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+                   ELSE true
+                 END AS is_current
+          FROM doc_acknowledgements a
+          LEFT JOIN train_track_records tr
+            ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
+          WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
+            AND a.staff_roster_id IS NULL AND a.acknowledged_by = ${userId}
           LIMIT 1
         `);
-    if ((existing.rows ?? []).length > 0) continue;
+    const existingAck = (existing.rows ?? [])[0] as any;
+    if (existingAck?.is_current) continue;
 
     // Create TrainTrack signoff record.
     // When annual_acknowledgement is enabled the record gets a 1-year expiry so
@@ -482,16 +516,26 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
     `);
     const trainId = ((trainResult.rows ?? [])[0] as any)?.id ?? null;
 
-    // Create acknowledgement record
-    const ackResult = await db.execute(sql`
-      INSERT INTO doc_acknowledgements
-        (document_id, client_id, staff_roster_id, staff_name, signature,
-         acknowledged_by, train_track_record_id)
-      VALUES
-        (${docId}, ${clientId}, ${ack.staffRosterId}, ${ack.staffName},
-         ${ack.signature ?? null}, ${userId}, ${trainId})
-      RETURNING *
-    `);
+    const ackResult = existingAck
+      ? await db.execute(sql`
+          UPDATE doc_acknowledgements
+          SET staff_name = ${ack.staffName},
+              signature = ${ack.signature ?? null},
+              acknowledged_by = ${userId},
+              train_track_record_id = ${trainId},
+              acknowledged_at = now()
+          WHERE id = ${existingAck.id} AND client_id = ${clientId}
+          RETURNING *
+        `)
+      : await db.execute(sql`
+          INSERT INTO doc_acknowledgements
+            (document_id, client_id, staff_roster_id, staff_name, signature,
+             acknowledged_by, train_track_record_id)
+          VALUES
+            (${docId}, ${clientId}, ${ack.staffRosterId}, ${ack.staffName},
+             ${ack.signature ?? null}, ${userId}, ${trainId})
+          RETURNING *
+        `);
     if ((ackResult.rows ?? [])[0]) created.push((ackResult.rows ?? [])[0]);
   }
 
