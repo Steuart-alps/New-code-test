@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 
 const router = Router();
@@ -151,11 +151,18 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     if (existingAcl?.owner && existingAcl.owner !== String(clientId)) {
       return res.status(403).json({ error: "Object does not belong to this account" });
     }
+    const tenantUploadPrefix = `/objects/uploads/tenant-${clientId}/`;
+    if (!existingAcl?.owner && !objectPath.startsWith(tenantUploadPrefix)) {
+      return res.status(403).json({ error: "Upload was not reserved for this account" });
+    }
     await storage.trySetObjectEntityAclPolicy(objectPath, {
       owner: String(clientId),
       visibility: "private",
     });
   } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      return res.status(404).json({ error: "Uploaded object not found" });
+    }
     req.log.error({ err, objectPath }, "Could not set ACL policy on DocTrack upload");
     return res.status(500).json({ error: "Could not secure uploaded document" });
   }
@@ -518,7 +525,7 @@ router.post("/documents/request-upload", requireAuth, denyViewers, async (req, r
   }).parse(req.body); // validate — name/contentType not used server-side
 
   try {
-    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {
@@ -545,10 +552,8 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   if (!await canAccessDocument(clientId, id, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
   // Backfill ACL for legacy documents that were uploaded before the ACL check
-  // was enforced. If the object has no owner set, tag it now so that the
-  // storage security check (GET /api/storage/objects/*) allows this client's
-  // users to read it. Never re-tag an object that already belongs to a
-  // different tenant.
+  // was enforced. A signed URL bypasses the application's storage route, so
+  // verify the final ACL here too; it must never be issued for another tenant.
   try {
     const file = await storage.getObjectEntityFile(row.object_path);
     const existingAcl = await getObjectAclPolicy(file);
@@ -558,10 +563,13 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
         owner: String(clientId),
         visibility: "private",
       });
+    } else if (existingAcl.owner !== String(clientId)) {
+      return res.status(403).json({ error: "Object does not belong to this account" });
     }
-    // If an owner is set but it doesn't match, the ACL check on the storage
-    // route will return 403 as intended — don't silently override it here.
   } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      return res.status(404).json({ error: "Document object not found" });
+    }
     req.log.warn({ err, objectPath: row.object_path }, "Could not backfill ACL on DocTrack download");
     // Non-fatal — attempt to generate the signed URL anyway.
   }

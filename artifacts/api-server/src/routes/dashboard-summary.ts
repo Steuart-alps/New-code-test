@@ -36,6 +36,7 @@ export interface TrackSummary {
 
 export interface ChecklistTotals {
   date: string;
+  available: boolean;
   expectedAmPairs: number;
   completedAmPairs: number;
   expectedPmPairs: number;
@@ -95,6 +96,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
   // ── Sites list (for daily track gap detection) ──────────────────────────────
   let allSites: { id: number; name: string }[] = [];
+  let sitesAvailable = false;
   try {
     const siteRows = await db.execute(sql`
       SELECT id, name FROM sites
@@ -105,23 +107,29 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     allSites = rows(siteRows)
       .map((r: any) => ({ id: r.id, name: r.name }))
       .filter((site) => accessibleSiteIds == null || accessibleSiteIds.includes(site.id));
+    sitesAvailable = true;
   } catch {
     // sites table always exists; skip silently if error
   }
+
+  const amEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_am");
+  const pmEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_pm");
 
   // A site has one expected AM pair and one expected PM pair. Each branch is
   // complete when any of its real checklist types has been submitted; this
   // keeps KitchenTrack and PremisesTrack checklists under the same definition.
   const checklistTotals: ChecklistTotals = {
     date: today,
-    expectedAmPairs: allSites.length,
+    available: false,
+    expectedAmPairs: amEnabled ? allSites.length : 0,
     completedAmPairs: 0,
-    expectedPmPairs: allSites.length,
+    expectedPmPairs: pmEnabled ? allSites.length : 0,
     completedPmPairs: 0,
     completedSitePairs: 0,
   };
   const checklistCompletionBySite = new Map<number, { am: boolean; pm: boolean }>();
-  let checklistTotalsAvailable = false;
+  let checklistTotalsAvailable = sitesAvailable && allSites.length === 0;
+  checklistTotals.available = checklistTotalsAvailable;
   if (allSites.length > 0) {
     try {
       const completed = await db.execute(sql`
@@ -142,11 +150,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         });
       }
       checklistTotalsAvailable = true;
+      checklistTotals.available = true;
       for (const site of allSites) {
         const complete = checklistCompletionBySite.get(site.id);
-        if (complete?.am) checklistTotals.completedAmPairs++;
-        if (complete?.pm) checklistTotals.completedPmPairs++;
-        if (complete?.am && complete.pm) checklistTotals.completedSitePairs++;
+        const amComplete = !amEnabled || Boolean(complete?.am);
+        const pmComplete = !pmEnabled || Boolean(complete?.pm);
+        if (amEnabled && amComplete) checklistTotals.completedAmPairs++;
+        if (pmEnabled && pmComplete) checklistTotals.completedPmPairs++;
+        if ((amEnabled || pmEnabled) && amComplete && pmComplete) checklistTotals.completedSitePairs++;
       }
     } catch {
       // The established per-track no-data fallback remains available below.
@@ -154,7 +165,6 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   }
 
   // ── Daily AM ─────────────────────────────────────────────────────────────────
-  const amEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_am");
   {
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";
@@ -191,7 +201,6 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   }
 
   // ── Daily PM / Sign-off ───────────────────────────────────────────────────────
-  const pmEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_pm");
   {
     const items: TrackItem[] = [];
     let status: TrackStatus = "no_data";

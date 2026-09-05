@@ -14,16 +14,17 @@ export interface FixTrackIssue {
   id: number;
   title: string;
   description: string | null;
-  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  status: 'reported' | 'in_progress' | 'resolved' | 'closed';
   priority: 'urgent' | 'high' | 'medium' | 'low';
   issueType: string;
   siteId: number | null;
   siteName: string | null;
-  notes: string | null;
   solutionNotes: string | null;
   assignedTo: string | null;
   createdAt: string;
   updatedAt: string;
+  statusEvents?: Array<{ status: FixTrackIssue['status']; createdAt: string }>;
+  notes?: Array<{ id: number; note: string | null; createdBy: string; createdAt: string }>;
 }
 
 function timeAgo(dateStr: string): string {

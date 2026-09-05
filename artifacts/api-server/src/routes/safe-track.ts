@@ -13,7 +13,7 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const router = Router();
 
@@ -62,6 +62,15 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if (data.objectPath) {
+      try {
+        await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
+      } catch (err) {
+        const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+          : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
+        return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+      }
+    }
     const insertRows = await db.insert(table).values({ ...data, clientId, createdBy: (req.session as any).userId ?? null }).returning() as any[];
     const row = insertRows[0];
     res.status(201).json(row);
@@ -76,6 +85,15 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
     const data = parsed.data as any;
     if ("siteId" in data && !(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+    if (data.objectPath) {
+      try {
+        await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
+      } catch (err) {
+        const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+          : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
+        return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+      }
+    }
     const [row] = await db.update(table).set({ ...data, updatedAt: new Date() })
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).returning();
     if (!row) return res.status(404).json({ error: "Not found" });
@@ -109,8 +127,10 @@ const fileFields = z.object({
 // Shared presigned upload URL endpoint
 router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   try {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const storage = new ObjectStorageService();
-    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {

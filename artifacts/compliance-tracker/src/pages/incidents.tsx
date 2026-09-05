@@ -93,7 +93,9 @@ interface Site { id: number; name: string; }
 interface RiddorHistoryEvent {
   id: number; eventType: "decision" | "submission"; riddorReportable: boolean;
   reportedToHse: boolean; rationale: string | null; hseReference: string | null;
-  hseReportDate: string | null; createdAt: string; actorName: string | null; actorEmail: string | null;
+  hseReportDate: string | null; decisionMaker: string | null; decisionAt: string;
+  submittedAt: string | null; submissionEvidence: string | null;
+  createdAt: string; actorName: string | null; actorEmail: string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -179,6 +181,13 @@ function useIncidentsApi() {
 function fmt(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtDateTime(d: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("en-GB", {
+    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
 }
 
 // ─── Incident Config Dialog ───────────────────────────────────────────────────
@@ -331,6 +340,8 @@ const emptyForm = () => ({
   reportedToHse: false,
   hseReference: "",
   hseReportDate: "",
+  submittedAt: "",
+  submissionEvidence: "",
   riddorRationale: "",
   immediateActions: "",
   correctiveActions: "",
@@ -515,6 +526,8 @@ ${rows.map(r => `<tr>
       reportedToHse: r.reportedToHse,
       hseReference: r.hseReference ?? "",
       hseReportDate: r.hseReportDate?.slice(0, 10) ?? "",
+      submittedAt: "",
+      submissionEvidence: "",
       riddorRationale: "",
       immediateActions: r.immediateActions ?? "",
       correctiveActions: r.correctiveActions ?? "",
@@ -552,7 +565,11 @@ ${rows.map(r => `<tr>
         reportedToHse: form.reportedToHse,
         hseReference: form.hseReference.trim() || null,
         hseReportDate: form.hseReportDate || null,
-        riddorRationale: form.riddorRationale.trim() || null,
+        // Empty audit fields are omitted while editing: they are append-only,
+        // not a request to overwrite an earlier decision or submission.
+        submittedAt: form.submittedAt ? new Date(form.submittedAt).toISOString() : (editItem ? undefined : null),
+        submissionEvidence: form.submissionEvidence.trim() || (editItem ? undefined : null),
+        riddorRationale: form.riddorRationale.trim() || (editItem ? undefined : null),
         immediateActions: form.immediateActions.trim() || null,
         correctiveActions: form.correctiveActions.trim() || null,
         reportedBy: form.reportedBy.trim(),
@@ -822,9 +839,9 @@ ${rows.map(r => `<tr>
                   <td className="px-4 py-3">
                     <CheckPhotoUploader entityType="incident" entityId={r.id} compact />
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
-                      {canAdmin && <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" title="View RIDDOR history" onClick={() => setHistoryIncident(r)}>
                         <Activity className="w-3.5 h-3.5" />
-                      </Button>}
+                      </Button>
                       <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
@@ -1084,6 +1101,16 @@ ${rows.map(r => `<tr>
                       </p>
                     </div>
                   </div>
+                  <div>
+                    <Label>RIDDOR decision rationale *</Label>
+                    <Textarea
+                      placeholder="Record why this incident is or is not RIDDOR reportable."
+                      value={form.riddorRationale}
+                      onChange={e => setForm(f => ({ ...f, riddorRationale: e.target.value }))}
+                      className="mt-1 rounded-sm" rows={2}
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">The decision maker and time are recorded automatically in the immutable audit history.</p>
+                  </div>
 
                   {form.riddorReportable && (
                     <>
@@ -1095,6 +1122,7 @@ ${rows.map(r => `<tr>
                       </div>
 
                       {form.reportedToHse && (
+                        <>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <Label>HSE Reference Number</Label>
@@ -1110,6 +1138,22 @@ ${rows.map(r => `<tr>
                               className="mt-1 rounded-sm" />
                           </div>
                         </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label>Submission time *</Label>
+                            <Input type="datetime-local" value={form.submittedAt}
+                              onChange={e => setForm(f => ({ ...f, submittedAt: e.target.value }))}
+                              className="mt-1 rounded-sm" />
+                          </div>
+                          <div>
+                            <Label>Submission evidence / secure location *</Label>
+                            <Input placeholder="Receipt ID, document reference or secure URL"
+                              value={form.submissionEvidence}
+                              onChange={e => setForm(f => ({ ...f, submissionEvidence: e.target.value }))}
+                              className="mt-1 rounded-sm" />
+                          </div>
+                        </div>
+                        </>
                       )}
 
                       {!form.reportedToHse && (
@@ -1120,15 +1164,6 @@ ${rows.map(r => `<tr>
                           </span>
                         </div>
                       )}
-                      <div>
-                        <Label>Decision / submission rationale</Label>
-                        <Textarea
-                          placeholder="Record why this decision was made or submission details. Saved as an immutable history event."
-                          value={form.riddorRationale}
-                          onChange={e => setForm(f => ({ ...f, riddorRationale: e.target.value }))}
-                          className="mt-1 rounded-sm" rows={2}
-                        />
-                      </div>
                     </>
                   )}
                 </div>
@@ -1163,11 +1198,12 @@ ${rows.map(r => `<tr>
                 <div key={event.id} className="border rounded-sm p-3 text-sm space-y-1">
                   <div className="flex justify-between gap-2 font-medium">
                     <span>{event.eventType === "submission" ? "HSE submission" : "RIDDOR decision"}: {event.riddorReportable ? "Reportable" : "Not reportable"}</span>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{fmt(event.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtDateTime(event.decisionAt)}</span>
                   </div>
                   <p className="text-muted-foreground">{event.reportedToHse ? "Reported to HSE" : "Not reported to HSE"}{event.hseReference ? ` · ${event.hseReference}` : ""}</p>
-                   <p className="text-xs text-muted-foreground">Recorded by {event.actorName ?? event.actorEmail ?? "System"}</p>
+                  <p className="text-xs text-muted-foreground">Decision by {event.decisionMaker ?? event.actorName ?? event.actorEmail ?? "System"} · {fmtDateTime(event.decisionAt)}</p>
                   {event.rationale && <p>{event.rationale}</p>}
+                  {event.submittedAt && <p className="text-xs text-muted-foreground">Submitted {fmtDateTime(event.submittedAt)}{event.submissionEvidence ? ` · Evidence: ${event.submissionEvidence}` : ""}</p>}
                 </div>
               ))}
           </div>

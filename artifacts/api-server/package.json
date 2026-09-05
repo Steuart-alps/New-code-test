@@ -30,8 +30,12 @@
     "test:track-action-templates": "bash tests/run-track-action-templates.sh",
     "test:room-track": "bash tests/run-room-track-routes.sh",
     "test:guidance-register": "node tests/guidance-register.mjs",
-    "test:daily-checklist-entitlements": "node tests/daily-checklist-entitlements.mjs"
-    ,"test:export-attachment-acl": "node tests/export-attachment-acl.mjs"
+    "test:daily-checklist-entitlements": "node tests/daily-checklist-entitlements.mjs",
+    "test:export-attachment-acl": "node tests/export-attachment-acl.mjs",
+    "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
+    "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
+    "test:riddor-audit-history": "bash tests/run-riddor-audit-history.sh",
+    "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",

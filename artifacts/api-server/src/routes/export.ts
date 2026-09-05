@@ -64,6 +64,59 @@ export function isExportAttachmentAuthorized(
   return acl?.visibility === "private" && acl.owner === String(clientId);
 }
 
+type ExportAttachmentRow = {
+  module: string;
+  record_id: string;
+  label: string | null;
+  file_name: string | null;
+  file_size: number | string | null;
+  object_path: string;
+};
+
+type AttachmentManifestRow = {
+  module: string;
+  recordId: string;
+  objectPath: string;
+  zipPath: string;
+  status: "included" | "omitted";
+  reason: string;
+};
+
+/** Gives every archive member a deterministic, safe name without overwriting a
+ * different attachment that happened to have the same display name. */
+export function getAttachmentZipPath(
+  row: Pick<ExportAttachmentRow, "module" | "record_id" | "label" | "file_name">,
+  usedNames: Set<string>,
+): string {
+  const base = (row.label || `${row.module}-${row.record_id}`)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+/, "").slice(0, 180).trim()
+    || `attachment-${row.record_id}`;
+  const ext = (row.file_name ? path.extname(path.basename(row.file_name)) : "")
+    .replace(/[^a-zA-Z0-9.]/g, "").slice(0, 20);
+  let filename = base.endsWith(ext) && ext ? base : `${base}${ext}`;
+  let n = 2;
+  while (usedNames.has(`${row.module}/${filename}`)) filename = `${base} (${n++})${ext}`;
+  usedNames.add(`${row.module}/${filename}`);
+  return `attachments/${row.module}/${filename}`;
+}
+
+/** Kept separate so omissions have stable, supportable manifest wording. */
+export function getAttachmentOmissionReason(error: unknown): string {
+  return error instanceof ObjectNotFoundError
+    ? "object unavailable"
+    : "object storage unavailable";
+}
+
+export function fitsAttachmentExportCap(bytes: unknown, usedBytes: number, maxBytes: number): boolean {
+  const size = Number(bytes);
+  return Number.isFinite(size) && size >= 0 && usedBytes + size <= maxBytes;
+}
+
+function manifestToCsv(rows: AttachmentManifestRow[]): string {
+  const headers = ["module", "recordId", "objectPath", "zipPath", "status", "reason"];
+  return `${headers.join(",")}\n${rows.map((row) => headers.map((h) => escapeCell(row[h as keyof AttachmentManifestRow])).join(",")).join("\n")}${rows.length ? "\n" : ""}`;
+}
+
 function escapeCell(v: unknown): string {
   if (v === null || v === undefined) return "";
   const s = typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -280,69 +333,41 @@ router.get(
       // client-scoped; paths are accepted only through ObjectStorageService,
       // which rejects anything outside /objects/ and the configured bucket.
       // Keep this after the DocTrack CSVs to preserve the historical export.
-      const attachmentRows = await db.execute(sql`
-        SELECT 'doc-track' AS module, id::text AS record_id, title AS label,
-               file_name, file_size::bigint AS file_size, object_path
-          FROM doc_track_documents
-         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'safe-track/risk-assessments', id::text, title, file_name,
-               file_size::bigint, object_path
-          FROM safe_risk_assessments
-         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'safe-track/sops', id::text, title, file_name, file_size::bigint, object_path
-          FROM safe_sops WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'safe-track/handbook', id::text, title, file_name, file_size::bigint, object_path
-          FROM safe_handbook WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'site-documents', id::text, name, name, NULL::bigint, object_path
-          FROM site_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'contractors/certificates', id::text, certificate_name, certificate_name,
-               NULL::bigint, object_path
-          FROM contractor_certificates
-         WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'check-photos', id::text, COALESCE(caption, entity_type || '-' || entity_id::text),
-               NULL, NULL::bigint, object_path
-          FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''
-        UNION ALL
-        SELECT 'fix-track/completion-documents', id::text, title, NULL, NULL::bigint,
-               completion_document_path
-          FROM fix_track_issues
-         WHERE client_id = ${cid} AND completion_document_path IS NOT NULL
-           AND completion_document_path != ''
-      `).catch(() => ({ rows: [] }));
+       // Do not use a single UNION here. Some installations acquired optional
+       // attachment tables over time; one absent legacy table must not suppress
+       // every other document in a cancellation export.
+       const attachmentSources = await Promise.all([
+         db.execute(sql`SELECT 'doc-track' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM doc_track_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'safe-track/risk-assessments' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_risk_assessments WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'safe-track/sops' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_sops WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'safe-track/handbook' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_handbook WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'site-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM site_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'contractors/certificates' AS module, id::text AS record_id, certificate_name AS label, certificate_name AS file_name, NULL::bigint AS file_size, object_path FROM contractor_certificates WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         // The primary certificates table uses file_url and is linked through
+         // contractors/items rather than carrying client_id itself.
+         db.execute(sql`SELECT 'contractors/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN contractors c ON c.id = cert.contractor_id WHERE c.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT CASE WHEN entity_type LIKE 'green%' THEN 'green-track/photos' WHEN entity_type LIKE 'swim%' THEN 'swim-track/photos' ELSE 'check-photos' END AS module, id::text AS record_id, COALESCE(caption, entity_type || '-' || entity_id::text) AS label, NULL::text AS file_name, NULL::bigint AS file_size, object_path FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'fix-track/media' AS module, fi.id::text || '-' || media.ordinality::text AS record_id, fi.title AS label, NULL::text AS file_name, NULL::bigint AS file_size, media.object_path FROM fix_track_issues fi CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(fi.media_urls, '[]'::jsonb)) WITH ORDINALITY AS media(object_path, ordinality) WHERE fi.client_id = ${cid} AND media.object_path LIKE '/objects/%'`).catch(() => ({ rows: [] })),
+         db.execute(sql`SELECT 'fix-track/completion-documents' AS module, id::text AS record_id, title AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${cid} AND completion_document_path IS NOT NULL AND completion_document_path != ''`).catch(() => ({ rows: [] })),
+       ]);
+       const attachmentRows = attachmentSources.flatMap((source) => source.rows) as ExportAttachmentRow[];
 
       const MAX_ATTACHMENT_BYTES = 500 * 1024 * 1024;
       let attachmentBytesUsed = 0;
       const storage = new ObjectStorageService();
       const usedNames = new Set<string>();
       const seenObjectPaths = new Set<string>();
-      const manifest: Array<Record<string, unknown>> = [];
-      for (const row of attachmentRows.rows as Array<{
-        module: string; record_id: string; label: string | null; file_name: string | null;
-        file_size: number | string | null; object_path: string;
-      }>) {
+       const manifest: AttachmentManifestRow[] = [];
+       for (const row of attachmentRows) {
         const size = Number(row.file_size ?? 0);
-        const base = (row.label || `${row.module}-${row.record_id}`)
-          .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/^\.+/, "").slice(0, 180).trim()
-          || `attachment-${row.record_id}`;
-        const ext = (row.file_name ? path.extname(path.basename(row.file_name)) : "").replace(/[^a-zA-Z0-9.]/g, "").slice(0, 20);
-        let filename = `${base}${ext}`;
-        let n = 2;
-        while (usedNames.has(`${row.module}/${filename}`)) filename = `${base} (${n++})${ext}`;
-        const zipPath = `attachments/${row.module}/${filename}`;
-        usedNames.add(`${row.module}/${filename}`);
+        const zipPath = getAttachmentZipPath(row, usedNames);
 
         if (seenObjectPaths.has(row.object_path)) {
           manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "duplicate object path" });
           continue;
         }
         seenObjectPaths.add(row.object_path);
-        if (!Number.isFinite(size) || size < 0 || attachmentBytesUsed + size > MAX_ATTACHMENT_BYTES) {
+        if (!fitsAttachmentExportCap(size, attachmentBytesUsed, MAX_ATTACHMENT_BYTES)) {
           manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "500 MB export cap" });
           continue;
         }
@@ -351,21 +376,37 @@ router.get(
           // Object paths are opaque and a compromised/incorrect record must
           // never turn an export into a cross-tenant download. Every private
           // upload route stamps the owning client ID in this ACL metadata.
-          const acl = await getObjectAclPolicy(file);
+          let acl = await getObjectAclPolicy(file);
+          // A legacy row is already tenant-scoped by the source query above,
+          // unlike a request body. It is therefore safe to backfill only an
+          // unowned private object; the storage helper refuses foreign/public
+          // ACLs and never overwrites another owner's claim.
+          if (!acl) {
+            await storage.backfillTenantObjectAcl(row.object_path, cid);
+            acl = await getObjectAclPolicy(file);
+          }
           if (!isExportAttachmentAuthorized(acl, cid)) {
             manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "not authorized for exporting client" });
             continue;
           }
+          // Some legacy records have no stored file_size. Use object metadata
+          // before adding their stream so those records cannot bypass the cap.
+          const [metadata] = await file.getMetadata();
+          const actualSize = Number(metadata.size ?? size);
+          if (!fitsAttachmentExportCap(actualSize, attachmentBytesUsed, MAX_ATTACHMENT_BYTES)) {
+            manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason: "500 MB export cap" });
+            continue;
+          }
           archive.append(file.createReadStream(), { name: zipPath });
-          attachmentBytesUsed += size;
+          attachmentBytesUsed += actualSize;
           manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "included", reason: "" });
         } catch (err) {
-          const reason = err instanceof ObjectNotFoundError ? "object unavailable" : "object storage unavailable";
+          const reason = getAttachmentOmissionReason(err);
           manifest.push({ module: row.module, recordId: row.record_id, objectPath: row.object_path, zipPath, status: "omitted", reason });
           console.warn(`Export attachment omitted: ${row.module}/${row.record_id}`, err);
         }
       }
-      archive.append(rowsToCsv(manifest), { name: "attachment-manifest.csv" });
+      archive.append(manifestToCsv(manifest), { name: "attachment-manifest.csv" });
 
       // ── TrainTrack ────────────────────────────────────────────────────────
       const ttRows = await db.execute(sql`SELECT * FROM train_track_records WHERE client_id = ${cid} ORDER BY completed_date DESC`);

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { appendFile } from "node:fs/promises";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendEmail, escapeHtml } from "./email";
@@ -54,6 +55,25 @@ const PRIORITY_LABEL: Record<string, string> = {
   medium: "🟡 Medium",
   low:    "🟢 Low",
 };
+
+/**
+ * The normal production boundary is sendEmail. The narrowly scoped test
+ * outbox lets the self-booting route suite exercise a real dispatch without
+ * credentials or an external provider; it is unreachable outside NODE_ENV=test.
+ */
+async function dispatchContractorEmail(opts: Parameters<typeof sendEmail>[0]): Promise<void> {
+  const outbox = process.env.NODE_ENV === "test" ? process.env.FIXTRACK_TEST_EMAIL_OUTBOX : undefined;
+  if (outbox) {
+    await appendFile(outbox, `${JSON.stringify({
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      idempotencyKey: opts.idempotencyKey,
+    })}\n`);
+    return;
+  }
+  await sendEmail(opts);
+}
 
 export interface ContractorAssignmentOpts {
   contractorName:   string;
@@ -159,7 +179,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
 </div>`;
 
   const priorityPrefix = issuePriority === "urgent" ? "[URGENT] " : "";
-  await sendEmail({
+  await dispatchContractorEmail({
     to:      contractorEmail,
     subject: `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
     html,
@@ -247,7 +267,7 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   </p>
 </div>`;
 
-  await sendEmail({
+  await dispatchContractorEmail({
     to:      contractorEmail,
     subject: `Quote Requested: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
     html,

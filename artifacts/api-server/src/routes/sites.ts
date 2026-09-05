@@ -13,7 +13,7 @@ import {
 import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const storage = new ObjectStorageService();
 
@@ -198,12 +198,8 @@ router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdm
   if (!site) return res.status(404).json({ error: "Site not found" });
 
   try {
-    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
-    await storage.trySetObjectEntityAclPolicy(uploadUrl, {
-      owner: String(clientId),
-      visibility: "private",
-    });
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {
     res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
@@ -223,6 +219,13 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
   const name = String(req.body?.name ?? "").trim().slice(0, 300);
   const objectPath = String(req.body?.objectPath ?? "").trim();
   if (!name || !objectPath) return res.status(400).json({ error: "name and objectPath are required" });
+  try {
+    await storage.finalizeTenantUpload(objectPath, clientId);
+  } catch (err) {
+    const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+      : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
+    return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+  }
 
   const userId: number | null = (req.session as any)?.userId ?? null;
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -24,12 +24,8 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   }).parse(req.body);
 
   try {
-    const uploadUrl = await storage.getObjectEntityUploadURL();
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
-    await storage.trySetObjectEntityAclPolicy(uploadUrl, {
-      owner: String(clientId),
-      visibility: "private",
-    });
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {
     res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
@@ -48,6 +44,13 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     objectPath: z.string().min(1).max(500),
     caption: z.string().max(500).optional(),
   }).parse(req.body);
+  try {
+    await storage.finalizeTenantUpload(body.objectPath, clientId);
+  } catch (err) {
+    const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+      : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
+    return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+  }
 
   const result = await db.execute(sql`
     INSERT INTO check_photos (client_id, entity_type, entity_id, object_path, caption, created_by)

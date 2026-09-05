@@ -9,6 +9,7 @@ import {
   getServicePrice,
   quantityForSiteCount,
   findLiveSubscription,
+  collectAddonFirstMonthInvoice,
 } from "../lib/billing";
 import { invalidateTrialLock, isClientBillingLocked } from "../lib/trialLock";
 import {
@@ -444,39 +445,24 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
       const label = SERVICES[service as ServiceKey].label;
       const description = `${label} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
       try {
-        // Charge the current month up front. If the invoice can't even be
-        // created/finalized, the item add is rolled back below so the service
-        // is never silently enabled without its first month's charge.
-        const invoice = await stripe.invoices.create(
-          {
-            customer: client.stripeCustomerId,
-            auto_advance: true,
-            pending_invoice_items_behavior: "exclude",
-            description,
-            automatic_tax: { enabled: true },
-            metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
-          },
-          { idempotencyKey: `svc-add-inv-${sub.id}-${service}-${periodStart}` },
-        );
-        await stripe.invoiceItems.create(
-          {
-            customer: client.stripeCustomerId,
-            invoice: invoice.id!,
-            amount,
-            currency: price.currency,
-            description,
-          },
-          { idempotencyKey: `svc-add-item-${sub.id}-${service}-${periodStart}` },
-        );
-        const finalized = await stripe.invoices.finalizeInvoice(invoice.id!);
-        if (finalized.status === "open") {
-          await stripe.invoices
-            .pay(invoice.id!, undefined, { idempotencyKey: `svc-add-pay-${sub.id}-${service}-${periodStart}` })
-            .catch((err) => {
-              // Card declined etc. — auto_advance retries; access stays on.
-              res.locals.paymentPending = true;
-              req.log?.warn?.({ err, clientId, service }, "Add-on invoice payment failed; Stripe will retry");
-            });
+        const payment = await collectAddonFirstMonthInvoice(stripe, {
+          customerId: client.stripeCustomerId,
+          amount,
+          currency: price.currency,
+          description,
+          metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
+          idempotencyPrefix: `svc-add-${sub.id}-${service}-${periodStart}`,
+        });
+        if (payment === "not_collected") {
+          throw new Error("Add-on invoice was not collected");
+        }
+        if (payment === "unknown") {
+          // Do not compensate by removing the item: Stripe may have accepted
+          // payment and only its response/retrieval may have failed.
+          invalidateEntitlements(clientId);
+          return res.status(502).json({
+            error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
+          });
         }
       } catch (err: any) {
         // Roll back the item add: enabling a service without collecting its
@@ -499,7 +485,7 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 
     invalidateEntitlements(clientId);
     const entitled = await getEntitledServices(clientId);
-    res.json({ ok: true, entitled, paymentPending: !!res.locals.paymentPending });
+    res.json({ ok: true, entitled });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
@@ -27,6 +27,76 @@ const riskAcknowledgementsSchema = z.object({
   departmentId: z.coerce.number().int().positive().optional(),
 });
 
+type ReportScope = {
+  siteId?: number;
+  departmentId?: number;
+  departmentName: string | null;
+};
+
+/**
+ * Reports accept ids from the URL, so resolve them against the authenticated
+ * tenant before using them in any query.  A department-scoped user's
+ * department remains authoritative, and a selected site must belong to the
+ * resulting department rather than merely be a valid site in the tenant.
+ */
+async function resolveReportScope(
+  req: Request,
+  res: Response,
+  clientId: number,
+  requestedSiteId: number | undefined,
+  requestedDepartmentId: number | undefined,
+): Promise<ReportScope | null> {
+  const activeDepartmentId = getActiveDepartmentId(req);
+  if (
+    activeDepartmentId !== null
+    && requestedDepartmentId !== undefined
+    && requestedDepartmentId !== activeDepartmentId
+  ) {
+    res.status(403).json({ error: "Department scope cannot be changed" });
+    return null;
+  }
+
+  const departmentId = activeDepartmentId ?? requestedDepartmentId;
+  let departmentName: string | null = null;
+  // -1 is the deliberate no-department sentinel returned for an unassigned
+  // staff/viewer account. It is not a department row, but must still produce
+  // an empty staff scope rather than widening the report to the whole tenant.
+  if (departmentId === -1) {
+    departmentName = "__unassigned_department_scope__";
+  } else if (departmentId !== undefined) {
+    const departmentResult = await db.execute(sql`
+      SELECT name FROM departments
+      WHERE id = ${departmentId} AND client_id = ${clientId}
+      LIMIT 1
+    `);
+    const department = (departmentResult.rows ?? [])[0] as { name: string } | undefined;
+    if (!department) {
+      res.status(400).json({ error: "Department not found" });
+      return null;
+    }
+    departmentName = department.name;
+  }
+
+  if (requestedSiteId !== undefined) {
+    const siteResult = await db.execute(sql`
+      SELECT department_id FROM sites
+      WHERE id = ${requestedSiteId} AND client_id = ${clientId}
+      LIMIT 1
+    `);
+    const site = (siteResult.rows ?? [])[0] as { department_id: number | null } | undefined;
+    if (!site) {
+      res.status(400).json({ error: "Site not found" });
+      return null;
+    }
+    if (departmentId !== undefined && Number(site.department_id) !== departmentId) {
+      res.status(403).json({ error: "Site is outside the selected department scope" });
+      return null;
+    }
+  }
+
+  return { siteId: requestedSiteId, departmentId, departmentName };
+}
+
 // ─── GET /reports/risk-acknowledgements ──────────────────────────────────────
 
 router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
@@ -40,49 +110,9 @@ router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
     return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
   }
 
-  const { siteId, departmentId } = parsed.data;
-  const activeDepartmentId = getActiveDepartmentId(req);
-  if (
-    activeDepartmentId !== null
-    && departmentId !== undefined
-    && departmentId !== activeDepartmentId
-  ) {
-    return res.status(403).json({ error: "Department scope cannot be changed" });
-  }
-
-  // A scoped caller's department is always authoritative, whether or not it was
-  // supplied in the query string.
-  const effectiveDepartmentId = activeDepartmentId ?? departmentId;
-  let departmentName: string | null = null;
-  if (effectiveDepartmentId !== undefined && effectiveDepartmentId !== null) {
-    const departmentResult = await db.execute(sql`
-      SELECT name
-      FROM departments
-      WHERE id = ${effectiveDepartmentId} AND client_id = ${clientId}
-      LIMIT 1
-    `);
-    const department = (departmentResult.rows ?? [])[0] as { name: string } | undefined;
-    if (!department) return res.status(400).json({ error: "Department not found" });
-    departmentName = department.name;
-  }
-
-  if (siteId !== undefined) {
-    const siteResult = await db.execute(sql`
-      SELECT department_id
-      FROM sites
-      WHERE id = ${siteId} AND client_id = ${clientId}
-      LIMIT 1
-    `);
-    const site = (siteResult.rows ?? [])[0] as { department_id: number | null } | undefined;
-    if (!site) return res.status(400).json({ error: "Site not found" });
-    if (
-      activeDepartmentId !== null
-      && site.department_id !== null
-      && Number(site.department_id) !== activeDepartmentId
-    ) {
-      return res.status(403).json({ error: "Site is outside your department scope" });
-    }
-  }
+  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
+  if (!scope) return;
+  const { siteId, departmentId: effectiveDepartmentId, departmentName } = scope;
 
   const staffWhere = sql`
     sr.client_id = ${clientId}
@@ -97,14 +127,14 @@ router.get("/reports/risk-acknowledgements", requireAuth, async (req, res) => {
     AND d.requires_acknowledgement = true
     ${siteId !== undefined ? sql`AND (d.site_id IS NULL OR d.site_id = ${siteId})` : sql``}
     ${departmentName !== null ? sql`AND (d.department IS NULL OR d.department = ${departmentName})` : sql``}
-    ${activeDepartmentId !== null ? sql`
+    ${effectiveDepartmentId !== undefined ? sql`
       AND (
         d.site_id IS NULL
         OR EXISTS (
           SELECT 1 FROM sites scoped_site
           WHERE scoped_site.id = d.site_id
             AND scoped_site.client_id = ${clientId}
-            AND (scoped_site.department_id IS NULL OR scoped_site.department_id = ${activeDepartmentId})
+            AND scoped_site.department_id = ${effectiveDepartmentId}
         )
       )
     ` : sql``}
@@ -264,12 +294,16 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
   const parsed = complianceSchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
 
-  const { from, to, siteId, departmentId } = parsed.data;
+  const { from, to } = parsed.data;
 
   if (from > to) return res.status(400).json({ error: "'from' must not be after 'to'" });
 
   const totalDays = Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1;
   if (totalDays > 366) return res.status(400).json({ error: "Date range cannot exceed 366 days" });
+
+  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
+  if (!scope) return;
+  const { siteId, departmentId } = scope;
 
   // Build WHERE fragments for site-scoped queries
   const siteWhereClause =
@@ -411,7 +445,7 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
   const parsed = trendSchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid params" });
 
-  const { months, siteId, departmentId } = parsed.data;
+  const { months } = parsed.data;
 
   // Compute the from/to range: from = first day of (months) months ago, to = yesterday
   const now   = new Date();
@@ -421,6 +455,10 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
 
   const from = fromDate.toISOString().slice(0, 10);
   const to   = toDate.toISOString().slice(0, 10);
+
+  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
+  if (!scope) return;
+  const { siteId, departmentId } = scope;
 
   const siteFilter = siteId && departmentId
     ? sql`AND dc.site_id = ${siteId} AND dc.site_id IN (SELECT id FROM sites WHERE department_id = ${departmentId})`

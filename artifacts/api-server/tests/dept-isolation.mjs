@@ -226,6 +226,30 @@ async function main() {
     "staff: GET /sites/:id (other dept)",
     (await staff("GET", `/sites/${siteBetaId}`)).status,
   );
+  // The three Reports tabs must retain the active department and reject both
+  // a department override and a site outside that department.
+  const reportFrom = uniqueDate(2);
+  const reportTo = uniqueDate();
+  const staffCompliance = await staff(
+    "GET",
+    `/reports/compliance?from=${reportFrom}&to=${reportTo}`,
+  );
+  expectOk("staff: GET /reports/compliance (active department)", staffCompliance.status);
+  check(
+    "staff: compliance report excludes beta site",
+    !(staffCompliance.data?.sites ?? []).some((site) => site.id === siteBetaId),
+    "beta site appeared in active-department report",
+  );
+  for (const [label, path] of [
+    ["compliance department override", `/reports/compliance?from=${reportFrom}&to=${reportTo}&departmentId=${deptBetaId}`],
+    ["compliance foreign-department site", `/reports/compliance?from=${reportFrom}&to=${reportTo}&siteId=${siteBetaId}`],
+    ["trend department override", `/reports/compliance-trend?months=3&departmentId=${deptBetaId}`],
+    ["trend foreign-department site", `/reports/compliance-trend?months=3&siteId=${siteBetaId}`],
+    ["risk department override", `/reports/risk-acknowledgements?departmentId=${deptBetaId}`],
+    ["risk foreign-department site", `/reports/risk-acknowledgements?siteId=${siteBetaId}`],
+  ]) {
+    expectForbidden(`staff: report ${label}`, (await staff("GET", path)).status);
+  }
 
   // PATCH — beta site must be blocked.
   expectBlocked(

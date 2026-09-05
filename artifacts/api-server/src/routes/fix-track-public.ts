@@ -5,7 +5,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -279,6 +279,15 @@ router.post("/:token", async (req, res) => {
   const notes                = typeof req.body?.notes === "string"                ? req.body.notes.slice(0, 5000) : null;
   const completionObjectPath = typeof req.body?.completionObjectPath === "string" ? req.body.completionObjectPath : null;
   const today                = new Date().toISOString().slice(0, 10);
+  if (completionObjectPath) {
+    try {
+      await storage.finalizeTenantUpload(completionObjectPath, t.client_id);
+    } catch (err) {
+      const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+        : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
+      return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+    }
+  }
 
   let outcome: "updated" | "used" | "invalid" = "used";
   try {
@@ -337,9 +346,8 @@ router.post("/:token/upload-url", async (req, res) => {
   if (new Date(t.expires_at) < new Date()) return res.status(410).json({ error: "Link expired" });
 
   try {
-    const uploadUrl  = await storage.getObjectEntityUploadURL();
+    const uploadUrl  = await storage.getObjectEntityUploadURL(t.client_id);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
-    await storage.trySetObjectEntityAclPolicy(uploadUrl, { owner: String(t.client_id), visibility: "private" });
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {
     res.status(500).json({ error: "Could not generate upload URL" });

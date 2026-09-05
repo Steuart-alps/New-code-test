@@ -28,6 +28,108 @@ export interface PerSitePrice {
   interval: string | null;
 }
 
+export type AddonPaymentResult = "paid" | "not_collected" | "unknown";
+
+/**
+ * Collect an add-on's first month on a dedicated invoice.
+ *
+ * `auto_advance` deliberately remains off.  In particular, do not let Stripe
+ * collect this invoice in the background while the caller is compensating for
+ * a failed activation.  The item may only be removed after a
+ * `not_collected` result, which means this helper successfully voided the
+ * dedicated invoice.
+ *
+ * The caller supplies a stable idempotency prefix (subscription + service +
+ * period).  Retrying after a timeout therefore resumes the same invoice/item/
+ * payment rather than charging a second first month.
+ */
+export async function collectAddonFirstMonthInvoice(
+  stripe: any,
+  input: {
+    customerId: string;
+    amount: number;
+    currency: string;
+    description: string;
+    metadata: Record<string, string>;
+    idempotencyPrefix: string;
+  },
+): Promise<AddonPaymentResult> {
+  const invoice = await stripe.invoices.create(
+    {
+      customer: input.customerId,
+      // Collection is explicitly driven below.  This prevents an automatic
+      // retry from charging an invoice after a failed activation was rolled
+      // back.
+      auto_advance: false,
+      pending_invoice_items_behavior: "exclude",
+      description: input.description,
+      automatic_tax: { enabled: true },
+      metadata: input.metadata,
+    },
+    { idempotencyKey: `${input.idempotencyPrefix}-inv` },
+  );
+  if (!invoice.id) throw new Error("Stripe returned invoice without id");
+
+  await stripe.invoiceItems.create(
+    {
+      customer: input.customerId,
+      invoice: invoice.id,
+      amount: input.amount,
+      currency: input.currency,
+      description: input.description,
+    },
+    { idempotencyKey: `${input.idempotencyPrefix}-item` },
+  );
+
+  let finalized: any;
+  try {
+    finalized = await stripe.invoices.finalizeInvoice(invoice.id);
+  } catch (err) {
+    // A response may have been lost after Stripe finalized the invoice.  Never
+    // remove an entitlement until we have established that it was not paid.
+    try {
+      const latest = await stripe.invoices.retrieve(invoice.id);
+      if (latest.status === "paid") return "paid";
+      if (latest.status === "draft" || latest.status === "open") {
+        await stripe.invoices.voidInvoice(invoice.id);
+        return "not_collected";
+      }
+    } catch {
+      return "unknown";
+    }
+    throw err;
+  }
+
+  if (finalized.status === "paid") return "paid";
+  if (finalized.status !== "open") {
+    await stripe.invoices.voidInvoice(invoice.id);
+    return "not_collected";
+  }
+
+  try {
+    const paid = await stripe.invoices.pay(
+      invoice.id,
+      undefined,
+      { idempotencyKey: `${input.idempotencyPrefix}-pay` },
+    );
+    if (paid.status === "paid") return "paid";
+  } catch {
+    // Stripe can process a payment while its response is lost.  Look up the
+    // invoice before deciding whether the subscription item can be removed.
+  }
+
+  try {
+    const latest = await stripe.invoices.retrieve(invoice.id);
+    if (latest.status === "paid") return "paid";
+    await stripe.invoices.voidInvoice(invoice.id);
+    return "not_collected";
+  } catch {
+    // The payment outcome is indeterminate.  Preserve the entitlement rather
+    // than risk leaving a client charged for an inaccessible add-on.
+    return "unknown";
+  }
+}
+
 /**
  * Resolve the active per-site monthly price from the Stripe-synced tables.
  * After the per-site migration there is a single active recurring product, so we

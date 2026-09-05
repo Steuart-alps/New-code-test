@@ -1,50 +1,25 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { 
-  LayoutDashboard, 
-  Tags, 
   ShieldCheck,
   Bell,
-  Briefcase,
-  Building,
-  Building2,
-  Settings,
-  Users,
   LogOut,
   ChevronDown,
   ArrowLeft,
   ArrowLeftRight,
-  AlertOctagon,
   Smartphone,
-  Flame,
-  UtensilsCrossed,
-  Droplets,
-  Waves,
-  TreePine,
   Lock,
-  ClipboardList,
-  Sunrise,
-  Sunset,
-  LayoutGrid,
-  Wrench,
-  FolderOpen,
-  BookOpen,
-  Bike,
-  Waves as WavesIcon,
-  Tractor,
-  Anchor,
-  Zap,
-  Bug,
-  BarChart2,
-  FileCheck2,
-  BedDouble,
+  Menu,
+  ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth, useIsConsultant, useCanAdmin } from "@/context/auth-context";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader, SheetDescription } from "@/components/ui/sheet";
 import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 
@@ -72,66 +47,79 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/incidents", moduleKey: "incident" },
 ];
 
-function useNavGroups() {
+import { getNavGroups, NavGroup, NavItem } from "@/lib/nav-groups";
+
+function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
+  return getNavGroups({ isConsultant, canAdmin });
+}
 
-  const groups: { title: string; items: { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }[] }[] = [
-    {
-      title: "COMPLYTRACK",
-      items: [
-        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/reports",   label: "Reports",   icon: BarChart2 },
-        { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
-        { href: "/external", label: "Compliance Checks", icon: Briefcase },
-        { href: "/contractors", label: "Contractors", icon: Building },
-        { href: "/categories", label: "Categories", icon: Tags },
-      ],
-    },
-    {
-      title: "MODULES",
-      items: [
-        { href: "/fire-safety",    label: "FireTrack",       icon: Flame,           serviceKey: "firetrack" },
-        { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
-        { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
-        { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
-        { href: "/fix-track",      label: "FixTrack",        icon: Wrench,          serviceKey: "fixtrack" },
-        { href: "/premises-track", label: "PremisesTrack",   icon: Building2,       serviceKey: "premisestrack" },
-        { href: "/room-track",     label: "RoomTrack",       icon: BedDouble,       serviceKey: "roomtrack" },
-        { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
-        { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
-        { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },
-        { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
-        { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
-        { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
-        { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
-        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack", comingSoon: true },
-        { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
-        { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
-        { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKeys: ["dailytrack_am", "kitchentrack", "premisestrack"] },
-        { href: "/daily-track-pm", label: "DailyTrack PM",   icon: Sunset,          serviceKeys: ["dailytrack_pm", "kitchentrack", "premisestrack"] },
-      ],
-    },
-  ];
+function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string }) {
+  const [isOpen, setIsOpen] = useState(group.defaultOpen);
 
-  const systemItems: { href: string; label: string; icon: any; serviceKey?: string }[] = [];
-  if (canAdmin) {
-    systemItems.push({ href: "/sites", label: "Sites", icon: Building2 });
-    systemItems.push({ href: "/users", label: "Users", icon: Users });
-    systemItems.push({ href: "/staff-roster", label: "Staff Roster", icon: ClipboardList });
-  }
-  if (isConsultant) {
-    systemItems.push({ href: "/clients", label: "Clients", icon: Building2 });
-  }
-  if (canAdmin) {
-    systemItems.push({ href: "/settings", label: "Settings", icon: Settings });
-  }
-
-  if (systemItems.length > 0) {
-    groups.push({ title: "SYSTEM", items: systemItems });
-  }
-
-  return groups;
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="space-y-1">
+      <CollapsibleTrigger className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest hover:text-sidebar-foreground/60 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm">
+        <span>{group.title}</span>
+        <ChevronRight className={cn("w-3 h-3 transition-transform duration-200", isOpen && "rotate-90")} />
+      </CollapsibleTrigger>
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <CollapsibleContent forceMount asChild>
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
+              className="space-y-1 overflow-hidden"
+            >
+              {group.items.map((item) => {
+                const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
+                const isLocked = item.serviceKeys
+                  ? !item.serviceKeys.some(hasService)
+                  : item.serviceKey ? !hasService(item.serviceKey) : false;
+                const isComingSoon = item.comingSoon === true;
+                const inner = (
+                  <div className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
+                    isActive
+                      ? "text-sidebar-foreground"
+                      : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+                    (isLocked || isComingSoon) && "opacity-70"
+                  )}
+                  >
+                    {isActive && !isComingSoon && (
+                      <motion.div
+                        layoutId={`${layoutIdPrefix}-active`}
+                        className="absolute inset-0 rounded-sm z-0"
+                        style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
+                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                      />
+                    )}
+                    <item.icon className={cn("w-4 h-4 z-10 relative", isActive && !isComingSoon ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive && !isComingSoon ? { color: primaryColor } : {}} />
+                    <span className="z-10 relative text-sm tracking-wide flex-1 text-left">{item.label}</span>
+                    {isComingSoon ? (
+                      <span className="z-10 relative text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sidebar-foreground/10 text-sidebar-foreground/50 tracking-wide">
+                        Soon
+                      </span>
+                    ) : isLocked ? (
+                      <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
+                    ) : null}
+                  </div>
+                );
+                return isComingSoon ? (
+                  <div key={item.href} className="cursor-default">{inner}</div>
+                ) : (
+                  <Link key={item.href} href={item.href} onClick={onNavigate} className="block focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm">{inner}</Link>
+                );
+              })}
+            </motion.div>
+          </CollapsibleContent>
+        )}
+      </AnimatePresence>
+    </Collapsible>
+  );
 }
 
 export function AppLayout({ children, title }: { children: ReactNode; title: string }) {
@@ -140,6 +128,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
   const [showAppDialog, setShowAppDialog] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const moduleActionKey = moduleActionRoutes.find(route => location.startsWith(route.prefix))?.moduleKey;
 
   const primaryColor = client?.primaryColor ?? "#7FA8C9";
@@ -165,57 +154,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </Link>
         </div>
         
-        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
           {navGroups.map((group) => (
-            <div key={group.title} className="space-y-2">
-              {group.title && (
-                <div className="text-xs font-medium text-sidebar-foreground/40 uppercase tracking-widest px-3">
-                  {group.title}
-                </div>
-              )}
-              <div className="space-y-1">
-                {group.items.map((item) => {
-                  const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
-                   const isLocked = item.serviceKeys
-                     ? !item.serviceKeys.some(hasService)
-                     : item.serviceKey ? !hasService(item.serviceKey) : false;
-                  const isComingSoon = (item as any).comingSoon === true;
-                  const inner = (
-                    <div className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-sm font-medium transition-all duration-200 group relative",
-                      isActive 
-                        ? "text-sidebar-foreground" 
-                        : "text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent",
-                      (isLocked || isComingSoon) && "opacity-70"
-                    )}
-                    >
-                      {isActive && !isComingSoon && (
-                        <motion.div 
-                          layoutId="sidebar-active" 
-                          className="absolute inset-0 rounded-sm z-0"
-                          style={{ backgroundColor: `${primaryColor}20`, borderLeft: `3px solid ${primaryColor}` }}
-                          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                        />
-                      )}
-                      <item.icon className={cn("w-4 h-4 z-10 relative", isActive && !isComingSoon ? "text-sidebar-foreground" : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70")} style={isActive && !isComingSoon ? { color: primaryColor } : {}} />
-                      <span className="z-10 relative text-sm tracking-wide flex-1">{item.label}</span>
-                      {isComingSoon ? (
-                        <span className="z-10 relative text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sidebar-foreground/10 text-sidebar-foreground/50 tracking-wide">
-                          Soon
-                        </span>
-                      ) : isLocked ? (
-                        <Lock className="w-3.5 h-3.5 z-10 relative text-sidebar-foreground/40" />
-                      ) : null}
-                    </div>
-                  );
-                  return isComingSoon ? (
-                    <div key={item.href} className="cursor-default">{inner}</div>
-                  ) : (
-                    <Link key={item.href} href={item.href} className="block">{inner}</Link>
-                  );
-                })}
-              </div>
-            </div>
+            <NavSidebarGroup
+              key={group.id}
+              group={group}
+              location={location}
+              hasService={hasService}
+              primaryColor={primaryColor}
+              layoutIdPrefix="desktop"
+            />
           ))}
         </nav>
 
@@ -323,6 +271,46 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         {/* Top Header */}
         <header className="h-[80px] bg-white/80 backdrop-blur-md border-b border-border flex items-center justify-between px-6 lg:px-8 z-10 sticky top-0">
           <div className="flex items-center gap-3">
+            <div className="md:hidden flex items-center">
+              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <button className="p-1.5 -ml-2 mr-1 rounded-sm hover:bg-muted border border-transparent hover:border-border transition-all text-[#162D42]">
+                    <Menu className="w-5 h-5" />
+                  </button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-[280px] p-0 flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+                  <SheetHeader className="sr-only">
+                    <SheetTitle>Navigation Menu</SheetTitle>
+                    <SheetDescription>Main navigation menu for ComplyTrack.</SheetDescription>
+                  </SheetHeader>
+                  <div className="min-h-[80px] flex items-center px-6 py-4 border-b border-sidebar-border">
+                    <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-3 hover:opacity-80 transition-opacity w-full min-w-0">
+                      {client?.logoUrl ? (
+                        <img src={client.logoUrl} alt={client.name} className="w-8 h-8 object-contain rounded-sm flex-shrink-0" />
+                      ) : (
+                        <ShieldCheck className="w-6 h-6 flex-shrink-0" style={{ color: primaryColor }} />
+                      )}
+                      <span className="font-display font-medium text-lg tracking-wide break-words min-w-0 flex-1">
+                        {client ? client.name : "ComplyTrack"}
+                      </span>
+                    </Link>
+                  </div>
+                  <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
+                    {navGroups.map((group) => (
+                      <NavSidebarGroup
+                        key={group.id}
+                        group={group}
+                        location={location}
+                        hasService={hasService}
+                        primaryColor={primaryColor}
+                        layoutIdPrefix="mobile"
+                        onNavigate={() => setMobileMenuOpen(false)}
+                      />
+                    ))}
+                  </nav>
+                </SheetContent>
+              </Sheet>
+            </div>
             {location !== "/dashboard" && (
               <button
                 onClick={() => window.history.back()}
@@ -332,7 +320,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <h1 className="text-2xl font-display font-medium text-[#162D42]">
+            <h1 className="text-2xl font-display font-medium text-[#162D42] truncate">
               {title}
             </h1>
           </div>
@@ -366,36 +354,6 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             </button>
           </div>
         </header>
-
-        {/* Mobile Nav */}
-        <nav className="md:hidden flex overflow-x-auto border-b border-border bg-white px-4 py-3 scrollbar-hide gap-4">
-          {navGroups.map((group) => (
-            <div key={group.title} className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {group.title}
-              </span>
-              {group.items.map((item) => {
-                const isActive = location === item.href;
-                const isLocked = item.serviceKeys
-                  ? !item.serviceKeys.some(hasService)
-                  : item.serviceKey ? !hasService(item.serviceKey) : false;
-                return (
-                  <Link key={item.href} href={item.href} className="flex-shrink-0">
-                    <div className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium transition-colors border",
-                      isActive ? "text-primary border-primary bg-primary/5" : "bg-white text-muted-foreground border-border hover:bg-muted"
-                    )}
-                    >
-                      <item.icon className="w-4 h-4" />
-                      {item.label}
-                      {isLocked && <Lock className="w-3 h-3 opacity-60 ml-1" />}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
 
         {/* Page Content */}
         <div className="flex-1 overflow-auto p-6 lg:p-8">

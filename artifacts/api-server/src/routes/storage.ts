@@ -27,8 +27,13 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
 
   try {
     const { name, size, contentType } = parsed.data;
+    const clientId = getClientId(req);
+    if (!clientId) {
+      res.status(400).json({ error: "No client context" });
+      return;
+    }
 
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL(clientId);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
     res.json(

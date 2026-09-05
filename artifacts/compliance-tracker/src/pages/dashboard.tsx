@@ -38,21 +38,12 @@ interface TrackSummary {
 
 interface ChecklistTotals {
   date: string;
-  totalSites: number;
-  submittedAll: number;
-  inProgress: number;
-  notStarted: number;
-}
-
-interface DailyChecklistRecord {
-  checklistType: string;
-  siteId?: number | null;
-  submittedAt?: string | null;
-}
-
-interface DailySignoffRecord {
-  siteId?: number | null;
-  submittedAt?: string | null;
+  available: boolean;
+  expectedAmPairs: number;
+  completedAmPairs: number;
+  expectedPmPairs: number;
+  completedPmPairs: number;
+  completedSitePairs: number;
 }
 
 // ── Status styling ─────────────────────────────────────────────────────────────
@@ -96,7 +87,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
     <div
       className={cn(
         "border-l-4 rounded-r-md border border-border/60 transition-colors",
-        track.health === "action_required" ? "border-l-rose-500" : "border-l-emerald-500",
+        STATUS_BORDER[track.status],
         STATUS_BG[track.status],
       )}
     >
@@ -111,7 +102,13 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
 
           <span className={cn(
             "font-medium text-sm flex-1",
-            track.health === "action_required" ? "text-rose-700" : "text-emerald-700",
+            track.health === "action_required"
+              ? "text-rose-700"
+              : track.status === "attention"
+              ? "text-amber-700"
+              : track.status === "no_data"
+              ? "text-muted-foreground"
+              : "text-emerald-700",
           )}>{track.label}</span>
 
           {kitchenOverdueBadge}
@@ -199,8 +196,13 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 
 function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   const enabled = tracks.filter((t) => t.enabled);
+  // These buckets are deliberately ordered so every module is counted once:
+  // an overdue/no-data module is action-needed even when its status is not
+  // "attention", while future due items remain a separate, non-urgent state.
   const actionRequired = enabled.filter((t) => t.health === "action_required").length;
-  const clear = enabled.filter((t) => t.health === "clear").length;
+  const due = enabled.filter((t) => t.health !== "action_required" && t.status === "attention").length;
+  const complete = enabled.filter((t) => t.health !== "action_required" && t.status === "ok").length;
+  const notApplicable = tracks.filter((t) => !t.enabled).length;
 
   if (enabled.length === 0) return null;
 
@@ -212,10 +214,22 @@ function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
           {actionRequired} track{actionRequired > 1 ? "s" : ""} require action
         </span>
       )}
-      {clear > 0 && (
+      {due > 0 && (
+        <span className="flex items-center gap-1.5 text-amber-700">
+          <AlertTriangle className="w-4 h-4" />
+          {due} due soon
+        </span>
+      )}
+      {complete > 0 && (
         <span className="flex items-center gap-1.5 text-emerald-600">
           <CheckCircle2 className="w-4 h-4" />
-          {clear} clear
+          {complete} complete
+        </span>
+      )}
+      {notApplicable > 0 && (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <MinusCircle className="w-4 h-4" />
+          {notApplicable} not applicable
         </span>
       )}
     </div>
@@ -332,7 +346,9 @@ function SetupChecklist({
 
 function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals | null; loading: boolean }) {
   if (!totals && !loading) return null;
-  const allDone = Boolean(totals && totals.totalSites > 0 && totals.submittedAll === totals.totalSites);
+  const requiredPairs = (totals?.expectedAmPairs ?? 0) + (totals?.expectedPmPairs ?? 0);
+  const completedPairs = (totals?.completedAmPairs ?? 0) + (totals?.completedPmPairs ?? 0);
+  const allDone = Boolean(totals && totals.available && requiredPairs > 0 && completedPairs === requiredPairs);
   const dateLabel = totals
     ? new Date(`${totals.date}T12:00:00`).toLocaleDateString("en-GB", {
         weekday: "short",
@@ -344,7 +360,13 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
   return (
     <div className={cn(
       "rounded-lg border border-border/60 bg-card px-4 py-3",
-      allDone ? "border-l-4 border-l-emerald-500" : "border-l-4 border-l-amber-400",
+      allDone
+        ? "border-l-4 border-l-emerald-500"
+        : !totals?.available
+        ? "border-l-4 border-l-rose-500"
+        : requiredPairs === 0
+        ? "border-l-4 border-l-muted-foreground/30"
+        : "border-l-4 border-l-amber-400",
     )}>
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -356,17 +378,34 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
         ) : (
           <span className={cn(
             "text-xs px-2 py-0.5 rounded-full font-medium",
-            allDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+            allDone
+              ? "bg-emerald-100 text-emerald-700"
+              : !totals?.available
+              ? "bg-rose-100 text-rose-700"
+              : requiredPairs === 0
+              ? "bg-muted text-muted-foreground"
+              : "bg-amber-100 text-amber-700",
           )}>
-            {totals?.submittedAll ?? 0}/{totals?.totalSites ?? 0} sites fully complete
+            {!totals?.available
+              ? "Status unavailable"
+              : requiredPairs === 0
+              ? "Not applicable"
+              : `${completedPairs}/${requiredPairs} checklists complete`}
           </span>
         )}
       </div>
       {!loading && (
         <div className="mt-3 flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
-          <span className="text-emerald-700"><strong>{totals?.submittedAll ?? 0}</strong> Submitted all</span>
-          <span className="text-amber-700"><strong>{totals?.inProgress ?? 0}</strong> In progress</span>
-          <span className="text-muted-foreground"><strong className="text-foreground">{totals?.notStarted ?? 0}</strong> Not started</span>
+          {totals?.expectedAmPairs ? (
+            <span className="text-emerald-700"><strong>{totals.completedAmPairs}/{totals.expectedAmPairs}</strong> AM complete</span>
+          ) : (
+            <span className="text-muted-foreground">AM not applicable</span>
+          )}
+          {totals?.expectedPmPairs ? (
+            <span className="text-emerald-700"><strong>{totals.completedPmPairs}/{totals.expectedPmPairs}</strong> PM complete</span>
+          ) : (
+            <span className="text-muted-foreground">PM not applicable</span>
+          )}
           <Link
             href="/daily-track-status"
             className="ml-auto flex cursor-pointer items-center gap-1 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -453,103 +492,25 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setChecklistLoading(true);
     setError(null);
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
       const res = await apiFetch(`/dashboard/summary${params}`);
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
-      setTracks(json.tracks ?? []);
+        setTracks(json.tracks ?? []);
+        setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       setError(String(e));
+      setChecklistTotals(null);
     } finally {
       setLoading(false);
+      setChecklistLoading(false);
     }
   }, [siteId]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    if (!hasDailytrack) {
-      setChecklistTotals(null);
-      return;
-    }
-
-    let cancelled = false;
-    const today = new Date().toISOString().slice(0, 10);
-    const visibleSites = siteId === "all"
-      ? sites
-      : sites.filter((site: any) => String(site.id) === siteId);
-
-    (async () => {
-      setChecklistLoading(true);
-      try {
-        const params = new URLSearchParams({ date: today });
-        if (siteId !== "all") params.set("siteId", siteId);
-        const [amRes, pmRes, signoffRes] = await Promise.all([
-          apiFetch(`/daily-track-am?${params}`),
-          apiFetch(`/daily-track-pm?${params}`),
-          apiFetch(`/daily-track-pm/signoffs?${params}`),
-        ]);
-        if (!amRes.ok || !pmRes.ok || !signoffRes.ok) throw new Error("Unable to load checklist status");
-
-        const [amRows, pmRows, signoffs] = await Promise.all([
-          amRes.json() as Promise<DailyChecklistRecord[]>,
-          pmRes.json() as Promise<DailyChecklistRecord[]>,
-          signoffRes.json() as Promise<DailySignoffRecord[]>,
-        ]);
-        const requiredTypes = [
-          ...(hasStandaloneDailytrackAm || hasKitchentrack ? ["kitchen_opening"] : []),
-          ...(hasStandaloneDailytrackAm || hasPremisestrack ? ["premises_opening"] : []),
-          ...(hasStandaloneDailytrackPm || hasKitchentrack ? ["kitchen_closing"] : []),
-          ...(hasStandaloneDailytrackPm || hasPremisestrack ? ["premises_closing"] : []),
-        ];
-        let submittedAll = 0;
-        let inProgress = 0;
-        let notStarted = 0;
-
-        for (const site of visibleSites) {
-          const records = [...amRows, ...pmRows].filter((row) => row.siteId === site.id);
-          const signoff = signoffs.find((row) => row.siteId === site.id);
-          const hasStarted = records.length > 0 || Boolean(signoff);
-          const submittedTypes = new Set(
-            records.filter((row) => row.submittedAt).map((row) => row.checklistType),
-          );
-          const isComplete = requiredTypes.every((type) => submittedTypes.has(type))
-            && (!hasDailytrackPm || Boolean(signoff?.submittedAt));
-
-          if (isComplete) submittedAll++;
-          else if (hasStarted) inProgress++;
-          else notStarted++;
-        }
-
-        if (!cancelled) {
-          setChecklistTotals({
-            date: today,
-            totalSites: visibleSites.length,
-            submittedAll,
-            inProgress,
-            notStarted,
-          });
-        }
-      } catch {
-        if (!cancelled) setChecklistTotals(null);
-      } finally {
-        if (!cancelled) setChecklistLoading(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [
-    hasDailytrack,
-    hasDailytrackPm,
-    hasKitchentrack,
-    hasPremisestrack,
-    hasStandaloneDailytrackAm,
-    hasStandaloneDailytrackPm,
-    siteId,
-    sites,
-  ]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);

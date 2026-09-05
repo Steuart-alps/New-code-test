@@ -57,8 +57,15 @@ export const incidentRiddorEventsTable = pgTable("incident_riddor_events", {
   eventType: text("event_type").notNull(), // decision | submission
   riddorReportable: boolean("riddor_reportable").notNull(),
   reportedToHse: boolean("reported_to_hse").notNull().default(false),
+  // Snapshot the accountable person and the actual decision time. A user
+  // account can subsequently be renamed or removed, so actorId alone is not a
+  // sufficient compliance record.
+  decisionMaker: text("decision_maker"),
+  decisionAt: timestamp("decision_at").notNull().defaultNow(),
   rationale: text("rationale"),
   hseReference: text("hse_reference"),
   hseReportDate: date("hse_report_date"),
+  submittedAt: timestamp("submitted_at"),
+  submissionEvidence: text("submission_evidence"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

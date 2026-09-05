@@ -1552,6 +1552,22 @@ async function migrateFixTrackV2() {
     CREATE INDEX IF NOT EXISTS "IDX_fix_track_issue_activity_issue"
     ON "fix_track_issue_activity" ("issue_id", "created_at")
   `);
+  // Earlier installs constrained activity to status/note. The contractor mail
+  // workflow is also an audit trail, so replace that generated constraint
+  // explicitly rather than relying on CREATE TABLE IF NOT EXISTS.
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issue_activity"
+      DROP CONSTRAINT IF EXISTS "fix_track_issue_activity_event_type_check"
+  `);
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issue_activity"
+      ADD CONSTRAINT "fix_track_issue_activity_event_type_check"
+      CHECK ("event_type" IN (
+        'status', 'note',
+        'email_requested', 'email_approved', 'email_rejected',
+        'email_invalidated', 'email_sent'
+      ))
+  `);
   await db.execute(sql`
     INSERT INTO "fix_track_issue_activity" ("client_id", "issue_id", "event_type", "status", "created_by", "created_at")
     SELECT i.client_id, i.id, 'status', 'reported', i.created_by, i.created_at
@@ -1633,6 +1649,7 @@ async function migrateFixTrackV2() {
       ADD COLUMN IF NOT EXISTS "email_request_status" text,
       ADD COLUMN IF NOT EXISTS "email_approved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS "email_approved_at" timestamp,
+       ADD COLUMN IF NOT EXISTS "email_sent_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS "email_sent_at" timestamp
   `);
   // Existing requests were created before an explicit approval state existed.
@@ -1766,17 +1783,92 @@ async function migrateIncidents() {
       "event_type" text NOT NULL,
       "riddor_reportable" boolean NOT NULL,
       "reported_to_hse" boolean NOT NULL DEFAULT false,
+      "decision_maker" text,
+      "decision_at" timestamp NOT NULL DEFAULT now(),
       "rationale" text,
       "hse_reference" text,
       "hse_report_date" date,
+      "submitted_at" timestamp,
+      "submission_evidence" text,
       "created_at" timestamp NOT NULL DEFAULT now()
     )
   `);
+  // Additive backfill for installations which already had the first version of
+  // IncidentTrack. Keep existing events intact and make their recorded time the
+  // decision time where no more precise value was available.
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "decision_maker" text`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "decision_at" timestamp`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submitted_at" timestamp`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "submission_evidence" text`);
+  await db.execute(sql`
+    UPDATE "incident_riddor_events" e
+    SET "decision_at" = e."created_at"
+    WHERE e."decision_at" IS NULL
+  `);
+  await db.execute(sql`
+    UPDATE "incident_riddor_events" e
+    SET "decision_maker" = u."name"
+    FROM "users" u
+    WHERE e."actor_id" = u."id" AND e."decision_maker" IS NULL
+  `);
+  await db.execute(sql`
+    UPDATE "incident_riddor_events"
+    SET "submitted_at" = "hse_report_date"::timestamp
+    WHERE "submitted_at" IS NULL AND "reported_to_hse" = true AND "hse_report_date" IS NOT NULL
+  `);
+  // A historical event must belong to the same tenant as its parent incident.
+  // Correct any pre-audit rows before enforcing this on every future write.
+  await db.execute(sql`
+    UPDATE "incident_riddor_events" e
+    SET "client_id" = i."client_id"
+    FROM "incidents" i
+    WHERE e."incident_id" = i."id" AND e."client_id" <> i."client_id"
+  `);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" ALTER COLUMN "decision_at" SET NOT NULL`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incident_riddor_events_incident" ON "incident_riddor_events" ("client_id", "incident_id", "created_at" DESC)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incident_riddor_events_tenant_incident" ON "incident_riddor_events" ("client_id", "incident_id", "decision_at" DESC)`);
   // Older installs created this FK with CASCADE. Replace it so a current
   // incident cannot take its immutable legal record with it.
   await db.execute(sql`ALTER TABLE "incident_riddor_events" DROP CONSTRAINT IF EXISTS "incident_riddor_events_incident_id_incidents_id_fk"`);
+  await db.execute(sql`ALTER TABLE "incident_riddor_events" DROP CONSTRAINT IF EXISTS "incident_riddor_events_incident_id_fkey"`);
   await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD CONSTRAINT "incident_riddor_events_incident_id_incidents_id_fk" FOREIGN KEY ("incident_id") REFERENCES "incidents"("id") ON DELETE RESTRICT`);
+  // This is an evidence trail, not a mutable working note. Corrections are
+  // represented by a later event, preserving the original decision and
+  // submission record. The tenant check also protects direct SQL callers.
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "enforce_incident_riddor_event_tenant"()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM "incidents"
+        WHERE "id" = NEW."incident_id" AND "client_id" = NEW."client_id"
+      ) THEN
+        RAISE EXCEPTION 'RIDDOR event tenant must match its incident';
+      END IF;
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "prevent_incident_riddor_event_mutation"()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'RIDDOR decision and submission history is append-only';
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS "incident_riddor_events_tenant_guard" ON "incident_riddor_events"`);
+  await db.execute(sql`
+    CREATE TRIGGER "incident_riddor_events_tenant_guard"
+    BEFORE INSERT ON "incident_riddor_events"
+    FOR EACH ROW EXECUTE FUNCTION "enforce_incident_riddor_event_tenant"()
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS "incident_riddor_events_immutable" ON "incident_riddor_events"`);
+  await db.execute(sql`
+    CREATE TRIGGER "incident_riddor_events_immutable"
+    BEFORE UPDATE OR DELETE ON "incident_riddor_events"
+    FOR EACH ROW EXECUTE FUNCTION "prevent_incident_riddor_event_mutation"()
+  `);
 }
 
 async function migrateComplianceAuditTrail() {

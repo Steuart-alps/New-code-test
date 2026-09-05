@@ -30,10 +30,17 @@ const PRIORITY_COLOR: Record<string, string> = {
 };
 
 const STATUS_TRANSITIONS: Record<IssueStatus, { value: IssueStatus; label: string }[]> = {
-  open: [{ value: 'in_progress', label: 'Mark in progress' }],
+  reported: [{ value: 'in_progress', label: 'Mark in progress' }],
   in_progress: [{ value: 'resolved', label: 'Mark resolved' }],
-  resolved: [],
+  resolved: [{ value: 'closed', label: 'Mark closed' }],
   closed: [],
+};
+
+const STATUS_LABEL: Record<IssueStatus, string> = {
+  reported: 'Reported',
+  in_progress: 'In progress',
+  resolved: 'Resolved',
+  closed: 'Closed',
 };
 
 function DetailRow({
@@ -224,7 +231,7 @@ export default function IssueDetailScreen() {
       </View>
 
       {/* Description */}
-      {(issue.description || issue.notes) && (
+      {!!issue.description && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
             Description
@@ -236,7 +243,7 @@ export default function IssueDetailScreen() {
             ]}
           >
             <Text style={[styles.notesText, { color: colors.foreground }]}>
-              {issue.description ?? issue.notes}
+              {issue.description}
             </Text>
           </View>
         </View>
@@ -247,7 +254,7 @@ export default function IssueDetailScreen() {
         <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
           Notes
         </Text>
-        {!!issue.solutionNotes && (
+        {!!issue.solutionNotes && !issue.notes?.length && (
           <View
             style={[
               styles.notesCard,
@@ -259,6 +266,22 @@ export default function IssueDetailScreen() {
             </Text>
           </View>
         )}
+        {issue.notes?.map((note) => (
+          <View
+            key={note.id}
+            style={[
+              styles.notesCard,
+              { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 8 },
+            ]}
+          >
+            <Text style={[styles.noteAuthor, { color: colors.foreground }]}>
+              {note.createdBy}
+            </Text>
+            <Text style={[styles.notesText, { color: colors.foreground }]}>
+              {note.note}
+            </Text>
+          </View>
+        ))}
         <TextInput
           value={noteDraft}
           onChangeText={setNoteDraft}
@@ -293,6 +316,33 @@ export default function IssueDetailScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Status history is returned by the same detail endpoint as the manager view. */}
+      {!!issue.statusEvents?.length && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
+            Status history
+          </Text>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {issue.statusEvents.map((event, index) => (
+              <View
+                key={`${event.status}-${event.createdAt}-${index}`}
+                style={[styles.detailRow, { borderBottomColor: colors.border }]}
+              >
+                <Feather name="check-circle" size={15} color={colors.primary} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.detailValue, { color: colors.foreground }]}>
+                    {STATUS_LABEL[event.status] ?? event.status}
+                  </Text>
+                  <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>
+                    {new Date(event.createdAt).toLocaleString('en-GB')}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Status transitions */}
       {transitions.length > 0 && (
@@ -377,6 +427,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   notesText: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20 },
+  noteAuthor: { fontSize: 12, fontFamily: 'Inter_600SemiBold', marginBottom: 4 },
   noteInput: {
     borderWidth: 1,
     borderRadius: 8,

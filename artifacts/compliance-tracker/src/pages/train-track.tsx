@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SignaturePad } from "@/components/signature-pad";
+import { buildTrainingMatrix, certificateStatus } from "@/lib/training-matrix";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,12 @@ interface Site {
   name: string;
 }
 
+interface StaffMember {
+  name: string;
+  site_id: number | null;
+  active: boolean;
+}
+
 type CertStatus = "expired" | "expiring_soon" | "valid" | "no_expiry";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -110,12 +117,8 @@ const STATUS_CFG = {
 
 function getCertStatus(expiryDate: string | null): CertStatus {
   if (!expiryDate) return "no_expiry";
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const exp = new Date(expiryDate);
-  if (exp < today) return "expired";
-  const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
-  if (exp <= in30) return "expiring_soon";
-  return "valid";
+  const status = certificateStatus(expiryDate);
+  return status === "Expired" ? "expired" : status === "Expiring Soon" ? "expiring_soon" : "valid";
 }
 
 function formatDate(d: string | null) {
@@ -257,6 +260,14 @@ export default function TrainTrackPage() {
   const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ["sites", activeClientId],
     queryFn: () => apiFetch("/sites"),
+    enabled: !!activeClientId,
+  });
+  // The matrix uses the active roster rather than certificate holders so it
+  // exposes staff who are missing a required certificate. The endpoint omits
+  // inactive staff by default.
+  const { data: activeStaff = [] } = useQuery<StaffMember[]>({
+    queryKey: ["staff-roster", activeClientId],
+    queryFn: () => apiFetch("/staff-roster"),
     enabled: !!activeClientId,
   });
 
@@ -544,49 +555,29 @@ ${rows.map(r => `<tr>
 
   // Training matrix CSV — rows = staff, columns = training types, cells = current status.
   function handleDownloadMatrix() {
-    const matrixCerts = siteFilter === "all"
-      ? certs
-      : certs.filter(r => String(r.site_id) === siteFilter);
-    const staffNames = Array.from(new Set(matrixCerts.map(r => r.staff_name)))
-      .sort((a, b) => a.localeCompare(b));
-    const types = Array.from(new Set(matrixCerts.map(r => r.training_type ?? "Other")))
-      .sort((a, b) => a.localeCompare(b));
+    const matrix = buildTrainingMatrix(certs, activeStaff, siteFilter);
 
-    if (staffNames.length === 0 || types.length === 0) {
+    if (matrix.staffNames.length === 0 || matrix.types.length === 0) {
       toast({
         title: "No certificates to export",
         description: siteFilter === "all"
-          ? "Add a training certificate before downloading the matrix."
-          : "No training certificates are recorded for the selected site.",
+          ? "Add active staff and a training certificate before downloading the matrix."
+          : "No active staff or training certificates are recorded for the selected site.",
         variant: "destructive",
       });
       return;
     }
 
-    // Use the latest completed certificate for each staff member and training type.
-    const cellMap = new Map<string, TrainingRecord>();
-    for (const r of matrixCerts) {
-      const key = `${r.staff_name}||${r.training_type ?? "Other"}`;
-      const existing = cellMap.get(key);
-      if (!existing || r.completed_date > existing.completed_date) cellMap.set(key, r);
-    }
-
     const cell = (staff: string, type: string): string => {
-      const r = cellMap.get(`${staff}||${type}`);
-      if (!r) return "—";
-      const status = getCertStatus(r.expiry_date);
-      const label = status === "expiring_soon"
-        ? "Expiring Soon"
-        : status === "no_expiry"
-          ? "Valid"
-          : STATUS_CFG[status].label;
-      return r.expiry_date ? `${label} (${formatDate(r.expiry_date)})` : label;
+      const value = matrix.cells.get(`${staff}\u0000${type}`);
+      if (!value) return "Missing";
+      return value.expiryDate ? `${value.status} (${formatDate(value.expiryDate)})` : value.status;
     };
 
     const csvValue = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
     const rows = [
-      ["Staff member", ...types],
-      ...staffNames.map(staff => [staff, ...types.map(type => cell(staff, type))]),
+      ["Staff member", ...matrix.types],
+      ...matrix.staffNames.map(staff => [staff, ...matrix.types.map(type => cell(staff, type))]),
     ];
     const csv = rows.map(row => row.map(csvValue).join(",")).join("\r\n");
     const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });

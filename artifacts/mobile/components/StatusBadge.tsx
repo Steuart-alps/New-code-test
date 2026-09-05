@@ -8,6 +8,7 @@ export type BadgeStatus =
   | 'overdue'
   | 'never'
   | 'open'
+  | 'reported'
   | 'in_progress'
   | 'resolved'
   | 'closed'
@@ -25,6 +26,7 @@ const LABELS: Record<BadgeStatus, string> = {
   overdue: 'Overdue',
   never: 'Never',
   open: 'Open',
+  reported: 'Reported',
   in_progress: 'In progress',
   resolved: 'Resolved',
   closed: 'Closed',
@@ -70,6 +72,7 @@ export function StatusBadge({
       fg = colors.warningForeground;
       break;
     case 'open':
+    case 'reported':
     case 'medium':
       bg = colors.primary;
       fg = colors.primaryForeground;

@@ -57,7 +57,7 @@ function fmtMonth(ym: string) {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface Site       { id: number; name: string; }
+interface Site       { id: number; name: string; departmentId?: number | null; }
 interface Department { id: number; name: string; }
 
 interface DailyRow {
@@ -316,6 +316,23 @@ function ComplianceTab({
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [data,         setData]         = useState<ReportData | null>(null);
+  const filteredSites = useMemo(
+    () => departmentId === "all"
+      ? sites
+      : sites.filter(site => site.departmentId === Number(departmentId)),
+    [sites, departmentId],
+  );
+
+  const selectDepartment = useCallback((value: string) => {
+    setDepartmentId(value);
+    if (
+      value !== "all"
+      && siteId !== "all"
+      && sites.find(site => site.id === Number(siteId))?.departmentId !== Number(value)
+    ) {
+      setSiteId("all");
+    }
+  }, [siteId, sites]);
 
   const runReport = useCallback(async () => {
     setError(null); setLoading(true);
@@ -368,8 +385,8 @@ function ComplianceTab({
     <>
       <FilterBar
         from={from} to={to} siteId={siteId} departmentId={departmentId}
-        sites={sites} departments={departments}
-        onFrom={setFrom} onTo={setTo} onSite={setSiteId} onDept={setDepartmentId}
+        sites={filteredSites} departments={departments}
+        onFrom={setFrom} onTo={setTo} onSite={setSiteId} onDept={selectDepartment}
         onLoadSites={() => {}} onLoadDepts={() => {}}
         onRun={runReport} loading={loading}
         extra={data ? (
@@ -532,6 +549,23 @@ function TrendTab({
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [data,         setData]         = useState<TrendData | null>(null);
+  const filteredSites = useMemo(
+    () => departmentId === "all"
+      ? sites
+      : sites.filter(site => site.departmentId === Number(departmentId)),
+    [sites, departmentId],
+  );
+
+  const selectDepartment = useCallback((value: string) => {
+    setDepartmentId(value);
+    if (
+      value !== "all"
+      && siteId !== "all"
+      && sites.find(site => site.id === Number(siteId))?.departmentId !== Number(value)
+    ) {
+      setSiteId("all");
+    }
+  }, [siteId, sites]);
 
   const runReport = useCallback(async () => {
     setError(null); setLoading(true);
@@ -589,7 +623,7 @@ function TrendTab({
 
         <div className="flex flex-col gap-1">
           <Label>Department</Label>
-          <Select value={departmentId} onValueChange={setDepartmentId}>
+          <Select value={departmentId} onValueChange={selectDepartment}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder="All departments" />
             </SelectTrigger>
@@ -610,7 +644,7 @@ function TrendTab({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All sites</SelectItem>
-              {sites.map(s => (
+            {filteredSites.map(s => (
                 <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
               ))}
             </SelectContent>
@@ -760,6 +794,23 @@ function RiskTab({
   const [error,        setError]        = useState<string | null>(null);
   const [data,         setData]         = useState<RiskReportData | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const filteredSites = useMemo(
+    () => departmentId === "all"
+      ? sites
+      : sites.filter(site => site.departmentId === Number(departmentId)),
+    [sites, departmentId],
+  );
+
+  const selectDepartment = useCallback((value: string) => {
+    setDepartmentId(value);
+    if (
+      value !== "all"
+      && siteId !== "all"
+      && sites.find(site => site.id === Number(siteId))?.departmentId !== Number(value)
+    ) {
+      setSiteId("all");
+    }
+  }, [siteId, sites]);
 
   const visibleStaff = useMemo(() => {
     if (!data || statusFilter === "all") return data?.staff ?? [];
@@ -788,7 +839,7 @@ function RiskTab({
       <div className="mb-6 flex flex-wrap gap-3 items-end print:hidden">
         <div className="flex flex-col gap-1">
           <Label>Department</Label>
-          <Select value={departmentId} onValueChange={setDepartmentId}>
+          <Select value={departmentId} onValueChange={selectDepartment}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder="All departments" />
             </SelectTrigger>
@@ -809,7 +860,7 @@ function RiskTab({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All sites</SelectItem>
-              {sites.map(s => (
+            {filteredSites.map(s => (
                 <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
               ))}
             </SelectContent>

@@ -7,11 +7,23 @@ import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite } from "../lib/email";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { getObjectAclPolicy } from "../lib/objectAcl";
 import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 
 const router = Router();
 const storage = new ObjectStorageService();
+
+async function finalizeIssueMedia(paths: string[] | undefined, clientId: number): Promise<string | null> {
+  try {
+    for (const objectPath of paths ?? []) await storage.finalizeTenantUpload(objectPath, clientId);
+    return null;
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
+    if (err instanceof ObjectOwnershipError) return err.message;
+    return "Could not secure uploaded media";
+  }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +49,31 @@ async function verifyContractor(contractorId: number | null | undefined, clientI
   const [row] = await db.select({ id: contractorsTable.id }).from(contractorsTable)
     .where(and(eq(contractorsTable.id, contractorId), eq(contractorsTable.clientId, clientId))).limit(1);
   return !!row;
+}
+
+function dateOnly(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+/** Fields rendered into a contractor email. Any change invalidates approval. */
+function contractorEmailContentChanged(current: any, data: Record<string, any>): boolean {
+  const fields = ["contractorId", "title", "description", "location", "issueType", "priority", "siteId"] as const;
+  if (fields.some((field) => field in data && (data[field] ?? null) !== (current[field] ?? null))) return true;
+  return "targetDate" in data && dateOnly(data.targetDate) !== dateOnly(current.targetDate);
+}
+
+/** Never sign a cross-tenant or unstamped private document URL into contractor mail. */
+async function authorisedSiteDocumentUrl(objectPath: string, clientId: number): Promise<string | null> {
+  try {
+    const file = await storage.getObjectEntityFile(objectPath);
+    const acl = await getObjectAclPolicy(file);
+    if (acl?.visibility !== "private" || acl.owner !== String(clientId)) return null;
+    return await storage.getSignedDownloadURL(objectPath, 30 * 24 * 60 * 60);
+  } catch {
+    return null;
+  }
 }
 
 // Gas is one issue type but three distinct trades.
@@ -128,7 +165,12 @@ router.get("/issues", requireAuth, async (req, res) => {
   }
 
   const { status, priority, issueType, siteId } = req.query as any;
-  if (status)    conditions.push(eq(fixTrackIssuesTable.status, status));
+  // Mobile's open-work view requests more than one status. Treat repeated
+  // query values as an OR rather than comparing the column to an array.
+  if (status) {
+    const statuses = Array.isArray(status) ? status : [status];
+    conditions.push(inArray(fixTrackIssuesTable.status, statuses));
+  }
   if (priority)  conditions.push(eq(fixTrackIssuesTable.priority, priority));
   if (issueType) conditions.push(eq(fixTrackIssuesTable.issueType, issueType));
   if (siteId)    conditions.push(eq(fixTrackIssuesTable.siteId, Number(siteId)));
@@ -190,7 +232,10 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
       eq(fixTrackIssueActivityTable.issueId, id),
       eq(fixTrackIssueActivityTable.clientId, clientId),
     ))
-    .orderBy(fixTrackIssueActivityTable.createdAt);
+    // An issue can be created or advanced more than once within the same
+    // timestamp precision. Use the append-only id as a stable tie-breaker so
+    // every client receives the status history in the order it occurred.
+    .orderBy(fixTrackIssueActivityTable.createdAt, fixTrackIssueActivityTable.id);
 
   res.json({
     ...r.issue,
@@ -230,6 +275,8 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   }
   if (!(await canAccessSite(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   if (!(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
+  const mediaError = await finalizeIssueMedia(data.mediaUrls, clientId);
+  if (mediaError) return res.status(403).json({ error: mediaError });
 
   // Auto-assign: if no contractor supplied, pick the client's best-matching
   // active contractor by trade for the issue type (same matching as
@@ -280,6 +327,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if ("siteId" in data && !(await canAccessSite(data.siteId, clientId, getActiveDepartmentId(req)))) return res.status(403).json({ error: "Site not accessible" });
   if ("contractorId" in data && !(await verifyContractor(data.contractorId, clientId))) return res.status(400).json({ error: "Invalid contractor" });
+  const mediaError = await finalizeIssueMedia(data.mediaUrls, clientId);
+  if (mediaError) return res.status(403).json({ error: mediaError });
 
   const updateConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const updateDeptId = getActiveDepartmentId(req);
@@ -290,11 +339,12 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
 
   const transitionResult = await db.transaction(async (tx) => {
-    const [current] = await tx.select({ status: fixTrackIssuesTable.status })
+    const [current] = await tx.select()
       .from(fixTrackIssuesTable)
       .where(and(...updateConditions))
       .limit(1);
     if (!current) return { kind: "not_found" as const };
+    if (current.emailRequestStatus === "sending") return { kind: "email_sending" as const };
 
     const nextStatus: Record<string, string | undefined> = {
       reported: "in_progress",
@@ -307,13 +357,29 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       return { kind: "invalid_transition" as const, currentStatus: current.status };
     }
 
-    const updateData = { ...data, updatedAt: new Date() };
+    const approvalInvalidated =
+      current.emailRequestStatus === "approved" && contractorEmailContentChanged(current, data);
+    const updateData: Record<string, any> = { ...data, updatedAt: new Date() };
     if (data.status === "resolved" && isStatusChange) {
       updateData.resolvedDate = new Date().toISOString().slice(0, 10);
     }
-    const atomicConditions = isStatusChange
-      ? [...updateConditions, eq(fixTrackIssuesTable.status, current.status)]
-      : updateConditions;
+    if (approvalInvalidated) {
+      updateData.emailRequestStatus = "pending";
+      updateData.emailApprovedBy = null;
+      updateData.emailApprovedAt = null;
+      updateData.emailSentBy = null;
+      updateData.emailSentAt = null;
+    }
+    // Make approval invalidation race safely against dispatch: the update can
+    // only win while the row is still approved; a claimed `sending` row is
+    // never mutated underneath the provider call.
+    const atomicConditions = [
+      ...updateConditions,
+      ...(isStatusChange ? [eq(fixTrackIssuesTable.status, current.status)] : []),
+      current.emailRequestStatus == null
+        ? isNull(fixTrackIssuesTable.emailRequestStatus)
+        : eq(fixTrackIssuesTable.emailRequestStatus, current.emailRequestStatus),
+    ];
     const updated = await tx.update(fixTrackIssuesTable)
       .set(updateData)
       .where(and(...atomicConditions))
@@ -329,6 +395,15 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         createdBy: (req.session as any).userId ?? null,
       });
     }
+    if (approvalInvalidated) {
+      await tx.insert(fixTrackIssueActivityTable).values({
+        clientId,
+        issueId: id,
+        eventType: "email_invalidated",
+        note: "Contractor email content changed; manager reapproval required",
+        createdBy: (req.session as any).userId ?? null,
+      });
+    }
     return { kind: "updated" as const, row: updated[0] };
   });
 
@@ -341,6 +416,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (transitionResult.kind === "conflict") {
     return res.status(409).json({ error: "Issue status changed; refresh and try again" });
+  }
+  if (transitionResult.kind === "email_sending") {
+    return res.status(409).json({ error: "This issue cannot be changed while its approved contractor email is sending" });
   }
   res.json(transitionResult.row);
 });
@@ -437,9 +515,8 @@ router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, 
   }).parse(req.body);
 
   try {
-    const uploadUrl  = await storage.getObjectEntityUploadURL();
+    const uploadUrl  = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
-    await storage.trySetObjectEntityAclPolicy(uploadUrl, { owner: String(clientId), visibility: "private" });
     res.json({ uploadUrl, objectPath });
   } catch (err: any) {
     res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
@@ -483,7 +560,8 @@ router.get("/contractors/suggest", requireAuth, async (req, res) => {
 //
 // Contractor emails require manager approval: staff request a send
 // (mode "assign" or "quote"); a manager (client_admin/consultant or a
-// maintenance manager) approves — which actually sends — or dismisses it.
+// maintenance manager) approves or dismisses it. A separate, manager-only
+// dispatch then crosses the outbound email boundary.
 
 function isManager(req: any): boolean {
   const u = req.currentUser;
@@ -526,8 +604,17 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     emailRequestedAt: new Date(),
     emailApprovedBy: null,
     emailApprovedAt: null,
+    emailSentBy: null,
+    emailSentAt: null,
     updatedAt: new Date(),
   }).where(and(...requestConditions));
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId,
+    issueId: id,
+    eventType: "email_requested",
+    note: parsed.data.mode,
+    createdBy: (req.session as any).userId ?? null,
+  });
   res.json({ ok: true, message: "Approval requested" });
 });
 
@@ -557,6 +644,13 @@ router.post("/issues/:id/approve-send", requireAuth, denyViewers, async (req, re
   `);
   const row = (result.rows as any[])[0];
   if (!row) return res.status(409).json({ error: "There is no pending contractor email request to approve" });
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId,
+    issueId: id,
+    eventType: "email_approved",
+    note: row.email_request_mode,
+    createdBy: (req.session as any).userId ?? null,
+  });
   res.json({ ok: true, mode: row.email_request_mode });
 });
 
@@ -587,6 +681,13 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
     .where(and(...rejectConditions))
     .returning();
   if (!row) return res.status(409).json({ error: "There is no pending contractor email request to dismiss" });
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId,
+    issueId: id,
+    eventType: "email_rejected",
+    note: row.emailRequestMode ?? null,
+    createdBy: (req.session as any).userId ?? null,
+  });
   res.json({ ok: true });
 });
 
@@ -631,18 +732,19 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   if (!issue.contractor_id)   return res.status(400).json({ error: "No contractor assigned to this issue" });
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
 
-  if (!["approved", "sending"].includes(issue.email_request_status) || !["assign", "quote"].includes(issue.email_request_mode)) {
+  if (issue.email_request_status !== "approved" || !["assign", "quote"].includes(issue.email_request_mode)) {
     return res.status(403).json({ error: "An approved contractor email request is required before sending" });
   }
   const mode = issue.email_request_mode as "assign" | "quote";
 
-  // Claim the approved request before reaching either email sender. This makes
-  // concurrent clicks safe and is the final gate at the outbound boundary.
+  // Claim only an approved request before reaching either email sender. In
+  // particular, never allow a second request that merely observes `sending` to
+  // reach the provider: this is the final approval and concurrency gate.
   const claim = await db.execute(sql`
     UPDATE fix_track_issues
     SET email_request_status = 'sending', updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
-      AND email_request_status IN ('approved', 'sending') AND email_request_mode = ${mode}${sendUpdateDeptClause}
+      AND email_request_status = 'approved' AND email_request_mode = ${mode}${sendUpdateDeptClause}
     RETURNING id
   `);
   if (!(claim.rows as any[])[0]) {
@@ -650,7 +752,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   }
   const markSent = () => db.execute(sql`
     UPDATE fix_track_issues
-    SET email_request_status = 'sent', email_sent_at = now(), updated_at = now()
+    SET email_request_status = 'sent',
+        email_sent_by = ${(req.session as any).userId ?? null},
+        email_sent_at = now(),
+        updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId} AND email_request_status = 'sending'
   `);
   const restoreApproval = () => db.execute(sql`
@@ -713,8 +818,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     `);
     for (const doc of (quoteDocResult.rows as any[])) {
       try {
-        const url = await storage.getSignedDownloadURL(doc.object_path as string, 30 * 24 * 60 * 60);
-        quoteDocs.push({ name: doc.name as string, url });
+        const url = await authorisedSiteDocumentUrl(doc.object_path as string, clientId);
+        if (url) quoteDocs.push({ name: doc.name as string, url });
       } catch { /* skip */ }
     }
 
@@ -735,6 +840,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     providerAccepted = true;
     await markProviderAccepted();
     await markSent();
+      await db.insert(fixTrackIssueActivityTable).values({
+        clientId, issueId: id, eventType: "email_sent", note: mode,
+        createdBy: (req.session as any).userId ?? null,
+      });
       return res.json({ ok: true, message: "Quote request sent to contractor" });
     }
 
@@ -825,11 +934,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
 
   for (const doc of (siteDocResult.rows as any[])) {
     try {
-      const url = await storage.getSignedDownloadURL(
-        doc.object_path as string,
-        30 * 24 * 60 * 60,   // 30 days
-      );
-      siteDocuments.push({ name: doc.name as string, url });
+      const url = await authorisedSiteDocumentUrl(doc.object_path as string, clientId);
+      if (url) siteDocuments.push({ name: doc.name as string, url });
     } catch {
       // Skip any document that fails — don't block the email
     }
@@ -859,6 +965,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   providerAccepted = true;
   await markProviderAccepted();
   await markSent();
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId, issueId: id, eventType: "email_sent", note: mode,
+    createdBy: (req.session as any).userId ?? null,
+  });
   res.json({ ok: true, message: "Email sent to contractor" });
   } catch (err) {
     // Only an explicit provider failure is retryable. If provider acceptance

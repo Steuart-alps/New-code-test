@@ -160,6 +160,20 @@ async function attack(attacker, victim) {
   expectBlocked(`${tag}: GET /sites/:id`, (await req("GET", `/sites/${victim.siteId}`)).status);
   expectBlocked(`${tag}: PATCH /sites/:id`, (await req("PATCH", `/sites/${victim.siteId}`, { name: "hacked" })).status);
   expectBlocked(`${tag}: DELETE /sites/:id`, (await req("DELETE", `/sites/${victim.siteId}`)).status);
+  // Report filters are URL-controlled too; a foreign site id must never be
+  // accepted as a way to inspect another tenant's reporting scope.
+  expectBlocked(
+    `${tag}: GET /reports/compliance with foreign site`,
+    (await req("GET", `/reports/compliance?from=${uniqueDate(1)}&to=${uniqueDate()}&siteId=${victim.siteId}`)).status,
+  );
+  expectBlocked(
+    `${tag}: GET /reports/compliance-trend with foreign site`,
+    (await req("GET", `/reports/compliance-trend?months=3&siteId=${victim.siteId}`)).status,
+  );
+  expectBlocked(
+    `${tag}: GET /reports/risk-acknowledgements with foreign site`,
+    (await req("GET", `/reports/risk-acknowledgements?siteId=${victim.siteId}`)).status,
+  );
 
   expectBlocked(`${tag}: GET /compliance-items/:id`, (await req("GET", `/compliance-items/${victim.itemId}`)).status);
   expectBlocked(`${tag}: PUT /compliance-items/:id`, (await req("PUT", `/compliance-items/${victim.itemId}`, { name: "hacked" })).status);

@@ -8,7 +8,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -126,13 +126,8 @@ router.post("/:token/upload-url", async (req, res) => {
     const row = await validateToken(req.params.token);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
-    const uploadUrl  = await objectStorageService.getObjectEntityUploadURL();
+    const uploadUrl  = await objectStorageService.getObjectEntityUploadURL(row.client_id);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadUrl);
-
-    await objectStorageService.trySetObjectEntityAclPolicy(uploadUrl, {
-      owner: String(row.client_id),
-      visibility: "private",
-    });
 
     return res.json({ uploadUrl, objectPath });
   } catch (err: any) {
@@ -158,6 +153,15 @@ router.post("/:token/certificates", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const data = certCreateSchema.parse(req.body);
+    if (data.objectPath) {
+      try {
+        await objectStorageService.finalizeTenantUpload(data.objectPath, row.client_id);
+      } catch (err) {
+        const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+          : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded certificate";
+        return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+      }
+    }
 
     const result = await db.execute(sql`
       INSERT INTO contractor_certificates

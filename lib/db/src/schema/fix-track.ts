@@ -30,6 +30,9 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   emailRequestStatus: text("email_request_status"),
   emailApprovedBy: integer("email_approved_by").references(() => usersTable.id, { onDelete: "set null" }),
   emailApprovedAt: timestamp("email_approved_at"),
+  // Kept separately from the approver: a manager can approve a request and a
+  // different authorised manager can perform the resulting dispatch.
+  emailSentBy: integer("email_sent_by").references(() => usersTable.id, { onDelete: "set null" }),
   emailSentAt: timestamp("email_sent_at"),
   mediaUrls: jsonb("media_urls").default([]).$type<string[]>(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),

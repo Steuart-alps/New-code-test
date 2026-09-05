@@ -46,6 +46,7 @@ export default function IssuesScreen() {
   const filtered = issues.filter((issue) => {
     if (filter === 'all') return true;
     if (filter === 'urgent') return issue.priority === 'urgent';
+    if (filter === 'open') return issue.status === 'reported';
     return issue.status === filter;
   });
 

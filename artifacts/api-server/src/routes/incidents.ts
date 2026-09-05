@@ -39,6 +39,8 @@ const createSchema = z.object({
   reportedBy: z.string().min(1).max(200),
   siteId: z.number().int().nullable().optional(),
   riddorRationale: z.string().max(5000).nullable().optional(),
+  submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  submissionEvidence: z.string().max(5000).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -50,6 +52,21 @@ function allowedSites(clientId: number, deptId: number) {
       eq(sitesTable.clientId, clientId),
       or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, deptId)),
     ));
+}
+
+function validateRiddorRecord(data: {
+  riddorReportable?: boolean; reportedToHse?: boolean; riddorRationale?: string | null;
+  hseReference?: string | null; hseReportDate?: string | null; submittedAt?: string | null;
+  submissionEvidence?: string | null;
+}) {
+  if (!data.riddorRationale?.trim()) return "Record the rationale for the RIDDOR decision";
+  if (data.reportedToHse) {
+    if (!data.hseReference?.trim()) return "An HSE submission reference is required";
+    if (!data.hseReportDate) return "The HSE submission date is required";
+    if (!data.submittedAt) return "The HSE submission time is required";
+    if (!data.submissionEvidence?.trim()) return "Record the submission evidence or its secure location";
+  }
+  return null;
 }
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
@@ -150,15 +167,21 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!await canAccessSite(clientId, data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
 
-  const { riddorRationale, ...incidentData } = data;
+  const riddorError = validateRiddorRecord(data);
+  if (riddorError) return res.status(400).json({ error: riddorError });
+  const { riddorRationale, submittedAt, submissionEvidence, ...incidentData } = data;
+  const actor = (req as any).currentUser;
+  const decisionAt = new Date();
   const inserted = await db.transaction(async (tx) => {
     const [incident] = await tx.insert(incidentsTable).values({
-      clientId, ...incidentData, createdBy: (req as any).currentUser?.id ?? null,
+      clientId, ...incidentData, createdBy: actor?.id ?? null,
     }).returning();
     await tx.insert(incidentRiddorEventsTable).values({
-      clientId, incidentId: incident.id, eventType: "decision", actorId: (req as any).currentUser?.id ?? null,
+      clientId, incidentId: incident.id, eventType: incident.reportedToHse ? "submission" : "decision", actorId: actor?.id ?? null,
+      decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
       riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse,
-      rationale: riddorRationale ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+      rationale: riddorRationale?.trim() ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+      submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
     });
     return incident;
   });
@@ -197,19 +220,35 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 
   if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
-  const { riddorRationale, ...updateData } = parsed.data;
+  const { riddorRationale, submittedAt, submissionEvidence, ...updateData } = parsed.data;
   const riddorChanged = ["riddorReportable", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
+  const hasRiddorRecord = riddorChanged || riddorRationale !== undefined || submittedAt !== undefined || submissionEvidence !== undefined;
+  if (hasRiddorRecord) {
+    const riddorError = validateRiddorRecord({
+      riddorReportable: updateData.riddorReportable ?? existing.riddorReportable,
+      reportedToHse: updateData.reportedToHse ?? existing.reportedToHse,
+      riddorRationale,
+      hseReference: updateData.hseReference ?? existing.hseReference,
+      hseReportDate: updateData.hseReportDate ?? existing.hseReportDate,
+      submittedAt,
+      submissionEvidence,
+    });
+    if (riddorError) return res.status(400).json({ error: riddorError });
+  }
+  const actor = (req as any).currentUser;
+  const decisionAt = new Date();
   const updated = await db.transaction(async (tx) => {
     const [incident] = await tx.update(incidentsTable)
       .set({ ...updateData, updatedAt: new Date() })
       .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).returning();
-    if (riddorChanged || riddorRationale) {
+    if (hasRiddorRecord) {
       await tx.insert(incidentRiddorEventsTable).values({
         clientId, incidentId: id, eventType: incident.reportedToHse ? "submission" : "decision",
-        actorId: (req as any).currentUser?.id ?? null, riddorReportable: incident.riddorReportable,
-        reportedToHse: incident.reportedToHse, rationale: riddorRationale ?? null,
+        actorId: actor?.id ?? null, decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
+        riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse, rationale: riddorRationale?.trim() ?? null,
         hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+        submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
       });
     }
     return incident;
@@ -255,6 +294,10 @@ router.get("/:id/riddor-history", requireAuth, async (req, res) => {
     rationale: incidentRiddorEventsTable.rationale,
     hseReference: incidentRiddorEventsTable.hseReference,
     hseReportDate: incidentRiddorEventsTable.hseReportDate,
+    decisionMaker: incidentRiddorEventsTable.decisionMaker,
+    decisionAt: incidentRiddorEventsTable.decisionAt,
+    submittedAt: incidentRiddorEventsTable.submittedAt,
+    submissionEvidence: incidentRiddorEventsTable.submissionEvidence,
     createdAt: incidentRiddorEventsTable.createdAt,
     actorName: usersTable.name,
     actorEmail: usersTable.email,

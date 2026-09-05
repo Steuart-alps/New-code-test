@@ -5,36 +5,15 @@ import { useListContractors } from "@workspace/api-client-react";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Building, Mail, Phone, ChevronRight, Send } from "lucide-react";
+import { Plus, Search, Building, Mail, Phone, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { LiabilityBadge, DbsReviewBadge } from "@/components/badges";
-import { apiFetch } from "@/lib/api";
-import { toast } from "sonner";
 
 export default function ContractorsPage() {
   const [search, setSearch] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [sendingReminder, setSendingReminder] = useState<number | null>(null);
 
   const { data: contractors = [], isLoading } = useListContractors();
-
-  async function handleSendReminder(e: React.MouseEvent, contractorId: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    setSendingReminder(contractorId);
-    try {
-      const res = await apiFetch(`/contractors/${contractorId}/send-reminder`, { method: "POST" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Failed to send reminder");
-      }
-      toast.success("Reminder sent", { description: "The contractor has been emailed." });
-    } catch (err: any) {
-      toast.error("Could not send reminder", { description: err.message });
-    } finally {
-      setSendingReminder(null);
-    }
-  }
 
   const filtered = contractors.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -76,17 +55,6 @@ export default function ContractorsPage() {
                     {contractor.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                      disabled={sendingReminder === contractor.id}
-                      onClick={(e) => handleSendReminder(e, contractor.id)}
-                      title="Resend compliance reminder email"
-                    >
-                      <Send className="w-3.5 h-3.5 mr-1" />
-                      {sendingReminder === contractor.id ? "Sending…" : "Remind"}
-                    </Button>
                     <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors transform group-hover:translate-x-1" />
                   </div>
                 </div>

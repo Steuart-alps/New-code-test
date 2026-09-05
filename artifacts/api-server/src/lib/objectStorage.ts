@@ -37,6 +37,15 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+/** A caller attempted to attach an object not reserved for its tenant. */
+export class ObjectOwnershipError extends Error {
+  constructor(message = "Object does not belong to this tenant") {
+    super(message);
+    this.name = "ObjectOwnershipError";
+    Object.setPrototypeOf(this, ObjectOwnershipError.prototype);
+  }
+}
+
 export class ObjectStorageService {
   constructor() {}
 
@@ -106,7 +115,7 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
-  async getObjectEntityUploadURL(): Promise<string> {
+  async getObjectEntityUploadURL(tenantId?: number | string): Promise<string> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
       throw new Error(
@@ -116,7 +125,8 @@ export class ObjectStorageService {
     }
 
     const objectId = randomUUID();
-    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
+    const tenantSegment = tenantId === undefined ? "" : `/tenant-${tenantId}`;
+    const fullPath = `${privateObjectDir}/uploads${tenantSegment}/${objectId}`;
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
 
@@ -190,24 +200,69 @@ export class ObjectStorageService {
   }
 
   /**
+   * Finalise a direct upload after the PUT has completed. A signed PUT cannot
+   * carry our ACL metadata, so setting it before upload is both ineffective and
+   * (with GCS) fails because the object does not exist yet.
+   *
+   * Only paths issued for this tenant may be claimed here. Legacy backfills are
+   * deliberately a separate, explicit operation and must be preceded by a
+   * tenant-owned database lookup in the caller.
+   */
+  async finalizeTenantUpload(objectPath: string, tenantId: number | string): Promise<string> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    const reservedPrefix = `/objects/uploads/tenant-${tenantId}/`;
+    if (!normalizedPath.startsWith(reservedPrefix)) {
+      throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+    }
+    return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  /**
+   * Backfills an ACL for a pre-tenant-namespace object. Callers may use this
+   * only after establishing ownership from a tenant-scoped DB row; it never
+   * overwrites an existing owner's ACL.
+   */
+  async backfillTenantObjectAcl(objectPath: string, tenantId: number | string): Promise<string> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!normalizedPath.startsWith("/objects/")) {
+      throw new ObjectOwnershipError("Not a private object path");
+    }
+    return this.setTenantObjectAcl(normalizedPath, tenantId);
+  }
+
+  private async setTenantObjectAcl(objectPath: string, tenantId: number | string): Promise<string> {
+    const objectFile = await this.getObjectEntityFile(objectPath);
+    const existing = await getObjectAclPolicy(objectFile);
+    if (existing?.owner && existing.owner !== String(tenantId)) {
+      throw new ObjectOwnershipError();
+    }
+    if (existing?.visibility === "public") {
+      throw new ObjectOwnershipError("Public objects cannot be attached to a tenant");
+    }
+    if (!existing?.owner) {
+      await setObjectAclPolicy(objectFile, {
+        owner: String(tenantId),
+        visibility: "private",
+      });
+    }
+    return objectPath;
+  }
+
+  /**
    * Generate a short-lived signed GET URL for an object stored via
    * getObjectEntityUploadURL / normalizeObjectEntityPath.
    * objectPath must start with /objects/  (e.g. /objects/uploads/<uuid>).
    */
   async getSignedDownloadURL(objectPath: string, ttlSec = 900): Promise<string> {
-    if (!objectPath.startsWith("/objects/")) {
-      throw new ObjectNotFoundError();
-    }
-    // e.g.  objectPath = /objects/uploads/uuid
-    // parts = ["", "objects", "uploads", "uuid"]  → slice(1) → ["objects","uploads","uuid"] → slice(1) → ["uploads","uuid"]
-    const parts = objectPath.slice(1).split("/");
-    if (parts.length < 2) throw new ObjectNotFoundError();
-    const entityId = parts.slice(1).join("/"); // "uploads/uuid"
-    let entityDir = this.getPrivateObjectDir();
-    if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
-    const fullPath = `${entityDir}${entityId}`; // "/my-bucket/uploads/uuid"
-    const { bucketName, objectName } = parseObjectPath(fullPath);
-    return signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+    // Resolve through getObjectEntityFile so callers cannot get a signed URL
+    // for a nonexistent private object.
+    const objectFile = await this.getObjectEntityFile(objectPath);
+    return signObjectURL({
+      bucketName: objectFile.bucket.name,
+      objectName: objectFile.name,
+      method: "GET",
+      ttlSec,
+    });
   }
 
   async canAccessObjectEntity({

@@ -120,7 +120,7 @@ export default function TodayScreen() {
     queryKey: ['fix-track-issues', selectedSiteId],
     queryFn: () =>
       apiFetch(
-        `/api/fix-track/issues?status=open&status=in_progress${selectedSiteId ? `&siteId=${selectedSiteId}` : ''}`,
+        `/api/fix-track/issues?status=reported&status=in_progress${selectedSiteId ? `&siteId=${selectedSiteId}` : ''}`,
       ),
     placeholderData: [],
   });
