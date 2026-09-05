@@ -21,7 +21,7 @@ export const SERVICES = {
   fixtrack: { label: "FixTrack", amountPence: 1000 },
   doctrack: { label: "DocTrack", amountPence: 1000 },
   traintrack: { label: "TrainTrack", amountPence: 1000 },
-  hottubtrack: { label: "TubTrack", amountPence: 1000 },
+  hottubtrack: { label: "HotTubTrack", amountPence: 1000 },
   treetrack: { label: "TreeTrack", amountPence: 1000 },
   biketrack: { label: "BikeTrack", amountPence: 1000 },
   aquatrack:   { label: "AquaTrack",   amountPence: 1000 },
