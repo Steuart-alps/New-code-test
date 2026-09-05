@@ -10,12 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter } from "@/components/ui/drawer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useListSites } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
-import { useIsMobile } from "@/hooks/use-mobile";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
   Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
@@ -323,21 +321,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         </F>
       </div>
 
-      <F label="Status">
-        <Select value={form.status ?? "reported"} onValueChange={v => setForm({ ...form, status: v })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {Object.entries(STATUSES).map(([k, v]) => (
-              <SelectItem key={k} value={k}>{v.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </F>
-
-      <div className="grid grid-cols-2 gap-4">
-        <F label="Resolved Date">
-          <Input type="date" value={form.resolvedDate ?? ""} onChange={e => setForm({ ...form, resolvedDate: e.target.value })} />
-        </F>
+      <div>
         <F label="Site">
           <Select value={form.siteId ? String(form.siteId) : "__none__"} onValueChange={v => setForm({ ...form, siteId: v === "__none__" ? null : Number(v) })}>
             <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
@@ -477,7 +461,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
         <div className="bg-card border rounded-xl p-5 space-y-3">
           <h3 className="font-semibold text-sm">Open issues by priority</h3>
           {byPriority.length === 0
-            ? <p className="text-sm text-muted-foreground italic">No open issues 🎉</p>
+            ? <p className="text-sm text-muted-foreground italic">No open issues</p>
             : byPriority.map(({ key, meta, count }) => (
               <div key={key} className="flex items-center gap-3">
                 <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-medium w-20 flex-shrink-0", meta.color)}>
@@ -605,7 +589,7 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
     return (
       <div className="py-20 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
         <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-        <p className="text-sm font-medium">No open issues — nothing to action right now 🎉</p>
+        <p className="text-sm font-medium">No open issues — nothing to action right now</p>
       </div>
     );
   }
@@ -641,7 +625,7 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
                   </div>
                   <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    {issue.siteName && <div className="truncate">📍 {issue.siteName}</div>}
+                    {issue.siteName && <div className="truncate flex items-center gap-1"><MapPin className="w-3 h-3" /> {issue.siteName}</div>}
                     {issue.targetDate && (
                       <div className={cn(overdue && "text-rose-600 font-medium")}>
                         Target {format(new Date(issue.targetDate), "dd/MM/yyyy")}{overdue ? " · overdue" : ""}
@@ -658,277 +642,12 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
   );
 }
 
-// ── Issue Detail Panel (mobile Drawer / desktop Dialog) ───────────────────────
-
-interface IssueDetailPanelProps {
-  issue: Issue | null;
-  open: boolean;
-  onClose: () => void;
-  onEdit: (issue: Issue) => void;
-  onQuickStatus: (issue: Issue, status: string) => Promise<void>;
-  canAdmin: boolean;
-}
-
-function IssueDetailPanel({ issue, open, onClose, onEdit, onQuickStatus, canAdmin }: IssueDetailPanelProps) {
-  const isMobile = useIsMobile();
-  const { toast } = useToast();
-  const [noteText, setNoteText] = useState("");
-  const [savingNote, setSavingNote] = useState(false);
-  const [statusBusy, setStatusBusy] = useState(false);
-
-  // Reset note field whenever a different issue is shown
-  useEffect(() => { setNoteText(""); }, [issue?.id]);
-
-  if (!issue) return null;
-
-  const statusMeta   = STATUSES[issue.status]      ?? STATUSES.reported;
-  const StatusIcon   = statusMeta.icon;
-  const typeMeta     = issueTypeMeta(issue.issueType);
-  const priorityMeta = PRIORITIES[issue.priority]  ?? PRIORITIES.medium;
-  const isOpen       = issue.status === "reported" || issue.status === "in_progress";
-
-  async function doQuickStatus(newStatus: string) {
-    setStatusBusy(true);
-    try {
-      await onQuickStatus(issue!, newStatus);
-      onClose();
-    } finally {
-      setStatusBusy(false);
-    }
-  }
-
-  async function handleNoteSubmit() {
-    if (!noteText.trim()) return;
-    setSavingNote(true);
-    try {
-      const res = await apiFetch(`/fix-track/issues/${issue!.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ solutionNotes: noteText.trim() }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
-      toast({ title: "Note saved" });
-      setNoteText("");
-      onClose(); // close so the list refreshes
-    } catch (err: any) {
-      toast({ title: "Error saving note", description: err.message, variant: "destructive" });
-    } finally {
-      setSavingNote(false);
-    }
-  }
-
-  const body = (
-    <div className="space-y-5 px-1 pb-2">
-      {/* Badges */}
-      <div className="flex flex-wrap gap-2">
-        <span className={cn("inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border font-medium", statusMeta.color)}>
-          <StatusIcon className="w-3 h-3" />{statusMeta.label}
-        </span>
-        <span className={cn("text-xs px-2 py-1 rounded-md border font-medium", typeMeta.color)}>{typeMeta.label}</span>
-        <span className={cn("text-xs px-2 py-1 rounded-md border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
-        {issue.emailRequestStatus && (
-          <span className={cn(
-            "text-xs px-2 py-1 rounded-md border font-medium",
-            issue.emailRequestStatus === "sent"
-              ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-              : issue.emailRequestStatus === "approved"
-                ? "text-blue-700 bg-blue-50 border-blue-200"
-                : issue.emailRequestStatus === "pending"
-                  ? "text-amber-700 bg-amber-50 border-amber-200"
-                  : "text-muted-foreground bg-muted border-border",
-          )}>
-            Contractor email: {issue.emailRequestStatus}
-            {issue.emailRequestMode ? ` · ${issue.emailRequestMode === "quote" ? "quote request" : "job assignment"}` : ""}
-          </span>
-        )}
-      </div>
-
-      {/* Key fields */}
-      <div className="space-y-3 text-sm">
-        {issue.description && (
-          <div className="p-3 bg-muted/40 rounded-lg">
-            <p className="text-muted-foreground text-xs font-medium mb-1 flex items-center gap-1">
-              <FileText className="w-3 h-3" />Description
-            </p>
-            <p className="text-foreground">{issue.description}</p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-muted/40 rounded-lg">
-            <p className="text-muted-foreground text-xs font-medium mb-1 flex items-center gap-1">
-              <MapPin className="w-3 h-3" />Location
-            </p>
-            <p className="font-medium">{issue.location}</p>
-          </div>
-          <div className="p-3 bg-muted/40 rounded-lg">
-            <p className="text-muted-foreground text-xs font-medium mb-1 flex items-center gap-1">
-              <User className="w-3 h-3" />Reported by
-            </p>
-            <p className="font-medium">{issue.reportedBy}</p>
-          </div>
-          {issue.assignedTo && (
-            <div className="p-3 bg-muted/40 rounded-lg">
-              <p className="text-muted-foreground text-xs font-medium mb-1 flex items-center gap-1">
-                <UserCog className="w-3 h-3" />Assigned to
-              </p>
-              <p className="font-medium">{issue.assignedTo}</p>
-            </div>
-          )}
-          {issue.targetDate && (
-            <div className="p-3 bg-muted/40 rounded-lg">
-              <p className="text-muted-foreground text-xs font-medium mb-1 flex items-center gap-1">
-                <Calendar className="w-3 h-3" />Target date
-              </p>
-              <p className={cn("font-medium", new Date(issue.targetDate) < new Date() && isOpen ? "text-rose-600" : "")}>
-                {format(new Date(issue.targetDate), "dd MMM yyyy")}
-                {new Date(issue.targetDate) < new Date() && isOpen ? " · overdue" : ""}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {issue.solutionNotes && (
-          <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
-            <p className="text-emerald-700 text-xs font-medium mb-1">Resolution notes</p>
-            <p className="text-emerald-900 text-sm">{issue.solutionNotes}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Quick action buttons */}
-      {isOpen && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Quick actions</p>
-          <div className="flex flex-wrap gap-2">
-            {issue.status === "reported" && (
-              <Button
-                size="sm"
-                onClick={() => doQuickStatus("in_progress")}
-                disabled={statusBusy}
-                className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                <Play className="w-3.5 h-3.5" />Start Work
-              </Button>
-            )}
-            {issue.status === "in_progress" && (
-              <Button
-                size="sm"
-                onClick={() => doQuickStatus("resolved")}
-                disabled={statusBusy}
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />Mark Resolved
-              </Button>
-            )}
-            {issue.status === "resolved" && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => doQuickStatus("closed")}
-                disabled={statusBusy}
-                className="gap-1.5"
-              >
-                <Clock className="w-3.5 h-3.5" />Close Issue
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => { onClose(); onEdit(issue!); }}
-              className="gap-1.5"
-            >
-              <Pencil className="w-3.5 h-3.5" />Edit Details
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Notes / resolution input */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {issue.solutionNotes ? "Update notes" : "Add a note"}
-        </p>
-        <Textarea
-          value={noteText}
-          onChange={e => setNoteText(e.target.value)}
-          rows={3}
-          placeholder="Add resolution notes, updates, or actions taken…"
-          className="resize-none"
-        />
-        <Button
-          size="sm"
-          onClick={handleNoteSubmit}
-          disabled={savingNote || !noteText.trim()}
-          className="gap-1.5"
-        >
-          {savingNote ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-          {savingNote ? "Saving…" : "Save Note"}
-        </Button>
-      </div>
-
-      {/* Attachments */}
-      {issue.mediaUrls?.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-            <Paperclip className="w-3 h-3" />Attachments ({issue.mediaUrls.length})
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {issue.mediaUrls.map(path => <MediaThumb key={path} path={path} />)}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={v => !v && onClose()}>
-        <DrawerContent className="max-h-[92dvh] flex flex-col">
-          <DrawerHeader className="text-left border-b pb-4">
-            <DrawerTitle className="font-display text-base pr-2 leading-snug">{issue.title}</DrawerTitle>
-            {issue.siteName && (
-              <p className="text-xs text-muted-foreground mt-0.5">📍 {issue.siteName}</p>
-            )}
-          </DrawerHeader>
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {body}
-          </div>
-          <DrawerFooter className="border-t pt-3">
-            <Button variant="outline" onClick={onClose} className="w-full">Close</Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-[520px] max-h-[88vh] flex flex-col overflow-hidden">
-        <DialogHeader className="border-b pb-4 flex-shrink-0">
-          <DialogTitle className="font-display pr-2 leading-snug">{issue.title}</DialogTitle>
-          <DialogDescription>
-            Review the issue, contractor communication status, notes and attachments.
-          </DialogDescription>
-          {issue.siteName && (
-            <p className="text-xs text-muted-foreground mt-0.5">📍 {issue.siteName}</p>
-          )}
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto py-4">
-          {body}
-        </div>
-        <DialogFooter className="border-t pt-3 flex-shrink-0">
-          <Button variant="outline" onClick={onClose}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FixTrackPage() {
   const { hasService, user } = useAuth();
   const canAdmin = useCanAdmin() || useIsMaintenanceManager();
+  const canEdit = user?.role !== "client_viewer";
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
   const { data: formOptions } = useFormOptions();
@@ -949,9 +668,7 @@ export default function FixTrackPage() {
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
 
-  // Detail panel (mobile-friendly view of a single issue)
-  const [detailOpen, setDetailOpen]   = useState(false);
-  const [detailIssue, setDetailIssue] = useState<Issue | null>(null);
+  const [, setLocation] = useLocation();
 
   async function load() {
     setLoading(true);
@@ -984,8 +701,7 @@ export default function FixTrackPage() {
   }
 
   function openDetail(issue: Issue) {
-    setDetailIssue(issue);
-    setDetailOpen(true);
+    setLocation(`/fix-track/${issue.id}`);
   }
 
   async function handleSave() {
@@ -997,7 +713,6 @@ export default function FixTrackPage() {
         contractorId:  form.contractorId  ? Number(form.contractorId) : null,
         assignedTo:    form.assignedTo    || null,
         targetDate:    form.targetDate    || null,
-        resolvedDate:  form.resolvedDate  || null,
         description:   form.description   || null,
         solutionNotes: form.solutionNotes || null,
       };
@@ -1008,6 +723,7 @@ export default function FixTrackPage() {
       delete payload.createdAt;
       delete payload.updatedAt;
       delete payload.createdBy;
+      delete payload.resolvedDate;
 
       if (editing) {
         const res = await apiFetch(`/fix-track/issues/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -1041,8 +757,6 @@ export default function FixTrackPage() {
       method: "PUT",
       body: JSON.stringify({
         status: newStatus,
-        resolvedDate: (newStatus === "resolved" || newStatus === "closed")
-          ? new Date().toISOString().slice(0, 10) : issue.resolvedDate,
       }),
     });
     await load();
@@ -1328,7 +1042,7 @@ export default function FixTrackPage() {
                             rel="noreferrer"
                             className="inline-flex items-center gap-1 mt-1 text-xs text-blue-700 hover:underline"
                           >
-                            📎 Completion document
+                            <Paperclip className="w-3 h-3" /> Completion document
                           </a>
                         )}
                       </div>
@@ -1342,15 +1056,15 @@ export default function FixTrackPage() {
 
                     {/* Actions */}
                     <div className="flex flex-col gap-1.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                      {issue.status === "reported" && (
+                      {canEdit && issue.status === "reported" && (
                         <Button variant="outline" size="sm" onClick={() => quickStatus(issue, "in_progress")}
                           className="text-xs h-7 px-2 whitespace-nowrap">Start</Button>
                       )}
-                      {issue.status === "in_progress" && (
+                      {canEdit && issue.status === "in_progress" && (
                         <Button variant="outline" size="sm" onClick={() => quickStatus(issue, "resolved")}
                           className="text-xs h-7 px-2 whitespace-nowrap text-emerald-700 border-emerald-300 hover:bg-emerald-50">Resolve</Button>
                       )}
-                      {issue.status === "resolved" && (
+                      {canEdit && issue.status === "resolved" && (
                         <Button variant="outline" size="sm" onClick={() => quickStatus(issue, "closed")}
                           className="text-xs h-7 px-2 whitespace-nowrap">Close</Button>
                       )}
@@ -1392,7 +1106,7 @@ export default function FixTrackPage() {
                           Awaiting manager approval
                         </span>
                       )}
-                      {issue.contractorId && !canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                      {canEdit && issue.contractorId && !canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
                         <>
                             <Button
                               variant="outline" size="sm"
@@ -1417,7 +1131,7 @@ export default function FixTrackPage() {
                             </Button>
                         </>
                       )}
-                      {issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
+                      {canEdit && issue.contractorId && canAdmin && !["pending", "approved", "sent", "sending"].includes(issue.emailRequestStatus ?? "") && (
                         <>
                           <Button variant="outline" size="sm"
                             onClick={() => handleRequestSend(issue, "assign")}
@@ -1447,10 +1161,12 @@ export default function FixTrackPage() {
                         </span>
                       )}
 
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(issue)}>
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                      {canAdmin && (
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(issue)}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                      {canEdit && canAdmin && (
                         <Button variant="ghost" size="icon"
                           className="h-7 w-7 text-destructive hover:bg-destructive/10"
                           onClick={() => handleDelete(issue.id)}>
@@ -1466,16 +1182,6 @@ export default function FixTrackPage() {
         )}
       </>}
       </div>
-
-      {/* Issue detail panel (Drawer on mobile, Dialog on desktop) */}
-      <IssueDetailPanel
-        issue={detailIssue}
-        open={detailOpen}
-        onClose={() => { setDetailOpen(false); load(); }}
-        onEdit={openEdit}
-        onQuickStatus={async (issue, status) => { await quickStatus(issue, status); }}
-        canAdmin={canAdmin}
-      />
 
       {/* Re-notify confirmation dialog */}
       <Dialog open={!!renotifyIssue} onOpenChange={open => !open && setRenotifyIssue(null)}>

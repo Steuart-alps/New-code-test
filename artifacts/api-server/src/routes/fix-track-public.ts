@@ -158,10 +158,43 @@ router.get("/:token", async (req, res) => {
   // ── Booked: act immediately ───────────────────────────────────────────────
 
   if (t.action === "booked") {
-    await db.execute(sql`UPDATE fix_track_action_tokens SET used_at = now() WHERE id = ${t.id}`);
-    await db.execute(sql`
-      UPDATE fix_track_issues SET status = 'in_progress', updated_at = now() WHERE id = ${t.issue_id}
-    `);
+    let outcome: "updated" | "used" | "invalid" = "used";
+    try {
+      outcome = await db.transaction(async (tx) => {
+        const tokenClaim = await tx.execute(sql`
+          UPDATE fix_track_action_tokens
+          SET used_at = now()
+          WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now()
+          RETURNING id
+        `);
+        if (!(tokenClaim.rows as any[])[0]) return "used" as const;
+
+        const issueUpdate = await tx.execute(sql`
+          UPDATE fix_track_issues
+          SET status = 'in_progress', updated_at = now()
+          WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'reported'
+          RETURNING id
+        `);
+        if (!(issueUpdate.rows as any[])[0]) throw new Error("INVALID_TRANSITION");
+
+        await tx.execute(sql`
+          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
+          VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
+        `);
+        return "updated" as const;
+      });
+    } catch (err: any) {
+      if (err?.message === "INVALID_TRANSITION") outcome = "invalid";
+      else throw err;
+    }
+    if (outcome === "used") {
+      return res.status(409).send(shell("Already Actioned",
+        `<div class="stitle">Already recorded</div><div class="ssub">This link has already been used.</div>`));
+    }
+    if (outcome === "invalid") {
+      return res.status(409).send(shell("Status Changed",
+        `<div class="stitle">Job cannot be booked</div><div class="ssub">The issue has already moved to another status.</div>`));
+    }
     return res.send(shell("Job Booked",
       `<div class="big">📅</div>
        <div class="stitle">Job marked as Booked</div>
@@ -247,20 +280,47 @@ router.post("/:token", async (req, res) => {
   const completionObjectPath = typeof req.body?.completionObjectPath === "string" ? req.body.completionObjectPath : null;
   const today                = new Date().toISOString().slice(0, 10);
 
-  await db.execute(sql`
-    UPDATE fix_track_action_tokens
-    SET    used_at = now(), completion_notes = ${notes}, completion_object_path = ${completionObjectPath}
-    WHERE  id = ${t.id}
-  `);
-  await db.execute(sql`
-    UPDATE fix_track_issues
-    SET    status                   = 'resolved',
-           resolved_date            = ${today},
-           solution_notes           = COALESCE(${notes}, solution_notes),
-           completion_document_path = COALESCE(${completionObjectPath}, completion_document_path),
-           updated_at               = now()
-    WHERE  id = ${t.issue_id}
-  `);
+  let outcome: "updated" | "used" | "invalid" = "used";
+  try {
+    outcome = await db.transaction(async (tx) => {
+      const tokenClaim = await tx.execute(sql`
+        UPDATE fix_track_action_tokens
+        SET used_at = now(), completion_notes = ${notes}, completion_object_path = ${completionObjectPath}
+        WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now()
+        RETURNING id
+      `);
+      if (!(tokenClaim.rows as any[])[0]) return "used" as const;
+
+      const issueUpdate = await tx.execute(sql`
+        UPDATE fix_track_issues
+        SET status                   = 'resolved',
+            resolved_date            = ${today},
+            solution_notes           = COALESCE(${notes}, solution_notes),
+            completion_document_path = COALESCE(${completionObjectPath}, completion_document_path),
+            updated_at               = now()
+        WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'in_progress'
+        RETURNING id
+      `);
+      if (!(issueUpdate.rows as any[])[0]) throw new Error("INVALID_TRANSITION");
+
+      await tx.execute(sql`
+        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
+        VALUES (${t.client_id}, ${t.issue_id}, 'status', 'resolved', now())
+      `);
+      if (notes) {
+        await tx.execute(sql`
+          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
+          VALUES (${t.client_id}, ${t.issue_id}, 'note', ${notes}, now())
+        `);
+      }
+      return "updated" as const;
+    });
+  } catch (err: any) {
+    if (err?.message === "INVALID_TRANSITION") outcome = "invalid";
+    else throw err;
+  }
+  if (outcome === "used") return res.status(409).send("Already actioned");
+  if (outcome === "invalid") return res.status(409).send("Issue must be in progress before it can be completed");
 
   res.status(200).send("ok");
 });

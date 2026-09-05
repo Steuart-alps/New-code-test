@@ -37,4 +37,16 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const fixTrackIssueActivityTable = pgTable("fix_track_issue_activity", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  issueId: integer("issue_id").notNull().references(() => fixTrackIssuesTable.id, { onDelete: "cascade" }),
+  eventType: text("event_type").notNull(),
+  status: text("status"),
+  note: text("note"),
+  createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type FixTrackIssue = typeof fixTrackIssuesTable.$inferSelect;
+export type FixTrackIssueActivity = typeof fixTrackIssueActivityTable.$inferSelect;

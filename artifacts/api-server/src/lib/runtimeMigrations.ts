@@ -1536,6 +1536,82 @@ async function migrateCheckPhotos() {
 
 // ---- FixTrack v2: contractor trades, contractorId on issues, action tokens ----
 async function migrateFixTrackV2() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fix_track_issue_activity" (
+      "id"         serial PRIMARY KEY,
+      "client_id"  integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "issue_id"   integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+      "event_type" text NOT NULL CHECK ("event_type" IN ('status', 'note')),
+      "status"     text,
+      "note"       text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_fix_track_issue_activity_issue"
+    ON "fix_track_issue_activity" ("issue_id", "created_at")
+  `);
+  await db.execute(sql`
+    INSERT INTO "fix_track_issue_activity" ("client_id", "issue_id", "event_type", "status", "created_by", "created_at")
+    SELECT i.client_id, i.id, 'status', 'reported', i.created_by, i.created_at
+    FROM "fix_track_issues" i
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "fix_track_issue_activity" a
+      WHERE a.issue_id = i.id AND a.event_type = 'status' AND a.status = 'reported'
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM "fix_track_issue_activity" a
+    USING "fix_track_issues" i
+    WHERE a.issue_id = i.id
+      AND a.event_type = 'status'
+      AND CASE a.status
+            WHEN 'reported' THEN 0
+            WHEN 'in_progress' THEN 1
+            WHEN 'resolved' THEN 2
+            WHEN 'closed' THEN 3
+            ELSE 99
+          END
+          >
+          CASE i.status
+            WHEN 'reported' THEN 0
+            WHEN 'in_progress' THEN 1
+            WHEN 'resolved' THEN 2
+            WHEN 'closed' THEN 3
+            ELSE 0
+          END
+  `);
+  await db.execute(sql`
+    INSERT INTO "fix_track_issue_activity" ("client_id", "issue_id", "event_type", "status", "created_by", "created_at")
+    SELECT i.client_id, i.id, 'status', 'resolved', i.created_by, i.resolved_date::timestamp
+    FROM "fix_track_issues" i
+    WHERE i.resolved_date IS NOT NULL
+      AND i.status IN ('resolved', 'closed')
+      AND NOT EXISTS (
+      SELECT 1 FROM "fix_track_issue_activity" a
+      WHERE a.issue_id = i.id AND a.event_type = 'status' AND a.status = 'resolved'
+    )
+  `);
+  await db.execute(sql`
+    INSERT INTO "fix_track_issue_activity" ("client_id", "issue_id", "event_type", "status", "created_by", "created_at")
+    SELECT i.client_id, i.id, 'status', 'closed', i.created_by, i.updated_at
+    FROM "fix_track_issues" i
+    WHERE i.status = 'closed' AND NOT EXISTS (
+      SELECT 1 FROM "fix_track_issue_activity" a
+      WHERE a.issue_id = i.id AND a.event_type = 'status' AND a.status = 'closed'
+    )
+  `);
+  await db.execute(sql`
+    INSERT INTO "fix_track_issue_activity" ("client_id", "issue_id", "event_type", "note", "created_by", "created_at")
+    SELECT i.client_id, i.id, 'note', i.solution_notes, i.created_by, i.updated_at
+    FROM "fix_track_issues" i
+    WHERE i.solution_notes IS NOT NULL AND i.solution_notes <> '' AND NOT EXISTS (
+      SELECT 1 FROM "fix_track_issue_activity" a
+      WHERE a.issue_id = i.id AND a.event_type = 'note'
+    )
+  `);
+
   // Contractor trade specialisms (JSONB array matching fix-track issue types)
   await db.execute(sql`
     ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "trades" jsonb NOT NULL DEFAULT '[]'

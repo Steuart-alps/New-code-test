@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { fixTrackIssuesTable, sitesTable, contractorsTable } from "@workspace/db/schema";
+import { fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -175,11 +175,38 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
     .limit(1);
   if (!r) return res.status(404).json({ error: "Not found" });
 
+  const activity = await db
+    .select({
+      id: fixTrackIssueActivityTable.id,
+      eventType: fixTrackIssueActivityTable.eventType,
+      status: fixTrackIssueActivityTable.status,
+      note: fixTrackIssueActivityTable.note,
+      createdAt: fixTrackIssueActivityTable.createdAt,
+      createdBy: usersTable.name,
+    })
+    .from(fixTrackIssueActivityTable)
+    .leftJoin(usersTable, eq(fixTrackIssueActivityTable.createdBy, usersTable.id))
+    .where(and(
+      eq(fixTrackIssueActivityTable.issueId, id),
+      eq(fixTrackIssueActivityTable.clientId, clientId),
+    ))
+    .orderBy(fixTrackIssueActivityTable.createdAt);
+
   res.json({
     ...r.issue,
     siteName:        r.site?.name        ?? null,
     contractorName:  r.contractor?.name  ?? null,
     contractorEmail: r.contractor?.email ?? null,
+    statusEvents: activity.filter(a => a.eventType === "status").map(a => ({
+      status: a.status,
+      createdAt: a.createdAt,
+    })),
+    notes: activity.filter(a => a.eventType === "note").map(a => ({
+      id: a.id,
+      note: a.note,
+      createdBy: a.createdBy ?? "Former user",
+      createdAt: a.createdAt,
+    })),
   });
 });
 
@@ -193,6 +220,10 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const data = parsed.data;
+  if (data.status && data.status !== "reported") {
+    return res.status(400).json({ error: "New issues must start with reported status" });
+  }
+  delete data.resolvedDate;
   if (data.issueType !== undefined) {
     const allowedTypes = await getEffectiveOptionList(clientId, "fixtrack_issue_types");
     if (!allowedTypes.includes(data.issueType)) return res.status(400).json({ error: "Invalid issue type" });
@@ -213,6 +244,13 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   const [row] = await db.insert(fixTrackIssuesTable)
     .values({ ...data, contractorId, clientId, createdBy: (req.session as any).userId ?? null })
     .returning();
+  await db.insert(fixTrackIssueActivityTable).values({
+    clientId,
+    issueId: row.id,
+    eventType: "status",
+    status: row.status,
+    createdBy: (req.session as any).userId ?? null,
+  });
   res.status(201).json(row);
 });
 
@@ -229,6 +267,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data as any;
+  delete data.resolvedDate;
   if ("issueType" in data && data.issueType != null) {
     // Allow a value unchanged from the stored record even if it is no longer in
     // the client's effective list; reject only NEW values not in the list.
@@ -250,14 +289,60 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     );
   }
 
-  const [row] = await db
-    .update(fixTrackIssuesTable)
-    .set({ ...data, updatedAt: new Date() })
-    .where(and(...updateConditions))
-    .returning();
+  const transitionResult = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ status: fixTrackIssuesTable.status })
+      .from(fixTrackIssuesTable)
+      .where(and(...updateConditions))
+      .limit(1);
+    if (!current) return { kind: "not_found" as const };
 
-  if (!row) return res.status(404).json({ error: "Not found" });
-  res.json(row);
+    const nextStatus: Record<string, string | undefined> = {
+      reported: "in_progress",
+      in_progress: "resolved",
+      resolved: "closed",
+      closed: undefined,
+    };
+    const isStatusChange = data.status && data.status !== current.status;
+    if (isStatusChange && data.status !== nextStatus[current.status]) {
+      return { kind: "invalid_transition" as const, currentStatus: current.status };
+    }
+
+    const updateData = { ...data, updatedAt: new Date() };
+    if (data.status === "resolved" && isStatusChange) {
+      updateData.resolvedDate = new Date().toISOString().slice(0, 10);
+    }
+    const atomicConditions = isStatusChange
+      ? [...updateConditions, eq(fixTrackIssuesTable.status, current.status)]
+      : updateConditions;
+    const updated = await tx.update(fixTrackIssuesTable)
+      .set(updateData)
+      .where(and(...atomicConditions))
+      .returning();
+
+    if (!updated[0]) return { kind: "conflict" as const };
+    if (isStatusChange) {
+      await tx.insert(fixTrackIssueActivityTable).values({
+        clientId,
+        issueId: id,
+        eventType: "status",
+        status: data.status,
+        createdBy: (req.session as any).userId ?? null,
+      });
+    }
+    return { kind: "updated" as const, row: updated[0] };
+  });
+
+  if (transitionResult.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (transitionResult.kind === "invalid_transition") {
+    return res.status(409).json({
+      error: `Issue must move to the next status from ${transitionResult.currentStatus}`,
+      currentStatus: transitionResult.currentStatus,
+    });
+  }
+  if (transitionResult.kind === "conflict") {
+    return res.status(409).json({ error: "Issue status changed; refresh and try again" });
+  }
+  res.json(transitionResult.row);
 });
 
 // ── Append a note (atomic — safe under concurrent writers) ───────────────────
@@ -283,17 +368,28 @@ router.post("/issues/:id/notes", requireAuth, denyViewers, async (req, res) => {
 
   // Append server-side in one statement so concurrent notes never clobber
   // each other.
-  const result = await db.execute(sql`
-    UPDATE fix_track_issues
-    SET solution_notes = CASE
-          WHEN solution_notes IS NULL OR solution_notes = '' THEN ${entry}
-          ELSE solution_notes || E'\n\n' || ${entry}
-        END,
-        updated_at = now()
-    WHERE id = ${id} AND client_id = ${clientId}${deptClause}
-    RETURNING *
-  `);
-  const row = (result.rows ?? [])[0];
+  const row = await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      UPDATE fix_track_issues
+      SET solution_notes = CASE
+            WHEN solution_notes IS NULL OR solution_notes = '' THEN ${entry}
+            ELSE solution_notes || E'\n\n' || ${entry}
+          END,
+          updated_at = now()
+      WHERE id = ${id} AND client_id = ${clientId}${deptClause}
+      RETURNING *
+    `);
+    const updated = (result.rows ?? [])[0];
+    if (!updated) return null;
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId,
+      issueId: id,
+      eventType: "note",
+      note: parsed.data.note.trim(),
+      createdBy: (req.session as any).userId ?? null,
+    });
+    return updated;
+  });
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
