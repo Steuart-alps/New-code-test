@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ShieldOff, ArrowLeft } from "lucide-react";
+import { KeyRound, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,7 +55,7 @@ export default function TwoFaRecoverPage() {
           <div className="bg-[#162D42] px-8 py-12 text-center relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 blur-[40px] pointer-events-none" />
             <div className="flex justify-center mb-6 relative z-10">
-              <ShieldOff className="w-12 h-12 text-primary" />
+               <KeyRound className="w-12 h-12 text-primary" />
             </div>
             <h1 className="text-3xl font-display text-white mb-2 relative z-10">
               Account Recovery
@@ -79,8 +79,8 @@ export default function TwoFaRecoverPage() {
                 </div>
                 <h2 className="text-2xl font-display text-[#162D42] mb-3">Access restored</h2>
                 <p className="text-sm text-muted-foreground font-light">
-                  Two-factor authentication has been disabled. You can re-enable it from your account settings.
-                  Redirecting…
+                   You are signed in. That recovery code has been used, and your other recovery codes
+                   and authenticator app remain active. Redirecting…
                 </p>
               </motion.div>
             ) : (
@@ -98,9 +98,8 @@ export default function TwoFaRecoverPage() {
 
                 <h2 className="text-2xl font-display text-[#162D42] mb-3">Recover account access</h2>
                 <p className="text-sm text-muted-foreground mb-8 font-light leading-relaxed">
-                  Enter your email, password and the recovery code you saved when you set up two-factor
-                  authentication. This will disable 2FA so you can sign in normally and re-enrol with a
-                  new device.
+                   Enter your email, password and one of the recovery codes you saved when you set up
+                   two-factor authentication. The code can only be used once.
                 </p>
 
                 <form onSubmit={handleSubmit} className="space-y-5">

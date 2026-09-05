@@ -19,6 +19,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const [usingRecoveryCode, setUsingRecoveryCode] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -190,16 +191,22 @@ export default function LoginPage() {
                   </div>
                   <h2 className="text-2xl font-display text-[#162D42] mb-2 text-center">Two-factor authentication</h2>
                   <p className="text-sm text-muted-foreground mb-8 text-center font-light">
-                    Open your authenticator app and enter the 6-digit code — or use your recovery
-                    code if you've lost access to your device.
+                     {usingRecoveryCode
+                       ? "Enter one of the recovery codes you saved when you enabled two-factor authentication."
+                       : "Open your authenticator app and enter the 6-digit code."}
                   </p>
                   <form onSubmit={handleTotp} className="space-y-5">
                     <div className="space-y-2">
-                      <Label htmlFor="totp-code" className="text-[#1A1A1A]">Authentication code</Label>
+                       <div className="flex items-center justify-between">
+                         <Label htmlFor="totp-code" className="text-[#1A1A1A]">{usingRecoveryCode ? "Recovery code" : "Authentication code"}</Label>
+                         <button type="button" onClick={() => { setUsingRecoveryCode(value => !value); setTotpCode(""); setError(""); }} className="text-xs text-primary hover:underline">
+                           {usingRecoveryCode ? "Use authenticator code" : "Use a recovery code"}
+                         </button>
+                       </div>
                       <Input
                         id="totp-code"
                         type="text"
-                        placeholder="000 000 or recovery code"
+                         placeholder={usingRecoveryCode ? "XXXX-XXXX-XXXX" : "000 000"}
                         value={totpCode}
                         onChange={e => setTotpCode(e.target.value.replace(/[^0-9A-Za-z\s-]/g, "").slice(0, 16))}
                         required

@@ -1975,14 +1975,15 @@ function TwoFactorCard() {
   const { user, refresh } = useAuth();
   const { toast } = useToast();
 
-  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "disabling";
+  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "disabling" | "regenerating";
   const [step, setStep] = useState<SetupStep>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [disablePassword, setDisablePassword] = useState("");
   const [error, setError] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [regeneratePassword, setRegeneratePassword] = useState("");
 
   const enabled = user?.totpEnabled ?? false;
 
@@ -2005,9 +2006,9 @@ function TwoFactorCard() {
     setError("");
     setStep("verifying");
     try {
-      const result = await apiFetch<{ ok: boolean; recoveryCode?: string }>("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
+      const result = await apiFetch<{ ok: boolean; recoveryCodes: string[] }>("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
       await refresh();
-      if (result.recoveryCode) setRecoveryCode(result.recoveryCode);
+      setRecoveryCodes(result.recoveryCodes);
       toast({ title: "Two-factor authentication enabled" });
       setStep("idle");
       setCode("");
@@ -2018,6 +2019,33 @@ function TwoFactorCard() {
       setCode("");
       setStep("scanning");
     }
+  }
+
+  async function handleRegenerate(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      const result = await apiFetch<{ recoveryCodes: string[] }>("/auth/2fa/recovery-codes/regenerate", {
+        method: "POST",
+        body: JSON.stringify({ password: regeneratePassword }),
+      });
+      setRecoveryCodes(result.recoveryCodes);
+      setRegeneratePassword("");
+      setStep("idle");
+      toast({ title: "Recovery codes regenerated", description: "Your previous recovery codes no longer work." });
+    } catch (e: any) {
+      setError(e.message ?? "Failed to regenerate recovery codes");
+    }
+  }
+
+  function downloadRecoveryCodes() {
+    const content = `ComplyTrack recovery codes\n\n${recoveryCodes.join("\n")}\n\nEach code can be used once. Store these somewhere safe.`;
+    const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "complytrack-recovery-codes.txt";
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleDisable(e: React.FormEvent) {
@@ -2049,19 +2077,29 @@ function TwoFactorCard() {
       <CardContent className="pt-6">
         {enabled ? (
           <div className="space-y-4">
-            {recoveryCode && (
+            {recoveryCodes.length > 0 && (
               <div className="px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm space-y-2">
-                <p className="font-semibold">Save your recovery code</p>
+                <p className="font-semibold">Save your recovery codes</p>
                 <p>
-                  If you lose access to your authenticator app, this one-time code is the only way to
-                  sign back in on your own. Store it somewhere safe — it will not be shown again.
+                  Each code can be used once if you lose access to your authenticator app. Store them
+                  somewhere safe — they will not be shown again after you close this screen.
                 </p>
-                <code className="block font-mono text-base tracking-widest bg-white border border-amber-200 rounded-sm px-3 py-2 select-all">
-                  {recoveryCode}
-                </code>
-                <Button size="sm" variant="outline" className="rounded-sm" onClick={() => setRecoveryCode(null)}>
-                  I've saved my recovery code
-                </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 bg-white border border-amber-200 rounded-sm p-3">
+                  {recoveryCodes.map((recoveryCode) => (
+                    <code key={recoveryCode} className="font-mono text-sm tracking-wider select-all">{recoveryCode}</code>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="rounded-sm" onClick={downloadRecoveryCodes}>
+                    <Download className="w-4 h-4 mr-1.5" /> Download codes
+                  </Button>
+                  <Button size="sm" variant="outline" className="rounded-sm" onClick={() => window.print()}>
+                    Print codes
+                  </Button>
+                  <Button size="sm" className="rounded-sm" onClick={() => setRecoveryCodes([])}>
+                    I've saved my codes
+                  </Button>
+                </div>
               </div>
             )}
             <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
@@ -2069,9 +2107,25 @@ function TwoFactorCard() {
               <span>Two-factor authentication is <strong>active</strong> on your account.</span>
             </div>
             {step === "idle" && (
-              <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }}>
-                <ShieldOff className="w-4 h-4" /> Disable two-factor authentication
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }}>
+                  <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
+                </Button>
+                <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }}>
+                  <ShieldOff className="w-4 h-4" /> Disable two-factor authentication
+                </Button>
+              </div>
+            )}
+            {step === "regenerating" && (
+              <form onSubmit={handleRegenerate} className="space-y-3 max-w-sm">
+                <p className="text-sm text-muted-foreground">For security, existing codes cannot be viewed. Enter your password to replace them with 10 new codes.</p>
+                <Input type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus className="rounded-sm" />
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" className="rounded-sm" disabled={!regeneratePassword}>Regenerate codes</Button>
+                  <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
+                </div>
+              </form>
             )}
             {step === "disabling" && (
               <form onSubmit={handleDisable} className="space-y-3 max-w-sm">

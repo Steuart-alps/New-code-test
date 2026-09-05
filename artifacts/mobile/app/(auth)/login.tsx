@@ -27,6 +27,7 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [needs2fa, setNeeds2fa] = useState(false);
   const [code, setCode] = useState('');
+  const [usingRecoveryCode, setUsingRecoveryCode] = useState(false);
   const passwordRef = useRef<TextInput>(null);
   const codeRef = useRef<TextInput>(null);
 
@@ -192,7 +193,7 @@ export default function LoginScreen() {
                     { color: colors.foreground, marginTop: 16 },
                   ]}
                 >
-                  Verification code
+                  {usingRecoveryCode ? 'Recovery code' : 'Verification code'}
                 </Text>
                 <TextInput
                   ref={codeRef}
@@ -205,11 +206,15 @@ export default function LoginScreen() {
                     },
                   ]}
                   value={code}
-                  onChangeText={setCode}
-                  placeholder="6-digit code from your authenticator app"
+                  onChangeText={(value) => setCode(
+                    usingRecoveryCode
+                      ? value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 14)
+                      : value.replace(/\D/g, '').slice(0, 6),
+                  )}
+                  placeholder={usingRecoveryCode ? 'XXXX-XXXX-XXXX' : '6-digit authenticator code'}
                   placeholderTextColor={colors.mutedForeground}
-                  keyboardType="number-pad"
-                  autoCapitalize="none"
+                  keyboardType={usingRecoveryCode ? 'default' : 'number-pad'}
+                  autoCapitalize={usingRecoveryCode ? 'characters' : 'none'}
                   autoCorrect={false}
                   returnKeyType="go"
                   onSubmitEditing={handleLogin}
@@ -218,9 +223,23 @@ export default function LoginScreen() {
                 <Text
                   style={[styles.cardSub, { color: colors.mutedForeground, marginTop: 6, marginBottom: 0 }]}
                 >
-                  Two-factor authentication is enabled on this account. Enter the
-                  code from your authenticator app, or a recovery code.
+                   {usingRecoveryCode
+                     ? 'Enter one of the recovery codes you saved when you enabled two-factor authentication.'
+                     : 'Two-factor authentication is enabled on this account. Enter the code from your authenticator app.'}
                 </Text>
+                 <TouchableOpacity
+                   onPress={() => {
+                     setUsingRecoveryCode((value) => !value);
+                     setCode('');
+                     setError('');
+                     setTimeout(() => codeRef.current?.focus(), 50);
+                   }}
+                   style={{ marginTop: 10 }}
+                 >
+                   <Text style={{ color: colors.primary, fontWeight: '600' }}>
+                     {usingRecoveryCode ? 'Use authenticator code' : 'Use a recovery code'}
+                   </Text>
+                 </TouchableOpacity>
               </>
             )}
 

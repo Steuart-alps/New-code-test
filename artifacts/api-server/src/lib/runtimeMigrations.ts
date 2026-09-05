@@ -472,9 +472,6 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" date`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "gas_safe_registration" text`);
 
-    // ---- 2FA recovery code (Task #52) ----
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_recovery_code text`);
-
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "staff_training_records" (
         "id" serial PRIMARY KEY,
@@ -1037,6 +1034,36 @@ async function migrateTwoFactor() {
   await db.execute(sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "totp_secret" text`);
   await db.execute(sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "totp_enabled" boolean NOT NULL DEFAULT false`);
   await db.execute(sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "totp_recovery_hash" text`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "totp_recovery_codes" (
+      "id" serial PRIMARY KEY,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "code_hash" text NOT NULL,
+      "used_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT "UQ_totp_recovery_codes_hash" UNIQUE ("code_hash")
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_totp_recovery_codes_user_unused"
+    ON "totp_recovery_codes" ("user_id")
+    WHERE "used_at" IS NULL
+  `);
+  // Preserve the one recovery code issued by the previous implementation.
+  // Its value was already hashed with the same normalization and SHA-256
+  // scheme, so it can safely become the user's first unused row.
+  await db.execute(sql`
+    INSERT INTO "totp_recovery_codes" ("user_id", "code_hash")
+    SELECT "id", "totp_recovery_hash"
+    FROM "users"
+    WHERE "totp_recovery_hash" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "totp_recovery_codes"
+        WHERE "totp_recovery_codes"."user_id" = "users"."id"
+      )
+    ON CONFLICT ("code_hash") DO NOTHING
+  `);
 }
 
 // ---- Staff roster ----

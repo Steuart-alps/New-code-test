@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomBytes, createHash, timingSafeEqual } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import QRCode from "qrcode";
 import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp";
 import { getUserWithClientByEmail } from "../lib/auth";
@@ -23,9 +23,8 @@ import { nameIsClean } from "../lib/contentFilter";
 const router = Router();
 
 // ── 2FA recovery codes ──────────────────────────────────────────────────────
-// A single one-time recovery code (format XXXX-XXXX-XXXX, no ambiguous chars)
-// is issued when 2FA is enabled. Using it signs the user in and disables 2FA
-// so they can re-enrol with a new device.
+// Ten one-time recovery codes (format XXXX-XXXX-XXXX, no ambiguous chars) are
+// issued when 2FA is enabled or regenerated. Only SHA-256 hashes are stored.
 const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 function generateRecoveryCode(): string {
@@ -38,10 +37,39 @@ function hashRecoveryCode(code: string): string {
   return createHash("sha256").update(code.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
 }
 
-function recoveryCodeMatches(code: string, storedHash: string): boolean {
-  const a = Buffer.from(hashRecoveryCode(code), "hex");
-  const b = Buffer.from(storedHash, "hex");
-  return a.length === b.length && timingSafeEqual(a, b);
+function generateRecoveryCodes(): string[] {
+  return Array.from({ length: 10 }, generateRecoveryCode);
+}
+
+async function replaceRecoveryCodes(userId: number): Promise<string[]> {
+  const codes = generateRecoveryCodes();
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${userId}`);
+    for (const code of codes) {
+      await tx.execute(sql`
+        INSERT INTO totp_recovery_codes (user_id, code_hash)
+        VALUES (${userId}, ${hashRecoveryCode(code)})
+      `);
+    }
+  });
+  return codes;
+}
+
+async function consumeRecoveryCode(userId: number, code: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    UPDATE totp_recovery_codes
+    SET used_at = now()
+    WHERE id = (
+      SELECT id
+      FROM totp_recovery_codes
+      WHERE user_id = ${userId}
+        AND code_hash = ${hashRecoveryCode(code)}
+        AND used_at IS NULL
+      LIMIT 1
+    ) AND used_at IS NULL
+    RETURNING id
+  `);
+  return (result.rows?.length ?? 0) > 0;
 }
 
 const LoginBody = z.object({
@@ -90,7 +118,7 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
 
   req.session.userId = result.user.id;
 
-  const { passwordHash: _, totpSecret: __, ...safeUser } = result.user;
+  const { passwordHash: _, totpSecret: __, totpRecoveryHash: ___, ...safeUser } = result.user;
   let billingLocked = false;
   let services: "all" | string[] = "all";
   if (safeUser.clientId != null) {
@@ -125,30 +153,22 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
     res.status(400).json({ error: "Invalid session" }); return;
   }
 
-  let usedRecoveryCode = false;
   if (/^\d{6}$/.test(trimmed)) {
     if (!verifyToken(trimmed, user.totpSecret)) {
       res.status(401).json({ error: "Incorrect code. Please try again." }); return;
     }
   } else {
     // Not a 6-digit TOTP — treat as a one-time recovery code.
-    if (!user.totpRecoveryHash || !recoveryCodeMatches(trimmed, user.totpRecoveryHash)) {
+    if (!await consumeRecoveryCode(user.id, trimmed)) {
       res.status(401).json({ error: "Incorrect code. Please try again." }); return;
     }
-    // Recovery code is single-use: sign in and disable 2FA so the user can
-    // re-enrol with a new device.
-    usedRecoveryCode = true;
-    await db.update(usersTable)
-      .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-      .where(eq(usersTable.id, user.id));
-    user.totpEnabled = false;
   }
 
   delete (req.session as any).pending2faUserId;
   req.session.userId = user.id;
 
   const withClient = await getUserWithClientByEmail(user.email);
-  const { passwordHash: _p, totpSecret: _t, ...safeUser } = user;
+  const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
   let billingLocked = false;
   let services: "all" | string[] = "all";
   if (user.clientId != null) {
@@ -158,11 +178,10 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
     } catch {}
   }
   res.json({
-    user: { ...safeUser, totpEnabled: !usedRecoveryCode },
+    user: safeUser,
     client: withClient?.client ?? null,
     billingLocked,
     services,
-    ...(usedRecoveryCode ? { usedRecoveryCode: true } : {}),
   });
 });
 
@@ -192,18 +211,30 @@ router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
   if (!verifyToken(code.trim(), pendingSecret)) {
     res.status(401).json({ error: "Incorrect code — please check your authenticator app." }); return;
   }
-  const recoveryCode = generateRecoveryCode();
+  const recoveryCodes = await replaceRecoveryCodes(req.currentUser!.id);
   await db.update(usersTable)
     .set({
       totpSecret: pendingSecret,
       totpEnabled: true,
-      totpRecoveryHash: hashRecoveryCode(recoveryCode),
       updatedAt: new Date(),
     })
     .where(eq(usersTable.id, req.currentUser!.id));
   delete (req.session as any).pendingTotpSecret;
-  // The plaintext recovery code is returned exactly once — it is stored hashed.
-  res.json({ ok: true, recoveryCode });
+  // Plaintext codes are returned exactly once — only their hashes are stored.
+  res.json({ ok: true, recoveryCodes });
+});
+
+// POST /auth/2fa/recovery-codes/regenerate — replace all remaining codes.
+router.post("/auth/2fa/recovery-codes/regenerate", requireAuth, async (req, res) => {
+  const { password } = req.body as { password?: string };
+  if (!password) { res.status(400).json({ error: "Password required" }); return; }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+  if (!user || !user.totpEnabled) { res.status(400).json({ error: "Two-factor authentication is not enabled" }); return; }
+  if (!await verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Incorrect password" }); return;
+  }
+  const recoveryCodes = await replaceRecoveryCodes(user.id);
+  res.json({ recoveryCodes });
 });
 
 // POST /auth/2fa/recover — account recovery for users locked out of their authenticator app.
@@ -224,18 +255,13 @@ router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
     res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
   }
 
-  if (!result.user.totpRecoveryHash) {
-    res.status(400).json({ error: "No recovery code is associated with this account" }); return;
+  if (!result.user.totpEnabled) {
+    res.status(400).json({ error: "Two-factor authentication is not enabled on this account" }); return;
   }
 
-  if (!recoveryCodeMatches(recoveryCode.trim(), result.user.totpRecoveryHash)) {
+  if (!await consumeRecoveryCode(result.user.id, recoveryCode.trim())) {
     res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
   }
-
-  // Recovery code matched — disable 2FA so the user can re-enrol with a new device
-  await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-    .where(eq(usersTable.id, result.user.id));
 
   // Establish a session so they are immediately logged in
   req.session.userId = result.user.id;
@@ -251,7 +277,7 @@ router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
 
   const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = result.user;
   res.json({
-    user: { ...safeUser, totpEnabled: false },
+    user: safeUser,
     client: result.client ?? null,
     billingLocked,
     services,
@@ -270,6 +296,7 @@ router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
   await db.update(usersTable)
     .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
     .where(eq(usersTable.id, user.id));
+  await db.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${user.id}`);
   res.json({ ok: true });
 });
 
@@ -712,14 +739,11 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
         return;
       }
     } else {
-      // Treat as a one-time recovery code; single-use, disables 2FA for re-enrolment.
-      if (!result.user.totpRecoveryHash || !recoveryCodeMatches(trimmed, result.user.totpRecoveryHash)) {
+      // Treat as a one-time recovery code and consume only the matching row.
+      if (!await consumeRecoveryCode(result.user.id, trimmed)) {
         res.status(401).json({ error: "Incorrect code. Please try again." });
         return;
       }
-      await db.update(usersTable)
-        .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-        .where(eq(usersTable.id, result.user.id));
     }
   }
 

@@ -44,6 +44,14 @@ async function main() {
     companyName: `TwoFA Co ${ts}`,
   });
   check("register admin", reg.status === 200 || reg.status === 201, `got ${reg.status}`);
+  check("test verification token returned", typeof reg.data?.verificationToken === "string");
+  const verified = await admin("GET", `/auth/verify-email?token=${encodeURIComponent(reg.data?.verificationToken ?? "")}`);
+  check("verify admin email", verified.status === 200, `got ${verified.status}`);
+  const adminLogin = await admin("POST", "/auth/login", {
+    email: `twofa-admin-${ts}@test.local`,
+    password: "password-123",
+  });
+  check("login verified admin", adminLogin.status === 200, `got ${adminLogin.status}`);
 
   const me = await admin("GET", "/auth/me");
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
@@ -65,8 +73,11 @@ async function main() {
   const code = generateToken(setup.data.secret);
   const enable = await staff("POST", "/auth/2fa/enable", { code });
   check("2fa enable ok", enable.status === 200, JSON.stringify(enable.data));
-  const recoveryCode = enable.data?.recoveryCode;
-  check("recovery code issued", typeof recoveryCode === "string" && /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(recoveryCode ?? ""), String(recoveryCode));
+  const recoveryCodes = enable.data?.recoveryCodes;
+  check("10 recovery codes issued", Array.isArray(recoveryCodes) && recoveryCodes.length === 10, JSON.stringify(recoveryCodes));
+  check("recovery codes have expected format", recoveryCodes?.every((value) => /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(value)), JSON.stringify(recoveryCodes));
+  check("recovery codes are distinct", new Set(recoveryCodes ?? []).size === 10);
+  const recoveryCode = recoveryCodes?.[0];
 
   // ── Login with recovery code ────────────────────────────────────────────────
   const s2 = makeSession();
@@ -76,18 +87,26 @@ async function main() {
   check("wrong recovery code rejected", badVerify.status === 401, `got ${badVerify.status}`);
   const verify = await s2("POST", "/auth/2fa/verify", { code: recoveryCode });
   check("recovery code accepted", verify.status === 200, JSON.stringify(verify.data));
-  check("recovery flagged in response", verify.data?.usedRecoveryCode === true);
-  check("2fa disabled after recovery", verify.data?.user?.totpEnabled === false);
+  check("2fa remains enabled after recovery", verify.data?.user?.totpEnabled === true);
 
-  // Recovery code is single-use; 2FA is now off, plain login works.
+  // Recovery code is single-use; 2FA remains active and another code still works.
   const s3 = makeSession();
   const login3 = await s3("POST", "/auth/login", { email: staffEmail, password: "password-456" });
-  check("plain login works after recovery", login3.status === 200 && !login3.data?.requires2fa);
+  check("login still requires 2fa after recovery", login3.data?.requires2fa === true);
+  const reused = await s3("POST", "/auth/2fa/verify", { code: recoveryCode });
+  check("used recovery code is rejected", reused.status === 401, `got ${reused.status}`);
+  const secondCode = await s3("POST", "/auth/2fa/verify", { code: recoveryCodes?.[1] });
+  check("a different recovery code still works", secondCode.status === 200, JSON.stringify(secondCode.data));
 
   // ── Admin reset: re-enable 2FA, then admin clears it ───────────────────────
-  const setup2 = await s3("GET", "/auth/2fa/setup");
-  const enable2 = await s3("POST", "/auth/2fa/enable", { code: generateToken(setup2.data.secret) });
-  check("2fa re-enabled", enable2.status === 200);
+  const regenerated = await s3("POST", "/auth/2fa/recovery-codes/regenerate", { password: "password-456" });
+  check("10 replacement codes issued", regenerated.data?.recoveryCodes?.length === 10, JSON.stringify(regenerated.data));
+  const sRegenerated = makeSession();
+  await sRegenerated("POST", "/auth/login", { email: staffEmail, password: "password-456" });
+  const oldCode = await sRegenerated("POST", "/auth/2fa/verify", { code: recoveryCodes?.[2] });
+  check("regeneration invalidates previous codes", oldCode.status === 401, `got ${oldCode.status}`);
+  const newCode = await sRegenerated("POST", "/auth/2fa/verify", { code: regenerated.data?.recoveryCodes?.[0] });
+  check("replacement recovery code works", newCode.status === 200, JSON.stringify(newCode.data));
 
   const userList = await admin("GET", "/users");
   const staffRow = (Array.isArray(userList.data) ? userList.data : []).find((u) => u.id === staffId);
