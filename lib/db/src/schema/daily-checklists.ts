@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -58,6 +58,13 @@ export const dailyChecklistSubmissionsTable = pgTable("daily_checklist_submissio
   signOffNotes: text("sign_off_notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_daily_checklist_submissions_client_site_date_type").on(
+    table.clientId,
+    table.siteId,
+    table.checklistDate,
+    table.type,
+  ),
+]);
 
 export type DailyChecklistSubmission = typeof dailyChecklistSubmissionsTable.$inferSelect;

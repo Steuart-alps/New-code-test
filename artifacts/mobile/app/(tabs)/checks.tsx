@@ -23,6 +23,14 @@ interface CheckModule {
 
 const MODULES: CheckModule[] = [
   {
+    id: 'daily',
+    label: 'DailyTrack',
+    subtitle: 'AM / PM opening and closing checks',
+    icon: 'clipboard',
+    iconColor: '#14b8a6',
+    checks: ['Morning checklist', 'Evening checklist'],
+  },
+  {
     id: 'fire',
     label: 'FireTrack',
     subtitle: 'Fire safety logbook',
@@ -138,7 +146,9 @@ export default function ChecksScreen() {
               { backgroundColor: colors.card, borderColor: colors.border },
             ]}
             onPress={() => {
-              if (mod.id === 'kitchen') {
+              if (mod.id === 'daily') {
+                router.push('/checks/daily' as any);
+              } else if (mod.id === 'kitchen') {
                 router.push('/checks/kitchen' as any);
               } else if (mod.id === 'aqua') {
                 router.push('/checks/aqua' as any);
@@ -155,6 +165,7 @@ export default function ChecksScreen() {
               }
             }}
             activeOpacity={0.75}
+            testID={`checks-module-${mod.id}`}
           >
             <View
               style={[

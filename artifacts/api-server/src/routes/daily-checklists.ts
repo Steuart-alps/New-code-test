@@ -2,8 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistSubmissionsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, inArray, gte, lte, desc } from "drizzle-orm";
-import { requireAuth, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { eq, and, or, isNull, inArray, gte, lte, desc } from "drizzle-orm";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { getEntitledServices, isEntitled, requireAnyEntitlement, SERVICES } from "../lib/services";
 
 const router = Router();
 
@@ -44,6 +45,51 @@ function validateDate(date: string): boolean {
   return dateRegex.test(date);
 }
 
+function dailyService(type: "am" | "pm") {
+  return type === "am" ? "dailytrack_am" : "dailytrack_pm";
+}
+
+function serviceDenied(res: Parameters<typeof requireAuth>[1], type: "am" | "pm") {
+  const service = dailyService(type);
+  res.status(403).json({
+    error: `${SERVICES[service].label} is not enabled for this account`,
+    code: "SERVICE_NOT_ENABLED",
+    service,
+  });
+}
+
+async function requireDailyService(
+  res: Parameters<typeof requireAuth>[1],
+  clientId: number,
+  type: "am" | "pm",
+): Promise<boolean> {
+  if (await requireAnyEntitlement(clientId, dailyService(type))) return true;
+  serviceDenied(res, type);
+  return false;
+}
+
+function departmentSiteCondition(clientId: number, departmentId: number | null) {
+  const conditions = [eq(sitesTable.clientId, clientId)];
+  if (departmentId !== null) {
+    conditions.push(or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)) as any);
+  }
+  return and(...conditions);
+}
+
+async function findAccessibleSite(
+  clientId: number,
+  siteId: number,
+  departmentId: number | null,
+) {
+  if (!Number.isInteger(siteId) || siteId <= 0) return null;
+  const [site] = await db
+    .select()
+    .from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), departmentSiteCondition(clientId, departmentId)))
+    .limit(1);
+  return site ?? null;
+}
+
 // ── GET /api/daily-checklists/history ────────────────────────────────────────
 // Paginated list of past submissions with optional filters.
 
@@ -62,14 +108,42 @@ router.get("/daily-checklists/history", requireAuth, async (req, res) => {
   const offset = Number(req.query.offset ?? 0);
   const limit = Math.min(Number(req.query.limit ?? 20), 100);
 
+  if (type && !["am", "pm"].includes(type)) {
+    res.status(400).json({ error: "type must be 'am' or 'pm'" });
+    return;
+  }
+  const services = await getEntitledServices(clientId);
+  const allowedTypes = (["am", "pm"] as const).filter((candidate) => isEntitled(services, dailyService(candidate)));
+  if (allowedTypes.length === 0) {
+    serviceDenied(res, "am");
+    return;
+  }
+  if (type && !allowedTypes.includes(type)) {
+    serviceDenied(res, type);
+    return;
+  }
+
+  const departmentId = getActiveDepartmentId(req);
+  const accessibleSites = await db
+    .select({ id: sitesTable.id, name: sitesTable.name })
+    .from(sitesTable)
+    .where(departmentSiteCondition(clientId, departmentId));
+  const accessibleSiteIds = accessibleSites.map((site) => site.id);
+  if (accessibleSiteIds.length === 0) {
+    res.json({ submissions: [], total: 0 });
+    return;
+  }
+
   // Build where conditions
   const conditions = [
     eq(dailyChecklistSubmissionsTable.clientId, clientId),
+    inArray(dailyChecklistSubmissionsTable.siteId, accessibleSiteIds),
     gte(dailyChecklistSubmissionsTable.checklistDate, from),
     lte(dailyChecklistSubmissionsTable.checklistDate, to),
   ];
   if (siteId) conditions.push(eq(dailyChecklistSubmissionsTable.siteId, siteId));
   if (type) conditions.push(eq(dailyChecklistSubmissionsTable.type, type));
+  else conditions.push(inArray(dailyChecklistSubmissionsTable.type, allowedTypes));
 
   const whereClause = and(...conditions);
 
@@ -85,7 +159,7 @@ router.get("/daily-checklists/history", requireAuth, async (req, res) => {
       .select({ count: dailyChecklistSubmissionsTable.id })
       .from(dailyChecklistSubmissionsTable)
       .where(whereClause),
-    db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.clientId, clientId)),
+    Promise.resolve(accessibleSites),
   ]);
 
   const siteMap = new Map(sites.map(s => [s.id, s.name]));
@@ -110,15 +184,23 @@ router.get("/daily-checklists/overview", requireAuth, async (req, res) => {
     return;
   }
 
-  // Fetch all sites for this client
+  const services = await getEntitledServices(clientId);
+  const allowedTypes = (["am", "pm"] as const).filter((type) => isEntitled(services, dailyService(type)));
+  if (allowedTypes.length === 0) {
+    serviceDenied(res, "am");
+    return;
+  }
+
+  // Fetch only sites visible in the user's active department.
+  const departmentId = getActiveDepartmentId(req);
   const sites = await db
     .select({ id: sitesTable.id, name: sitesTable.name })
     .from(sitesTable)
-    .where(eq(sitesTable.clientId, clientId))
+    .where(departmentSiteCondition(clientId, departmentId))
     .orderBy(sitesTable.name);
 
   if (sites.length === 0) {
-    res.json({ date, sites: [] });
+    res.json({ date, enabledTypes: allowedTypes, enabledPeriods: allowedTypes, sites: [] });
     return;
   }
 
@@ -133,6 +215,7 @@ router.get("/daily-checklists/overview", requireAuth, async (req, res) => {
         eq(dailyChecklistSubmissionsTable.clientId, clientId),
         eq(dailyChecklistSubmissionsTable.checklistDate, date),
         inArray(dailyChecklistSubmissionsTable.siteId, siteIds),
+        inArray(dailyChecklistSubmissionsTable.type, allowedTypes),
       ),
     );
 
@@ -171,7 +254,10 @@ router.get("/daily-checklists/overview", requireAuth, async (req, res) => {
     };
   });
 
-  res.json({ date, sites: result });
+  // `enabledTypes` is deliberately returned even when a period has no
+  // submission. Clients must not treat an unavailable paid period as missing.
+  // `enabledPeriods` is retained as a descriptive alias for dashboard clients.
+  res.json({ date, enabledTypes: allowedTypes, enabledPeriods: allowedTypes, sites: result });
 });
 
 // ── GET /api/daily-checklists/:siteId/:date/am|pm ────────────────────────────
@@ -196,9 +282,10 @@ router.get("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, res
     return;
   }
 
-  // Verify site belongs to this client
-  const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, siteId));
-  if (!site || !canAccessClient(req, site.clientId)) {
+  if (!(await requireDailyService(res, clientId, type))) return;
+
+  const site = await findAccessibleSite(clientId, siteId, getActiveDepartmentId(req));
+  if (!site) {
     res.status(404).json({ error: "Site not found" });
     return;
   }
@@ -223,7 +310,7 @@ router.get("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, res
 
 // ── POST /api/daily-checklists/:siteId/:date/pm/sign-off ─────────────────────
 
-router.post("/daily-checklists/:siteId/:date/pm/sign-off", requireAuth, async (req, res) => {
+router.post("/daily-checklists/:siteId/:date/pm/sign-off", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -245,8 +332,10 @@ router.post("/daily-checklists/:siteId/:date/pm/sign-off", requireAuth, async (r
     return;
   }
 
-  const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, siteId));
-  if (!site || !canAccessClient(req, site.clientId)) {
+  if (!(await requireDailyService(res, clientId, "pm"))) return;
+
+  const site = await findAccessibleSite(clientId, siteId, getActiveDepartmentId(req));
+  if (!site) {
     res.status(404).json({ error: "Site not found" });
     return;
   }
@@ -284,9 +373,16 @@ router.post("/daily-checklists/:siteId/:date/pm/sign-off", requireAuth, async (r
       signOffNotes: notes,
       updatedAt: new Date(),
     })
-    .where(eq(dailyChecklistSubmissionsTable.id, submission.id))
+    .where(and(
+      eq(dailyChecklistSubmissionsTable.id, submission.id),
+      isNull(dailyChecklistSubmissionsTable.signedOffAt),
+    ))
     .returning();
 
+  if (!updated) {
+    res.status(409).json({ error: "Already signed off" });
+    return;
+  }
   res.json(updated);
 });
 
@@ -303,7 +399,7 @@ const SubmitBody = z.object({
   answers: z.array(AnswerSchema).min(1),
 });
 
-router.post("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, res) => {
+router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -323,6 +419,7 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, re
     res.status(400).json({ error: "Invalid date format" });
     return;
   }
+  if (!(await requireDailyService(res, clientId, type))) return;
 
   const parsed = SubmitBody.safeParse(req.body);
   if (!parsed.success) {
@@ -330,8 +427,8 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, re
     return;
   }
 
-  const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, siteId));
-  if (!site || !canAccessClient(req, site.clientId)) {
+  const site = await findAccessibleSite(clientId, siteId, getActiveDepartmentId(req));
+  if (!site) {
     res.status(404).json({ error: "Site not found" });
     return;
   }
@@ -371,13 +468,32 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, async (req, re
     [result] = await db
       .update(dailyChecklistSubmissionsTable)
       .set(values)
-      .where(eq(dailyChecklistSubmissionsTable.id, existing.id))
+      .where(and(
+        eq(dailyChecklistSubmissionsTable.id, existing.id),
+        isNull(dailyChecklistSubmissionsTable.submittedAt),
+      ))
       .returning();
+    if (!result) {
+      res.status(409).json({ error: "Checklist already submitted for this date" });
+      return;
+    }
   } else {
     [result] = await db
       .insert(dailyChecklistSubmissionsTable)
       .values([values])
+      .onConflictDoNothing({
+        target: [
+          dailyChecklistSubmissionsTable.clientId,
+          dailyChecklistSubmissionsTable.siteId,
+          dailyChecklistSubmissionsTable.checklistDate,
+          dailyChecklistSubmissionsTable.type,
+        ],
+      })
       .returning();
+    if (!result) {
+      res.status(409).json({ error: "Checklist already submitted for this date" });
+      return;
+    }
   }
 
   res.status(201).json(result);

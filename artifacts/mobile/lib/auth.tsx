@@ -8,6 +8,10 @@ import React, {
 import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import { apiFetch, setToken } from './api';
+import {
+  clearOtherPendingIssueUploadRecovery,
+  clearPendingIssueUploadRecovery,
+} from './fixTrackRecovery';
 import { registerForPushNotifications, unregisterPushToken } from './push';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
@@ -76,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Stale or invalid token — clear it
         await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+         await clearPendingIssueUploadRecovery().catch(() => {});
         applyToken(null);
       } finally {
         setIsLoading(false);
@@ -95,6 +100,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { requires2fa: true };
       }
       const ok = res as { token: string; user: AuthUser };
+      // A different account must never inherit another user's recoverable
+      // photo uploads on this shared device. Preserve only a recovery record
+      // that demonstrably belongs to the account completing this login.
+      if (ok.user.clientId !== null) {
+        await clearOtherPendingIssueUploadRecovery({
+          userId: ok.user.id,
+          clientId: ok.user.clientId,
+        }).catch(() => {});
+      } else {
+        await clearPendingIssueUploadRecovery().catch(() => {});
+      }
       await SecureStore.setItemAsync(TOKEN_KEY, ok.token);
       applyToken(ok.token);
       setUser(ok.user);
@@ -115,6 +131,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    // Clear recoverable local photo references before any best-effort network
+    // work, so signing out is reliable even while offline.
+    await clearPendingIssueUploadRecovery().catch(() => {});
     // Unregister the device's push token while we still have a valid bearer.
     await unregisterPushToken();
     try {

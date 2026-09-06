@@ -75,6 +75,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="checks/daily"
+        options={{
+          title: 'DailyTrack',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/cleaning"
         options={{
           title: 'Cleaning',

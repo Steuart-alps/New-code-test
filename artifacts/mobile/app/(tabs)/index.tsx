@@ -43,11 +43,13 @@ function ModuleStatusCard({
   icon,
   statuses,
   onPress,
+  summaryOverride,
 }: {
   label: string;
   icon: React.ComponentProps<typeof Feather>['name'];
   statuses: CheckStatus[];
   onPress?: () => void;
+  summaryOverride?: string;
 }) {
   const colors = useColors();
   const overdue = statuses.filter((s) => s.status === 'overdue').length;
@@ -57,20 +59,21 @@ function ModuleStatusCard({
 
   let bg = colors.card;
   let accent = colors.success;
-  let label2 = all > 0 ? `${ok}/${all} OK` : 'No checks';
+  let label2 = summaryOverride ?? (all > 0 ? `${ok}/${all} OK` : 'No checks');
 
   if (overdue > 0) {
     bg = '#fef2f2';
     accent = colors.destructive;
-    label2 = `${overdue} overdue`;
+    label2 = summaryOverride ?? `${overdue} overdue`;
   } else if (due > 0) {
     bg = '#fffbeb';
     accent = colors.warning;
-    label2 = `${due} due soon`;
+    label2 = summaryOverride ?? `${due} due soon`;
   }
 
   return (
     <TouchableOpacity
+      testID={`dashboard-module-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}
       style={[styles.moduleCard, { backgroundColor: bg, borderColor: colors.border }]}
       onPress={onPress}
       activeOpacity={0.75}
@@ -105,6 +108,24 @@ export default function TodayScreen() {
         `/api/fire-safety/status${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}`,
       ),
   });
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: kitchenToday } = useQuery<{ submittedAt: string | null } | null>({
+    queryKey: ['food-safety', 'today-status', selectedSiteId, today],
+    queryFn: async () => {
+      try {
+        return await apiFetch(`/api/food-safety/by-date/${today}${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}`);
+      } catch {
+        return null;
+      }
+    },
+  });
+  type DailyPeriod = 'am' | 'pm';
+  interface DailyOverviewItem { siteId: number; am: { submitted: boolean } | null; pm: { submitted: boolean } | null; }
+  interface DailyOverview { sites: DailyOverviewItem[]; enabledTypes: DailyPeriod[]; }
+  const { data: dailyOverview } = useQuery<DailyOverview>({
+    queryKey: ['daily-overview', selectedSiteId, today],
+    queryFn: () => apiFetch(`/api/daily-checklists/overview?date=${today}`),
+  });
 
   const { data: waterStatus = [], refetch: refetchWater } = useQuery<CheckStatus[]>({
     queryKey: ['water-status', selectedSiteId],
@@ -134,6 +155,28 @@ export default function TodayScreen() {
 
   const recentIssues = (issues ?? []).slice(0, 4);
   const selectedSite = sites?.find((s) => s.id === selectedSiteId);
+  const relevantDailySites = selectedSite
+    ? (dailyOverview?.sites ?? []).filter((site) => site.siteId === selectedSite.id)
+    : (dailyOverview?.sites ?? []);
+  // The API scopes both sites and available periods to the user/client. An
+  // unpurchased AM or PM service is not a missed DailyTrack check.
+  const enabledDailyPeriods = dailyOverview?.enabledTypes ?? [];
+  const dailyTotal = relevantDailySites.length * enabledDailyPeriods.length;
+  const dailyCompleted = relevantDailySites.reduce(
+    (count, site) => count + enabledDailyPeriods.filter((period) => site[period]?.submitted).length,
+    0,
+  );
+  const currentHour = new Date().getHours();
+  const missingDailyPeriods = relevantDailySites.flatMap((site) =>
+    enabledDailyPeriods.filter((period) => !site[period]?.submitted),
+  );
+  const dailyStatuses: CheckStatus[] = missingDailyPeriods.map((period, index) => ({
+    checkType: `daily-${period}-${index}`,
+    status: currentHour >= 18 || (currentHour >= 12 && period === 'am') ? 'overdue' : 'due_soon',
+    lastDate: null,
+    dueDate: today,
+  }));
+  const kitchenSummary = kitchenToday?.submittedAt ? 'Signed off today' : kitchenToday ? 'Diary in progress' : 'No diary today';
   const topPad =
     Platform.OS === 'web' ? 67 : insets.top;
 
@@ -242,8 +285,16 @@ export default function TodayScreen() {
           <ModuleStatusCard
             label="KitchenTrack"
             icon="thermometer"
-            statuses={[]}
+            statuses={kitchenToday ? [{ checkType: 'diary', status: kitchenToday.submittedAt ? 'ok' : 'due_soon', lastDate: today, dueDate: today }] : [{ checkType: 'diary', status: currentHour >= 18 ? 'overdue' : 'due_soon', lastDate: null, dueDate: today }]}
+            summaryOverride={kitchenSummary}
             onPress={() => router.push('/checks/kitchen' as any)}
+          />
+          <ModuleStatusCard
+            label="DailyTrack"
+            icon="clipboard"
+            statuses={dailyStatuses}
+            summaryOverride={dailyTotal ? `${dailyCompleted}/${dailyTotal} complete` : 'No sites'}
+            onPress={() => router.push('/checks/daily' as any)}
           />
         </View>
       </View>
@@ -362,10 +413,11 @@ const styles = StyleSheet.create({
   seeAll: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   moduleGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   moduleCard: {
-    flex: 1,
+    width: '48%',
     borderWidth: 1,
     borderRadius: 8,
     padding: 14,

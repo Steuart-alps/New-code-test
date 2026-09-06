@@ -520,6 +520,33 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "safe_track_enabled" boolean NOT NULL DEFAULT false`);
     await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "daily_track_enabled" boolean NOT NULL DEFAULT false`);
 
+    // ---- Daily checklist submissions ----
+    // The unique index makes the one AM/PM submission per site/day invariant
+    // durable across concurrent POST requests.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "daily_checklist_submissions" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE,
+        "checklist_date" text NOT NULL,
+        "type" text NOT NULL,
+        "answers" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "submitted_by_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "submitted_by_name" text,
+        "submitted_at" timestamp,
+        "signed_off_by_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "signed_off_by_name" text,
+        "signed_off_at" timestamp,
+        "sign_off_notes" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_daily_checklist_submissions_client_site_date_type"
+      ON "daily_checklist_submissions" ("client_id", "site_id", "checklist_date", "type")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
