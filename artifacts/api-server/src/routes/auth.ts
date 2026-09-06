@@ -398,7 +398,10 @@ const ResetPasswordBody = z.object({
 
 // Guard token-guessing on reset-password: an invalid/expired token returns 400
 // (not 401), so count 400 as a failed attempt here in addition to 401.
-const resetPasswordRateLimit = makeLoginRateLimit({ failureStatuses: [400, 401] });
+const resetPasswordRateLimit = makeLoginRateLimit({
+  namespace: "reset-password",
+  failureStatuses: [400, 401],
+});
 
 router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => {
   const body = ResetPasswordBody.safeParse(req.body);

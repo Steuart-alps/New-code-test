@@ -2,10 +2,9 @@
 //
 // Boots a tiny in-process express app that mounts the REAL limiter middleware
 // in front of stub credential routes, then drives it over HTTP to verify:
-//   1. per-email cap: 5 failed (401) attempts -> 6th is 429 with Retry-After
-//   2. a successful (2xx) login clears the email counter
-//   3. per-IP cap is higher than per-email (spraying many emails from one IP
-//      keeps returning 401 well past the per-email cap, until the IP cap)
+//   1. login allows 10 attempts per IP per 15 minutes, then returns 429
+//   2. successful attempts still consume quota
+//   3. registration allows 5 attempts per IP per hour, independently of login
 //   4. reset-password limiter counts 400 (invalid-token guesses) as failures
 //
 // No database is required — the limiter is pure IP/email counting.
@@ -24,7 +23,7 @@ if (!LIMITER_MODULE) {
   process.exit(1);
 }
 
-const { loginRateLimit, makeLoginRateLimit, _resetLoginRateLimit } = await import(LIMITER_MODULE);
+const { loginRateLimit, registrationRateLimit, makeLoginRateLimit, _resetLoginRateLimit } = await import(LIMITER_MODULE);
 
 let passed = 0;
 const failures = [];
@@ -42,6 +41,10 @@ app.use(express.json());
 app.post("/auth/login", loginRateLimit, (req, res) => {
   if (req.body?.password === "correct") res.json({ ok: true });
   else res.status(401).json({ error: "bad" });
+});
+
+app.post("/auth/register", registrationRateLimit, (_req, res) => {
+  res.status(201).json({ ok: true });
 });
 
 // Stub reset-password: 400 for an invalid token (mirrors real endpoint).
@@ -84,16 +87,16 @@ function post(path, body, xff) {
 }
 
 try {
-  // 1. per-email cap ---------------------------------------------------------
+  // 1. login cap -------------------------------------------------------------
   _resetLoginRateLimit();
   const ip1 = "203.0.113.10";
   let last;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     last = await post("/auth/login", { email: "victim@example.com", password: "wrong" }, ip1);
   }
-  check("first 5 wrong logins return 401", last.status === 401, `got ${last.status}`);
+  check("first 10 logins return 401", last.status === 401, `got ${last.status}`);
   const blocked = await post("/auth/login", { email: "victim@example.com", password: "wrong" }, ip1);
-  check("6th attempt is 429", blocked.status === 429, `got ${blocked.status}`);
+  check("11th attempt is 429", blocked.status === 429, `got ${blocked.status}`);
   check("429 sets Retry-After header", Number(blocked.retryAfter) > 0, `retry-after=${blocked.retryAfter}`);
   check("429 body has retryAfterSeconds", blocked.body?.retryAfterSeconds > 0);
   check("429 body has clear message", typeof blocked.body?.error === "string" && blocked.body.error.length > 0);
@@ -101,37 +104,28 @@ try {
   const blockedCorrect = await post("/auth/login", { email: "victim@example.com", password: "correct" }, ip1);
   check("correct password also blocked while limited", blockedCorrect.status === 429, `got ${blockedCorrect.status}`);
 
-  // 2. success clears the email counter --------------------------------------
+  // 2. all attempts consume quota --------------------------------------------
   _resetLoginRateLimit();
   const ip2 = "203.0.113.20";
-  for (let i = 0; i < 4; i++) await post("/auth/login", { email: "user2@example.com", password: "wrong" }, ip2);
+  for (let i = 0; i < 9; i++) await post("/auth/login", { email: "user2@example.com", password: "wrong" }, ip2);
   const ok = await post("/auth/login", { email: "user2@example.com", password: "correct" }, ip2);
   check("successful login returns 2xx", ok.status >= 200 && ok.status < 300, `got ${ok.status}`);
-  // after reset, another full run of wrong attempts must still get 5 x 401
-  let afterReset;
-  for (let i = 0; i < 5; i++) {
-    afterReset = await post("/auth/login", { email: "user2@example.com", password: "wrong" }, ip2);
-  }
-  check("email counter reset after success (5 fresh 401s)", afterReset.status === 401, `got ${afterReset.status}`);
+  const afterSuccess = await post("/auth/login", { email: "user2@example.com", password: "wrong" }, ip2);
+  check("successful login still consumes quota", afterSuccess.status === 429, `got ${afterSuccess.status}`);
 
-  // 3. per-IP cap is higher than per-email -----------------------------------
+  // 3. registration cap and independent namespace ---------------------------
   _resetLoginRateLimit();
   const ip3 = "203.0.113.30";
-  // Spray 10 distinct emails once each from one IP: each email is under its own
-  // cap (1 < 5) so all should be 401, proving the IP cap is > per-email cap.
-  let sprayBlocked = false;
-  for (let i = 0; i < 10; i++) {
-    const r = await post("/auth/login", { email: `spray${i}@example.com`, password: "wrong" }, ip3);
-    if (r.status === 429) { sprayBlocked = true; break; }
+  let fifthRegistration;
+  for (let i = 0; i < 5; i++) {
+    fifthRegistration = await post("/auth/register", { email: `new${i}@example.com` }, ip3);
   }
-  check("per-IP cap higher than per-email (10 unique emails not blocked)", !sprayBlocked);
-  // Keep spraying from the same IP; eventually the higher IP cap trips.
-  let ipTripped = false;
-  for (let i = 10; i < 60; i++) {
-    const r = await post("/auth/login", { email: `spray${i}@example.com`, password: "wrong" }, ip3);
-    if (r.status === 429) { ipTripped = true; break; }
-  }
-  check("per-IP cap eventually trips on sustained spraying", ipTripped);
+  check("first 5 registrations are allowed", fifthRegistration.status === 201, `got ${fifthRegistration.status}`);
+  const blockedRegistration = await post("/auth/register", { email: "new5@example.com" }, ip3);
+  check("6th registration is 429", blockedRegistration.status === 429, `got ${blockedRegistration.status}`);
+  check("registration 429 sets Retry-After", Number(blockedRegistration.retryAfter) > 0);
+  const independentLogin = await post("/auth/login", { email: "user3@example.com", password: "wrong" }, ip3);
+  check("registration quota does not consume login quota", independentLogin.status === 401, `got ${independentLogin.status}`);
 
   // 4. reset-password counts 400 (invalid token guesses) ---------------------
   // reset-password submits token+password (no email), so only the per-IP cap
@@ -143,7 +137,7 @@ try {
   check("reset-password invalid token returns 400", firstReset.status === 400, `got ${firstReset.status}`);
   let resetTripped = false;
   let resetRetryAfter;
-  for (let i = 1; i < 60; i++) {
+  for (let i = 1; i < 20; i++) {
     const r = await post("/auth/reset-password", { token: `guess-${i}`, password: "longenough" }, ip4);
     if (r.status === 429) { resetTripped = true; resetRetryAfter = r.retryAfter; break; }
   }
