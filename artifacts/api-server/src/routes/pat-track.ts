@@ -591,6 +591,10 @@ async function validateCertificateLinks(clientId: number, departmentId: number |
     if (!document) return "missing";
     const documentAccess = await siteAccess(clientId, document.site_id, departmentId);
     if (documentAccess !== "allowed") return documentAccess;
+    // A site-specific document is evidence for that site only.  Without this
+    // check an administrator could attach one site's certificate file to a
+    // certificate for another site in the same tenant.
+    if (document.site_id !== null && document.site_id !== d.siteId) return "missing";
   }
   if (d.roomIds.length) {
     for (const roomId of d.roomIds) {

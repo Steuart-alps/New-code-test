@@ -48,6 +48,8 @@ export interface CheckPhotoUploaderProps {
   required?: boolean;
   /** When true, renders in a compact inline strip rather than a full grid. */
   compact?: boolean;
+  /** Preserve photo viewing while suppressing upload and deletion controls. */
+  readOnly?: boolean;
   /** Called whenever the photo count changes (useful for form validation). */
   onCountChange?: (count: number) => void;
 }
@@ -89,6 +91,7 @@ export function CheckPhotoUploader({
   entityId,
   required = false,
   compact = false,
+  readOnly = false,
   onCountChange,
 }: CheckPhotoUploaderProps) {
   const [photos, setPhotos] = useState<CheckPhoto[]>([]);
@@ -207,15 +210,15 @@ export function CheckPhotoUploader({
               className="w-full h-full object-cover cursor-pointer"
               onClick={() => setLightboxSrc(photoUrl(p.objectPath))}
             />
-            <button
+            {!readOnly && <button
               onClick={() => handleDelete(p)}
               className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
             >
               <X className="w-3 h-3 text-white" />
-            </button>
+            </button>}
           </div>
         ))}
-        <label className={cn(
+        {!readOnly && <label className={cn(
           "w-10 h-10 rounded-sm border-2 border-dashed border-border flex items-center justify-center cursor-pointer",
           "hover:border-primary/50 hover:bg-muted/40 transition-colors flex-shrink-0",
           uploading && "opacity-50 pointer-events-none"
@@ -232,7 +235,7 @@ export function CheckPhotoUploader({
             className="hidden"
             onChange={handleFileChange}
           />
-        </label>
+        </label>}
         {required && photos.length === 0 && (
           <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">Photo required</Badge>
         )}
@@ -253,7 +256,7 @@ export function CheckPhotoUploader({
             <span className="text-xs text-muted-foreground">{photos.length} attached</span>
           )}
         </div>
-        <label className={cn(
+        {!readOnly && <label className={cn(
           "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-border text-xs font-medium cursor-pointer",
           "hover:bg-muted/50 transition-colors",
           uploading && "opacity-50 pointer-events-none"
@@ -271,7 +274,7 @@ export function CheckPhotoUploader({
             className="hidden"
             onChange={handleFileChange}
           />
-        </label>
+        </label>}
       </div>
 
       {loading && (
@@ -303,12 +306,12 @@ export function CheckPhotoUploader({
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
-                <button
+                {!readOnly && <button
                   onClick={() => handleDelete(p)}
                   className="p-1 bg-white/20 rounded text-white hover:bg-red-500/80 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                </button>}
               </div>
             </div>
           ))}

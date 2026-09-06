@@ -312,7 +312,7 @@ router.get(
       const mgSignoffs = await db.select().from(dailyManagerSignoffsTable).where(eq(dailyManagerSignoffsTable.clientId, cid));
       archive.append(rowsToCsv(mgSignoffs), { name: "kitchen/manager-signoffs.csv" });
 
-      const kwRows = await db.execute(sql`SELECT * FROM kitchen_weekly_records WHERE client_id = ${cid} ORDER BY week_start_date DESC`);
+      const kwRows = await db.execute(sql`SELECT * FROM kitchen_weekly_records WHERE client_id = ${cid} ORDER BY week_commencing DESC`);
       archive.append(rawToCsv(kwRows.rows), { name: "kitchen/weekly-reviews.csv" });
 
       const kpRows = await db.execute(sql`SELECT * FROM kitchen_probe_checks WHERE client_id = ${cid} ORDER BY check_date DESC`);
@@ -482,6 +482,23 @@ router.get(
 
       const patTests = await db.select().from(patTestsTable).where(eq(patTestsTable.clientId, cid));
       archive.append(rowsToCsv(patTests), { name: "pat-track/tests.csv" });
+
+      // Certificate-led PAT register. Keep the linking and evidence tables in
+      // the tenant export as well as the legacy appliance register above.
+      const patTemplates = await db.execute(sql`SELECT * FROM pat_equipment_templates WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patTemplates.rows), { name: "pat-track/equipment-templates.csv" });
+      const patTemplateItems = await db.execute(sql`SELECT * FROM pat_equipment_template_items WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patTemplateItems.rows), { name: "pat-track/equipment-template-items.csv" });
+      const patRooms = await db.execute(sql`SELECT * FROM pat_rooms WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patRooms.rows), { name: "pat-track/rooms.csv" });
+      const patCertificates = await db.execute(sql`SELECT * FROM pat_certificates WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patCertificates.rows), { name: "pat-track/certificates.csv" });
+      const patCertificateRooms = await db.execute(sql`SELECT * FROM pat_certificate_rooms WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patCertificateRooms.rows), { name: "pat-track/certificate-rooms.csv" });
+      const patReplacements = await db.execute(sql`SELECT * FROM pat_replacements WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patReplacements.rows), { name: "pat-track/replacements.csv" });
+      const patFailures = await db.execute(sql`SELECT * FROM pat_failures WHERE client_id = ${cid} ORDER BY id`);
+      archive.append(rawToCsv(patFailures.rows), { name: "pat-track/failures.csv" });
 
       // ── PestTrack ─────────────────────────────────────────────────────────
       const pestVisits = await db.select().from(pestVisitsTable).where(eq(pestVisitsTable.clientId, cid));

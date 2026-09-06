@@ -240,6 +240,14 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // Keep legacy SafeTrack training rows aligned with the department-scoped
+    // Drizzle model. Older databases predate this optional scope column.
+    await db.execute(sql`
+      ALTER TABLE "safe_training_records"
+      ADD COLUMN IF NOT EXISTS "department_id" integer
+      REFERENCES "departments"("id") ON DELETE SET NULL
+    `);
+
     // ---- FixTrack issues table ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "fix_track_issues" (

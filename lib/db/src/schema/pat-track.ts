@@ -2,6 +2,7 @@ import { pgTable, serial, integer, text, date, boolean, timestamp } from "drizzl
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { contractorsTable } from "./contractors";
 
 export const PAT_APPLIANCE_TYPES = [
   "Class I",
@@ -94,11 +95,49 @@ export const patRoomsTable = pgTable("pat_rooms", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const patCertificatesTable = pgTable("pat_certificates", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").notNull().references(() => sitesTable.id, { onDelete: "cascade" }),
+  visitDate: date("visit_date").notNull(),
+  contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
+  contractorName: text("contractor_name"),
+  certificateRef: text("certificate_ref").notNull(),
+  appliancesTestedCount: integer("appliances_tested_count").notNull().default(0),
+  passCount: integer("pass_count").notNull().default(0),
+  failCount: integer("fail_count").notNull().default(0),
+  nextTestDue: date("next_test_due"),
+  documentId: integer("document_id"),
+  documentLink: text("document_link"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const patCertificateRoomsTable = pgTable("pat_certificate_rooms", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  certificateId: integer("certificate_id").notNull().references(() => patCertificatesTable.id, { onDelete: "cascade" }),
+  roomId: integer("room_id").notNull().references(() => patRoomsTable.id, { onDelete: "cascade" }),
+});
+
+export const patReplacementsTable = pgTable("pat_replacements", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  roomId: integer("room_id").notNull().references(() => patRoomsTable.id, { onDelete: "cascade" }),
+  applianceName: text("appliance_name").notNull(),
+  replacedOn: date("replaced_on").notNull(),
+  replacementDetails: text("replacement_details"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const patFailuresTable = pgTable("pat_failures", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
-  certificateId: integer("certificate_id").notNull(),
-  roomId: integer("room_id"),
+  certificateId: integer("certificate_id").notNull().references(() => patCertificatesTable.id, { onDelete: "cascade" }),
+  roomId: integer("room_id").references(() => patRoomsTable.id, { onDelete: "set null" }),
   // Snapshots retain the audit location even when an area has no register room,
   // or is later renamed.
   locationText: text("location_text"),

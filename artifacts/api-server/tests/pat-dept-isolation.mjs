@@ -1,3 +1,8 @@
+import { writeFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let passed = 0;
 const failures = [];
@@ -14,7 +19,7 @@ function expectStatus(name, response, expected) {
 }
 function session() {
   let cookie = "";
-  return async (method, path, body) => {
+  const request = async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
       headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
@@ -26,6 +31,8 @@ function session() {
       ? await response.json().catch(() => null) : null;
     return { status: response.status, data };
   };
+  request.cookie = () => cookie;
+  return request;
 }
 
 async function main() {
@@ -51,6 +58,26 @@ async function main() {
   for (const [name, response] of [["alpha department", alphaDept], ["beta department", betaDept], ["alpha site", alphaSite], ["beta site", betaSite]]) {
     expectStatus(`create ${name}`, response, [200, 201]);
   }
+  // Store real tenant-scoped DocTrack objects so certificate document linkage
+  // is tested at the same boundary used in production.
+  async function createSiteDocument(siteId, title) {
+    const requested = await admin("POST", "/doc-track/documents/request-upload", {
+      name: `${title}.txt`, contentType: "text/plain",
+    });
+    expectStatus(`request upload for ${title}`, requested, [200]);
+    const uploaded = await fetch(requested.data?.uploadUrl, {
+      method: "PUT", headers: { "Content-Type": "text/plain" }, body: title,
+    });
+    check(`upload ${title} object`, uploaded.ok, `got ${uploaded.status}`);
+    return admin("POST", "/doc-track/documents", {
+      title, category: "other", fileName: `${title}.txt`, fileSize: title.length,
+      mimeType: "text/plain", objectPath: requested.data?.objectPath, siteId,
+    });
+  }
+  const alphaDocument = await createSiteDocument(alphaSite.data.id, `PAT Alpha evidence ${stamp}`);
+  const betaDocument = await createSiteDocument(betaSite.data.id, `PAT Beta evidence ${stamp}`);
+  expectStatus("create alpha PAT evidence document", alphaDocument, [201]);
+  expectStatus("create beta PAT evidence document", betaDocument, [201]);
 
   const alphaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: alphaSite.data.id, name: "Alpha template" });
   const betaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: betaSite.data.id, name: "Beta template" });
@@ -61,6 +88,18 @@ async function main() {
   });
   const alphaCertificate = await admin("POST", "/pat-track/certificates", certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"));
   const betaCertificate = await admin("POST", "/pat-track/certificates", certificateBody(betaSite.data.id, betaRoom.data.id, "BETA-CERT"));
+  expectStatus("reject cross-site document on certificate create", await admin("POST", "/pat-track/certificates", {
+    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "CROSS-SITE-DOCUMENT"),
+    documentId: betaDocument.data.id,
+  }), [400]);
+  expectStatus("reject cross-site document on certificate update", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
+    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"),
+    documentId: betaDocument.data.id,
+  }), [400]);
+  expectStatus("link same-site document to certificate", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
+    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"),
+    documentId: alphaDocument.data.id,
+  }), [200]);
   expectStatus("reject javascript certificate document link", await admin("POST", "/pat-track/certificates", {
     ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "BAD-JS-LINK"),
     documentLink: "javascript:alert(1)",
@@ -180,6 +219,92 @@ async function main() {
   expectStatus("cannot relink alpha room to beta template/site", await staff("PUT", `/pat-track/rooms/${alphaRoom.data.id}`, {
     siteId: betaSite.data.id, templateId: betaTemplate.data.id, name: "Moved",
   }), [403]);
+
+  // A viewer is read-only, including all certificate-led register mutations
+  // and the original appliance/test register.
+  const viewerEmail = `pat-viewer-${stamp}@test.local`;
+  expectStatus("create PAT viewer", await admin("POST", "/users", {
+    name: "PAT viewer", email: viewerEmail, password: "password-789",
+    role: "client_viewer", clientId,
+  }), [200, 201]);
+  const viewer = session();
+  expectStatus("login PAT viewer", await viewer("POST", "/auth/login", {
+    email: viewerEmail, password: "password-789",
+  }), [200]);
+  for (const [method, path] of [
+    ["POST", "/pat-track/equipment-templates"], ["POST", "/pat-track/rooms"],
+    ["POST", "/pat-track/certificates"], ["POST", "/pat-track/replacements"],
+    ["POST", "/pat-track/failures"], ["POST", "/pat-track/appliances"],
+    ["POST", "/pat-track/tests"],
+    ["PUT", `/pat-track/equipment-templates/${alphaTemplate.data.id}`],
+    ["PUT", `/pat-track/rooms/${alphaRoom.data.id}`],
+    ["PUT", `/pat-track/certificates/${alphaCertificate.data.id}`],
+    ["PUT", `/pat-track/replacements/${betaReplacement.data.id}`],
+    ["PUT", `/pat-track/failures/${betaFailure.data.id}`],
+    ["PUT", `/pat-track/appliances/${alphaAppliance.data.id}`],
+    ["PUT", `/pat-track/tests/${alphaTest.data.id}`],
+    ["DELETE", `/pat-track/equipment-templates/${alphaTemplate.data.id}`],
+    ["DELETE", `/pat-track/rooms/${alphaRoom.data.id}`],
+    ["DELETE", `/pat-track/certificates/${alphaCertificate.data.id}`],
+    ["DELETE", `/pat-track/replacements/${betaReplacement.data.id}`],
+    ["DELETE", `/pat-track/failures/${betaFailure.data.id}`],
+    ["DELETE", `/pat-track/appliances/${alphaAppliance.data.id}`],
+    ["DELETE", `/pat-track/tests/${alphaTest.data.id}`],
+  ]) expectStatus(`viewer ${method} ${path} is denied`, await viewer(method, path, {}), [403]);
+
+  // Compliance evidence prevents destructive room moves/deletes, and
+  // certificates are immutable evidence rather than deletable records.
+  expectStatus("history blocks room site move", await admin("PUT", `/pat-track/rooms/${alphaRoom.data.id}`, {
+    siteId: betaSite.data.id, templateId: betaTemplate.data.id, name: "Alpha room",
+  }), [409]);
+  expectStatus("history blocks room delete", await admin("DELETE", `/pat-track/rooms/${alphaRoom.data.id}`), [409]);
+  expectStatus("certificate delete is retained evidence", await admin("DELETE", `/pat-track/certificates/${alphaCertificate.data.id}`), [405]);
+
+  // Use explicit due dates so the boundary is independent of the server clock:
+  // only dates before CURRENT_DATE are overdue; inactive rooms are excluded.
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const now = new Date(); const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const todayRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Due today room" });
+  const overdueRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Overdue room" });
+  const untestedRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Untested room" });
+  const inactiveRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Retired room", active: false });
+  for (const [name, response] of [["due today room", todayRoom], ["overdue room", overdueRoom], ["untested room", untestedRoom], ["inactive room", inactiveRoom]]) expectStatus(`create ${name}`, response, [201]);
+  expectStatus("record certificate due today", await admin("POST", "/pat-track/certificates", {
+    ...certificateBody(alphaSite.data.id, todayRoom.data.id, "DUE-TODAY"), visitDate: iso(now), nextTestDue: iso(now),
+  }), [201]);
+  expectStatus("record overdue certificate", await admin("POST", "/pat-track/certificates", {
+    ...certificateBody(alphaSite.data.id, overdueRoom.data.id, "OVERDUE"), visitDate: iso(yesterday), nextTestDue: iso(yesterday),
+  }), [201]);
+  const overdue = await admin("GET", `/pat-track/overdue-by-room-area?siteId=${alphaSite.data.id}`);
+  expectStatus("get room overdue register", overdue, [200]);
+  const overdueIds = new Set((overdue.data ?? []).map(row => row.id));
+  const overdueById = new Map((overdue.data ?? []).map(row => [row.id, row]));
+  check("due today is not overdue", !overdueIds.has(todayRoom.data.id));
+  check("past due room is overdue", overdueIds.has(overdueRoom.data.id));
+  check("untested active room is listed", overdueIds.has(untestedRoom.data.id));
+  check("past due room has overdue status", overdueById.get(overdueRoom.data.id)?.status === "overdue");
+  check("untested room has untested status", overdueById.get(untestedRoom.data.id)?.status === "untested");
+  check("inactive room is excluded", !overdueIds.has(inactiveRoom.data.id));
+
+  // The cancellation/client export must preserve every certificate-led PAT
+  // entity and retain the client-scoped DocTrack evidence manifest entry.
+  const exportResponse = await fetch(`${BASE}/export`, { headers: { cookie: admin.cookie() } });
+  expectStatus("download full client export", exportResponse, [200]);
+  const exportPath = join(tmpdir(), `pat-export-${stamp}.zip`);
+  try {
+    await writeFile(exportPath, Buffer.from(await exportResponse.arrayBuffer()));
+    const entries = execFileSync("unzip", ["-Z1", exportPath], { encoding: "utf8" }).split("\n");
+    for (const filename of [
+      "pat-track/equipment-templates.csv", "pat-track/equipment-template-items.csv",
+      "pat-track/rooms.csv", "pat-track/certificates.csv",
+      "pat-track/certificate-rooms.csv", "pat-track/replacements.csv",
+      "pat-track/failures.csv",
+    ]) check(`export includes ${filename}`, entries.includes(filename));
+    const manifest = execFileSync("unzip", ["-p", exportPath, "attachment-manifest.csv"], { encoding: "utf8" });
+    check("export manifest includes client DocTrack object", manifest.includes(`doc-track,${alphaDocument.data.id},`));
+  } finally {
+    await rm(exportPath, { force: true });
+  }
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length) process.exit(1);
