@@ -272,6 +272,21 @@ async function main() {
     console.error("FATAL: registration failed", regRes.status, regRes.data);
     process.exit(1);
   }
+  const verificationToken = regRes.data?.verificationToken;
+  if (typeof verificationToken !== "string") {
+    console.error("FATAL: test registration returned no verification token");
+    process.exit(1);
+  }
+  const verifyRes = await req("GET", `/auth/verify-email?token=${encodeURIComponent(verificationToken)}`);
+  if (verifyRes.status !== 200) {
+    console.error("FATAL: email verification failed", verifyRes.status, verifyRes.data);
+    process.exit(1);
+  }
+  const loginRes = await req("POST", "/auth/login", { email, password: "password-123" });
+  if (loginRes.status !== 200) {
+    console.error("FATAL: login failed", loginRes.status, loginRes.data);
+    process.exit(1);
+  }
 
   await testAmLocks(req);
   await testPmChecklistLocks(req);

@@ -190,7 +190,7 @@ integrations = ["stripe:1.0.0", "github:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 60000
+timeoutMs = 180000
 
 [nix]
 channel = "stable-25_05"

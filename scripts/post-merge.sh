@@ -6,7 +6,10 @@ set -e
 # lock while the development workflows are already running.
 if [ ! -f node_modules/.pnpm/lock.yaml ] || \
    ! cmp -s pnpm-lock.yaml node_modules/.pnpm/lock.yaml; then
-  pnpm install --frozen-lockfile --offline
+  if ! pnpm install --frozen-lockfile --offline; then
+    echo "Offline pnpm store is incomplete; retrying with package downloads enabled."
+    pnpm install --frozen-lockfile
+  fi
 else
   echo "Dependencies already match pnpm-lock.yaml; skipping install."
 fi

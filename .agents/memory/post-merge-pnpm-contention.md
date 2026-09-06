@@ -7,4 +7,4 @@ When post-merge setup runs while several pnpm-based workflows are active, a redu
 
 **Why:** Increasing the timeout from 20 seconds to two minutes did not help and both output streams remained empty. Skipping the redundant install let setup and workflow reconciliation complete in under a second.
 
-**How to apply:** Preserve the lockfile comparison fast path. Run a frozen, offline install only when the installed marker is missing or differs, and keep enough timeout for a real dependency update.
+**How to apply:** Preserve the lockfile comparison fast path. When the marker differs, try a frozen offline install first, but retry the same frozen install with downloads enabled if pnpm reports a missing offline tarball. Keep enough timeout for a real dependency update.
