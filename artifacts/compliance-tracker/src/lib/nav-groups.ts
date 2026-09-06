@@ -64,7 +64,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
         { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
         { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
-        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack", comingSoon: true },
+        { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
         { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
         { href: "/daily-track-am", label: "DailyTrack AM",   icon: Sunrise,         serviceKeys: ["dailytrack_am", "kitchentrack", "premisestrack"] },

@@ -132,7 +132,15 @@ const ADDONS = [
     iconColor: "text-green-600",
     activeBorder: "border-green-400",
     activeBg: "bg-green-50/60",
-    comingSoon: true,
+  },
+  {
+    key: "swimtrack",
+    label: "SwimTrack",
+    desc: "Swimming sessions, safety checks & incident records",
+    icon: Waves,
+    iconColor: "text-cyan-700",
+    activeBorder: "border-cyan-500",
+    activeBg: "bg-cyan-50/60",
   },
   {
     key: "pattrack",
