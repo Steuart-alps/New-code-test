@@ -61,6 +61,7 @@ const runnerLocked = new Set([
   "test:bike-hire-export", "test:riddor-audit-history",
   "test:compliance-audit-history", "test:fix-track-contractor-approval",
   "test:twofa-recovery", "test:fix-track-history", "test:contractor-portal",
+  "test:premises-inspection-date-range",
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
