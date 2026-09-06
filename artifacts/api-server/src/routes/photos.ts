@@ -28,10 +28,12 @@ export const PHOTO_ENTITY_TABLES = {
   fire_safety_check: "fire_safety_checks",
   pool_check: "pool_checks",
   bike_hire: "bike_hire_records",
+  bike_check: "bike_checks",
   bike_service: "bike_services",
   daily_checklist: "daily_checklists",
   daily_checklist_pm: "daily_checklists",
   food_safety_record: "food_safety_records",
+  food_safety_check: "food_safety_records",
   legionella_check: "legionella_checks",
   hot_tub_check: "hot_tub_checks",
   incident: "incidents",
@@ -46,6 +48,11 @@ export const PHOTO_ENTITY_TABLES = {
   swim_surveillance_check: "swim_surveillance_checks",
   swim_first_aid_check: "swim_first_aid_checks",
   swim_incident: "swim_incidents",
+  safe_risk_assessment: "safe_risk_assessments",
+  safe_sop: "safe_sops",
+  safe_handbook: "safe_handbook",
+  safe_training_record: "safe_training_records",
+  safe_induction: "safe_inductions",
 } as const;
 
 export type PhotoEntityType = keyof typeof PHOTO_ENTITY_TABLES;

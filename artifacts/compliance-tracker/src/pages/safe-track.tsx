@@ -418,9 +418,10 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
 
 // ── Generic list table ────────────────────────────────────────────────────────
 
-function ListTable({ headers, rows, onEdit, onDelete, onDownload, onPrint, onAcknowledgements, canAdmin }: {
+function ListTable({ headers, rows, photoEntityType, onEdit, onDelete, onDownload, onPrint, onAcknowledgements, canAdmin }: {
   headers: string[];
   rows: { id: number; cells: React.ReactNode[]; hasFile?: boolean; requiresAcknowledgement?: boolean; className?: string }[];
+  photoEntityType?: string;
   onEdit?: (id: number) => void;
   onDelete: (id: number) => void;
   onDownload?: (id: number) => void;
@@ -434,6 +435,7 @@ function ListTable({ headers, rows, onEdit, onDelete, onDownload, onPrint, onAck
         <thead className="bg-muted/50">
           <tr>
             {headers.map(h => <th key={h} className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">{h}</th>)}
+            {photoEntityType && <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Photos</th>}
             <th className="px-4 py-3" />
           </tr>
         </thead>
@@ -441,6 +443,11 @@ function ListTable({ headers, rows, onEdit, onDelete, onDownload, onPrint, onAck
           {rows.map(r => (
             <tr key={r.id} className={cn("hover:bg-muted/30 transition-colors", r.className)}>
               {r.cells.map((c, i) => <td key={i} className="px-4 py-3 text-sm">{c}</td>)}
+              {photoEntityType && (
+                <td className="px-4 py-3">
+                  <CheckPhotoUploader entityType={photoEntityType} entityId={r.id} compact />
+                </td>
+              )}
               <td className="px-4 py-3">
                 <div className="flex gap-1 justify-end">
                   {onPrint && (
@@ -867,6 +874,7 @@ export default function SafeTrackPage() {
                 <ListTable
                   headers={cfg.headers as unknown as string[]}
                   rows={cfg.rows}
+                  photoEntityType={PHOTO_ENTITY_TYPE[key as TabKey]}
                   onEdit={canAdmin ? id => openEdit((tab === "risk" ? ras : tab === "sops" ? sops : tab === "handbook" ? handbook : tab === "training" ? training : inductions).find((r: any) => r.id === id)) : undefined}
                   onDelete={id => handleDelete(cfg.sub, id)}
                   onDownload={id => handleDownload(cfg.sub, id)}

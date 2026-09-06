@@ -1515,9 +1515,19 @@ export default function BikeTrackPage() {
                             : <span className="opacity-40">—</span>}
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell">
-                          <div className="flex gap-1">
-                            {h.preCheckId && <span className="text-[11px] text-muted-foreground">Pre: <ResultBadge result={h.preResult} /></span>}
-                            {h.postCheckId && <span className="text-[11px] text-muted-foreground">Post: <ResultBadge result={h.postResult} /></span>}
+                          <div className="space-y-2">
+                            {h.preCheckId && (
+                              <div>
+                                <span className="text-[11px] text-muted-foreground">Pre: <ResultBadge result={h.preResult} /></span>
+                                <CheckPhotoUploader entityType="bike_check" entityId={h.preCheckId} compact />
+                              </div>
+                            )}
+                            {h.postCheckId && (
+                              <div>
+                                <span className="text-[11px] text-muted-foreground">Post: <ResultBadge result={h.postResult} /></span>
+                                <CheckPhotoUploader entityType="bike_check" entityId={h.postCheckId} compact />
+                              </div>
+                            )}
                             {!h.preCheckId && !h.postCheckId && <span className="opacity-30 text-xs">—</span>}
                           </div>
                         </td>

@@ -1562,6 +1562,29 @@ async function migrateCheckPhotos() {
     )
   `);
 
+  // KitchenTrack originally stored diary photos under food_safety_record.
+  // Keep existing attachments and manager requirements visible after the UI
+  // adopts the canonical food_safety_check discriminator.
+  await db.execute(sql`
+    UPDATE "check_photos"
+    SET "entity_type" = 'food_safety_check'
+    WHERE "entity_type" = 'food_safety_record'
+  `);
+  await db.execute(sql`
+    INSERT INTO "photo_requirements" (
+      "client_id", "entity_type", "required", "min_photos", "created_at", "updated_at"
+    )
+    SELECT
+      "client_id", 'food_safety_check', "required", "min_photos", "created_at", "updated_at"
+    FROM "photo_requirements"
+    WHERE "entity_type" = 'food_safety_record'
+    ON CONFLICT ("client_id", "entity_type") DO NOTHING
+  `);
+  await db.execute(sql`
+    DELETE FROM "photo_requirements"
+    WHERE "entity_type" = 'food_safety_record'
+  `);
+
   // Manager-customisable checklist templates (per client + optional site + checklist type)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "checklist_templates" (

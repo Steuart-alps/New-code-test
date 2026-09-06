@@ -1420,7 +1420,7 @@ function DailyDiaryTab() {
 
           {/* Photos */}
           {record?.id && (
-            <CheckPhotoUploader entityType="food_safety_record" entityId={record.id} />
+            <CheckPhotoUploader entityType="food_safety_check" entityId={record.id} compact />
           )}
         </>
       )}
