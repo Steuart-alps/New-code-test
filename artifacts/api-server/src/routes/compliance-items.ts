@@ -173,6 +173,13 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     res.status(400).json({ error: titleCheck.message });
     return;
   }
+  if (body.notes) {
+    const notesCheck = filterName(body.notes);
+    if (!notesCheck.ok) {
+      res.status(400).json({ error: notesCheck.message });
+      return;
+    }
+  }
 
   if (body.siteId != null) {
     const [s] = await db.select().from(sitesTable).where(eq(sitesTable.id, body.siteId));
@@ -272,6 +279,13 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
     const titleCheck = filterName(body.title);
     if (!titleCheck.ok) {
       res.status(400).json({ error: titleCheck.message });
+      return;
+    }
+  }
+  if (body.notes) {
+    const notesCheck = filterName(body.notes);
+    if (!notesCheck.ok) {
+      res.status(400).json({ error: notesCheck.message });
       return;
     }
   }
