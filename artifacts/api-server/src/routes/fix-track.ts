@@ -84,12 +84,8 @@ function tradesForIssueType(issueType: string): string[] {
   return issueType === "gas" ? GAS_SUBTRADES : [issueType];
 }
 
-/**
- * Pick the client's best-matching contractor for an issue type by trade.
- * Returns the first (name-ordered) contractor whose trades cover the type,
- * or null when none match. Used to auto-assign on issue creation.
- */
-async function pickContractorForType(clientId: number, issueType: string): Promise<number | null> {
+/** Auto-assign only when exactly one client contractor covers the issue type. */
+async function uniqueContractorForType(clientId: number, issueType: string): Promise<number | null> {
   const matchTrades = tradesForIssueType(issueType);
   const result = await db.execute(sql`
     SELECT id, trades
@@ -97,11 +93,12 @@ async function pickContractorForType(clientId: number, issueType: string): Promi
     WHERE  client_id = ${clientId}
     ORDER  BY name
   `);
+  const matches: number[] = [];
   for (const c of (result.rows as any[])) {
     const trades = Array.isArray(c.trades) ? (c.trades as string[]) : [];
-    if (trades.some((t) => matchTrades.includes(t))) return c.id as number;
+    if (trades.some((t) => matchTrades.includes(t))) matches.push(c.id as number);
   }
-  return null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -278,13 +275,12 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   const mediaError = await finalizeIssueMedia(data.mediaUrls, clientId);
   if (mediaError) return res.status(403).json({ error: mediaError });
 
-  // Auto-assign: if no contractor supplied, pick the client's best-matching
-  // active contractor by trade for the issue type (same matching as
+  // Auto-assign only when one contractor matches the issue type (same matching as
   // GET /contractors/suggest). Never auto-sends an email — emails still
   // require manager approval.
   let contractorId = data.contractorId ?? null;
   if (contractorId == null) {
-    const autoId = await pickContractorForType(clientId, data.issueType ?? "general");
+    const autoId = await uniqueContractorForType(clientId, data.issueType ?? "general");
     if (autoId != null) contractorId = autoId;
   }
 
@@ -345,6 +341,16 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       .limit(1);
     if (!current) return { kind: "not_found" as const };
     if (current.emailRequestStatus === "sending") return { kind: "email_sending" as const };
+
+    // Re-run auto-matching when the type changes unless the caller explicitly
+    // chose a contractor. Multiple or zero matches leave the job unassigned.
+    if (
+      data.issueType &&
+      data.issueType !== current.issueType &&
+      !Object.prototype.hasOwnProperty.call(data, "contractorId")
+    ) {
+      data.contractorId = await uniqueContractorForType(clientId, data.issueType);
+    }
 
     const nextStatus: Record<string, string | undefined> = {
       reported: "in_progress",

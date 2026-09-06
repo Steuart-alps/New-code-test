@@ -170,7 +170,16 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
   function handleTypeChange(v: string) {
     const autoPri = AUTO_PRIORITY[v] ?? "medium";
-    setForm({ ...form, issueType: v, priority: autoPri });
+    const matchTrades = v === "gas" ? GAS_SUBTRADES : [v];
+    const matches = contractors.filter(c =>
+      Array.isArray(c.trades) && c.trades.some(t => matchTrades.includes(t)),
+    );
+    setForm({
+      ...form,
+      issueType: v,
+      priority: autoPri,
+      contractorId: matches.length === 1 ? matches[0].id : null,
+    });
   }
 
   // Gas is one issue type but three distinct trades — match all gas sub-trades
@@ -1025,6 +1034,12 @@ export default function FixTrackPage() {
                               <UserCog className="w-3 h-3" />
                               <span className="font-medium">{issue.contractorName}</span>
                             </span>
+                          )}
+                          {!issue.contractorId && (
+                            <Badge className="bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-50">
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                              No contractor set up for {issueTypeMeta(issue.issueType).label} — assign manually
+                            </Badge>
                           )}
                           {issue.assignedTo && <span>Assigned: <span className="font-medium">{issue.assignedTo}</span></span>}
                           {issue.targetDate && <span>Target: {format(new Date(issue.targetDate), "dd/MM/yyyy")}</span>}

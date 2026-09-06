@@ -28,6 +28,7 @@ interface TokenRow {
   issue_description: string | null;
   site_name: string | null;
   company_name: string;
+  contractor_name: string | null;
 }
 
 async function lookupToken(token: string): Promise<TokenRow | null> {
@@ -42,10 +43,12 @@ async function lookupToken(token: string): Promise<TokenRow | null> {
       fi.description AS issue_description,
       s.name         AS site_name,
       cl.name        AS company_name
+      ,c.name        AS contractor_name
     FROM   fix_track_action_tokens t
     JOIN   fix_track_issues fi ON fi.id  = t.issue_id
     LEFT   JOIN sites       s  ON s.id   = fi.site_id
     JOIN   clients          cl ON cl.id  = t.client_id
+    LEFT   JOIN contractors c  ON c.id   = t.contractor_id AND c.client_id = t.client_id
     WHERE  t.token = ${token}
     LIMIT  1
   `);
@@ -181,6 +184,16 @@ router.get("/:token", async (req, res) => {
           INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
           VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
         `);
+        await tx.execute(sql`
+          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
+          VALUES (
+            ${t.client_id},
+            ${t.issue_id},
+            'note',
+            ${`Marked as booked by ${t.contractor_name ?? "contractor"} via email`},
+            now()
+          )
+        `);
         return "updated" as const;
       });
     } catch (err: any) {
@@ -315,6 +328,16 @@ router.post("/:token", async (req, res) => {
       await tx.execute(sql`
         INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
         VALUES (${t.client_id}, ${t.issue_id}, 'status', 'resolved', now())
+      `);
+      await tx.execute(sql`
+        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
+        VALUES (
+          ${t.client_id},
+          ${t.issue_id},
+          'note',
+          ${`Marked as completed by ${t.contractor_name ?? "contractor"} via email`},
+          now()
+        )
       `);
       if (notes) {
         await tx.execute(sql`
