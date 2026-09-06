@@ -65,6 +65,7 @@ const runnerLocked = new Set([
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
+  "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
   "test:track-summary-routing", // unique temp bundle; pure formatting helpers
   "test:billing-addon-activation", // fake Stripe; unique temp bundle
   "test:service-price-preflight", // read-only source assertions and fake inputs

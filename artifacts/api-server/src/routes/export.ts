@@ -516,7 +516,7 @@ router.get(
       archive.append(rowsToCsv(premises), { name: "premises-track/inspections.csv" });
 
       // ── Staff roster ──────────────────────────────────────────────────────
-      const staffRows = await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, employment_type, start_date, active, notes, created_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`);
+      const staffRows = await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`);
       archive.append(rawToCsv(staffRows.rows), { name: "staff-roster/staff.csv" });
 
     } catch (err: unknown) {
