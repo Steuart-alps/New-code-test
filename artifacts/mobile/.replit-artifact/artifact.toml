@@ -17,7 +17,11 @@ run = "pnpm --filter @workspace/mobile run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/mobile", "run", "build" ]
-run = [ "pnpm", "--filter", "@workspace/mobile", "run", "serve" ]
+run = [ "node", "artifacts/mobile/server/serve.js" ]
+
+
+[services.production.health.startup]
+path = "/mobile/"
 
 [services.env]
 PORT = "18115"

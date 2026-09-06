@@ -6,6 +6,7 @@ id = "U8c3jOKkiGAmdZjbxfLOK"
 uri = "file://myproject.tar.gz"
 type = "unspecified"
 title = "ComplyTrack project archive"
+logical_id = "b7779189-3eb5-4100-bf2e-561eee8c8ab8"
 
 [[outputs]]
 id = "S4gfnvrByOnMFYwudXRNp"
@@ -13,3 +14,4 @@ uri = "file://research/notes.md"
 type = "text"
 title = "UK Compliance Comparison — Research Notes"
 description = "Running research plan and source-review checklist for the track-by-track UK comparison."
+logical_id = "8573715b-217c-4c2a-ada0-3fa53b8f2ce6"
