@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
+import { downloadFile, printHtmlDocument } from "@/lib/download";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -567,9 +568,7 @@ export default function SafeTrackPage() {
       const res = await apiFetch(`${base}/${sub}/${id}/download-url`);
       if (!res.ok) throw new Error("Could not get download link");
       const { downloadUrl, fileName } = await res.json();
-      const a = document.createElement("a");
-      a.href = downloadUrl; a.download = fileName ?? "document"; a.target = "_blank";
-      a.click();
+      await downloadFile(downloadUrl, fileName ?? "document");
     } catch (err: any) {
       toast({ title: "Download failed", description: err.message, variant: "destructive" });
     }
@@ -583,13 +582,7 @@ export default function SafeTrackPage() {
       const item = checklist.items.find(entry => entry.key === section.key);
       return `<tr><td class="number">${index + 1}</td><td>${escapeHtml(section.label)}</td><td class="status ${escapeHtml(item?.status || "blank")}">${escapeHtml(statusLabel[item?.status ?? ""])}</td><td>${escapeHtml(item?.comments || "—")}</td></tr>`;
     }).join("");
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      toast({ title: "Print window blocked", description: "Allow pop-ups for this site and try again.", variant: "destructive" });
-      return;
-    }
-    printWindow.opener = null;
-    printWindow.document.write(`<!doctype html><html><head><title>Staff Induction - ${escapeHtml(record.staffName)}</title>
+    printHtmlDocument(`<!doctype html><html><head><title>Staff Induction - ${escapeHtml(record.staffName)}</title>
       <style>
         @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt}
         h1{font-size:20pt;margin:0 0 4px;color:#173b57}.subtitle{margin:0 0 16px;color:#52606d}
@@ -616,8 +609,7 @@ export default function SafeTrackPage() {
       <table><thead><tr><th>No.</th><th>Induction section</th><th>Status</th><th>Comments</th></tr></thead><tbody>${rows}</tbody></table>
       <section class="notes"><span class="label">Manager sign-off notes</span>${escapeHtml(record.notes || "No sign-off notes recorded.")}</section>
       <p class="footer">Once the employee and manager have signed to confirm the induction is complete, place this form on the employee's personnel file.</p>
-      <script>window.addEventListener("load",()=>window.print())<\/script></body></html>`);
-    printWindow.document.close();
+      </body></html>`);
   }
 
   async function handleSave(sub: string) {

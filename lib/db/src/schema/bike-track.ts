@@ -38,6 +38,12 @@ export const bikeHireRecordsTable = pgTable("bike_hire_records", {
   depositPence: integer("deposit_pence"),
   depositReturned: boolean("deposit_returned").notNull().default(false),
   status: text("status").notNull().default("active"), // active | returned | overdue | cancelled
+  // Last successfully delivered overdue alert. Repeat alerts are eligible after
+  // the server-side cadence; the claim fields prevent concurrent workers sending
+  // the same alert.
+  overdueNotifiedAt: timestamp("overdue_notified_at"),
+  overdueNotificationClaimToken: text("overdue_notification_claim_token"),
+  overdueNotificationClaimedAt: timestamp("overdue_notification_claimed_at"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -7,8 +7,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 
-TEST_PORT="${TEST_PORT:-8080}"
+_free_port() {
+  python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19093
+}
+TEST_PORT="${TEST_PORT:-$(_free_port)}"
 export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
 
 healthy() {

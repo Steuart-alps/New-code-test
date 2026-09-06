@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Self-sufficient runner for focused compliance audit-history coverage.
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 
 _free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19094

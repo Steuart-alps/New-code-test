@@ -8,6 +8,28 @@ import { z } from "zod";
 
 const router = Router();
 
+// Inspection dates are PostgreSQL DATE values, rather than instants. Validate
+// them as calendar dates before they reach a comparison so the bounds retain
+// their UK/date-picker meaning and cannot be widened by an invalid value.
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}, "Invalid calendar date");
+
+const listInspectionsQuery = z.object({
+  from: dateOnly.optional(),
+  to: dateOnly.optional(),
+  siteId: z.coerce.number().int().positive().optional(),
+  type: z.string().min(1).max(60).optional(),
+  status: z.enum(["open", "actioned", "closed"]).optional(),
+}).refine(({ from, to }) => !from || !to || from <= to, {
+  message: "'from' must not be after 'to'",
+  path: ["to"],
+});
+
 function allowedSitesSubquery(clientId: number, departmentId: number) {
   return db.select({ id: sitesTable.id }).from(sitesTable).where(and(
     eq(sitesTable.clientId, clientId),
@@ -99,13 +121,23 @@ router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const { from, to, siteId, type, status } = req.query as Record<string, string>;
+  const parsed = listInspectionsQuery.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid query parameters" });
+  }
+  const { from, to, siteId, type, status } = parsed.data;
+  const departmentId = getActiveDepartmentId(req);
+  // Do not turn an invalid/cross-scope site into an unfiltered export. This
+  // check also makes the URL's site scope authoritative before querying rows.
+  if (siteId !== undefined && !(await siteIsAccessible(siteId, clientId, departmentId))) {
+    return res.status(403).json({ error: "Site is outside your access scope" });
+  }
+
   const conds = [eq(premisesInspectionsTable.clientId, clientId)];
-  addDepartmentScope(conds, clientId, getActiveDepartmentId(req));
+  addDepartmentScope(conds, clientId, departmentId);
   if (from)   conds.push(gte(premisesInspectionsTable.inspectionDate, from));
   if (to)     conds.push(lte(premisesInspectionsTable.inspectionDate, to));
-  if (siteId && !isNaN(parseInt(siteId, 10)))
-    conds.push(eq(premisesInspectionsTable.siteId, parseInt(siteId, 10)));
+  if (siteId !== undefined) conds.push(eq(premisesInspectionsTable.siteId, siteId));
   if (type)   conds.push(eq(premisesInspectionsTable.inspectionType, type));
   if (status) conds.push(eq(premisesInspectionsTable.status, status));
 

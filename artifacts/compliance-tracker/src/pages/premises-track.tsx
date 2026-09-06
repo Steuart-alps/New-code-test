@@ -26,6 +26,7 @@ import {
   Search, X, Printer, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { printHtmlDocument } from "@/lib/download";
 import { format, parseISO, isValid } from "date-fns";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -393,9 +394,28 @@ export default function PremisesTrackPage() {
   const esc = (s: string | null | undefined) =>
     (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const handleExportLog = () => {
-    const sorted = [...inspections].sort((a, b) => (a.inspectionDate < b.inspectionDate ? 1 : -1));
-    const openCount = inspections.filter(r => r.status === "open").length;
+  const handleExportLog = async () => {
+    if (fromDate && toDate && fromDate > toDate) {
+      toast({ title: "Invalid date range", description: "The from date must be on or before the to date.", variant: "destructive" });
+      return;
+    }
+    // Fetch a fresh, unpaginated result for the print/PDF document instead of
+    // reusing the visible list. This prevents a stale page from escaping the
+    // selected date range while a filter request is in flight.
+    let exportRows: PremisesInspection[];
+    try {
+      exportRows = await apiFetch<PremisesInspection[]>(`/${listParams()}`);
+    } catch (err: any) {
+      toast({ title: "Export failed", description: err.message, variant: "destructive" });
+      return;
+    }
+    const query = q.trim().toLowerCase();
+    const filteredRows = query
+      ? exportRows.filter(r => [r.area, r.findings, r.hazardDetails, r.actionRequired, r.actionTaken, r.inspectedBy]
+        .some(s => s?.toLowerCase().includes(query)))
+      : exportRows;
+    const sorted = [...filteredRows].sort((a, b) => (a.inspectionDate < b.inspectionDate ? 1 : -1));
+    const openCount = filteredRows.filter(r => r.status === "open").length;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Premises Safety Logbook</title>
 <style>
   body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
@@ -410,6 +430,7 @@ export default function PremisesTrackPage() {
 </style></head><body>
 <h1>Premises Safety Logbook</h1>
 <div class="meta">${esc(user?.name ?? "")} — generated ${format(new Date(), "dd MMM yyyy")} — premises safety inspection register</div>
+${fromDate || toDate ? `<div class="meta">Date range: ${esc(fromDate ? (fmt(fromDate) ?? fromDate) : "earliest")} to ${esc(toDate ? (fmt(toDate) ?? toDate) : "latest")}</div>` : ""}
 <div class="meta">Inspections: ${sorted.length} (${openCount} open)</div>
 
 <h2>Inspection records</h2>
@@ -429,15 +450,7 @@ ${sorted.map(r => `<tr>
 </tr>`).join("")}
 </table>`}
 </body></html>`;
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the logbook.", variant: "destructive" });
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
+    printHtmlDocument(html);
   };
 
   return (

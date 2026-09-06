@@ -34,12 +34,21 @@ async function bundleEntry() {
 async function main() {
   const { outDir, outFile } = await bundleEntry();
   const lib = await import(new URL(`file://${outFile}`).href);
-  const { runBikeOverdueJob, db, pool, clientsTable, usersTable, sql } = lib;
+  const { runBikeOverdueJob, BIKE_OVERDUE_REPEAT_INTERVAL_DAYS, db, pool, clientsTable, usersTable, sql } = lib;
   const tag = `bike-overdue-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let clientId;
   const sent = [];
 
   try {
+    // This standalone suite does not boot the API, so it must install the
+    // additive runtime-migration pieces used by the reminder claim protocol.
+    await db.execute(sql`ALTER TABLE bike_hire_records ADD COLUMN IF NOT EXISTS overdue_notification_claim_token text`);
+    await db.execute(sql`ALTER TABLE bike_hire_records ADD COLUMN IF NOT EXISTS overdue_notification_claimed_at timestamp`);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_bike_hire_overdue_alerts"
+      ON bike_hire_records (client_id, status, return_date_expected, overdue_notified_at)
+    `);
+
     const [client] = await db.insert(clientsTable).values({
       name: `Bike overdue test ${tag}`,
       slug: tag,
@@ -53,6 +62,7 @@ async function main() {
     }).returning();
     await db.insert(usersTable).values([
       { email: `${tag}-staff@test.local`, passwordHash: "x", name: "Staff", role: "client_staff", clientId, active: true },
+      { email: `${tag}-manager@test.local`, passwordHash: "x", name: "Manager", role: "client_staff", clientId, active: true, isMaintenanceManager: true },
       { email: `${tag}-inactive@test.local`, passwordHash: "x", name: "Inactive", role: "client_admin", clientId, active: false },
     ]);
 
@@ -76,7 +86,9 @@ async function main() {
     const first = await runBikeOverdueJob(deps);
     check("first run finds only past active hire", first.hiresFound === 1, JSON.stringify(first));
     check("one digest is sent", sent.length === 1, `captured=${sent.length}`);
-    check("only active admin receives digest", JSON.stringify(sent[0]?.to) === JSON.stringify([admin.email]), JSON.stringify(sent[0]?.to));
+    check("only tenant managers receive digest",
+      JSON.stringify([...(sent[0]?.to ?? [])].sort()) === JSON.stringify([admin.email, `${tag}-manager@test.local`].sort()),
+      JSON.stringify(sent[0]?.to));
     check("digest lists bike reference", sent[0]?.html.includes("BIKE-57"), "bike reference missing");
     check("digest lists guest and contact", sent[0]?.html.includes("Overdue Guest") && sent[0]?.html.includes("07000 000057"), "guest details missing");
     check("digest lists days overdue", sent[0]?.html.includes("2 days overdue"), "days overdue missing");
@@ -87,7 +99,35 @@ async function main() {
     check("second run is idempotent", second.hiresFound === 0 && sent.length === 0, JSON.stringify(second));
 
     await db.execute(sql`
-      UPDATE bike_hire_records SET overdue_notified_at = NULL
+      UPDATE bike_hire_records
+      SET overdue_notified_at = now() - (${BIKE_OVERDUE_REPEAT_INTERVAL_DAYS} * interval '1 day')
+      WHERE client_id = ${clientId} AND guest_name = 'Overdue Guest'
+    `);
+    const repeats = [];
+    const concurrentSend = async (message) => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      repeats.push(message);
+    };
+    const [concurrentA, concurrentB] = await Promise.all([
+      runBikeOverdueJob({ sendEmail: concurrentSend, sendPush: async () => { throw new Error("push unavailable"); } }),
+      runBikeOverdueJob({ sendEmail: concurrentSend, sendPush: async () => { throw new Error("push unavailable"); } }),
+    ]);
+    check("weekly repeat is sent once under concurrent workers", repeats.length === 1, JSON.stringify({ concurrentA, concurrentB, sends: repeats.length }));
+    check("push partial failure does not reopen email claim", (await runBikeOverdueJob(deps)).hiresFound === 0, "repeat was made eligible after push failure");
+
+    await db.execute(sql`
+      UPDATE bike_hire_records
+      SET status = 'returned', overdue_notified_at = now() - (${BIKE_OVERDUE_REPEAT_INTERVAL_DAYS} * interval '1 day')
+      WHERE client_id = ${clientId} AND guest_name = 'Overdue Guest'
+    `);
+    sent.length = 0;
+    const returned = await runBikeOverdueJob(deps);
+    check("returned hire suppresses repeats", returned.hiresFound === 0 && sent.length === 0, JSON.stringify(returned));
+
+    await db.execute(sql`
+      UPDATE bike_hire_records
+      SET status = 'active', overdue_notified_at = NULL,
+          overdue_notification_claim_token = NULL, overdue_notification_claimed_at = NULL
       WHERE client_id = ${clientId} AND guest_name = 'Overdue Guest'
     `);
     const failed = await runBikeOverdueJob({

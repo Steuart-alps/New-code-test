@@ -11,7 +11,12 @@ import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
-import { ensureServicePrices } from "./lib/services";
+import {
+  ensureServicePrices,
+  getServicePricePreflight,
+  getServicePriceReadinessBlocker,
+  type ServicePricePreflight,
+} from "./lib/services";
 import { sendSystemEmail } from "./lib/email";
 import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
@@ -40,11 +45,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-async function initStripe() {
+async function initStripe(): Promise<string | null> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     logger.warn("DATABASE_URL not set — Stripe sync skipped");
-    return;
+    return "Stripe service-price catalogue could not be read";
   }
   try {
     logger.info("Initializing Stripe schema...");
@@ -56,24 +61,69 @@ async function initStripe() {
     await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
     logger.info("Stripe webhook configured");
 
-    stripeSync.syncBackfill()
-      .then(() => logger.info("Stripe data synced"))
-      .catch((err: any) => logger.error({ err }, "Stripe backfill error"));
+    await stripeSync.syncBackfill();
+    logger.info("Stripe data synced");
+
+    // Read-only launch preflight: report every gap from the synced catalogue
+    // before attempting the idempotent repair below. This cannot grant access
+    // or alter any subscription.
+    let catalogueReadFailed = false;
+    try {
+      const preflight = await getServicePricePreflight();
+      if (preflight.ready) {
+        logger.info({ configured: preflight.configured }, "Stripe service-price preflight passed");
+      } else {
+        logger.error(
+          { missing: preflight.missing, configured: preflight.configured },
+          "Stripe service-price preflight failed — affected modules cannot be activated",
+        );
+      }
+    } catch (err) {
+      catalogueReadFailed = true;
+      logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+    }
 
     // Ensure every module in the service catalogue has a Stripe product + price.
-    // Idempotent — only creates what's missing. Runs after syncBackfill kicks
-    // off so newly synced prices are visible before we check for gaps.
-    ensureServicePrices()
-      .then((r) => {
-        if (r.created.length > 0) {
-          logger.info({ created: r.created }, "Created missing Stripe service prices");
-        } else {
-          logger.info("All Stripe service prices already exist");
-        }
-      })
-      .catch((err: any) => logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually"));
+    // Idempotent — only creates what's missing, after the sync has made existing
+    // prices visible to the catalogue read.
+    let repairFailed = false;
+    try {
+      const prices = await ensureServicePrices();
+      if (prices.created.length > 0) {
+        logger.info({ created: prices.created }, "Created missing Stripe service prices");
+      } else {
+        logger.info("All Stripe service prices already exist");
+      }
+    } catch (err) {
+      repairFailed = true;
+      logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+    }
+
+    // Confirm the repair result before the application becomes ready. This is
+    // read-only and cannot grant a client an entitlement.
+    let finalPreflight: ServicePricePreflight | null = null;
+    try {
+      finalPreflight = await getServicePricePreflight();
+      if (finalPreflight.ready) {
+        logger.info({ configured: finalPreflight.configured }, "Stripe service-price preflight passed");
+      } else {
+        logger.error(
+          { missing: finalPreflight.missing, configured: finalPreflight.configured },
+          "Stripe service-price preflight failed — affected modules cannot be activated",
+        );
+      }
+    } catch (err) {
+      catalogueReadFailed = true;
+      logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+    }
+    return getServicePriceReadinessBlocker({
+      catalogueReadFailed,
+      repairFailed,
+      finalPreflight,
+    });
   } catch (err) {
     logger.error({ err }, "Failed to initialize Stripe — continuing without it");
+    return "Stripe service-price catalogue initialization failed";
   }
 }
 
@@ -174,7 +224,8 @@ function startScheduler() {
   });
   logger.info("FixTrack overdue alert scheduler started (daily at 08:40)");
 
-  // Notify client admins about overdue bike hires (daily; each hire notified once).
+  // Notify tenant managers about overdue bike hires (daily scan; initial alert
+  // then a safely claimed weekly repeat while the hire remains active).
   cron.schedule("20 8 * * *", async () => {
     try {
       const result = await runBikeOverdueJob();
@@ -183,7 +234,7 @@ function startScheduler() {
       logger.error({ err }, "Bike overdue job failed");
     }
   });
-  logger.info("Bike overdue notification scheduler started (daily at 08:20)");
+  logger.info("Bike overdue repeat-notification scheduler started (daily at 08:20)");
 
   // Detect newly cancelled subscriptions and start the 12-month retention clock
   // (daily at 07:00; sends one offboarding email per client).
@@ -398,8 +449,8 @@ app.listen(port, async (err?: any) => {
   }
   logger.info({ port }, "Server listening");
   await runRuntimeMigrations();
-  await initStripe();
-  markApplicationReady();
+  const readinessBlocker = await initStripe();
+  markApplicationReady(readinessBlocker);
   startScheduler();
   // Also reconcile once shortly after startup so drift never waits a full day
   // (best-effort; exits quietly per client when Stripe isn't reachable).

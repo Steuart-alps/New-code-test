@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 if [ -z "${DATABASE_URL:-}" ]; then
   echo "DATABASE_URL is required for contractor portal integration tests" >&2
   exit 2

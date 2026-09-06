@@ -9,9 +9,20 @@ type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missi
 
 // ─── Shared schemas ───────────────────────────────────────────────────────────
 
+// Report filters represent local calendar days (the value emitted by an HTML
+// date input), not UTC instants. Keep them as DATE-compatible strings so both
+// ends of an inclusive range have the expected UK calendar-day semantics.
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").refine((value) => {
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}, "Date must be a valid calendar date");
+
 const complianceSchema = z.object({
-  from:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD"),
-  to:           z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be YYYY-MM-DD"),
+  from:         dateOnly,
+  to:           dateOnly,
   siteId:       z.coerce.number().int().positive().optional(),
   departmentId: z.coerce.number().int().positive().optional(),
 });
@@ -298,7 +309,11 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
 
   if (from > to) return res.status(400).json({ error: "'from' must not be after 'to'" });
 
-  const totalDays = Math.floor((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1;
+  const [fromYear, fromMonth, fromDay] = from.split("-").map(Number);
+  const [toYear, toMonth, toDay] = to.split("-").map(Number);
+  const totalDays = Math.floor(
+    (Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000,
+  ) + 1;
   if (totalDays > 366) return res.status(400).json({ error: "Date range cannot exceed 366 days" });
 
   const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);

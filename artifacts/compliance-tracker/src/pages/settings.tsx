@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { clearModuleActivation, trackModuleActivation } from "@/lib/analytics";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -1075,7 +1076,7 @@ interface BillingConfig {
 
 function BillingCard() {
   const { toast } = useToast();
-  const { refresh: refreshAuth } = useAuth();
+  const { refresh: refreshAuth, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1128,6 +1129,11 @@ function BillingCard() {
         toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
       } else {
         toast({ title: `Service ${isAdd ? "added" : "removed"} successfully` });
+      }
+      if (isAdd && !res.paymentPending) {
+        trackModuleActivation(activeClientId, serviceKey);
+      } else {
+        clearModuleActivation(activeClientId, serviceKey);
       }
       fetchConfig();
       await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});

@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 
 # Use a private ephemeral port by default so this suite never attaches to a
 # developer's already-running server (which may not be in NODE_ENV=test).

@@ -45,6 +45,86 @@ export const BUNDLE_LABEL = "ComplyTrack Complete";
 /** Per-site monthly cap: at or beyond this, every service is unlocked. */
 export const SERVICE_CAP_PENCE = 5000;
 
+export const SERVICE_PRICE_CATALOGUE = [
+  ...Object.entries(SERVICES).map(([key, service]) => ({
+    key,
+    label: service.label,
+    amountPence: service.amountPence,
+  })),
+  { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
+] as const;
+
+export interface ServicePricePreflight {
+  /** All catalogue service keys which require a Stripe monthly price. */
+  required: string[];
+  /** Required keys with an active, synced monthly Stripe price. */
+  configured: string[];
+  /** Required keys which cannot safely be selected in checkout or add-on activation. */
+  missing: string[];
+  ready: boolean;
+}
+
+/**
+ * Turn price-catalogue checks into a safe, non-secret readiness status. A
+ * failed read or repair is not treated as healthy merely because the process
+ * itself can continue serving diagnostic/admin endpoints.
+ */
+export function getServicePriceReadinessBlocker(input: {
+  catalogueReadFailed: boolean;
+  repairFailed: boolean;
+  finalPreflight: ServicePricePreflight | null;
+}): string | null {
+  if (input.catalogueReadFailed) {
+    return "Stripe service-price catalogue could not be read";
+  }
+  if (input.repairFailed) {
+    return "Stripe service-price catalogue repair failed";
+  }
+  if (!input.finalPreflight || !input.finalPreflight.ready) {
+    return "Required Stripe service prices are missing";
+  }
+  return null;
+}
+
+/**
+ * Pure portion of the price launch check. Keeping this separate makes the
+ * catalogue contract testable without a Stripe account or a database.
+ */
+export function evaluateServicePricePreflight(
+  configuredServiceKeys: Iterable<string>,
+): ServicePricePreflight {
+  const configuredKeys = new Set(configuredServiceKeys);
+  const required = SERVICE_PRICE_CATALOGUE.map((service) => service.key);
+  const configured = required.filter((key) => configuredKeys.has(key));
+  const missing = required.filter((key) => !configuredKeys.has(key));
+  return { required, configured, missing, ready: missing.length === 0 };
+}
+
+async function listLiveMonthlyPriceServiceKeys(): Promise<string[]> {
+  const rows = await db.execute(sql`
+    SELECT DISTINCT pr.metadata->>'service_key' AS service_key
+    FROM stripe.prices pr
+    JOIN stripe.products p ON p.id = pr.product
+    WHERE p.active = true
+      AND pr.active = true
+      AND (pr.recurring->>'interval') = 'month'
+      AND pr.metadata->>'service_key' IS NOT NULL
+  `);
+  return (rows.rows as { service_key: string | null }[])
+    .map((row) => row.service_key)
+    .filter((key): key is string => Boolean(key));
+}
+
+/**
+ * Read-only launch preflight for the Stripe-synced price catalogue. It never
+ * calls Stripe and never changes subscriptions or entitlements. Callers get
+ * every missing required price in one response, rather than discovering gaps
+ * one client activation at a time.
+ */
+export async function getServicePricePreflight(): Promise<ServicePricePreflight> {
+  return evaluateServicePricePreflight(await listLiveMonthlyPriceServiceKeys());
+}
+
 export type Entitlements = "all" | ServiceKey[];
 
 // Cached per-client entitlement decisions (same spirit as the trial-lock cache).
@@ -201,26 +281,11 @@ export async function ensureServicePrices(): Promise<EnsurePricesResult> {
   // Which service_keys already have a live monthly price? Read from the synced
   // tables (the same source getServicePrice trusts) so we never create a
   // duplicate for a key that is already priced.
-  const existingRows = await db.execute(sql`
-    SELECT DISTINCT pr.metadata->>'service_key' AS service_key
-    FROM stripe.prices pr
-    JOIN stripe.products p ON p.id = pr.product
-    WHERE p.active = true
-      AND pr.active = true
-      AND (pr.recurring->>'interval') = 'month'
-      AND pr.metadata->>'service_key' IS NOT NULL
-  `);
-  const existing = new Set(
-    (existingRows.rows as { service_key: string | null }[])
-      .map((r) => r.service_key)
-      .filter((k): k is string => !!k),
-  );
+  const existing = new Set(await listLiveMonthlyPriceServiceKeys());
 
   // Full catalogue: every SERVICES entry (core + add-ons) plus the bundle.
-  const catalogue: { key: string; label: string; amountPence: number }[] = [
-    ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
-    { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
-  ];
+  const catalogue: readonly { key: string; label: string; amountPence: number }[] =
+    SERVICE_PRICE_CATALOGUE;
 
   const created: string[] = [];
   for (const svc of catalogue) {

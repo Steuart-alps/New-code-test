@@ -16,9 +16,15 @@ import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 
 const app: Express = express();
 let applicationReady = false;
+let readinessBlocker: string | null = null;
 
-export function markApplicationReady(): void {
-  applicationReady = true;
+/**
+ * Keep the process alive for diagnostics while accurately withholding readiness
+ * when a launch-critical dependency could not be verified.
+ */
+export function markApplicationReady(blocker: string | null = null): void {
+  readinessBlocker = blocker;
+  applicationReady = blocker === null;
 }
 
 // Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
@@ -147,7 +153,10 @@ app.use("/api", enforceTrialLock);
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 app.get("/readyz", (_req, res) => {
   if (!applicationReady) {
-    return res.status(503).json({ status: "starting" });
+    return res.status(503).json({
+      status: readinessBlocker ? "degraded" : "starting",
+      ...(readinessBlocker ? { blocker: readinessBlocker } : {}),
+    });
   }
   res.json({ status: "ok" });
 });

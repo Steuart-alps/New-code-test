@@ -66,8 +66,36 @@ async function main() {
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   check("manager has client context", clientId != null);
 
-  const staff = await request("POST", "/staff-roster", { name: "Alex Staff" });
+  const kitchenDepartment = await request("POST", "/departments", { name: "Kitchen" });
+  requireSuccess("create Kitchen department", kitchenDepartment, 201);
+  const primarySite = await request("POST", "/sites", {
+    name: "DocTrack primary site", departmentId: kitchenDepartment.data?.id,
+  });
+  requireSuccess("create primary site", primarySite, 201);
+  const otherSite = await request("POST", "/sites", {
+    name: "DocTrack other site", departmentId: kitchenDepartment.data?.id,
+  });
+  requireSuccess("create other site", otherSite, 201);
+  const staff = await request("POST", "/staff-roster", {
+    name: "Alex Staff", email: `doc-active-${Date.now()}@test.local`,
+    siteId: primarySite.data?.id, department: "Kitchen",
+  });
   requireSuccess("create roster staff", staff, 201);
+  const inactiveStaff = await request("POST", "/staff-roster", {
+    name: "Former Staff", email: `doc-inactive-${Date.now()}@test.local`,
+    siteId: primarySite.data?.id, department: "Kitchen", active: false,
+  });
+  requireSuccess("create inactive roster staff", inactiveStaff, 201);
+  const otherSiteStaff = await request("POST", "/staff-roster", {
+    name: "Other Site Staff", email: `doc-other-site-${Date.now()}@test.local`,
+    siteId: otherSite.data?.id, department: "Kitchen",
+  });
+  requireSuccess("create other-site roster staff", otherSiteStaff, 201);
+  const otherDepartmentStaff = await request("POST", "/staff-roster", {
+    name: "Other Department Staff", email: `doc-other-dept-${Date.now()}@test.local`,
+    siteId: primarySite.data?.id, department: "Housekeeping",
+  });
+  requireSuccess("create other-department roster staff", otherDepartmentStaff, 201);
   const uploadRequest = await request("POST", "/doc-track/documents/request-upload", {
     name: "annual-safety-policy.pdf",
     contentType: "application/pdf",
@@ -87,6 +115,8 @@ async function main() {
     fileName: "annual-safety-policy.pdf",
     mimeType: "application/pdf",
     objectPath: uploadRequest.data.objectPath,
+    siteId: primarySite.data?.id,
+    department: "Kitchen",
     requiresAcknowledgement: true,
     annualAcknowledgement: true,
   });
@@ -104,13 +134,64 @@ async function main() {
   let row = listed.data.find((item) => item.id === document.data?.id);
   check("new document status is pending", row?.acknowledgement_status === "pending");
   check("new document pending count is returned", Number(row?.pending_acknowledgement_count) === 1);
+  for (const [label, roster] of [
+    ["inactive", inactiveStaff],
+    ["other-site", otherSiteStaff],
+    ["other-department", otherDepartmentStaff],
+  ]) {
+    const rosterEmail = roster.data?.email;
+    requireSuccess(`create ${label} staff user`, await request("POST", "/users", {
+      name: roster.data?.name, email: rosterEmail, password: "password-123", role: "client_staff",
+      clientId, departmentId: kitchenDepartment.data?.id,
+    }), 201);
+    cookie = "";
+    requireSuccess(`log in ${label} staff`, await request("POST", "/auth/login", {
+      email: rosterEmail, password: "password-123",
+    }), 200);
+    check(`${label} staff self acknowledgement is denied`,
+      (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "forged" })).status === 403);
+    cookie = managerCookie;
+  }
 
   const acknowledged = await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
-    acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "Forged name" }],
+    acknowledgements: [
+      { staffRosterId: staff.data?.id, staffName: "Forged name" },
+      { staffRosterId: inactiveStaff.data?.id, staffName: "Former Staff" },
+      { staffRosterId: otherSiteStaff.data?.id, staffName: "Other Site Staff" },
+      { staffRosterId: otherDepartmentStaff.data?.id, staffName: "Other Department Staff" },
+    ],
   });
-  check("record acknowledgement", acknowledged.status === 201 && acknowledged.data?.created === 1);
+  check("manager bulk acknowledgement only includes eligible active population", acknowledged.status === 201 && acknowledged.data?.created === 1);
   const trainRecordId = acknowledged.data?.records?.[0]?.train_track_record_id;
   check("acknowledgement links TrainTrack record", typeof trainRecordId === "number");
+  const acknowledgementPopulation = await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements`);
+  requireSuccess("load eligible acknowledgement population", acknowledgementPopulation, 200);
+  check("manager bulk creates evidence only for the eligible staff member",
+    acknowledgementPopulation.data?.length === 1 && acknowledgementPopulation.data[0]?.staff_roster_id === staff.data?.id);
+
+  const manualTrainRecord = await request("POST", "/train-track/records", {
+    recordType: "internal",
+    staffName: "Alex Staff",
+    trainingType: "Fire drill",
+    trainer: "Safety Manager",
+    completedDate: isoDate(),
+    signature: "Alex Staff",
+  });
+  requireSuccess("create TrainTrack record", manualTrainRecord, 201);
+  check("TrainTrack persists record signature", manualTrainRecord.data?.signature === "Alex Staff");
+  const listedBeforeUnrelatedEdit = await request("GET", "/train-track/records");
+  requireSuccess("list TrainTrack signature before unrelated edit", listedBeforeUnrelatedEdit, 200);
+  check("TrainTrack list includes saved signature",
+    listedBeforeUnrelatedEdit.data?.find((record) => record.id === manualTrainRecord.data?.id)?.signature === "Alex Staff");
+  const updatedTrainRecord = await request("PATCH", `/train-track/records/${manualTrainRecord.data?.id}`, {
+    notes: "Annual drill completed",
+  });
+  requireSuccess("update TrainTrack record", updatedTrainRecord, 200);
+  check("TrainTrack update persists notes", updatedTrainRecord.data?.notes === "Annual drill completed");
+  const reloadedTrainRecords = await request("GET", "/train-track/records");
+  requireSuccess("reload TrainTrack records", reloadedTrainRecords, 200);
+  const reloadedTrainRecord = reloadedTrainRecords.data?.find((record) => record.id === manualTrainRecord.data?.id);
+  check("TrainTrack list retains signature after unrelated edit", reloadedTrainRecord?.signature === "Alex Staff");
 
   listed = await request("GET", "/doc-track/documents");
   row = listed.data?.find((item) => item.id === document.data?.id);
@@ -172,6 +253,41 @@ async function main() {
   requireSuccess("log in as viewer", await request("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), 200);
   check("viewer cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+  check("viewer cannot create TrainTrack records",
+    (await request("POST", "/train-track/records", {
+      recordType: "internal", staffName: "Viewer", trainingType: "Test",
+      trainer: "Test", completedDate: isoDate(),
+    })).status === 403);
+  check("viewer cannot update TrainTrack records",
+    (await request("PATCH", `/train-track/records/${manualTrainRecord.data?.id}`, { notes: "forged" })).status === 403);
+  check("viewer cannot acknowledge a DocTrack document",
+    (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "Viewer" })).status === 403);
+
+  // A record ID from another account must neither be visible nor mutable.
+  cookie = "";
+  const otherEmail = `doc-train-isolation-${Date.now()}@test.local`;
+  const otherRegistered = await request("POST", "/auth/register", {
+    name: "Other tenant", email: otherEmail, password: "password-123",
+  });
+  requireSuccess("register isolated tenant", otherRegistered, 200);
+  requireSuccess("verify isolated tenant", await request(
+    "GET", `/auth/verify-email?token=${encodeURIComponent(otherRegistered.data?.verificationToken)}`,
+  ), 200);
+  requireSuccess("log in isolated tenant", await request("POST", "/auth/login", {
+    email: otherEmail, password: "password-123",
+  }), 200);
+  const isolatedRecords = await request("GET", "/train-track/records");
+  requireSuccess("list isolated TrainTrack records", isolatedRecords, 200);
+  check("other tenant cannot see TrainTrack record",
+    !isolatedRecords.data?.some((record) => record.id === manualTrainRecord.data?.id));
+  check("other tenant cannot update TrainTrack record",
+    (await request("PATCH", `/train-track/records/${manualTrainRecord.data?.id}`, { notes: "forged" })).status === 404);
+  check("other tenant cannot read DocTrack acknowledgements",
+    (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements`)).status === 404);
+  check("other tenant cannot create DocTrack acknowledgement evidence",
+    (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
+      acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "forged" }],
+    })).status === 404);
 
   cookie = managerCookie;
   const preset = await request("PUT", "/pat-track/preset-templates/pest-control", {

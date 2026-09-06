@@ -58,6 +58,7 @@ import {
   Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
 import { buildTrainingMatrix, certificateStatus } from "@/lib/training-matrix";
 
@@ -80,6 +81,7 @@ interface TrainingRecord {
   completed_date: string;
   expiry_date: string | null;
   notes: string | null;
+  signature: string | null;
   created_at: string;
 }
 
@@ -101,6 +103,7 @@ type CertStatus = "expired" | "expiring_soon" | "valid" | "no_expiry";
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   risk_assessment: "Risk Assessment",
   sop: "SOP",
+  handbook: "Handbook",
   policy: "Policy",
   procedure: "Procedure",
   other: "Other",
@@ -202,7 +205,7 @@ function SiteName({ record }: { record: TrainingRecord }) {
   );
 }
 
-function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit: () => void; onDelete: () => void; onPrint?: () => void }) {
+function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit?: () => void; onDelete?: () => void; onPrint?: () => void }) {
   return (
     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
       {onPrint && (
@@ -216,12 +219,16 @@ function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit: () => void; onDele
           <Printer className="w-3.5 h-3.5" />
         </Button>
       )}
-      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={onEdit}>
-        <Pencil className="w-3.5 h-3.5" />
-      </Button>
-      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10" onClick={onDelete}>
-        <Trash2 className="w-3.5 h-3.5" />
-      </Button>
+      {onEdit && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={onEdit}>
+          <Pencil className="w-3.5 h-3.5" />
+        </Button>
+      )}
+      {onDelete && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10" onClick={onDelete}>
+          <Trash2 className="w-3.5 h-3.5" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -231,6 +238,7 @@ function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit: () => void; onDele
 export default function TrainTrackPage() {
   const { toast } = useToast();
   const { activeClientId, client, user } = useAuth();
+  const canMutate = user?.role !== "client_viewer";
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
@@ -365,7 +373,7 @@ export default function TrainTrackPage() {
         expiryDate: r.expiry_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
-        signature: (r as any).signature ?? null,
+        signature: r.signature ?? null,
       });
     } else if (r.record_type === "signoff") {
       setSignoffForm({
@@ -375,7 +383,7 @@ export default function TrainTrackPage() {
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
-        signature: (r as any).signature ?? null,
+        signature: r.signature ?? null,
       });
     } else {
       const isCustom = r.training_type ? !knownTrainingTypes.includes(r.training_type) : false;
@@ -387,7 +395,7 @@ export default function TrainTrackPage() {
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
         notes: r.notes ?? "",
-        signature: (r as any).signature ?? null,
+        signature: r.signature ?? null,
       });
     }
     setShowDialog(true);
@@ -477,15 +485,7 @@ export default function TrainTrackPage() {
   const todayLabel = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   function openPrintWindow(html: string) {
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to print.", variant: "destructive" });
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
+    printHtmlDocument(html);
   }
 
   // Single staff member — induction record for the personnel file
@@ -631,9 +631,11 @@ ${rows.map(r => `<tr>
       <div className="text-center py-16 border border-dashed border-border rounded-sm">
         <BookOpen className="w-9 h-9 mx-auto text-muted-foreground/30 mb-3" />
         <p className="text-sm text-muted-foreground">{message}</p>
-        <Button onClick={openAdd} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
-          <Plus className="w-4 h-4" /> Add Record
-        </Button>
+        {canMutate && (
+          <Button onClick={openAdd} variant="outline" size="sm" className="mt-4 rounded-sm gap-2">
+            <Plus className="w-4 h-4" /> Add Record
+          </Button>
+        )}
       </div>
     );
   }
@@ -671,11 +673,13 @@ ${rows.map(r => `<tr>
           Training certificates, document sign-offs, and internal training records
         </p>
         <div className="flex items-center gap-2">
-          <FormOptionsEditor
-            optionKey="traintrack_types"
-            title="Training types"
-            triggerLabel="Customise types"
-          />
+          {canMutate && (
+            <FormOptionsEditor
+              optionKey="traintrack_types"
+              title="Training types"
+              triggerLabel="Customise types"
+            />
+          )}
           <Button
             variant="outline"
             onClick={handleDownloadMatrix}
@@ -684,9 +688,11 @@ ${rows.map(r => `<tr>
           >
             <Download className="w-4 h-4" /> Download Matrix
           </Button>
-          <Button onClick={openAdd} className="gap-2 rounded-sm">
-            <Plus className="w-4 h-4" /> Add Record
-          </Button>
+          {canMutate && (
+            <Button onClick={openAdd} className="gap-2 rounded-sm">
+              <Plus className="w-4 h-4" /> Add Record
+            </Button>
+          )}
         </div>
       </div>
 
@@ -817,8 +823,8 @@ ${rows.map(r => `<tr>
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                      <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
+                      {canMutate && <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />}
+                      <ActionsCell onEdit={canMutate ? () => openEdit(r) : undefined} onDelete={canMutate ? () => setDeleteId(r.id) : undefined} onPrint={() => handlePrintInduction(r.staff_name)} />
                     </td>
                   </tr>
                 );
@@ -902,8 +908,8 @@ ${rows.map(r => `<tr>
                     {r.notes ?? <span className="opacity-40">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
+                    {canMutate && <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />}
+                    <ActionsCell onEdit={canMutate ? () => openEdit(r) : undefined} onDelete={canMutate ? () => setDeleteId(r.id) : undefined} onPrint={() => handlePrintInduction(r.staff_name)} />
                   </td>
                 </tr>
               ))}
@@ -951,8 +957,8 @@ ${rows.map(r => `<tr>
                     {r.notes ?? <span className="opacity-40">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />
-                    <ActionsCell onEdit={() => openEdit(r)} onDelete={() => setDeleteId(r.id)} onPrint={() => handlePrintInduction(r.staff_name)} />
+                    {canMutate && <CheckPhotoUploader entityType="training_record" entityId={r.id} compact />}
+                    <ActionsCell onEdit={canMutate ? () => openEdit(r) : undefined} onDelete={canMutate ? () => setDeleteId(r.id) : undefined} onPrint={() => handlePrintInduction(r.staff_name)} />
                   </td>
                 </tr>
               ))}

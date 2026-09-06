@@ -1,10 +1,30 @@
 import { Router } from "express";
 import { seedDemo } from "../lib/seedDemo";
-import { ensureServicePrices } from "../lib/services";
+import { ensureServicePrices, getServicePricePreflight } from "../lib/services";
 import { requireAuth, requireConsultant } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
 
 const router = Router();
+
+// Read-only launch check. This is deliberately separate from the repair
+// endpoint below: an administrator can see every catalogue gap without
+// creating Stripe products, changing a subscription, or granting access.
+// GET /api/admin/service-price-preflight
+router.get("/api/admin/service-price-preflight", requireAuth, requireConsultant, async (_req, res) => {
+  try {
+    const result = await getServicePricePreflight();
+    res.status(result.ready ? 200 : 503).json(result);
+  } catch (err: any) {
+    logger.error({ err }, "Stripe service-price preflight failed");
+    res.status(503).json({
+      error: "Could not read the Stripe service-price catalogue",
+      ready: false,
+      required: [],
+      configured: [],
+      missing: [],
+    });
+  }
+});
 
 // One-shot demo seed endpoint, gated by a secret token.
 // POST /api/admin/seed-demo  with header  Authorization: Bearer <DEMO_SEED_TOKEN>

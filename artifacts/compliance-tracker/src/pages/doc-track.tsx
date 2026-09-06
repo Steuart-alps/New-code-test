@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
+import { downloadFile, printHtmlDocument } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -385,11 +386,16 @@ function DocCard({
   doc,
   onDelete,
   onAcknowledge,
+  canMutate,
+  canManageAcknowledgements,
 }: {
   doc: Doc;
   onDelete: (doc: Doc) => void;
   onAcknowledge: (doc: Doc) => void;
+  canMutate: boolean;
+  canManageAcknowledgements: boolean;
 }) {
+  const { toast } = useToast();
   const { Icon, color, bg } = fileIcon(doc.mime_type);
   const cat = CATEGORY_META[doc.category] ?? CATEGORY_META.other;
   const [downloading, setDownloading] = useState(false);
@@ -400,9 +406,9 @@ function DocCard({
       const res = await apiFetch(`/doc-track/documents/${doc.id}/download-url`);
       if (!res.ok) throw new Error("Failed to get download URL");
       const { downloadUrl } = await res.json();
-      window.open(downloadUrl, "_blank", "noopener");
+      await downloadFile(downloadUrl, doc.file_name);
     } catch {
-      /* silent */
+      toast({ title: "Download failed", description: "Please try again.", variant: "destructive" });
     } finally {
       setDownloading(false);
     }
@@ -481,7 +487,7 @@ function DocCard({
             {downloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
             Download
           </Button>
-          {doc.requires_acknowledgement && (
+          {canManageAcknowledgements && doc.requires_acknowledgement && (
             <Button
               size="sm"
               variant="outline"
@@ -491,14 +497,16 @@ function DocCard({
               <Users className="w-3 h-3" /> Acknowledge
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => onDelete(doc)}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
+          {canMutate && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onDelete(doc)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -807,14 +815,14 @@ function MyDocumentsView({ staffName }: { staffName: string }) {
 
   useEffect(() => { load(); }, [staffName]);
 
-  async function handleAcknowledge(docId: number, docTitle: string, staffRosterId: number) {
+  async function handleAcknowledge(docId: number, docTitle: string) {
     setAcknowledging(docId);
     try {
       const res = await apiFetch(`/doc-track/documents/${docId}/acknowledge`, {
         method: "POST",
-        body: JSON.stringify({
-          acknowledgements: [{ staffRosterId, staffName, signature: null }],
-        }),
+        // Staff identity is resolved by the API from their authenticated email;
+        // never submit a roster identity that could be forged in the client.
+        body: JSON.stringify({ signature: staffName }),
       });
       if (!res.ok) throw new Error("Failed");
       toast({ title: "Acknowledged", description: `"${docTitle}" marked as read.` });
@@ -871,7 +879,7 @@ function MyDocumentsView({ staffName }: { staffName: string }) {
             <Button
               size="sm"
               className="flex-shrink-0 gap-1.5"
-              onClick={() => handleAcknowledge(doc.id, doc.title, doc.staffRosterId)}
+              onClick={() => handleAcknowledge(doc.id, doc.title)}
               disabled={acknowledging === doc.id}
             >
               {acknowledging === doc.id
@@ -894,6 +902,7 @@ export default function DocTrackPage() {
 
   // Determine if the current user is a manager (admin / consultant) or staff
   const isManager = user?.role === "client_admin" || user?.role === "consultant";
+  const canMutate = user?.role !== "client_viewer";
 
   const [docs, setDocs] = useState<Doc[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -996,9 +1005,11 @@ export default function DocTrackPage() {
               <Users className="w-4 h-4" /> Outstanding
             </Button>
           )}
-          <Button onClick={() => setUploadOpen(true)} className="gap-1.5">
-            <Plus className="w-4 h-4" /> Upload Document
-          </Button>
+          {canMutate && (
+            <Button onClick={() => setUploadOpen(true)} className="gap-1.5">
+              <Plus className="w-4 h-4" /> Upload Document
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1127,7 +1138,14 @@ export default function DocTrackPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {visible.map(doc => (
-                <DocCard key={doc.id} doc={doc} onDelete={setDeleteTarget} onAcknowledge={setAckDoc} />
+                <DocCard
+                  key={doc.id}
+                  doc={doc}
+                  onDelete={setDeleteTarget}
+                  onAcknowledge={setAckDoc}
+                  canMutate={canMutate}
+                  canManageAcknowledgements={isManager}
+                />
               ))}
             </div>
           )}
@@ -1222,12 +1240,7 @@ ${d.outstanding.map(s => `<tr class="out"><td>${escapeHtml(s.name)}</td><td>Outs
 </table>`).join("")}
 ${docs.length === 0 ? `<p class="meta">No documents require acknowledgement.</p>` : ""}
 </body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return false;
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 250);
+  printHtmlDocument(html);
   return true;
 }
 

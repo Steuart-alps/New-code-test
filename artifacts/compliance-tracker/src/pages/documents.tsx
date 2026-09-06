@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -28,6 +29,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import { downloadFile } from "@/lib/download";
 
 interface Doc {
   id: number;
@@ -241,6 +243,7 @@ function UploadDialog({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function DocumentsPage() {
+  const { toast } = useToast();
   const { user } = useAuth();
   const canManage = user?.role === "consultant" || user?.role === "client_admin";
 
@@ -279,9 +282,16 @@ export default function DocumentsPage() {
     }
   }
 
-  function handleDownload(doc: Doc) {
-    // Open in new tab — the server will set Content-Disposition: attachment
-    window.open(`${API_BASE}/documents/${doc.id}/download`, "_blank");
+  async function handleDownload(doc: Doc) {
+    try {
+      await downloadFile(`${API_BASE}/documents/${doc.id}/download`, doc.name);
+    } catch (error) {
+      toast({
+        title: "Download failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    }
   }
 
   return (

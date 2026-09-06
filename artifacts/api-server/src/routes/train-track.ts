@@ -2,9 +2,18 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
+
+async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
+  if (siteId == null) return true;
+  const result = await db.execute(sql`
+    SELECT department_id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1
+  `);
+  const site = (result.rows ?? [])[0] as any;
+  return !!site && (departmentId === null || site.department_id === null || site.department_id === departmentId);
+}
 
 export const RECORD_TYPES = ["certificate", "signoff", "internal"] as const;
 export type RecordType = typeof RECORD_TYPES[number];
@@ -38,6 +47,7 @@ export const CERTIFICATE_TRAINING_TYPES = [
 export const DOCUMENT_TYPES = [
   "risk_assessment",
   "sop",
+  "handbook",
   "policy",
   "procedure",
   "other",
@@ -108,12 +118,15 @@ router.get("/records", requireAuth, async (req, res) => {
     SELECT r.id, r.client_id, r.site_id, r.record_type,
            r.staff_name, r.training_type, r.document_title, r.document_type,
            r.provider, r.trainer,
-           r.completed_date, r.expiry_date, r.notes,
+            r.completed_date, r.expiry_date, r.notes, r.signature,
            r.created_at, r.updated_at,
            s.name AS site_name
     FROM train_track_records r
     LEFT JOIN sites s ON r.site_id = s.id
     WHERE r.client_id = ${clientId}
+      ${getActiveDepartmentId(req) !== null ? sql`
+        AND (r.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+      ` : sql``}
     ORDER BY r.expiry_date ASC NULLS LAST, r.completed_date DESC, r.staff_name ASC
   `);
 
@@ -145,6 +158,9 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const d = parsed.data;
+  if (!await canAccessSite(clientId, d.siteId, getActiveDepartmentId(req))) {
+    return res.status(403).json({ error: "Site not accessible" });
+  }
   const trainingType = "trainingType" in d ? d.trainingType : null;
   const documentTitle = "documentTitle" in d ? d.documentTitle : null;
   const documentType = "documentType" in d ? (d.documentType ?? null) : null;
@@ -156,12 +172,12 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
     INSERT INTO train_track_records
       (client_id, site_id, record_type, staff_name, training_type,
        document_title, document_type, provider, trainer,
-       completed_date, expiry_date, notes)
+       completed_date, expiry_date, notes, signature)
     VALUES
       (${clientId}, ${d.siteId ?? null}, ${d.recordType}, ${d.staffName},
        ${trainingType}, ${documentTitle}, ${documentType},
        ${provider}, ${trainer},
-       ${d.completedDate}::date, ${expiryDate}::date, ${d.notes ?? null})
+       ${d.completedDate}::date, ${expiryDate}::date, ${d.notes ?? null}, ${d.signature ?? null})
     RETURNING *
   `);
 
@@ -179,10 +195,20 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
 
   const parsed = recordUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+  const existing = await db.execute(sql`
+    SELECT site_id FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
+  `);
+  const record = (existing.rows ?? [])[0] as any;
+  if (!record || !await canAccessSite(clientId, record.site_id, getActiveDepartmentId(req))) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  if (parsed.data.siteId !== undefined && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req))) {
+    return res.status(403).json({ error: "Site not accessible" });
+  }
 
   const {
     staffName, trainingType, documentTitle, documentType, provider, trainer,
-    completedDate, expiryDate, siteId, notes,
+    completedDate, expiryDate, siteId, notes, signature,
   } = parsed.data;
 
   const hasExpiry   = expiryDate !== undefined;
@@ -194,6 +220,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const hasDocTitle = documentTitle !== undefined;
   const hasTrainType = trainingType !== undefined;
   const hasCompleted = completedDate !== undefined;
+  const hasSignature = signature !== undefined;
 
   await db.execute(sql`
     UPDATE train_track_records
@@ -208,6 +235,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
         expiry_date    = CASE WHEN ${hasExpiry}::boolean  THEN ${expiryDate ?? null}::date  ELSE expiry_date   END,
         site_id        = CASE WHEN ${hasSite}::boolean    THEN ${siteId ?? null}            ELSE site_id       END,
         notes          = CASE WHEN ${hasNotes}::boolean   THEN ${notes ?? null}             ELSE notes         END,
+        signature      = CASE WHEN ${hasSignature}::boolean THEN ${signature ?? null}       ELSE signature     END,
         updated_at     = now()
     WHERE id = ${id} AND client_id = ${clientId}
   `);
@@ -232,6 +260,13 @@ router.delete("/records/:id", requireAuth, denyViewers, async (req, res) => {
 
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const existing = await db.execute(sql`
+    SELECT site_id FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
+  `);
+  const record = (existing.rows ?? [])[0] as any;
+  if (!record || !await canAccessSite(clientId, record.site_id, getActiveDepartmentId(req))) {
+    return res.status(404).json({ error: "Not found" });
+  }
 
   await db.execute(sql`
     DELETE FROM train_track_records

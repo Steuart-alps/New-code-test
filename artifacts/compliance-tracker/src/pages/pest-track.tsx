@@ -28,6 +28,7 @@ import {
   Lock, Search, Settings, X, CalendarDays, ShieldAlert, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { printHtmlDocument } from "@/lib/download";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -649,15 +650,7 @@ ${sortedActivity.map(a => `<tr>
 </tr>`).join("")}
 </table>`}
 </body></html>`;
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the log.", variant: "destructive" });
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
+    printHtmlDocument(html);
   };
 
   // ── Status cards ───────────────────────────────────────────────────────────

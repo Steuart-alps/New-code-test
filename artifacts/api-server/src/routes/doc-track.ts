@@ -108,6 +108,7 @@ router.get("/documents", requireAuth, async (req, res) => {
       WHERE sr.client_id = d.client_id
         AND sr.active = true
         AND (d.department IS NULL OR sr.department = d.department)
+         AND (d.site_id IS NULL OR sr.site_id = d.site_id)
     ) ack_status ON d.requires_acknowledgement = true
     WHERE d.client_id = ${clientId}
       ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
@@ -292,7 +293,7 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
   }
 
   const documentResult = await db.execute(sql`
-    SELECT title, category, department
+    SELECT title, category, department, site_id
     FROM doc_track_documents
     WHERE id = ${docId} AND client_id = ${clientId}
     LIMIT 1
@@ -306,6 +307,7 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
     WHERE sr.client_id = ${clientId}
       AND sr.active = true
       AND (${document.department}::text IS NULL OR sr.department = ${document.department})
+      AND (${document.site_id}::integer IS NULL OR sr.site_id = ${document.site_id})
       ${getActiveDepartmentId(req) !== null ? sql`AND (sr.department IS NULL OR sr.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY sr.name ASC
   `);
@@ -382,7 +384,7 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const docsResult = await db.execute(sql`
-    SELECT d.id, d.title, d.category, d.department, d.created_at
+    SELECT d.id, d.title, d.category, d.department, d.site_id, d.created_at
     FROM doc_track_documents d
     LEFT JOIN sites s ON s.id = d.site_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
@@ -394,7 +396,7 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
   if (docs.length === 0) return res.json({ documents: [] });
 
   const staffResult = await db.execute(sql`
-    SELECT id, name, department FROM staff_roster
+    SELECT id, name, department, site_id FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
       ${getActiveDepartmentId(req) !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
     ORDER BY name ASC
@@ -423,7 +425,10 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
 
   const documents = docs.map((d) => {
     // Documents scoped to a department only need acknowledgement from that department.
-    const relevant = d.department ? staff.filter((s) => s.department === d.department) : staff;
+    const relevant = staff.filter((s) =>
+      (!d.department || s.department === d.department)
+      && (d.site_id == null || s.site_id === d.site_id),
+    );
     const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
     return {
       id: d.id,
@@ -461,6 +466,34 @@ interface ResolvedAck {
   signature: string | null;
 }
 
+/**
+ * The sole eligibility rule for acknowledgement evidence. A roster entry must
+ * be active and assigned to every document scope that is set. Keep this
+ * server-side: manager payloads and staff sessions are both untrusted.
+ */
+async function findEligibleRosterMember(
+  clientId: number,
+  document: { site_id: number | null; department: string | null },
+  rosterId?: number,
+  email?: string | null,
+) {
+  if (rosterId == null && !email) return null;
+  const result = await db.execute(sql`
+    SELECT id, name
+    FROM staff_roster
+    WHERE client_id = ${clientId}
+      AND active = true
+      AND (${document.department}::text IS NULL OR department = ${document.department})
+      AND (${document.site_id}::integer IS NULL OR site_id = ${document.site_id})
+      AND (
+        ${rosterId ?? null}::integer IS NOT NULL AND id = ${rosterId ?? null}
+        OR ${email ?? null}::text IS NOT NULL AND email IS NOT NULL AND lower(email) = lower(${email ?? null})
+      )
+    LIMIT 1
+  `);
+  return (result.rows ?? [])[0] as { id: number; name: string } | undefined;
+}
+
 // Manager bulk-ack payload: they supply the roster entries to sign off.
 const ackBulkCreate = z.object({
   acknowledgements: z.array(z.object({
@@ -486,13 +519,14 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
 
   // Verify document belongs to this client
   const docResult = await db.execute(sql`
-    SELECT id, title, category, site_id, annual_acknowledgement FROM doc_track_documents
+    SELECT id, title, category, site_id, department, requires_acknowledgement, annual_acknowledgement FROM doc_track_documents
     WHERE id = ${docId} AND client_id = ${clientId}
     LIMIT 1
   `);
   const doc = (docResult.rows ?? [])[0] as any;
   if (!doc) return res.status(404).json({ error: "Not found" });
   if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
+  if (!doc.requires_acknowledgement) return res.status(400).json({ error: "This document does not require acknowledgement" });
 
   const user = req.currentUser!;
   const userId = user.id;
@@ -507,16 +541,8 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
     if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
     for (const ack of parsed.data.acknowledgements) {
-      // Every supplied roster row must belong to this client (defense in depth
-      // against forged / cross-tenant roster ids).
-      const rosterCheck = await db.execute(sql`
-        SELECT id, name
-        FROM staff_roster
-        WHERE id = ${ack.staffRosterId} AND client_id = ${clientId}
-        LIMIT 1
-      `);
-      const roster = (rosterCheck.rows ?? [])[0] as any;
-      if (!roster) continue; // ignore roster ids not in this tenant
+      const roster = await findEligibleRosterMember(clientId, doc, ack.staffRosterId);
+      if (!roster) continue; // ineligible/foreign roster rows never create evidence
       toCreate.push({
         staffRosterId: roster.id,
         // Use the roster's real name, not the client-supplied one.
@@ -529,27 +555,12 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
     const parsed = ackSelfCreate.safeParse(req.body ?? {});
     const signature = parsed.success ? (parsed.data.signature ?? null) : null;
 
-    // Match the current user to a staff_roster row by email (case-insensitive)
-    // within this client. staff_roster has no user_id column, so email is the
-    // authoritative link; fall back to the user's own name with no roster link.
-    let rosterId: number | null = null;
-    let staffName = user.name;
-    if (user.email) {
-      const rosterMatch = await db.execute(sql`
-        SELECT id, name
-        FROM staff_roster
-        WHERE client_id = ${clientId}
-          AND email IS NOT NULL
-          AND lower(email) = lower(${user.email})
-        LIMIT 1
-      `);
-      const roster = (rosterMatch.rows ?? [])[0] as any;
-      if (roster) {
-        rosterId = roster.id;
-        staffName = roster.name;
-      }
-    }
-    toCreate = [{ staffRosterId: rosterId, staffName, signature: signature ?? staffName }];
+    // staff_roster has no user_id column, so email is the authoritative link.
+    // Unlike the legacy fallback, an unmatched/ineligible user cannot create
+    // acknowledgement evidence with an unlinked display name.
+    const roster = await findEligibleRosterMember(clientId, doc, undefined, user.email);
+    if (!roster) return res.status(403).json({ error: "No eligible active staff roster entry for this document" });
+    toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature: signature ?? roster.name }];
   }
 
   const today = new Date().toISOString().split("T")[0];

@@ -3,6 +3,7 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
+import { trackModuleActivation } from "@/lib/analytics";
 import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
@@ -189,10 +190,28 @@ export default function TrialEndedPage() {
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [bundle, setBundle] = useState(false);
   const [discountCode, setDiscountCode] = useState("");
+  const checkoutAnalyticsKey = activeClientId === null
+    ? null
+    : `complytrack:analytics:pending-checkout:${activeClientId}`;
 
   const canPay = user?.role === "consultant" || user?.role === "client_admin";
   const total = bundle ? 50 : 10 + selectedAddons.size * 10;
   const hasAlpsDiscount = discountCode.trim().length > 0;
+
+  const trackCompletedCheckout = () => {
+    if (!checkoutAnalyticsKey || activeClientId === null) return;
+    try {
+      const modules = JSON.parse(window.sessionStorage.getItem(checkoutAnalyticsKey) ?? "[]");
+      if (Array.isArray(modules)) {
+        modules
+          .filter((module): module is string => typeof module === "string")
+          .forEach((module) => trackModuleActivation(activeClientId, module));
+      }
+      window.sessionStorage.removeItem(checkoutAnalyticsKey);
+    } catch {
+      // Tracking cannot interfere with restored paid access.
+    }
+  };
 
   const toggleAddon = (key: string) => {
     setBundle(false);
@@ -225,7 +244,13 @@ export default function TrialEndedPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("billing") === "success") {
-      recheckAccess();
+      recheckAccess().then(trackCompletedCheckout);
+    } else if (params.get("billing") === "cancel" && checkoutAnalyticsKey) {
+      try {
+        window.sessionStorage.removeItem(checkoutAnalyticsKey);
+      } catch {
+        // Storage is only a best-effort analytics deduplication aid.
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -249,6 +274,14 @@ export default function TrialEndedPage() {
     try {
       const clientId = activeClientId ?? user?.clientId ?? undefined;
       const services = Array.from(selectedAddons);
+      if (checkoutAnalyticsKey) {
+        // Preserve only module keys. No user, tenant, or payment data is sent
+        // to analytics or included in the event itself.
+        window.sessionStorage.setItem(
+          checkoutAnalyticsKey,
+          JSON.stringify(bundle ? ADDONS.map((addon) => addon.key) : services),
+        );
+      }
 
       const res = await apiFetch("/billing/checkout", {
         method: "POST",
@@ -263,6 +296,13 @@ export default function TrialEndedPage() {
       if (!res.ok || !data.url) throw new Error(data.error ?? "Could not start checkout");
       window.location.href = data.url;
     } catch (err: any) {
+      if (checkoutAnalyticsKey) {
+        try {
+          window.sessionStorage.removeItem(checkoutAnalyticsKey);
+        } catch {
+          // Do not change the checkout error flow if storage is unavailable.
+        }
+      }
       toast({ title: "Couldn't start checkout", description: err.message, variant: "destructive" });
       setCheckingOut(false);
     }

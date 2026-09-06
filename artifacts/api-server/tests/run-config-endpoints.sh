@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 
 # Pick a free ephemeral port if none is set. Falls back to 19091 if python3
 # is unavailable (unlikely in this environment).

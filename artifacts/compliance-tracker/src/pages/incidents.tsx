@@ -38,6 +38,7 @@ import {
   ShieldAlert, UserX, Activity, Settings, X, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { printHtmlDocument } from "@/lib/download";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -470,15 +471,7 @@ ${rows.map(r => `<tr>
 </tr>`).join("")}
 </table>`}
 </body></html>`;
-    const win = window.open("", "_blank");
-    if (!win) {
-      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export the register.", variant: "destructive" });
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 250);
+    printHtmlDocument(html);
   };
 
   // ── Mutations ──────────────────────────────────────────────────────────────

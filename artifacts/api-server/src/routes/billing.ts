@@ -19,6 +19,7 @@ import {
   BUNDLE_LABEL,
   SERVICE_CAP_PENCE,
   getEntitledServices,
+  getServicePricePreflight,
   invalidateEntitlements,
   type ServiceKey,
 } from "../lib/services";
@@ -409,6 +410,19 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
   if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
 
   try {
+    // Read the complete synced catalogue before touching the subscription. This
+    // gives an admin/client a useful all-gap diagnosis while ensuring the
+    // requested service can never reach a Stripe mutation without its price.
+    // Keep the individual getServicePrice check below as a race-safe defence
+    // if a price is deactivated after this read.
+    const pricePreflight = await getServicePricePreflight();
+    if (pricePreflight.missing.includes(service)) {
+      return res.status(503).json({
+        error: "Service price not configured",
+        missingServicePrices: pricePreflight.missing,
+      });
+    }
+
     const stripe = await getUncachableStripeClient();
     const sub = await findLiveSubscription(client.stripeCustomerId);
     if (!sub) {

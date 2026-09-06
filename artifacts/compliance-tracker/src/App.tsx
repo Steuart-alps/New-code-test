@@ -62,6 +62,7 @@ import FoodSafetyPage from "@/pages/food-safety";
 import DailyHistoryPage from "@/pages/daily-history";
 import StaffTrainingPage from "@/pages/staff-training";
 import { WaterSafetyPage } from "@/pages/safety-summary";
+import { trackModuleFirstUse } from "@/lib/analytics";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,8 +81,38 @@ function Redirect({ to }: { to: string }) {
 }
 
 function ProtectedRoutes() {
-  const { user, billingLocked, isLoading } = useAuth();
+  const { user, billingLocked, isLoading, activeClientId } = useAuth();
   const [location] = useLocation();
+
+  useEffect(() => {
+    const module = [
+      ["/fire-safety", "firetrack"],
+      ["/kitchen", "kitchentrack"],
+      ["/food-safety", "kitchentrack"],
+      ["/legionella", "legionellatrack"],
+      ["/fix-track", "fixtrack"],
+      ["/doc-track", "doctrack"],
+      ["/safe-track", "safetrack"],
+      ["/train-track", "traintrack"],
+      ["/hot-tub", "hottubtrack"],
+      ["/tree-track", "treetrack"],
+      ["/bike-track", "biketrack"],
+      ["/aqua-track", "aquatrack"],
+      ["/pool-track", "pooltrack"],
+      ["/swim-track", "swimtrack"],
+      ["/green-track", "greentrack"],
+      ["/incidents", "incidenttrack"],
+      ["/pat-track", "pattrack"],
+      ["/pest-track", "pesttrack"],
+      ["/premises-track", "premisestrack"],
+      ["/room-track", "roomtrack"],
+      ["/daily-track-am", "dailytrack_am"],
+      ["/daily-track-pm", "dailytrack_pm"],
+      ["/daily/am", "dailytrack_am"],
+      ["/daily/pm", "dailytrack_pm"],
+    ].find(([path]) => location === path)?.[1];
+    if (module) trackModuleFirstUse(activeClientId, module);
+  }, [activeClientId, location]);
 
   // Always-public routes
   if (location === "/reset-password") return <ResetPasswordPage />;

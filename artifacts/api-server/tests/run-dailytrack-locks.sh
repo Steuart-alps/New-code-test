@@ -7,6 +7,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+source tests/api-integration-lock.sh
 
 _free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)' 2>/dev/null || echo 19092
@@ -30,7 +31,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=development PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 30); do
     if healthy; then break; fi

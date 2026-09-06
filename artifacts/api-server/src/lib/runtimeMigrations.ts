@@ -813,6 +813,22 @@ async function migrateAuditFixes2026_08() {
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "completed_date" date`);
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "expiry_date" date`);
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "signature" text`);
+  // Early TrainTrack installs used training_title/training_date as mandatory
+  // fields. Backfill the route's canonical fields, then make those retired
+  // columns optional so sign-off inserts work on upgraded databases as well.
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'train_track_records' AND column_name = 'training_date') THEN
+        EXECUTE 'UPDATE train_track_records SET completed_date = training_date WHERE completed_date IS NULL';
+        EXECUTE 'ALTER TABLE train_track_records ALTER COLUMN training_date DROP NOT NULL';
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'train_track_records' AND column_name = 'training_title') THEN
+        EXECUTE 'UPDATE train_track_records SET training_type = training_title WHERE training_type IS NULL OR training_type = ''internal''';
+        EXECUTE 'ALTER TABLE train_track_records ALTER COLUMN training_title DROP NOT NULL';
+      END IF;
+    END $$;
+  `);
 
   // KitchenTrack weekly review + probe checks tables (referenced by kitchen-weekly.ts and food-safety.ts).
   await db.execute(sql`
@@ -883,14 +899,17 @@ async function migrateTrainTrack() {
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "record_type" text NOT NULL DEFAULT 'internal',
       "staff_name" text NOT NULL,
-      "training_title" text NOT NULL,
-      "training_type" text NOT NULL DEFAULT 'internal',
-      "training_date" date NOT NULL,
-      "expiry_date" date,
+      "training_type" text,
+      "document_title" text,
+      "document_type" text,
       "provider" text,
-      "certificate_ref" text,
+      "trainer" text,
+      "completed_date" date NOT NULL,
+      "expiry_date" date,
       "notes" text,
+      "signature" text,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
     )
@@ -1010,6 +1029,12 @@ async function migrateBikeTrack() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_hire_client" ON "bike_hire_records" ("client_id")`);
   await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notified_at" timestamp`);
+  await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claim_token" text`);
+  await db.execute(sql`ALTER TABLE "bike_hire_records" ADD COLUMN IF NOT EXISTS "overdue_notification_claimed_at" timestamp`);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_bike_hire_overdue_alerts"
+    ON "bike_hire_records" ("client_id", "status", "return_date_expected", "overdue_notified_at")
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_checks" (
