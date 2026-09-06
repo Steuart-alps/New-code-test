@@ -1468,6 +1468,13 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
   daily_check_pm:    "DailyTrack — PM closing checks",
   safe_track_record: "SafeTrack — safety records",
   food_safety_check: "KitchenTrack — food safety records",
+  green_pre_use_check:       "GreenTrack — pre-use checks",
+  green_service:             "GreenTrack — service records",
+  green_defect:              "GreenTrack — defect reports",
+  swim_session:              "SwimTrack — pool sessions",
+  swim_surveillance_check:   "SwimTrack — surveillance checks",
+  swim_first_aid_check:      "SwimTrack — first-aid checks",
+  swim_incident:             "SwimTrack — incident records",
 };
 
 function PhotoRequirementsCard() {
