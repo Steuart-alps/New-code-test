@@ -55,6 +55,62 @@ export const patTestsTable = pgTable("pat_tests", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Certificate-level PAT register. The legacy appliance/test register above is
+// intentionally retained; these tables support room-template based testing.
+export const patEquipmentTemplatesTable = pgTable("pat_equipment_templates", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").references(() => sitesTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const patEquipmentTemplateItemsTable = pgTable("pat_equipment_template_items", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").notNull().references(() => patEquipmentTemplatesTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  applianceType: text("appliance_type").notNull().default("Other"),
+  quantity: integer("quantity").notNull().default(1),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const patRoomsTable = pgTable("pat_rooms", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  siteId: integer("site_id").notNull().references(() => sitesTable.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  areaType: text("area_type").notNull().default("room"),
+  templateId: integer("template_id").references(() => patEquipmentTemplatesTable.id, { onDelete: "set null" }),
+  testIntervalMonths: integer("test_interval_months").notNull().default(12),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const patFailuresTable = pgTable("pat_failures", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  certificateId: integer("certificate_id").notNull(),
+  roomId: integer("room_id"),
+  // Snapshots retain the audit location even when an area has no register room,
+  // or is later renamed.
+  locationText: text("location_text"),
+  roomNameSnapshot: text("room_name_snapshot"),
+  applianceName: text("appliance_name").notNull(),
+  actionTaken: text("action_taken"),
+  resolution: text("resolution"),
+  resolvedDate: date("resolved_date"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type PatAppliance = typeof patAppliancesTable.$inferSelect;
 export type NewPatAppliance = typeof patAppliancesTable.$inferInsert;
 export type PatTest = typeof patTestsTable.$inferSelect;

@@ -2083,6 +2083,78 @@ async function migratePATtrack() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_client" ON "pat_tests" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_appliance" ON "pat_tests" ("appliance_id")`);
+  // Certificate-level PAT register. These are additive and deliberately do not
+  // alter the original appliance/test tables used by the existing register.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_equipment_templates" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE, "name" text NOT NULL,
+      "description" text, "active" boolean NOT NULL DEFAULT true,
+      "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_equipment_template_items" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "template_id" integer NOT NULL REFERENCES "pat_equipment_templates"("id") ON DELETE CASCADE,
+      "name" text NOT NULL, "appliance_type" text NOT NULL DEFAULT 'Other',
+      "quantity" integer NOT NULL DEFAULT 1 CHECK ("quantity" > 0), "notes" text,
+      "sort_order" integer NOT NULL DEFAULT 0, "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_rooms" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE, "name" text NOT NULL,
+      "area_type" text NOT NULL DEFAULT 'room', "template_id" integer REFERENCES "pat_equipment_templates"("id") ON DELETE SET NULL,
+      "test_interval_months" integer NOT NULL DEFAULT 12 CHECK ("test_interval_months" > 0),
+      "active" boolean NOT NULL DEFAULT true, "notes" text,
+      "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_certificates" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE, "visit_date" date NOT NULL,
+      "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL, "contractor_name" text,
+      "certificate_ref" text NOT NULL, "appliances_tested_count" integer NOT NULL DEFAULT 0 CHECK ("appliances_tested_count" >= 0),
+      "pass_count" integer NOT NULL DEFAULT 0 CHECK ("pass_count" >= 0), "fail_count" integer NOT NULL DEFAULT 0 CHECK ("fail_count" >= 0),
+      "next_test_due" date, "document_id" integer REFERENCES "doc_track_documents"("id") ON DELETE SET NULL,
+      "document_link" text, "notes" text, "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_certificate_rooms" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "certificate_id" integer NOT NULL REFERENCES "pat_certificates"("id") ON DELETE CASCADE,
+      "room_id" integer NOT NULL REFERENCES "pat_rooms"("id") ON DELETE CASCADE,
+      UNIQUE ("certificate_id", "room_id")
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_replacements" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "room_id" integer NOT NULL REFERENCES "pat_rooms"("id") ON DELETE CASCADE, "appliance_name" text NOT NULL,
+      "replaced_on" date NOT NULL, "replacement_details" text, "notes" text,
+      "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "pat_failures" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "certificate_id" integer NOT NULL REFERENCES "pat_certificates"("id") ON DELETE CASCADE,
+      "room_id" integer REFERENCES "pat_rooms"("id") ON DELETE SET NULL, "location_text" text, "room_name_snapshot" text, "appliance_name" text NOT NULL,
+      "action_taken" text, "resolution" text, "resolved_date" date,
+      "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  // Added after the initial certificate register release. Keep both the
+  // supplied location and linked-room name as immutable compliance evidence.
+  await db.execute(sql`ALTER TABLE "pat_failures" ADD COLUMN IF NOT EXISTS "location_text" text`);
+  await db.execute(sql`ALTER TABLE "pat_failures" ADD COLUMN IF NOT EXISTS "room_name_snapshot" text`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_rooms_client_site" ON "pat_rooms" ("client_id", "site_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_certificates_client_site_date" ON "pat_certificates" ("client_id", "site_id", "visit_date" DESC)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_certificate_rooms_room" ON "pat_certificate_rooms" ("room_id")`);
 }
 
 async function migratePestTrack() {
