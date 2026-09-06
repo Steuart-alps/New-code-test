@@ -1038,7 +1038,7 @@ export default function FixTrackPage() {
                           {!issue.contractorId && (
                             <Badge className="bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-50">
                               <AlertTriangle className="w-3 h-3 mr-1" />
-                              No contractor set up for {issueTypeMeta(issue.issueType).label} — assign manually
+                              No unique contractor match for {issueTypeMeta(issue.issueType).label} — assign manually
                             </Badge>
                           )}
                           {issue.assignedTo && <span>Assigned: <span className="font-medium">{issue.assignedTo}</span></span>}
