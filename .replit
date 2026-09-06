@@ -198,3 +198,4 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
+FEEDBACK_RECIPIENT_EMAIL = "Info@alpsconsultancy.co.uk"

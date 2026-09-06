@@ -2734,6 +2734,24 @@ async function migrateDoctrackSafetrackMerge() {
       ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS feedback_reports (
+      id serial PRIMARY KEY,
+      client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      user_id integer REFERENCES users(id) ON DELETE SET NULL,
+      category text NOT NULL CHECK (category IN ('feedback', 'bug', 'feature')),
+      summary text NOT NULL,
+      details text NOT NULL,
+      page_path text,
+      email_status text NOT NULL DEFAULT 'pending',
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_feedback_reports_client_created"
+    ON feedback_reports (client_id, created_at DESC)
+  `);
+
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
   {
     const acks = await db.execute(sql`

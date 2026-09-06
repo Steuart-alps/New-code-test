@@ -58,6 +58,7 @@ import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
 import dailyChecklistsRouter from "./daily-checklists";
+import feedbackRouter from "./feedback";
 
 const router: IRouter = Router();
 
@@ -119,6 +120,7 @@ router.use(exportRouter);
 router.use(reportsRouter);
 router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
+router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
 // Public contractor action links — no auth, token-protected
