@@ -20,6 +20,7 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   contractorId: integer("contractor_id").references(() => contractorsTable.id, { onDelete: "set null" }),
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
+  resolvedByName: text("resolved_by_name"),
   solutionNotes: text("solution_notes"),
   // Pending contractor-email approval request ("assign" | "quote")
   emailRequestMode: text("email_request_mode"),

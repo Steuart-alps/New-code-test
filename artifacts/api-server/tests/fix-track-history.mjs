@@ -67,6 +67,9 @@ async function main() {
 
   const detail = await owner("GET", `/fix-track/issues/${id}`);
   check("manager/mobile detail loads", detail.status === 200, String(detail.status));
+  check("resolved issue snapshots authenticated resolver name",
+    detail.data?.resolvedByName === "owner FixTrack User",
+    JSON.stringify(detail.data));
   check("status history is chronological and complete",
     JSON.stringify(detail.data?.statusEvents?.map((event) => event.status)) ===
       JSON.stringify(["reported", "in_progress", "resolved", "closed"]),

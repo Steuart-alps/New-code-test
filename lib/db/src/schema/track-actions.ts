@@ -42,6 +42,7 @@ export const trackActionsTable = pgTable("track_actions", {
   status: text("status").notNull(),
   createdBy: integer("created_by"),
   resolvedBy: integer("resolved_by"),
+  resolvedByName: text("resolved_by_name"),
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

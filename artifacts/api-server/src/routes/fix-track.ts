@@ -496,7 +496,10 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       ["pending", "approved"].includes(current.emailRequestStatus ?? "") && contractorEmailContentChanged(current, data);
     const updateData: Record<string, any> = { ...data, updatedAt: new Date() };
     if (data.status === "resolved" && isStatusChange) {
+      const resolverName = req.currentUser!.name?.trim();
+      if (!resolverName) return { kind: "resolver_name_required" as const };
       updateData.resolvedDate = new Date().toISOString().slice(0, 10);
+      updateData.resolvedByName = resolverName;
     }
     if (approvalInvalidated) {
       updateData.emailRequestStatus = "pending";
@@ -612,6 +615,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       error: `Issue must move to the next status from ${transitionResult.currentStatus}`,
       currentStatus: transitionResult.currentStatus,
     });
+  }
+  if (transitionResult.kind === "resolver_name_required") {
+    return res.status(400).json({ error: "Your account must have a name before resolving an issue" });
   }
   if (transitionResult.kind === "conflict") {
     return res.status(409).json({ error: "Issue status changed; refresh and try again" });

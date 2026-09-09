@@ -28,6 +28,7 @@ export interface TrackAction {
   remedialAction?: string | null;
   evidenceReference?: string | null;
   resolutionNotes?: string | null;
+  resolvedByName?: string | null;
   instruction?: string | null;
   instructionSnapshot?: string | null;
   sourceKind?: string | null;
@@ -231,7 +232,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
             ))}
           </div>
 
-          {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <ActionRow key={action.id} action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />)}</CollapsibleContent></Collapsible>}
+          {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <div key={action.id}><ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />{action.resolvedByName && <p className="-mt-3 border-x border-b bg-slate-50 px-4 pb-3 text-xs text-muted-foreground">Signed off as complete by <strong className="text-foreground">{action.resolvedByName}</strong></p>}</div>)}</CollapsibleContent></Collapsible>}
         </CardContent>
       </Card>
     </section>

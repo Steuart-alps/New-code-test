@@ -240,7 +240,14 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes))) {
       return { status: 400 as const, error: "remedialAction, evidenceReference and resolutionNotes are required to resolve an action" };
     }
-    const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() }; if (nextStatus === "resolved") { updates.resolvedBy = req.currentUser!.id; updates.resolvedAt = new Date(); }
+    const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
+    if (nextStatus === "resolved") {
+      const resolverName = req.currentUser!.name?.trim();
+      if (!resolverName) return { status: 400 as const, error: "Your account must have a name before resolving an action" };
+      updates.resolvedBy = req.currentUser!.id;
+      updates.resolvedByName = resolverName;
+      updates.resolvedAt = new Date();
+    }
     const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     return { status: 200 as const, row };

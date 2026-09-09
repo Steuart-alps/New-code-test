@@ -39,6 +39,7 @@ interface Issue {
   contractorEmail?: string | null;
   targetDate?: string | null;
   resolvedDate?: string | null;
+  resolvedByName?: string | null;
   solutionNotes?: string | null;
   completionDocumentPath?: string | null;
   emailRequestMode?: string | null;
@@ -350,7 +351,7 @@ export default function FixTrackDetailPage() {
 
   const allNotes: IssueNote[] = [...(issue.notes ?? [])];
   if (allNotes.length === 0 && issue.solutionNotes) {
-    allNotes.push({ id: 0, note: issue.solutionNotes, createdBy: "Resolution", createdAt: issue.resolvedDate || issue.updatedAt || issue.createdAt, isLegacy: true });
+    allNotes.push({ id: 0, note: issue.solutionNotes, createdBy: issue.resolvedByName ? `Resolved by ${issue.resolvedByName}` : "Resolution", createdAt: issue.resolvedDate || issue.updatedAt || issue.createdAt, isLegacy: true });
   }
   allNotes.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
@@ -538,6 +539,11 @@ export default function FixTrackDetailPage() {
                   </Button>
                 )}
               </div>
+            )}
+            {issue.resolvedByName && ["resolved", "closed"].includes(issue.status) && (
+              <p className="w-full text-xs text-muted-foreground">
+                Signed off as complete by <strong className="text-foreground">{issue.resolvedByName}</strong>
+              </p>
             )}
             
             <div className="flex-1 flex gap-2 w-full">

@@ -823,6 +823,7 @@ async function migrateTrackActions() {
         CHECK ("status" IN ('open', 'in_progress', 'resolved')),
       "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "resolved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "resolved_by_name" text,
       "resolved_at" timestamp,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
@@ -860,6 +861,27 @@ async function migrateTrackActions() {
   // Earlier installs created this column as required. Automated records do not
   // have a human creator, whereas API-created records continue to set it.
   await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolved_by_name" text`);
+  await db.execute(sql`
+    UPDATE "track_actions" a
+    SET "resolved_by_name" = u.name
+    FROM "users" u
+    WHERE a.status = 'resolved'
+      AND a.resolved_by = u.id
+      AND nullif(trim(a.resolved_by_name), '') IS NULL
+  `);
+  await db.execute(sql`
+    ALTER TABLE "track_actions"
+      DROP CONSTRAINT IF EXISTS "CK_track_actions_resolver_name"
+  `);
+  await db.execute(sql`
+    ALTER TABLE "track_actions"
+      ADD CONSTRAINT "CK_track_actions_resolver_name"
+      CHECK (
+        status <> 'resolved'
+        OR (resolved_by IS NOT NULL AND nullif(trim(resolved_by_name), '') IS NOT NULL)
+      )
+  `);
   // A source record ID is only unique within its table. Preserve old rows
   // (whose source_kind remains NULL) while making new automated actions
   // collision-safe across the Green and Swim source tables.
@@ -1977,6 +1999,10 @@ async function migrateCheckPhotos() {
 
 // ---- FixTrack v2: contractor trades, contractorId on issues, action tokens ----
 async function migrateFixTrackV2() {
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issues"
+    ADD COLUMN IF NOT EXISTS "resolved_by_name" text
+  `);
   // Settings are tenant/key values. Keep the newest historical duplicate
   // before enforcing the invariant needed by atomic upserts.
   await db.execute(sql`

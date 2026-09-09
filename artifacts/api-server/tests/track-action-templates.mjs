@@ -56,7 +56,9 @@ async function main() {
   const oneOff = await admin("POST", "/track-actions", { module: "fire", title: "one off", severity: "monitor", instruction: "one off instruction", siteId: alphaSite.data?.id });
   status("create one-off action", oneOff, [201]); check("one-off provenance", oneOff.data?.provenance === "one_off");
   status("resolution rejects missing evidence", await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed" }), [400]);
-  status("resolution permits all evidence", await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed", evidenceReference: "photo-1", resolutionNotes: "completed" }), [200]);
+  const resolvedAction = await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed", evidenceReference: "photo-1", resolutionNotes: "completed" });
+  status("resolution permits all evidence", resolvedAction, [200]);
+  check("resolution snapshots authenticated resolver name", resolvedAction.data?.resolvedByName === "Template Admin", `got ${resolvedAction.data?.resolvedByName}`);
 
   const staffEmail = `action-staff-${Date.now()}@test.local`; const viewerEmail = `action-viewer-${Date.now()}@test.local`;
   status("create alpha staff", await admin("POST", "/users", { name: "Action staff", email: staffEmail, password: "password-123", role: "client_staff", clientId, departmentId: alpha.data?.id }), [200, 201]);
