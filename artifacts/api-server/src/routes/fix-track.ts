@@ -2,9 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, usersTable } from "@workspace/db/schema";
+import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
@@ -13,6 +13,8 @@ import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuot
 
 const router = Router();
 const storage = new ObjectStorageService();
+const DEFAULT_FIX_TRACK_STALE_DAYS = 7;
+const alertSettingsSchema = z.object({ staleDays: z.number().int().min(1).max(365) });
 
 async function finalizeIssueMedia(paths: string[] | undefined, clientId: number): Promise<string | null> {
   try {
@@ -100,6 +102,43 @@ async function uniqueContractorForType(clientId: number, issueType: string): Pro
   }
   return matches.length === 1 ? matches[0] : null;
 }
+
+router.get("/alert-settings", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "Client context required" });
+  const [row] = await db.select({ value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
+    .limit(1);
+  const parsed = Number.parseInt(row?.value ?? "", 10);
+  const staleDays = Number.isFinite(parsed) && parsed >= 1 && parsed <= 365
+    ? parsed
+    : DEFAULT_FIX_TRACK_STALE_DAYS;
+  res.json({ staleDays });
+});
+
+router.put("/alert-settings", requireAuth, requireClientAdmin, async (req, res) => {
+  const parsed = alertSettingsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Escalation timing must be between 1 and 365 days" });
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "Client context required" });
+  const [existing] = await db.select({ id: appSettingsTable.id })
+    .from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
+    .limit(1);
+  if (existing) {
+    await db.update(appSettingsTable)
+      .set({ value: String(parsed.data.staleDays), updatedAt: new Date() })
+      .where(eq(appSettingsTable.id, existing.id));
+  } else {
+    await db.insert(appSettingsTable).values({
+      clientId,
+      key: "fixTrackStaleDays",
+      value: String(parsed.data.staleDays),
+    });
+  }
+  res.json({ staleDays: parsed.data.staleDays });
+});
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 

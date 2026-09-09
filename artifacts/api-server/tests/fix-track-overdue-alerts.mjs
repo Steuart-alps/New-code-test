@@ -49,9 +49,33 @@ async function main() {
         id serial PRIMARY KEY,
         client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
         log_date date NOT NULL,
-        sent_at timestamp NOT NULL DEFAULT now(),
+        sent_at timestamp,
+        status text NOT NULL DEFAULT 'claimed',
+        claim_token text,
+        claimed_at timestamp,
         UNIQUE (client_id, log_date)
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE fix_track_alert_log
+        ADD COLUMN IF NOT EXISTS status text,
+        ADD COLUMN IF NOT EXISTS claim_token text,
+        ADD COLUMN IF NOT EXISTS claimed_at timestamp
+    `);
+    await db.execute(sql`
+      ALTER TABLE fix_track_alert_log
+        ALTER COLUMN sent_at DROP NOT NULL,
+        ALTER COLUMN sent_at DROP DEFAULT
+    `);
+    await db.execute(sql`
+      UPDATE fix_track_alert_log
+      SET status = CASE WHEN sent_at IS NULL THEN 'claimed' ELSE 'sent' END
+      WHERE status IS NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE fix_track_alert_log
+        ALTER COLUMN status SET DEFAULT 'claimed',
+        ALTER COLUMN status SET NOT NULL
     `);
     // Keep unrelated development tenants out of this table-scanning job.
     const existingClaims = await db.execute(sql`
@@ -63,8 +87,8 @@ async function main() {
       .map((row) => Number(row.id))
       .filter((id) => !claimed.has(id));
     await db.execute(sql`
-      INSERT INTO fix_track_alert_log (client_id, log_date)
-      SELECT id, CURRENT_DATE FROM clients
+      INSERT INTO fix_track_alert_log (client_id, log_date, sent_at, status)
+      SELECT id, CURRENT_DATE, now(), 'sent' FROM clients
       ON CONFLICT (client_id, log_date) DO NOTHING
     `);
 
@@ -109,6 +133,9 @@ async function main() {
       JSON.stringify(sent[0]?.to),
     );
     check("email uses the tenant email configuration", sent[0]?.clientId === clientId, `clientId=${sent[0]?.clientId}`);
+    check("email uses a stable daily provider key",
+      sent[0]?.idempotencyKey === `fixtrack-urgent-alert:${clientId}:${new Date().toISOString().slice(0, 10)}`,
+      sent[0]?.idempotencyKey);
     check("digest includes only eligible urgent jobs",
       sent[0]?.html.includes("Urgent past target") &&
       sent[0]?.html.includes("Urgent gone cold") &&
@@ -117,6 +144,38 @@ async function main() {
     sent.length = 0;
     const second = await runFixTrackOverdueAlertJob(fakeSend);
     check("second run is deduplicated for the day", second.clientsEmailed === 0 && sent.length === 0, JSON.stringify(second));
+
+    await db.execute(sql`DELETE FROM fix_track_alert_log WHERE client_id = ${clientId}`);
+    const concurrentSends = [];
+    const delayedSend = async (message) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      concurrentSends.push(message);
+    };
+    await Promise.all([
+      runFixTrackOverdueAlertJob(delayedSend),
+      runFixTrackOverdueAlertJob(delayedSend),
+    ]);
+    check("concurrent workers send only one digest", concurrentSends.length === 1, `sends=${concurrentSends.length}`);
+
+    const dailyKey = concurrentSends[0]?.idempotencyKey;
+    await db.execute(sql`
+      UPDATE fix_track_alert_log
+      SET status = 'claimed', claim_token = 'crashed-worker',
+          claimed_at = now() - interval '1 minute', sent_at = NULL
+      WHERE client_id = ${clientId} AND log_date = CURRENT_DATE
+    `);
+    sent.length = 0;
+    const liveLease = await runFixTrackOverdueAlertJob(fakeSend);
+    check("live claim lease is not stolen", liveLease.clientsEmailed === 0 && sent.length === 0, JSON.stringify(liveLease));
+
+    await db.execute(sql`
+      UPDATE fix_track_alert_log
+      SET claimed_at = now() - interval '31 minutes'
+      WHERE client_id = ${clientId} AND log_date = CURRENT_DATE
+    `);
+    const recovered = await runFixTrackOverdueAlertJob(fakeSend);
+    check("expired crash claim is recovered", recovered.clientsEmailed === 1 && sent.length === 1, JSON.stringify(recovered));
+    check("restart retry keeps the same provider key", sent[0]?.idempotencyKey === dailyKey, `${sent[0]?.idempotencyKey} !== ${dailyKey}`);
 
     await db.execute(sql`DELETE FROM fix_track_alert_log WHERE client_id = ${clientId}`);
     const failed = await runFixTrackOverdueAlertJob(async () => { throw new Error("simulated outage"); });

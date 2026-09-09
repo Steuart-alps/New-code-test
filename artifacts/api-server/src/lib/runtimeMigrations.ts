@@ -1867,19 +1867,46 @@ async function migrateFixTrackV2() {
       ADD COLUMN IF NOT EXISTS "completion_document_path" text
   `);
 
-  // Deduplication log for the daily overdue-issue alert digest
-  // (one email per client per day).
+  // Restart-safe delivery log for the daily overdue-issue alert digest.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "fix_track_alert_log" (
       "id"        serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "log_date"  date NOT NULL DEFAULT CURRENT_DATE,
-      "sent_at"   timestamp NOT NULL DEFAULT now(),
+      "sent_at"   timestamp,
+      "status"    text NOT NULL DEFAULT 'claimed',
+      "claim_token" text,
+      "claimed_at" timestamp,
       UNIQUE ("client_id", "log_date")
     )
   `);
   await db.execute(sql`
+    ALTER TABLE "fix_track_alert_log"
+      ADD COLUMN IF NOT EXISTS "status" text,
+      ADD COLUMN IF NOT EXISTS "claim_token" text,
+      ADD COLUMN IF NOT EXISTS "claimed_at" timestamp
+  `);
+  await db.execute(sql`
+    ALTER TABLE "fix_track_alert_log"
+      ALTER COLUMN "sent_at" DROP NOT NULL,
+      ALTER COLUMN "sent_at" DROP DEFAULT
+  `);
+  await db.execute(sql`
+    UPDATE "fix_track_alert_log"
+    SET "status" = CASE WHEN "sent_at" IS NULL THEN 'claimed' ELSE 'sent' END
+    WHERE "status" IS NULL
+  `);
+  await db.execute(sql`
+    ALTER TABLE "fix_track_alert_log"
+      ALTER COLUMN "status" SET DEFAULT 'claimed',
+      ALTER COLUMN "status" SET NOT NULL
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_fix_track_alert_log_client" ON "fix_track_alert_log" ("client_id")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_fix_track_alert_log_claim"
+    ON "fix_track_alert_log" ("status", "claimed_at")
   `);
 }
 

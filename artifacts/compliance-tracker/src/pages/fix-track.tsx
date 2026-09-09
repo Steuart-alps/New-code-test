@@ -17,7 +17,7 @@ import { Link, useLocation } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
   Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
-  Play, MapPin, User, Calendar, FileText, Paperclip,
+  Play, MapPin, User, Calendar, FileText, Paperclip, Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -689,7 +689,8 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
 
 export default function FixTrackPage() {
   const { hasService, user } = useAuth();
-  const canAdmin = useCanAdmin() || useIsMaintenanceManager();
+  const clientCanAdmin = useCanAdmin();
+  const canAdmin = clientCanAdmin || useIsMaintenanceManager();
   const canEdit = user?.role !== "client_viewer";
   const hasFixtrack = hasService("fixtrack");
   const { toast } = useToast();
@@ -710,6 +711,9 @@ export default function FixTrackPage() {
   const [saving, setSaving]         = useState(false);
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
+  const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [staleDays, setStaleDays] = useState(7);
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
   const [, setLocation] = useLocation();
 
@@ -722,6 +726,38 @@ export default function FixTrackPage() {
   }
 
   useEffect(() => { if (hasFixtrack) load(); }, [hasFixtrack]);
+
+  async function openAlertSettings() {
+    setAlertSettingsOpen(true);
+    try {
+      const res = await apiFetch("/fix-track/alert-settings");
+      if (!res.ok) throw new Error("Could not load alert settings");
+      const data = await res.json();
+      setStaleDays(data.staleDays);
+    } catch (err: any) {
+      toast({ title: "Could not load alert settings", description: err.message, variant: "destructive" });
+      setAlertSettingsOpen(false);
+    }
+  }
+
+  async function saveAlertSettings() {
+    setSavingAlertSettings(true);
+    try {
+      const res = await apiFetch("/fix-track/alert-settings", {
+        method: "PUT",
+        body: JSON.stringify({ staleDays }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not save alert settings");
+      setStaleDays(data.staleDays);
+      setAlertSettingsOpen(false);
+      toast({ title: "Alert timing updated", description: `Urgent unattended jobs will escalate after ${data.staleDays} day${data.staleDays === 1 ? "" : "s"}.` });
+    } catch (err: any) {
+      toast({ title: "Could not save alert settings", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingAlertSettings(false);
+    }
+  }
 
   function openCreate() {
     const today = new Date().toISOString().slice(0, 10);
@@ -934,6 +970,11 @@ export default function FixTrackPage() {
             <p className="text-sm text-muted-foreground">Report and track maintenance issues across your sites</p>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            {clientCanAdmin && (
+              <Button type="button" variant="outline" onClick={openAlertSettings} className="gap-1.5">
+                <Settings2 className="w-4 h-4" /> Alert timing
+              </Button>
+            )}
             <FormOptionsEditor
               optionKey="fixtrack_issue_types"
               title="Issue types"
@@ -945,6 +986,40 @@ export default function FixTrackPage() {
             </Button>
           </div>
         </div>
+
+        <Dialog open={alertSettingsOpen} onOpenChange={setAlertSettingsOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Urgent job alert timing</DialogTitle>
+              <DialogDescription>
+                Choose how long an urgent maintenance job can go without an update before managers are alerted. Jobs past their target date are alerted regardless of this setting.
+              </DialogDescription>
+            </DialogHeader>
+            <F label="Escalate after">
+              <div className="flex items-center gap-3">
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={staleDays}
+                  onChange={e => setStaleDays(Number(e.target.value))}
+                  className="w-28"
+                />
+                <span className="text-sm text-muted-foreground">days without an update</span>
+              </div>
+            </F>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAlertSettingsOpen(false)}>Cancel</Button>
+              <Button
+                type="button"
+                onClick={saveAlertSettings}
+                disabled={savingAlertSettings || !Number.isInteger(staleDays) || staleDays < 1 || staleDays > 365}
+              >
+                {savingAlertSettings ? "Saving…" : "Save timing"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Tab switcher */}
         <div className="flex border-b border-border">

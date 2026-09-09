@@ -17,12 +17,14 @@
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, appSettingsTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 
 /** Default days an open issue may sit unactioned before it's chased. */
 export const DEFAULT_STALE_DAYS = 7;
+export const ALERT_CLAIM_LEASE_MINUTES = 30;
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -163,14 +165,6 @@ export async function runFixTrackOverdueAlertJob(
   for (const client of clients) {
     result.clientsChecked++;
     try {
-      // Throttle: at most one alert per client per day.
-      const recent = await db.execute(sql`
-        SELECT 1 FROM fix_track_alert_log
-        WHERE client_id = ${client.id} AND log_date = CURRENT_DATE
-        LIMIT 1
-      `);
-      if (((recent as any).rows ?? []).length > 0) continue;
-
       const staleDays = await getStaleDays(client.id);
       const issues = await getOverdueUrgentIssues(client.id, staleDays);
       if (issues.length === 0) continue;
@@ -189,24 +183,54 @@ export async function runFixTrackOverdueAlertJob(
       const userIds = [...new Set(managers.map((m) => m.id))];
       if (emails.length === 0) continue;
 
-      // Claim first so concurrent job runs can't double-send; release the
-      // claim (delete the log row) if the send fails so a later run retries.
+      // Claim atomically. An abandoned claim can be recovered after the lease,
+      // while a completed row can never be reclaimed.
+      const claimToken = randomUUID();
       const claim = await db.execute(sql`
-        INSERT INTO fix_track_alert_log (client_id, log_date, sent_at)
-        VALUES (${client.id}, CURRENT_DATE, now())
-        ON CONFLICT (client_id, log_date) DO NOTHING
-        RETURNING id
+        INSERT INTO fix_track_alert_log
+          (client_id, log_date, status, claim_token, claimed_at, sent_at)
+        VALUES
+          (${client.id}, CURRENT_DATE, 'claimed', ${claimToken}, now(), NULL)
+        ON CONFLICT (client_id, log_date) DO UPDATE
+        SET status = 'claimed',
+            claim_token = EXCLUDED.claim_token,
+            claimed_at = now()
+        WHERE fix_track_alert_log.status <> 'sent'
+          AND (
+            fix_track_alert_log.claim_token IS NULL
+            OR fix_track_alert_log.claimed_at < now() - (${ALERT_CLAIM_LEASE_MINUTES} * interval '1 minute')
+          )
+        RETURNING id, log_date
       `);
-      const claimId = ((claim as any).rows ?? [])[0]?.id;
-      if (!claimId) continue;
+      const claimed = ((claim as any).rows ?? [])[0];
+      if (!claimed?.id) continue;
 
       const subject = `⚠️ ${issues.length} maintenance issue${issues.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
+      const logDate = String(claimed.log_date).slice(0, 10);
+      const idempotencyKey = `fixtrack-urgent-alert:${client.id}:${logDate}`;
       try {
-        await send({ to: emails, subject, html: buildEmailHtml(issues, appUrl), clientId: client.id });
+        await send({
+          to: emails,
+          subject,
+          html: buildEmailHtml(issues, appUrl),
+          clientId: client.id,
+          idempotencyKey,
+        });
       } catch (sendErr) {
-        await db.execute(sql`DELETE FROM fix_track_alert_log WHERE id = ${claimId}`);
+        await db.execute(sql`
+          DELETE FROM fix_track_alert_log
+          WHERE id = ${claimed.id} AND status = 'claimed' AND claim_token = ${claimToken}
+        `);
         throw sendErr;
       }
+
+      // Finalise before push. If the process died after provider acceptance,
+      // the expired lease would retry with the same provider idempotency key.
+      await db.execute(sql`
+        UPDATE fix_track_alert_log
+        SET status = 'sent', sent_at = now(), claim_token = NULL, claimed_at = NULL
+        WHERE id = ${claimed.id} AND status = 'claimed' AND claim_token = ${claimToken}
+      `);
 
       // Push managers a matching alert (best-effort; never blocks the job).
       await sendPushToUsers(userIds, {
