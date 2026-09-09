@@ -3,10 +3,9 @@
  *
  * For each active client, emails the client's managers (client_admin users
  * and maintenance managers) a digest of open issues that either:
- *   - are URGENT and past their target date OR without an update in 7+ days, or
- *   - (any priority) have been open/unactioned — no status change or notes, i.e.
- *     no update — for N days (default 7, configurable per-client via the
- *     app_settings key `fixTrackStaleDays`).
+ *   - are URGENT and past their target date, or
+ *   - are URGENT and have had no update for N days (default 7, configurable
+ *     per-client via the app_settings key `fixTrackStaleDays`).
  *
  * `updated_at` is bumped on every status change / notes edit, so "no update in N
  * days" is our proxy for "unactioned for N days".
@@ -58,9 +57,8 @@ interface OverdueIssue {
 }
 
 /**
- * Open issues that need a chase, either because they are URGENT and past target
- * date / stale, OR (any priority) have had no update (status change or notes)
- * for `staleDays` days.
+ * Open urgent issues that need a chase because they are past their target date
+ * or have had no update for `staleDays` days.
  */
 export async function getOverdueUrgentIssues(
   clientId: number,
@@ -79,16 +77,9 @@ export async function getOverdueUrgentIssues(
     LEFT  JOIN sites s ON s.id = fi.site_id
     WHERE fi.client_id = ${clientId}
       AND fi.status IN ('reported', 'in_progress')
+      AND fi.priority = 'urgent'
       AND (
-        -- URGENT issues: past target date or stale for 7+ days.
-        (
-          fi.priority = 'urgent'
-          AND (
-            (fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE)
-            OR fi.updated_at < now() - interval '7 days'
-          )
-        )
-        -- Any issue left unactioned (no update) for the configured window.
+        (fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE)
         OR fi.updated_at < now() - (${staleDays} * interval '1 day')
       )
     ORDER BY fi.target_date ASC NULLS LAST, fi.updated_at ASC
@@ -211,7 +202,7 @@ export async function runFixTrackOverdueAlertJob(
 
       const subject = `⚠️ ${issues.length} maintenance issue${issues.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
       try {
-        await send({ to: emails, subject, html: buildEmailHtml(issues, appUrl) });
+        await send({ to: emails, subject, html: buildEmailHtml(issues, appUrl), clientId: client.id });
       } catch (sendErr) {
         await db.execute(sql`DELETE FROM fix_track_alert_log WHERE id = ${claimId}`);
         throw sendErr;

@@ -51,6 +51,7 @@ const directLocked = new Set([
   "test:discounts", "test:compliance-hub", "test:guidance-register",
   "test:daily-checklist-entitlements", "test:export-attachment-acl",
   "test:photo-attachments", "test:bike-overdue-reminders",
+  "test:fix-track-overdue-alerts",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
 ]);
 const runnerLocked = new Set([
