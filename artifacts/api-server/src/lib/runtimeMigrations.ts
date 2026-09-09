@@ -1483,6 +1483,13 @@ async function migrateStaffRoster() {
     CREATE INDEX IF NOT EXISTS "IDX_staff_roster_client"
     ON "staff_roster" ("client_id")
   `);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "external_payroll_id" text`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "last_reconciled_at" timestamp`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_staff_roster_client_payroll_id"
+    ON "staff_roster" ("client_id", "external_payroll_id")
+    WHERE "external_payroll_id" IS NOT NULL
+  `);
   // requires_acknowledgement flag on documents
   await db.execute(sql`
     ALTER TABLE "doc_track_documents"

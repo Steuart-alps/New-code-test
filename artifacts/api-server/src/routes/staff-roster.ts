@@ -8,6 +8,7 @@ const router = Router();
 
 const staffCreate = z.object({
   name: z.string().min(1).max(300),
+  externalPayrollId: z.string().trim().min(1).max(200).nullable().optional(),
   jobTitle: z.string().max(300).nullable().optional(),
   department: z.string().max(300).nullable().optional(),
   email: z.string().email().max(300).nullable().optional().or(z.literal("").transform(() => null)),
@@ -16,6 +17,18 @@ const staffCreate = z.object({
 });
 
 const staffUpdate = staffCreate.partial();
+const rosterRow = staffCreate.extend({
+  externalPayrollId: z.string().trim().min(1).max(200),
+  active: z.boolean().optional(),
+});
+const reconcileBody = z.object({
+  rows: z.array(rosterRow).min(1).max(1000),
+  siteId: z.number().int().positive().nullable().optional(),
+  preview: z.boolean().default(true),
+}).strict();
+const normalizeIdentifier = (value: string) => value.trim().toUpperCase();
+const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const normalizeEmail = (value: string | null | undefined) => value?.trim().toLocaleLowerCase() || null;
 
 // ── List staff ────────────────────────────────────────────────────────────────
 
@@ -26,7 +39,7 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
   const { includeInactive, siteId } = req.query as any;
 
   const result = await db.execute(sql`
-    SELECT sr.id, sr.client_id, sr.site_id, sr.name, sr.job_title, sr.department,
+    SELECT sr.id, sr.client_id, sr.site_id, sr.name, sr.external_payroll_id, sr.last_reconciled_at, sr.job_title, sr.department,
            sr.email, sr.active, sr.created_at, sr.updated_at,
            s.name AS site_name
     FROM staff_roster sr
@@ -51,11 +64,11 @@ router.post("/staff-roster", requireAuth, denyViewers, async (req, res) => {
   const parsed = staffCreate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { name, jobTitle, department, email, siteId, active } = parsed.data;
+  const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
 
   const result = await db.execute(sql`
-    INSERT INTO staff_roster (client_id, site_id, name, job_title, department, email, active)
-    VALUES (${clientId}, ${siteId ?? null}, ${name}, ${jobTitle ?? null},
+    INSERT INTO staff_roster (client_id, site_id, name, external_payroll_id, job_title, department, email, active)
+    VALUES (${clientId}, ${siteId ?? null}, ${name}, ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null}, ${jobTitle ?? null},
             ${department ?? null}, ${email ?? null}, ${active ?? true})
     RETURNING *
   `);
@@ -63,27 +76,112 @@ router.post("/staff-roster", requireAuth, denyViewers, async (req, res) => {
   res.status(201).json((result.rows ?? [])[0]);
 });
 
-// ── Bulk import (CSV-style array) ─────────────────────────────────────────────
+router.post("/staff-roster/bulk", requireAuth, denyViewers, (_req, res) => {
+  res.status(410).json({ error: "Bulk insertion has been replaced by previewed roster reconciliation" });
+});
 
-router.post("/staff-roster/bulk", requireAuth, denyViewers, async (req, res) => {
+router.post("/staff-roster/reconcile", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = reconcileBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid roster data", details: parsed.error.flatten() });
+  const { preview } = parsed.data;
+  const scopeSiteId = parsed.data.siteId ?? null;
+  const identifiers = parsed.data.rows.map(row => normalizeIdentifier(row.externalPayrollId));
+  const duplicateIdentifiers = [...new Set(identifiers.filter((id, index) => identifiers.indexOf(id) !== index))];
+  if (duplicateIdentifiers.length) return res.status(409).json({ error: "Duplicate payroll identifiers in upload", identifiers: duplicateIdentifiers });
 
-  const parsed = z.array(staffCreate).min(1).max(500).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
-
-  const inserted: any[] = [];
-  for (const s of parsed.data) {
-    const r = await db.execute(sql`
-      INSERT INTO staff_roster (client_id, site_id, name, job_title, department, email, active)
-      VALUES (${clientId}, ${s.siteId ?? null}, ${s.name}, ${s.jobTitle ?? null},
-              ${s.department ?? null}, ${s.email ?? null}, ${s.active ?? true})
-      RETURNING *
+  const result = await db.transaction(async tx => {
+    if (scopeSiteId != null) {
+      const site = await tx.execute(sql`SELECT id FROM sites WHERE id = ${scopeSiteId} AND client_id = ${clientId} LIMIT 1`);
+      if (!site.rows?.[0]) return { error: "Selected site does not belong to this client", status: 403 as const };
+    }
+    const currentResult = await tx.execute(sql`
+      SELECT id, site_id, name, external_payroll_id, job_title, department, email, active
+      FROM staff_roster
+      WHERE client_id = ${clientId}
+        ${scopeSiteId == null ? sql`` : sql`AND site_id = ${scopeSiteId}`}
+      ORDER BY id
+      FOR UPDATE
     `);
-    if (r.rows?.[0]) inserted.push(r.rows[0]);
-  }
+    const current = (currentResult.rows ?? []) as any[];
+    const claimed = new Set<number>();
+    const plans: Array<{ row: typeof parsed.data.rows[number]; id: number | null; kind: "created" | "updated" | "reactivated" | "unchanged"; match: "identifier" | "email" | "name" | "new" }> = [];
+    const errors: Array<{ row: number; identifier: string; error: string }> = [];
 
-  res.status(201).json(inserted);
+    for (const [index, input] of parsed.data.rows.entries()) {
+      const identifier = normalizeIdentifier(input.externalPayrollId);
+      const rowSiteId = scopeSiteId ?? input.siteId ?? null;
+      if (scopeSiteId != null && input.siteId != null && input.siteId !== scopeSiteId) {
+        errors.push({ row: index + 2, identifier, error: "Row site does not match the selected reconciliation site" });
+        continue;
+      }
+      if (rowSiteId != null) {
+        const site = await tx.execute(sql`SELECT id FROM sites WHERE id = ${rowSiteId} AND client_id = ${clientId} LIMIT 1`);
+        if (!site.rows?.[0]) {
+          errors.push({ row: index + 2, identifier, error: "Site does not belong to this client" });
+          continue;
+        }
+      }
+      let matches = current.filter(item => item.external_payroll_id === identifier);
+      let match: "identifier" | "email" | "name" | "new" = "identifier";
+      if (!matches.length && normalizeEmail(input.email)) {
+        matches = current.filter(item => !item.external_payroll_id && normalizeEmail(item.email) === normalizeEmail(input.email) && !claimed.has(Number(item.id)));
+        match = "email";
+      }
+      if (!matches.length) {
+        matches = current.filter(item => !item.external_payroll_id && normalizeName(item.name) === normalizeName(input.name) && Number(item.site_id ?? 0) === Number(rowSiteId ?? 0) && !claimed.has(Number(item.id)));
+        match = "name";
+      }
+      if (matches.length > 1) {
+        errors.push({ row: index + 2, identifier, error: `Ambiguous ${match} match; update the existing roster before importing` });
+        continue;
+      }
+      const existing = matches[0];
+      if (!existing) {
+        plans.push({ row: { ...input, siteId: rowSiteId }, id: null, kind: "created", match: "new" });
+        continue;
+      }
+      claimed.add(Number(existing.id));
+      const changed = existing.name !== input.name.trim()
+        || existing.external_payroll_id !== identifier
+        || (existing.job_title ?? null) !== (input.jobTitle ?? null)
+        || (existing.department ?? null) !== (input.department ?? null)
+        || normalizeEmail(existing.email) !== normalizeEmail(input.email)
+        || Number(existing.site_id ?? 0) !== Number(rowSiteId ?? 0);
+      plans.push({ row: { ...input, siteId: rowSiteId }, id: Number(existing.id), kind: !existing.active ? "reactivated" : changed ? "updated" : "unchanged", match });
+    }
+    if (errors.length) return { error: "Roster contains rows that cannot be reconciled safely", status: 409 as const, errors };
+    const deactivatedIds = current.filter(item => item.active && !claimed.has(Number(item.id)) && !plans.some(plan => plan.id === Number(item.id))).map(item => Number(item.id));
+    const summary = {
+      total: plans.length,
+      created: plans.filter(plan => plan.kind === "created").length,
+      updated: plans.filter(plan => plan.kind === "updated").length,
+      reactivated: plans.filter(plan => plan.kind === "reactivated").length,
+      unchanged: plans.filter(plan => plan.kind === "unchanged").length,
+      deactivated: deactivatedIds.length,
+      matchedByEmail: plans.filter(plan => plan.match === "email").length,
+      matchedByName: plans.filter(plan => plan.match === "name").length,
+    };
+    if (preview) return { status: 200 as const, preview: true, summary };
+    for (const plan of plans) {
+      const identifier = normalizeIdentifier(plan.row.externalPayrollId);
+      if (plan.id == null) {
+        await tx.execute(sql`INSERT INTO staff_roster (client_id, site_id, name, external_payroll_id, job_title, department, email, active, last_reconciled_at)
+          VALUES (${clientId}, ${plan.row.siteId ?? null}, ${plan.row.name.trim()}, ${identifier}, ${plan.row.jobTitle ?? null}, ${plan.row.department ?? null}, ${plan.row.email ?? null}, true, now())`);
+      } else {
+        await tx.execute(sql`UPDATE staff_roster SET site_id = ${plan.row.siteId ?? null}, name = ${plan.row.name.trim()}, external_payroll_id = ${identifier},
+          job_title = ${plan.row.jobTitle ?? null}, department = ${plan.row.department ?? null}, email = ${plan.row.email ?? null},
+          active = true, last_reconciled_at = now(), updated_at = now()
+          WHERE id = ${plan.id} AND client_id = ${clientId}`);
+      }
+    }
+    if (deactivatedIds.length) await tx.execute(sql`UPDATE staff_roster SET active = false, last_reconciled_at = now(), updated_at = now()
+      WHERE client_id = ${clientId} AND id IN (${sql.join(deactivatedIds.map(id => sql`${id}`), sql`, `)})`);
+    return { status: 200 as const, preview: false, summary };
+  });
+  if ("error" in result) return res.status(result.status).json(result);
+  res.status(result.status).json(result);
 });
 
 // ── Update staff member ───────────────────────────────────────────────────────
@@ -98,12 +196,13 @@ router.patch("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => 
   const parsed = staffUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { name, jobTitle, department, email, siteId, active } = parsed.data;
+  const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
   const hasJobTitle  = jobTitle  !== undefined;
   const hasDept      = department !== undefined;
   const hasEmail     = email     !== undefined;
   const hasSite      = siteId    !== undefined;
   const hasActive    = active    !== undefined;
+  const hasExternalId = externalPayrollId !== undefined;
 
   await db.execute(sql`
     UPDATE staff_roster
@@ -113,6 +212,7 @@ router.patch("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => 
         email      = CASE WHEN ${hasEmail}::boolean      THEN ${email ?? null}      ELSE email      END,
         site_id    = CASE WHEN ${hasSite}::boolean       THEN ${siteId ?? null}     ELSE site_id    END,
         active     = CASE WHEN ${hasActive}::boolean     THEN ${active ?? true}     ELSE active     END,
+        external_payroll_id = CASE WHEN ${hasExternalId}::boolean THEN ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null} ELSE external_payroll_id END,
         updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
   `);
@@ -129,7 +229,7 @@ router.patch("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => 
   res.json(row);
 });
 
-// ── Delete staff member ───────────────────────────────────────────────────────
+// ── Remove from current roster without deleting compliance history ───────────
 
 router.delete("/staff-roster/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
@@ -139,7 +239,8 @@ router.delete("/staff-roster/:id", requireAuth, denyViewers, async (req, res) =>
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   await db.execute(sql`
-    DELETE FROM staff_roster
+    UPDATE staff_roster
+    SET active = false, updated_at = now()
     WHERE id = ${id} AND client_id = ${clientId}
   `);
   res.status(204).end();

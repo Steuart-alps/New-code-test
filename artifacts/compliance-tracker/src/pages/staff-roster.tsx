@@ -19,6 +19,7 @@ interface StaffMember {
   client_id: number;
   site_id: number | null;
   name: string;
+  external_payroll_id: string | null;
   job_title: string | null;
   department: string | null;
   email: string | null;
@@ -29,7 +30,7 @@ interface StaffMember {
 
 interface Site { id: number; name: string; }
 
-const EMPTY_FORM = { name: "", jobTitle: "", department: "", email: "", siteId: "none", active: true };
+const EMPTY_FORM = { name: "", externalPayrollId: "", jobTitle: "", department: "", email: "", siteId: "none", active: true };
 
 function StaffDialog({
   open, onClose, onSaved, sites, editing,
@@ -45,6 +46,7 @@ function StaffDialog({
     if (editing) {
       setForm({
         name: editing.name,
+        externalPayrollId: editing.external_payroll_id ?? "",
         jobTitle: editing.job_title ?? "",
         department: editing.department ?? "",
         email: editing.email ?? "",
@@ -62,6 +64,7 @@ function StaffDialog({
     try {
       const body = {
         name: form.name.trim(),
+        externalPayrollId: form.externalPayrollId.trim() || null,
         jobTitle: form.jobTitle.trim() || null,
         department: form.department.trim() || null,
         email: form.email.trim() || null,
@@ -93,6 +96,10 @@ function StaffDialog({
           <div className="space-y-1.5">
             <Label>Name <span className="text-destructive">*</span></Label>
             <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Payroll / workforce identifier <span className="text-muted-foreground text-xs">(recommended)</span></Label>
+            <Input value={form.externalPayrollId} onChange={e => setForm(f => ({ ...f, externalPayrollId: e.target.value }))} placeholder="e.g. EMP-1042" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -151,6 +158,7 @@ function StaffDialog({
 }
 
 interface ParsedStaff {
+  externalPayrollId: string;
   name: string;
   jobTitle: string | null;
   department: string | null;
@@ -176,12 +184,13 @@ function parseExcel(file: File): Promise<ParsedStaff[]> {
 
         const members: ParsedStaff[] = rows
           .map(row => ({
+            externalPayrollId: find(row, "payrollid", "employeeid", "staffid", "workforceid", "identifier") ?? "",
             name:       find(row, "name", "fullname", "staffname", "employeename") ?? "",
             jobTitle:   find(row, "jobtitle", "title", "role", "position", "job"),
             department: find(row, "department", "dept", "team", "area", "division"),
             email:      find(row, "email", "emailaddress", "mail"),
           }))
-          .filter(m => m.name.length > 0);
+          .filter(m => m.name.length > 0 || m.externalPayrollId.length > 0);
 
         resolve(members);
       } catch (err) {
@@ -197,8 +206,8 @@ function parsePasteText(text: string): ParsedStaff[] {
   return text.split("\n")
     .map(l => l.trim()).filter(Boolean)
     .map(line => {
-      const [name, jobTitle, department, email] = line.split(",").map(s => s.trim());
-      return { name: name || line, jobTitle: jobTitle || null, department: department || null, email: email || null };
+      const [externalPayrollId, name, jobTitle, department, email] = line.split(",").map(s => s.trim());
+      return { externalPayrollId: externalPayrollId || "", name: name || "", jobTitle: jobTitle || null, department: department || null, email: email || null };
     })
     .filter(m => m.name);
 }
@@ -213,10 +222,11 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
   const [siteId, setSiteId] = useState("none");
   const [importing, setImporting] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [reconciliation, setReconciliation] = useState<{ total: number; created: number; updated: number; reactivated: number; unchanged: number; deactivated: number; matchedByEmail: number; matchedByName: number } | null>(null);
 
   function reset() {
     setText(""); setExcelFile(null); setPreview([]);
-    setSiteId("none"); setMode("excel");
+    setSiteId("none"); setMode("excel"); setReconciliation(null);
   }
 
   async function handleFileChange(file: File) {
@@ -225,6 +235,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
     try {
       const members = await parseExcel(file);
       setPreview(members);
+      setReconciliation(null);
     } catch {
       toast({ title: "Could not read file", description: "Make sure it is a valid .xlsx or .xls file.", variant: "destructive" });
       setExcelFile(null);
@@ -234,25 +245,30 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
   }
 
   const members: ParsedStaff[] = mode === "excel" ? preview : parsePasteText(text);
-  const canImport = members.length > 0 && !importing;
+  const canImport = members.length > 0 && members.every(member => member.externalPayrollId.trim() && member.name.trim()) && !importing;
 
   async function handleImport() {
     if (!members.length) return;
     setImporting(true);
     try {
-      const body = members.map(m => ({
-        ...m,
+      const body = {
+        rows: members.map(m => ({ ...m, siteId: siteId !== "none" ? Number(siteId) : null })),
         siteId: siteId !== "none" ? Number(siteId) : null,
-      }));
-      const res = await apiFetch("/staff-roster/bulk", { method: "POST", body: JSON.stringify(body) });
-      if (!res.ok) throw new Error("Import failed");
+        preview: !reconciliation,
+      };
+      const res = await apiFetch("/staff-roster/reconcile", { method: "POST", body: JSON.stringify(body) });
       const data = await res.json();
-      toast({ title: `${data.length} staff member${data.length === 1 ? "" : "s"} imported` });
+      if (!res.ok) throw new Error(data.error ?? "Roster reconciliation failed");
+      if (!reconciliation) {
+        setReconciliation(data.summary);
+        return;
+      }
+      toast({ title: "Monthly roster updated", description: `${data.summary.created} added, ${data.summary.updated + data.summary.reactivated} updated, ${data.summary.deactivated} made inactive.` });
       onImported();
       reset();
       onClose();
-    } catch {
-      toast({ title: "Import failed", variant: "destructive" });
+    } catch (error) {
+      toast({ title: "Roster update failed", description: error instanceof Error ? error.message : "Please check the file and try again.", variant: "destructive" });
     } finally {
       setImporting(false);
     }
@@ -262,7 +278,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
     <Dialog open={open} onOpenChange={v => { if (!v && !importing) { reset(); onClose(); } }}>
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Upload className="w-4 h-4" /> Bulk Import Staff</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Upload className="w-4 h-4" /> Replace monthly staff roster</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
@@ -287,7 +303,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
           {mode === "excel" ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Upload an Excel (.xlsx) or CSV file. The first row must be column headers. Recognised columns: <strong>Name</strong>, Job Title, Department, Email.
+                 Upload the complete current roster as Excel or CSV. Required columns: <strong>Payroll ID</strong> and <strong>Name</strong>. Optional columns: Job Title, Department and Email.
               </p>
               <input
                 ref={fileInputRef}
@@ -329,6 +345,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
                     <thead className="bg-muted/40 sticky top-0">
                       <tr>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
+                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Payroll ID</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Job Title</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Department</th>
                       </tr>
@@ -337,6 +354,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
                       {preview.slice(0, 50).map((m, i) => (
                         <tr key={i}>
                           <td className="px-3 py-1.5 font-medium">{m.name}</td>
+                           <td className="px-3 py-1.5 text-muted-foreground">{m.externalPayrollId || "Missing"}</td>
                           <td className="px-3 py-1.5 text-muted-foreground hidden sm:table-cell">{m.jobTitle ?? "—"}</td>
                           <td className="px-3 py-1.5 text-muted-foreground hidden sm:table-cell">{m.department ?? "—"}</td>
                         </tr>
@@ -350,18 +368,18 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                One staff member per line. Optionally include job title, department, and email separated by commas.
+                One staff member per line: payroll ID, name, then optional job title, department and email.
               </p>
               <div className="bg-muted/40 rounded-md p-3 text-xs text-muted-foreground font-mono space-y-0.5">
-                <p>John Smith</p>
-                <p>Jane Doe, Chef, Kitchen</p>
-                <p>Bob Jones, Manager, Front of House, bob@example.com</p>
+                <p>EMP-1001, John Smith</p>
+                <p>EMP-1002, Jane Doe, Chef, Kitchen</p>
+                <p>EMP-1003, Bob Jones, Manager, Front of House, bob@example.com</p>
               </div>
               <textarea
                 className="w-full border rounded-md p-3 text-sm font-mono resize-y min-h-[120px] focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder={"John Smith\nJane Doe, Chef, Kitchen\n..."}
+                placeholder={"EMP-1001, John Smith\nEMP-1002, Jane Doe, Chef, Kitchen\n..."}
                 value={text}
-                onChange={e => setText(e.target.value)}
+                onChange={e => { setText(e.target.value); setReconciliation(null); }}
               />
             </div>
           )}
@@ -369,7 +387,7 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
           {sites.length > 0 && (
             <div className="space-y-1.5">
               <Label>Assign all to site <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId} onValueChange={value => { setSiteId(value); setReconciliation(null); }}>
                 <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">All sites</SelectItem>
@@ -378,13 +396,24 @@ function BulkImportDialog({ open, onClose, onImported, sites }: { open: boolean;
               </Select>
             </div>
           )}
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            This is a complete replacement for {siteId === "none" ? "the whole current roster" : "the selected site's current roster"}. Staff missing from the file will be made inactive, never deleted. Their training and compliance history will remain.
+          </div>
+          {members.some(member => !member.externalPayrollId.trim() || !member.name.trim()) && <p className="text-sm text-destructive">Every row needs both a payroll identifier and a name.</p>}
+          {reconciliation && <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-4">
+            <div><strong>{reconciliation.created}</strong><br /><span className="text-muted-foreground">New</span></div>
+            <div><strong>{reconciliation.updated}</strong><br /><span className="text-muted-foreground">Updated</span></div>
+            <div><strong>{reconciliation.reactivated}</strong><br /><span className="text-muted-foreground">Reactivated</span></div>
+            <div><strong>{reconciliation.deactivated}</strong><br /><span className="text-muted-foreground">Made inactive</span></div>
+            {(reconciliation.matchedByEmail + reconciliation.matchedByName) > 0 && <p className="col-span-2 text-xs text-muted-foreground sm:col-span-4">{reconciliation.matchedByEmail + reconciliation.matchedByName} existing staff matched safely and will keep their history.</p>}
+          </div>}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => { reset(); onClose(); }} disabled={importing}>Cancel</Button>
           <Button onClick={handleImport} disabled={!canImport}>
             {importing && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-            Import {members.length > 0 ? `${members.length} Staff` : ""}
+            {reconciliation ? "Confirm monthly replacement" : `Preview ${members.length > 0 ? `${members.length} staff` : "roster"}`}
           </Button>
         </DialogFooter>
       </DialogContent>

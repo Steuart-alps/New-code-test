@@ -23,6 +23,7 @@
     "test:config": "bash tests/run-db-workflow.sh tests/config-endpoints.mjs",
     "test:config:ci": "bash tests/run-config-endpoints.sh",
     "test:training-expiry": "bash tests/run-db-workflow.sh tests/training-expiry-reminders.mjs",
+    "test:staff-roster-reconciliation": "bash tests/run-staff-roster-reconciliation.sh",
     "test:safe-track-ack-reminders": "bash tests/run-db-workflow.sh tests/safe-track-ack-reminders.mjs",
     "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",
     "test:discounts": "bash tests/run-db-workflow.sh tests/discount-codes.mjs",
