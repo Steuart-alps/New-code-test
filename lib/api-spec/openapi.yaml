@@ -3103,6 +3103,8 @@ components:
     UpdateFoodSafetyRecordRequest:
       type: object
       properties:
+        mobileTemperatureLog:
+          $ref: "#/components/schemas/MobileTemperatureLog"
         deliveries:
           type: array
           items: {}
@@ -3128,6 +3130,39 @@ components:
         managerSignature:
           type: string
         submittedAt:
+          type: string
+
+    MobileTemperatureLog:
+      type: object
+      required:
+        - coldFood
+        - expectedColdFood
+        - expectedCorrectives
+      properties:
+        coldFood:
+          type: array
+          items: {}
+        expectedColdFood:
+          type: array
+          items: {}
+        delivery:
+          type: object
+          additionalProperties: true
+        hotHolding:
+          type: object
+          additionalProperties: true
+        hotTemperature:
+          type: object
+          additionalProperties: true
+        cooling:
+          type: object
+          additionalProperties: true
+        reheating:
+          type: object
+          additionalProperties: true
+        correctives:
+          type: string
+        expectedCorrectives:
           type: string
           nullable: true
 

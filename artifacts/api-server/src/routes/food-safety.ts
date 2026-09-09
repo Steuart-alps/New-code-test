@@ -10,6 +10,17 @@ const router = Router();
 // Rows are user-defined shapes, but must be flat objects of primitive values
 const rowSchema = z.record(z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
 const rowsSchema = z.array(rowSchema).max(200);
+const mobileTemperatureLogSchema = z.object({
+  coldFood: rowsSchema,
+  expectedColdFood: rowsSchema,
+  delivery: rowSchema.optional(),
+  hotHolding: rowSchema.optional(),
+  hotTemperature: rowSchema.optional(),
+  cooling: rowSchema.optional(),
+  reheating: rowSchema.optional(),
+  correctives: z.string().max(5000).optional(),
+  expectedCorrectives: z.string().max(5000).nullable(),
+});
 
 const recordFieldsSchema = z.object({
   deliveries: rowsSchema.optional(),
@@ -26,6 +37,9 @@ const recordFieldsSchema = z.object({
   correctives: z.string().max(5000).optional(),
   managerSignature: z.string().max(200).optional(),
   submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
+});
+const updateRecordSchema = recordFieldsSchema.extend({
+  mobileTemperatureLog: mobileTemperatureLogSchema.optional(),
 });
 
 const createRecordSchema = recordFieldsSchema.extend({
@@ -597,7 +611,21 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
       createdBy: (req.session as any).userId ?? null,
     })
+    .onConflictDoNothing()
     .returning();
+
+  if (!inserted) {
+    const [winner] = await db
+      .select({ id: foodSafetyRecordsTable.id })
+      .from(foodSafetyRecordsTable)
+      .where(and(
+        eq(foodSafetyRecordsTable.clientId, clientId),
+        eq(foodSafetyRecordsTable.recordDate, data.recordDate),
+        siteScopeCond(siteId),
+      ))
+      .limit(1);
+    return res.status(409).json({ error: "Record already exists for this date", id: winner?.id });
+  }
 
   res.status(201).json(inserted);
 });
@@ -713,11 +741,78 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     return res.status(403).json({ error: "Site not accessible" });
   }
 
-  const parsedUpdate = recordFieldsSchema.safeParse(req.body);
+  const parsedUpdate = updateRecordSchema.safeParse(req.body);
   if (!parsedUpdate.success) return res.status(400).json({ error: "Invalid data" });
 
+  const mobileLog = parsedUpdate.data.mobileTemperatureLog;
+  if (mobileLog) {
+    const updated = await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(foodSafetyRecordsTable)
+        .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+        .limit(1)
+        .for("update");
+      if (!current) return null;
+
+      const currentCold = (current.coldFood ?? []) as Record<string, unknown>[];
+      const expectedByUnit = new Map(
+        mobileLog.expectedColdFood.map((row) => [String(row.unit ?? ""), row]),
+      );
+      const coldConflict = mobileLog.coldFood.some((row) => {
+        const unit = String(row.unit ?? "");
+        const expected = expectedByUnit.get(unit);
+        const currentRow = currentCold.find((candidate) => String(candidate.unit ?? "") === unit);
+        return JSON.stringify(currentRow ?? null) !== JSON.stringify(expected ?? null);
+      });
+      const correctivesConflict =
+        mobileLog.correctives !== undefined &&
+        (current.correctives ?? null) !== mobileLog.expectedCorrectives;
+      if (coldConflict || correctivesConflict) return { conflict: true as const };
+
+      const incomingByUnit = new Map(
+        mobileLog.coldFood.map((row) => [String(row.unit ?? ""), row]),
+      );
+      const mergedCold = currentCold.map((row) => {
+        const unit = String(row.unit ?? "");
+        const replacement = incomingByUnit.get(unit);
+        if (replacement) incomingByUnit.delete(unit);
+        return replacement ?? row;
+      });
+      mergedCold.push(...incomingByUnit.values());
+
+      const append = (
+        rows: unknown,
+        row: Record<string, string | number | boolean | null> | undefined,
+      ) => row ? [...((rows ?? []) as Record<string, unknown>[]), row] : rows;
+
+      const [saved] = await tx
+        .update(foodSafetyRecordsTable)
+        .set({
+          coldFood: mergedCold,
+          deliveries: append(current.deliveries, mobileLog.delivery),
+          hotHolding: append(current.hotHolding, mobileLog.hotHolding),
+          hotTemperature: append(current.hotTemperature, mobileLog.hotTemperature),
+          cooling: append(current.cooling, mobileLog.cooling),
+          reheating: append(current.reheating, mobileLog.reheating),
+          ...(mobileLog.correctives !== undefined ? { correctives: mobileLog.correctives } : {}),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+        .returning();
+      return saved;
+    });
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    if ("conflict" in updated) {
+      return res.status(409).json({
+        error: "Today’s diary changed while you were editing. Reload it and try again.",
+      });
+    }
+    return res.json(updated);
+  }
+
   const updates: any = { updatedAt: new Date() };
-  const { submittedAt, ...rest } = parsedUpdate.data;
+  const { submittedAt, mobileTemperatureLog: _mobileTemperatureLog, ...rest } = parsedUpdate.data;
   for (const [key, value] of Object.entries(rest)) {
     if (value !== undefined) updates[key] = value;
   }
