@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 type Severity = "monitor" | "action_required" | "urgent";
 type ActionStatus = "open" | "in_progress" | "resolved";
 
-interface TrackAction {
+export interface TrackAction {
   id: number | string;
   title: string;
   severity: Severity;
@@ -31,6 +31,7 @@ interface TrackAction {
   instruction?: string | null;
   instructionSnapshot?: string | null;
   sourceKind?: string | null;
+  sourceRecordId?: number | null;
   provenance?: "product_default" | "template" | "one_off" | null;
   templateId?: number | null;
   createdAt?: string | null;

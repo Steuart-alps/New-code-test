@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { ModuleActionsPanel } from "@/components/module-actions-panel";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1224,7 +1225,7 @@ function FuelLogDialog({
   );
 }
 
-type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel";
+type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel" | "actions";
 
 function GreenTrackPageInternal() {
   const { user } = useAuth();
@@ -1370,6 +1371,7 @@ function GreenTrackPageInternal() {
     { key: "services", label: "Services",    icon: Wrench },
     { key: "defects",  label: "Defects",     icon: ShieldAlert,    count: status?.openDefects || undefined },
     { key: "puwer",    label: "Inspections", icon: ClipboardCheck },
+    { key: "actions",  label: "Actions",     icon: CheckCircle2 },
     ...(showFuelTab ? [{ key: "fuel" as Tab, label: "Fuel / Oil", icon: Fuel }] : []),
   ];
 
@@ -1448,12 +1450,12 @@ function GreenTrackPageInternal() {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="relative">
+            {activeTab !== "actions" && <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search…" className="pl-8 h-8 w-44 rounded-sm text-sm" />
-            </div>
-            {activeTab !== "fleet" && (
+            </div>}
+            {activeTab !== "fleet" && activeTab !== "actions" && (
               <Select value={filterMachine || "_all"} onValueChange={v => setFilterMachine(v === "_all" ? "" : v)}>
                 <SelectTrigger className="h-8 rounded-sm text-sm w-44">
                   <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
@@ -1637,7 +1639,7 @@ function GreenTrackPageInternal() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filteredPreUse.map(c => (
-                      <tr key={c.id} className="bg-white hover:bg-muted/20 transition-colors group">
+                      <tr id={`green-source-green_pre_use_checks-${c.id}`} key={c.id} className="bg-white hover:bg-muted/20 transition-colors group">
                         <td className="px-4 py-3">
                           <p className="font-medium">{c.machineName}</p>
                           <p className="text-xs text-muted-foreground">{MACHINE_TYPE_LABELS[c.machineType] ?? c.machineType}</p>
@@ -1898,7 +1900,7 @@ function GreenTrackPageInternal() {
                       const due30 = p.nextInspectionDate && !overdue &&
                         new Date(p.nextInspectionDate) <= new Date(Date.now() + 30 * 86400000);
                       return (
-                        <tr key={p.id} className={`border-b last:border-0 ${!p.safeToOperate ? "bg-red-50 dark:bg-red-900/10" : ""}`}>
+                        <tr id={`green-source-green_puwer_inspections-${p.id}`} key={p.id} className={`border-b last:border-0 ${!p.safeToOperate ? "bg-red-50 dark:bg-red-900/10" : ""}`}>
                           <td className="py-2 pr-4 font-medium">{p.machineName}</td>
                           <td className="py-2 pr-4 text-muted-foreground text-xs hidden sm:table-cell">
                             {PUWER_INSPECTION_TYPE_LABELS[p.inspectionType] ?? p.inspectionType}
@@ -2023,6 +2025,10 @@ function GreenTrackPageInternal() {
               </div>
             )}
           </>
+        )}
+
+        {activeTab === "actions" && (
+          <ModuleActionsPanel moduleKey="green" />
         )}
 
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}

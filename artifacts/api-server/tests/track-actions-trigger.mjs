@@ -111,6 +111,28 @@ async function main() {
   });
   assert("Green canonicalizes arbitrary result", greenCheck.status === 201 && greenCheck.data?.result === "pass");
 
+  const failedMachine = await request("POST", "/green-track/machines", {
+    name: "Greens mower", type: "ride_on_rotary", siteId,
+  });
+  const failedGreenCheck = await request("POST", "/green-track/pre-use-checks", {
+    machineId: failedMachine.data?.id,
+    checkDate: date,
+    operator: "Test Greenkeeper",
+    guardsOk: false,
+    notes: "Guard needs attention",
+  });
+  assert("Green failed check is recorded", failedGreenCheck.status === 201 && failedGreenCheck.data?.result === "fail");
+  const greenActions = sourceAction(await actions("green"), "green_pre_use_checks", failedGreenCheck.data?.id);
+  assert("Green failed check creates one in-track action", greenActions.length === 1);
+  assert("Green action names its machine", greenActions[0]?.title === "Pre-use check action: Greens mower");
+  assert("Green action is owned by its greenkeeper", greenActions[0]?.ownerName === "Test Greenkeeper");
+  assert("Green action remains site scoped", greenActions[0]?.siteId === siteId);
+  assert("Green source action cannot be detached from its site", (await request(
+    "PATCH",
+    `/track-actions/${greenActions[0]?.id}`,
+    { siteId: null },
+  )).status === 409);
+
   const swimSession = await request("POST", "/swim-track/sessions", {
     siteId, sessionDate: date, preSessionResult: "not-a-result", result: "urgent_action",
   });

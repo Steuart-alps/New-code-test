@@ -920,6 +920,7 @@ async function migrateTrackActions() {
       source_action_severity text := lower(coalesce(record_json->>'action_severity', ''));
       action_severity text;
       action_title text;
+      action_owner_name text;
       action_due_date date;
       source_site_id integer;
     BEGIN
@@ -958,6 +959,20 @@ async function migrateTrackActions() {
         FROM green_machines
         WHERE id = (record_json->>'machine_id')::integer
           AND client_id = (record_json->>'client_id')::integer;
+        SELECT
+          CASE
+            WHEN TG_ARGV[2] = 'green_puwer_inspections'
+              THEN 'PUWER inspection action: ' || name
+            ELSE 'Pre-use check action: ' || name
+          END
+        INTO action_title
+        FROM green_machines
+        WHERE id = (record_json->>'machine_id')::integer
+          AND client_id = (record_json->>'client_id')::integer;
+        action_owner_name := coalesce(
+          nullif(record_json->>'operator', ''),
+          nullif(record_json->>'inspector_name', '')
+        );
       END IF;
       -- PAT tests are appliance-scoped; only accept the appliance site from
       -- the same tenant as the test record.
@@ -992,7 +1007,7 @@ async function migrateTrackActions() {
 
       INSERT INTO "track_actions" (
         "client_id", "site_id", "module", "source_kind", "source_record_id", "title",
-        "provenance", "severity", "due_date", "status"
+        "provenance", "severity", "owner_name", "due_date", "status"
       )
       VALUES (
         (record_json->>'client_id')::integer,
@@ -1003,6 +1018,7 @@ async function migrateTrackActions() {
         action_title,
         'product_default',
         action_severity,
+        action_owner_name,
         action_due_date,
         'open'
       )

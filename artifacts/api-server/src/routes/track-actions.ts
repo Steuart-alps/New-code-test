@@ -232,6 +232,9 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     const sites = siteIds.length ? await tx.select({ id: sitesTable.id, clientId: sitesTable.clientId, departmentId: sitesTable.departmentId }).from(sitesTable).where(inArray(sitesTable.id, siteIds)).for("update") : [];
     const canUse = (siteId: number | null | undefined) => siteId == null || sites.some(site => site.id === siteId && site.clientId === clientId && (departmentId == null || site.departmentId == null || site.departmentId === departmentId));
     if (!canUse(current.siteId) || ("siteId" in parsed.data && !canUse(parsed.data.siteId))) return { status: 403 as const, error: "Forbidden site" };
+    if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
+      return { status: 409 as const, error: "The source record controls this action's site" };
+    }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes))) {
