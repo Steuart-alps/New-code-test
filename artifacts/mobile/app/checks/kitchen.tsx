@@ -137,8 +137,20 @@ const SECTION_SHOW_KEY: Record<KitchenSectionKey, { key: string; fallbackKey?: s
   hotHolding: { key: 'food_show_hot_holding' },
 };
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+function localDateParts(now = new Date()): { recordDate: string; recordedAt: string } {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const recordDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const offset = `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+  return {
+    recordDate,
+    recordedAt: `${recordDate}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset}`,
+  };
+}
+
+function createEntryId(): string {
+  return `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function siteQuery(siteId: number | null): string {
@@ -163,6 +175,7 @@ export default function KitchenTrackScreen() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [showForm, setShowForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [retryMeta, setRetryMeta] = useState<{ entryId: string; recordDate: string; recordedAt: string } | null>(null);
 
   // Service gate
   if (!hasService('kitchentrack')) {
@@ -182,7 +195,7 @@ export default function KitchenTrackScreen() {
     queryFn: () => apiFetch('/api/sites'),
   });
 
-  const today = todayStr();
+  const today = localDateParts().recordDate;
 
   const {
     data: todayRecord,
@@ -230,19 +243,28 @@ export default function KitchenTrackScreen() {
 
   const { mutate: appendEntry, isPending } = useMutation({
     mutationFn: async () => {
+      const meta = retryMeta ?? { entryId: createEntryId(), ...localDateParts() };
+      if (!retryMeta) setRetryMeta(meta);
       const row: Record<string, string> = {};
       for (const f of sectionDef.fields) {
         row[f.key] = (values[f.key] ?? '').trim();
       }
       return apiFetch(`/api/food-safety/append${siteQuery(siteId)}`, {
         method: 'POST',
-        body: JSON.stringify({ recordDate: today, section: sectionDef.value, row }),
+        body: JSON.stringify({
+          recordDate: meta.recordDate,
+          recordedAt: meta.recordedAt,
+          entryId: meta.entryId,
+          section: sectionDef.value,
+          row,
+        }),
       });
     },
     onSuccess: async () => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['food-safety'] });
       setValues({});
+      setRetryMeta(null);
       setShowForm(false);
       Alert.alert('Logged', "Entry added to today\u2019s diary.", [
         { text: 'OK' },
@@ -306,7 +328,7 @@ export default function KitchenTrackScreen() {
                     backgroundColor: siteId === null ? colors.primary + '1a' : colors.card,
                   },
                 ]}
-                onPress={() => { setSiteId(null); setValues({}); }}
+                onPress={() => { setSiteId(null); setValues({}); setRetryMeta(null); }}
               >
                 <Text style={[styles.chipText, { color: siteId === null ? colors.primary : colors.mutedForeground }]}>
                   All sites
@@ -322,7 +344,7 @@ export default function KitchenTrackScreen() {
                       backgroundColor: siteId === s.id ? colors.primary + '1a' : colors.card,
                     },
                   ]}
-                  onPress={() => { setSiteId(s.id); setValues({}); }}
+                    onPress={() => { setSiteId(s.id); setValues({}); setRetryMeta(null); }}
                 >
                   <Text style={[styles.chipText, { color: siteId === s.id ? colors.primary : colors.mutedForeground }]}>
                     {s.name}
@@ -364,7 +386,7 @@ export default function KitchenTrackScreen() {
         {/* Toggle form */}
         <TouchableOpacity
           style={[styles.addBtn, { backgroundColor: colors.navy }]}
-          onPress={() => { setShowForm((v) => !v); setValues({}); }}
+          onPress={() => { setShowForm((v) => !v); setValues({}); setRetryMeta(null); }}
         >
           <Feather name={showForm ? 'x' : 'plus'} size={18} color="#ffffff" />
           <Text style={styles.addBtnText}>{showForm ? 'Cancel' : 'Add entry to today\u2019s diary'}</Text>
@@ -392,7 +414,7 @@ export default function KitchenTrackScreen() {
                         gap: 6,
                       },
                     ]}
-                    onPress={() => { setSection(s.value); setValues({}); }}
+                    onPress={() => { setSection(s.value); setValues({}); setRetryMeta(null); }}
                   >
                     <Feather
                       name={s.icon}
@@ -423,7 +445,10 @@ export default function KitchenTrackScreen() {
                   { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card },
                 ]}
                 value={values[f.key] ?? ''}
-                onChangeText={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+                onChangeText={(v) => {
+                  setValues((prev) => ({ ...prev, [f.key]: v }));
+                  setRetryMeta(null);
+                }}
                 placeholder={f.placeholder ?? (f.keyboard === 'decimal-pad' ? 'e.g. 4.5' : '')}
                 placeholderTextColor={colors.mutedForeground}
                 keyboardType={f.keyboard ?? 'default'}

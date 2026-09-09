@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { sitesTable } from "@workspace/db/schema";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -12,10 +13,52 @@ function computedWeeklyResult(checks: Record<string, "yes" | "no" | "na">): "pas
   return Object.values(checks).some((value) => value === "no") ? "fail" : "pass";
 }
 
-async function fetchWeekly(clientId: number, date: string) {
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
+  (value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,
+  "Invalid calendar date",
+);
+
+function parseSiteId(raw: unknown): number | null | undefined {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const siteId = Number(raw);
+  return Number.isInteger(siteId) && siteId > 0 ? siteId : undefined;
+}
+
+async function resolveSiteId(req: any, res: any, clientId: number, raw: unknown): Promise<number | null | undefined> {
+  const siteId = parseSiteId(raw);
+  if (siteId === undefined) {
+    res.status(400).json({ error: "Invalid siteId" });
+    return undefined;
+  }
+  if (siteId === null) return null;
+  const departmentId = getActiveDepartmentId(req);
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(and(
+    eq(sitesTable.id, siteId),
+    eq(sitesTable.clientId, clientId),
+    ...(departmentId != null ? [or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId))] : []),
+  )).limit(1);
+  if (!site) {
+    res.status(403).json({ error: "Site not accessible" });
+    return undefined;
+  }
+  return siteId;
+}
+
+const scopeSql = (siteId: number | null) =>
+  siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
+
+function isUniqueViolation(error: unknown): boolean {
+  let current: any = error;
+  for (let depth = 0; current && depth < 5; depth++, current = current.cause) {
+    if (current.code === "23505") return true;
+  }
+  return false;
+}
+
+async function fetchWeekly(clientId: number, date: string, siteId: number | null) {
   const r = await db.execute(sql`
     SELECT * FROM kitchen_weekly_records
-    WHERE client_id = ${clientId} AND week_commencing = ${date} LIMIT 1
+    WHERE client_id = ${clientId} AND week_commencing = ${date} AND ${scopeSql(siteId)} LIMIT 1
   `);
   return r.rows[0] as Record<string, any> | undefined;
 }
@@ -27,10 +70,10 @@ async function fetchWeeklyById(id: number, clientId: number) {
   return r.rows[0] as Record<string, any> | undefined;
 }
 
-async function fetchProbe(clientId: number, date: string) {
+async function fetchProbe(clientId: number, date: string, siteId: number | null) {
   const r = await db.execute(sql`
     SELECT * FROM kitchen_probe_checks
-    WHERE client_id = ${clientId} AND check_date = ${date} LIMIT 1
+    WHERE client_id = ${clientId} AND check_date = ${date} AND ${scopeSql(siteId)} LIMIT 1
   `);
   return r.rows[0] as Record<string, any> | undefined;
 }
@@ -47,10 +90,12 @@ async function fetchProbeById(id: number, clientId: number) {
 router.get("/weekly", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = await resolveSiteId(req, res, clientId, req.query.siteId);
+  if (siteId === undefined) return;
   const rows = await db.execute(sql`
-    SELECT id, week_commencing, submitted_at, manager_signature
+    SELECT id, site_id, week_commencing, submitted_at, manager_signature
     FROM kitchen_weekly_records
-    WHERE client_id = ${clientId}
+    WHERE client_id = ${clientId} AND ${scopeSql(siteId)}
     ORDER BY week_commencing DESC
     LIMIT 52
   `);
@@ -62,7 +107,11 @@ router.get("/weekly", requireAuth, async (req, res) => {
 router.get("/weekly/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const row = await fetchWeekly(clientId, req.params.date as string);
+  const date = calendarDate.safeParse(req.params.date);
+  if (!date.success) return res.status(400).json({ error: "Invalid date" });
+  const siteId = await resolveSiteId(req, res, clientId, req.query.siteId);
+  if (siteId === undefined) return;
+  const row = await fetchWeekly(clientId, date.data, siteId);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
@@ -70,13 +119,13 @@ router.get("/weekly/by-date/:date", requireAuth, async (req, res) => {
 // ── Weekly Review: create ─────────────────────────────────────────────────────
 
 const weeklyBody = z.object({
-  weekCommencing: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  weekCommencing: calendarDate,
   checks: z.record(z.string(), z.enum(["yes", "no", "na"])).optional(),
   deviations: z.array(z.object({ rule: z.string().optional(), action: z.string().optional() })).optional(),
   additional: z.record(z.string(), z.any()).optional(),
   managerSignature: z.string().max(300).nullable().optional(),
   submittedAt: z.string().nullable().optional(),
-  siteId: z.number().int().nullable().optional(),
+  siteId: z.number().int().positive().nullable().optional(),
 });
 
 router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
@@ -87,8 +136,10 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { weekCommencing, checks, deviations, additional, managerSignature, submittedAt, siteId } = parsed.data;
+  const resolvedSiteId = await resolveSiteId(req, res, clientId, siteId);
+  if (resolvedSiteId === undefined) return;
 
-  const existing = await fetchWeekly(clientId, weekCommencing);
+  const existing = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this week", id: existing.id });
 
   const userId = (req.session as any).userId ?? null;
@@ -97,19 +148,27 @@ router.post("/weekly", requireAuth, denyViewers, async (req, res) => {
   const additionalJson = JSON.stringify(additional ?? {});
   const overallResult = submittedAt ? computedWeeklyResult(checks ?? {}) : null;
 
-  const result = await db.execute(sql`
-    INSERT INTO kitchen_weekly_records
-      (client_id, site_id, week_commencing, checks, deviations, additional, overall_result, manager_signature, submitted_at, created_by)
-    VALUES (
-      ${clientId}, ${siteId ?? null}, ${weekCommencing},
-       ${checksJson}::jsonb, ${deviationsJson}::jsonb, ${additionalJson}::jsonb, ${overallResult},
-      ${managerSignature ?? null},
-      ${submittedAt ? new Date(submittedAt) : null},
-      ${userId}
-    )
-    RETURNING *
-  `);
-  res.status(201).json(result.rows[0]);
+  try {
+    const result = await db.execute(sql`
+      INSERT INTO kitchen_weekly_records
+        (client_id, site_id, week_commencing, checks, deviations, additional, overall_result, manager_signature, submitted_at, created_by)
+      VALUES (
+        ${clientId}, ${resolvedSiteId}, ${weekCommencing},
+         ${checksJson}::jsonb, ${deviationsJson}::jsonb, ${additionalJson}::jsonb, ${overallResult},
+        ${managerSignature ?? null},
+        ${submittedAt ? new Date(submittedAt) : null},
+        ${userId}
+      )
+      RETURNING *
+    `);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      const duplicate = await fetchWeekly(clientId, weekCommencing, resolvedSiteId);
+      return res.status(409).json({ error: "Record already exists for this week", id: duplicate?.id });
+    }
+    throw error;
+  }
 });
 
 // ── Weekly Review: update ─────────────────────────────────────────────────────
@@ -128,13 +187,16 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { checks, deviations, additional, managerSignature, submittedAt, siteId } = parsed.data;
+  const requestedSiteId = siteId !== undefined ? siteId : existing.site_id;
+  const resolvedSiteId = await resolveSiteId(req, res, clientId, requestedSiteId);
+  if (resolvedSiteId === undefined) return;
+  if (existing.site_id !== null && await resolveSiteId(req, res, clientId, existing.site_id) === undefined) return;
 
   const checksJson = JSON.stringify(checks ?? existing.checks);
   const deviationsJson = JSON.stringify(deviations ?? existing.deviations);
   const additionalJson = JSON.stringify(additional ?? existing.additional);
   const sig = managerSignature !== undefined ? managerSignature : existing.manager_signature;
   const sub = submittedAt !== undefined ? (submittedAt ? new Date(submittedAt) : null) : existing.submitted_at;
-  const site = siteId !== undefined ? siteId : existing.site_id;
   // Do not infer a result for old submissions during an unrelated edit.
   const overallResult = (checks !== undefined || submittedAt !== undefined)
     ? (sub ? computedWeeklyResult(checks ?? existing.checks) : null)
@@ -148,7 +210,7 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
        overall_result    = ${overallResult},
       manager_signature = ${sig},
       submitted_at      = ${sub},
-      site_id           = ${site},
+       site_id           = ${resolvedSiteId},
       updated_at        = now()
     WHERE id = ${id} AND client_id = ${clientId}
     RETURNING *
@@ -161,10 +223,12 @@ router.put("/weekly/:id", requireAuth, denyViewers, async (req, res) => {
 router.get("/probe", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = await resolveSiteId(req, res, clientId, req.query.siteId);
+  if (siteId === undefined) return;
   const rows = await db.execute(sql`
-    SELECT id, check_date, overall_result, checked_by, submitted_at
+    SELECT id, site_id, check_date, overall_result, checked_by, submitted_at
     FROM kitchen_probe_checks
-    WHERE client_id = ${clientId}
+    WHERE client_id = ${clientId} AND ${scopeSql(siteId)}
     ORDER BY check_date DESC
     LIMIT 24
   `);
@@ -176,7 +240,11 @@ router.get("/probe", requireAuth, async (req, res) => {
 router.get("/probe/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const row = await fetchProbe(clientId, req.params.date as string);
+  const date = calendarDate.safeParse(req.params.date);
+  if (!date.success) return res.status(400).json({ error: "Invalid date" });
+  const siteId = await resolveSiteId(req, res, clientId, req.query.siteId);
+  if (siteId === undefined) return;
+  const row = await fetchProbe(clientId, date.data, siteId);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });
@@ -194,14 +262,14 @@ const probeRowSchema = z.object({
 });
 
 const probeBody = z.object({
-  checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkDate: calendarDate,
   probes: z.array(probeRowSchema).optional(),
   overallResult: z.enum(["pass", "fail", ""]).nullable().optional(),
   checkedBy: z.string().max(300).nullable().optional(),
   signature: z.string().max(300).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   submittedAt: z.string().nullable().optional(),
-  siteId: z.number().int().nullable().optional(),
+  siteId: z.number().int().positive().nullable().optional(),
 });
 
 router.post("/probe", requireAuth, denyViewers, async (req, res) => {
@@ -212,22 +280,34 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { checkDate, probes, overallResult, checkedBy, signature, notes, submittedAt, siteId } = parsed.data;
+  const resolvedSiteId = await resolveSiteId(req, res, clientId, siteId);
+  if (resolvedSiteId === undefined) return;
+  const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
+  if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
   const userId = (req.session as any).userId ?? null;
   const probesJson = JSON.stringify(probes ?? []);
 
-  const result = await db.execute(sql`
-    INSERT INTO kitchen_probe_checks
-      (client_id, site_id, check_date, probes, overall_result, checked_by, signature, notes, submitted_at, created_by)
-    VALUES (
-      ${clientId}, ${siteId ?? null}, ${checkDate},
-      ${probesJson}::jsonb,
-      ${overallResult || null}, ${checkedBy ?? null}, ${signature ?? null}, ${notes ?? null},
-      ${submittedAt ? new Date(submittedAt) : null},
-      ${userId}
-    )
-    RETURNING *
-  `);
-  res.status(201).json(result.rows[0]);
+  try {
+    const result = await db.execute(sql`
+      INSERT INTO kitchen_probe_checks
+        (client_id, site_id, check_date, probes, overall_result, checked_by, signature, notes, submitted_at, created_by)
+      VALUES (
+        ${clientId}, ${resolvedSiteId}, ${checkDate},
+        ${probesJson}::jsonb,
+        ${overallResult || null}, ${checkedBy ?? null}, ${signature ?? null}, ${notes ?? null},
+        ${submittedAt ? new Date(submittedAt) : null},
+        ${userId}
+      )
+      RETURNING *
+    `);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      const duplicate = await fetchProbe(clientId, checkDate, resolvedSiteId);
+      return res.status(409).json({ error: "Record already exists for this date", id: duplicate?.id });
+    }
+    throw error;
+  }
 });
 
 // ── Probe Checks: update ──────────────────────────────────────────────────────
@@ -246,6 +326,10 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const { probes, overallResult, checkedBy, signature, notes, submittedAt, siteId } = parsed.data;
+  const requestedSiteId = siteId !== undefined ? siteId : existing.site_id;
+  const resolvedSiteId = await resolveSiteId(req, res, clientId, requestedSiteId);
+  if (resolvedSiteId === undefined) return;
+  if (existing.site_id !== null && await resolveSiteId(req, res, clientId, existing.site_id) === undefined) return;
 
   const probesJson = JSON.stringify(probes ?? existing.probes);
   const result = existing.overall_result;
@@ -254,7 +338,6 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   const finalSig = signature !== undefined ? signature : existing.signature;
   const finalNotes = notes !== undefined ? notes : existing.notes;
   const finalSub = submittedAt !== undefined ? (submittedAt ? new Date(submittedAt) : null) : existing.submitted_at;
-  const finalSite = siteId !== undefined ? siteId : existing.site_id;
 
   const updated = await db.execute(sql`
     UPDATE kitchen_probe_checks SET
@@ -264,7 +347,7 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
       signature      = ${finalSig},
       notes          = ${finalNotes},
       submitted_at   = ${finalSub},
-      site_id        = ${finalSite},
+      site_id        = ${resolvedSiteId},
       updated_at     = now()
     WHERE id = ${id} AND client_id = ${clientId}
     RETURNING *

@@ -20,6 +20,7 @@
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
 - [Food-safety site scoping](foodsafety-site-scoping.md) — site.<id>.* app_settings overrides + nullable site_id diary with partial unique indexes; site saves must diff, not dump.
+- [Kitchen mobile submissions](kitchen-mobile-submissions.md) — use device-local calendar dates plus offset timestamps and stable entry IDs; server appends atomically and deduplicates retries.
 - [Task completion patterns](task-completion-patterns.md) — task queue lags codebase heavily; audit before building; subagent delegation patterns; full scheduler/trial-ended inventory.
 - [Signup verification tests](signup-verification-tests.md) — self-registration tests must explicitly verify the email token before expecting an authenticated session.
 - [UK compliance controls](uk-compliance-controls.md) — present guidance as support, not certification; verified action closure needs independent, atomic evidence-backed state changes.

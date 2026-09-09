@@ -33,6 +33,11 @@ const createRecordSchema = recordFieldsSchema.extend({
   submittedAt: z.string().datetime({ offset: true }).optional(),
 });
 
+const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
+  (value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,
+  "Invalid calendar date",
+);
+
 // Section visibility keys — one per diary section. Each stores "true"|"false"
 // and defaults to enabled. cold_food defaults on for compliance reasons.
 const SECTION_SHOW_KEYS = [
@@ -619,16 +624,26 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   if (siteId === undefined) return;
 
   const appendSchema = z.object({
-    recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    recordDate: calendarDateSchema,
     section: z.enum(SECTION_KEYS),
     row: rowSchema,
+    entryId: z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional(),
+    recordedAt: z.string().datetime({ offset: true }).optional(),
   });
   const parsed = appendSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
-  const { recordDate, section, row } = parsed.data;
+  const { recordDate, section, row, entryId, recordedAt } = parsed.data;
+  if (recordedAt && recordedAt.slice(0, 10) !== recordDate) {
+    return res.status(400).json({ error: "recordDate must match the local date in recordedAt" });
+  }
   const column = SECTION_COLUMNS[section];
-  const rowJson = JSON.stringify(row);
+  const storedRow = {
+    ...row,
+    ...(entryId ? { _entryId: entryId } : {}),
+    ...(recordedAt ? { _recordedAt: recordedAt } : {}),
+  };
+  const rowJson = JSON.stringify(storedRow);
   const userId = (req.session as any).userId ?? null;
 
   // Ensure the day's record exists for this diary scope (ignore the race where
@@ -649,14 +664,30 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
+  const duplicateGuard = entryId
+    ? sql`AND NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb)) AS existing
+        WHERE existing->>'_entryId' = ${entryId}
+      )`
+    : sql``;
   const result = await db.execute(sql`
     UPDATE food_safety_records
     SET ${sql.raw(`"${column}"`)} = COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb) || ${rowJson}::jsonb,
         updated_at = now()
     WHERE client_id = ${clientId} AND record_date = ${recordDate} AND ${scopeCond}
+      ${duplicateGuard}
     RETURNING *
   `);
   const updated = (result.rows ?? [])[0];
+  if (!updated && entryId) {
+    const existingResult = await db.execute(sql`
+      SELECT * FROM food_safety_records
+      WHERE client_id = ${clientId} AND record_date = ${recordDate} AND ${scopeCond}
+      LIMIT 1
+    `);
+    const existing = existingResult.rows?.[0];
+    if (existing) return res.status(200).json({ ...existing, deduplicated: true });
+  }
   if (!updated) return res.status(500).json({ error: "Could not append record" });
   res.status(201).json(updated);
 });

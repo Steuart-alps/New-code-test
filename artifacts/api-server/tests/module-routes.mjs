@@ -377,6 +377,31 @@ async function testFoodSafety(req) {
   check("food-safety: POST persists managerSignature", postRes.data?.managerSignature === "J Smith", `got ${postRes.data?.managerSignature}`);
   const recordId = postRes.data?.id;
 
+  // Mobile retries reuse an entryId. A lost response must not append the same
+  // temperature twice, and the recorded local date must match recordDate.
+  const entryId = `mobile-test-${Date.now()}`;
+  const appendBody = {
+    recordDate,
+    recordedAt: `${recordDate}T12:00:00+00:00`,
+    entryId,
+    section: "hotTemperature",
+    row: { item: "Test soup", coreTemp: "76.4" },
+  };
+  const appendRes = await req("POST", "/food-safety/append", appendBody);
+  expectOk("food-safety: mobile append succeeds", appendRes.status, [201]);
+  const retryRes = await req("POST", "/food-safety/append", appendBody);
+  expectOk("food-safety: mobile retry is idempotent", retryRes.status, [200]);
+  check("food-safety: mobile retry reports deduplication", retryRes.data?.deduplicated === true);
+  const appendedRows = (retryRes.data?.hot_temperature ?? retryRes.data?.hotTemperature ?? [])
+    .filter((row) => row?._entryId === entryId);
+  check("food-safety: retried entry is stored exactly once", appendedRows.length === 1, `got ${appendedRows.length}`);
+  const wrongDayRes = await req("POST", "/food-safety/append", {
+    ...appendBody,
+    entryId: `${entryId}-wrong-day`,
+    recordedAt: `${recordDate2}T12:00:00+00:00`,
+  });
+  check("food-safety: recorded local date cannot target another diary day", wrongDayRes.status === 400, `got ${wrongDayRes.status}`);
+
   // 6. Duplicate date → 409
   const dupRes = await req("POST", "/food-safety", { recordDate });
   check("food-safety: POST duplicate date → 409", dupRes.status === 409, `got ${dupRes.status}`);
@@ -506,6 +531,55 @@ async function testSiteFiltering(req, siteId) {
     (legFiltered.data ?? []).some((r) => r.id === legSiteCheck.data?.id),
     "site-pinned legionella check not in filtered list",
   );
+
+  const weekCommencing = isoDate(-14);
+  const orgWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing,
+    checks: { temperatureControl: "yes" },
+  });
+  expectOk("site-filter: create organisation weekly review", orgWeekly.status, [201]);
+  const siteWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing,
+    siteId,
+    checks: { temperatureControl: "yes" },
+  });
+  expectOk("site-filter: same weekly date is independent per site", siteWeekly.status, [201]);
+  check("site-filter: weekly review persists siteId", siteWeekly.data?.site_id === siteId, `got ${siteWeekly.data?.site_id}`);
+  const weeklyList = await req("GET", `/kitchen-weekly/weekly?siteId=${siteId}`);
+  expectOk("site-filter: weekly list accepts site scope", weeklyList.status);
+  check("site-filter: weekly list contains only selected site", (weeklyList.data ?? []).every((r) => r.site_id === siteId));
+  const duplicateWeekly = await req("POST", "/kitchen-weekly/weekly", {
+    weekCommencing,
+    siteId,
+  });
+  check("site-filter: duplicate weekly site/date is rejected", duplicateWeekly.status === 409, `got ${duplicateWeekly.status}`);
+
+  const probeDate = isoDate(-13);
+  const orgProbe = await req("POST", "/kitchen-weekly/probe", {
+    checkDate: probeDate,
+    probes: [{ name: "Probe A", iceTemp: "0.2", accurateIce: true }],
+  });
+  expectOk("site-filter: create organisation probe check", orgProbe.status, [201]);
+  const siteProbe = await req("POST", "/kitchen-weekly/probe", {
+    checkDate: probeDate,
+    siteId,
+    probes: [{ name: "Probe A", iceTemp: "0.1", accurateIce: true }],
+  });
+  expectOk("site-filter: same probe date is independent per site", siteProbe.status, [201]);
+  check("site-filter: probe check persists siteId", siteProbe.data?.site_id === siteId, `got ${siteProbe.data?.site_id}`);
+  const probeList = await req("GET", `/kitchen-weekly/probe?siteId=${siteId}`);
+  expectOk("site-filter: probe list accepts site scope", probeList.status);
+  check("site-filter: probe list contains only selected site", (probeList.data ?? []).every((r) => r.site_id === siteId));
+  const duplicateProbe = await req("POST", "/kitchen-weekly/probe", {
+    checkDate: probeDate,
+    siteId,
+  });
+  check("site-filter: duplicate probe site/date is rejected", duplicateProbe.status === 409, `got ${duplicateProbe.status}`);
+  const foreignProbe = await req("POST", "/kitchen-weekly/probe", {
+    checkDate: isoDate(-12),
+    siteId: 999999999,
+  });
+  check("site-filter: probe rejects inaccessible site", foreignProbe.status === 403, `got ${foreignProbe.status}`);
 
   // Invalid siteId (belongs to nobody) → 400
   const wrongSite = await req("POST", "/fire-safety", {

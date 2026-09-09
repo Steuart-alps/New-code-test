@@ -51,8 +51,24 @@ interface Site {
 type FireResult = 'pass' | 'fail';
 type WaterResult = 'pass' | 'fail' | 'action_required';
 
+function localDateParts(now = new Date()): { recordDate: string; recordedAt: string } {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const recordDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const offset = `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+  return {
+    recordDate,
+    recordedAt: `${recordDate}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset}`,
+  };
+}
+
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateParts().recordDate;
+}
+
+function createKitchenEntryId(): string {
+  return `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function ResultPicker<T extends string>({
@@ -558,6 +574,7 @@ function KitchenTempForm() {
   // Which site's diary we're filling. null = "All sites" = the whole-org diary
   // (records with no site), matching the original single-diary behaviour.
   const [siteId, setSiteId] = useState<number | null>(null);
+  const [retryMeta, setRetryMeta] = useState<{ entryId: string; recordDate: string; recordedAt: string } | null>(null);
 
   const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -594,7 +611,8 @@ function KitchenTempForm() {
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
-      const date = today();
+      const meta = retryMeta ?? { entryId: createKitchenEntryId(), ...localDateParts() };
+      if (!retryMeta) setRetryMeta(meta);
       const row: Record<string, string> = {};
       for (const f of sectionDef.fields) row[f.key] = (values[f.key] ?? '').trim();
 
@@ -603,13 +621,20 @@ function KitchenTempForm() {
       // selected site's diary (absent = whole-org).
       return apiFetch(`/api/food-safety/append${siteQuery(siteId)}`, {
         method: 'POST',
-        body: JSON.stringify({ recordDate: date, section: sectionDef.value, row }),
+        body: JSON.stringify({
+          recordDate: meta.recordDate,
+          recordedAt: meta.recordedAt,
+          entryId: meta.entryId,
+          section: sectionDef.value,
+          row,
+        }),
       });
     },
     onSuccess: async () => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['food-safety'] });
       setValues({});
+      setRetryMeta(null);
       Alert.alert('Logged', 'Temperature record added to today\u2019s diary.', [
         { text: 'Done', onPress: () => router.back() },
         { text: 'Log another', style: 'default' },
@@ -655,7 +680,7 @@ function KitchenTempForm() {
                     backgroundColor: siteId === null ? colors.primary + '1a' : colors.card,
                   },
                 ]}
-                onPress={() => { setSiteId(null); setValues({}); }}
+                onPress={() => { setSiteId(null); setValues({}); setRetryMeta(null); }}
               >
                 <Text style={[styles.typeChipText, { color: siteId === null ? colors.primary : colors.mutedForeground }]}>
                   All sites
@@ -671,7 +696,7 @@ function KitchenTempForm() {
                       backgroundColor: siteId === s.id ? colors.primary + '1a' : colors.card,
                     },
                   ]}
-                  onPress={() => { setSiteId(s.id); setValues({}); }}
+                  onPress={() => { setSiteId(s.id); setValues({}); setRetryMeta(null); }}
                 >
                   <Text style={[styles.typeChipText, { color: siteId === s.id ? colors.primary : colors.mutedForeground }]}>
                     {s.name}
@@ -701,7 +726,7 @@ function KitchenTempForm() {
                     gap: 6,
                   },
                 ]}
-                onPress={() => { setSection(s.value); setValues({}); }}
+                onPress={() => { setSection(s.value); setValues({}); setRetryMeta(null); }}
               >
                 <Feather
                   name={s.icon}
@@ -735,7 +760,10 @@ function KitchenTempForm() {
               { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card },
             ]}
             value={values[f.key] ?? ''}
-            onChangeText={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+              onChangeText={(v) => {
+                setValues((prev) => ({ ...prev, [f.key]: v }));
+                setRetryMeta(null);
+              }}
             placeholder={f.placeholder ?? (f.keyboard === 'decimal-pad' ? 'e.g. 4.5' : '')}
             placeholderTextColor={colors.mutedForeground}
             keyboardType={f.keyboard ?? 'default'}

@@ -1131,6 +1131,16 @@ async function migrateAuditFixes2026_08() {
   await db.execute(sql`ALTER TABLE "kitchen_weekly_records" ADD COLUMN IF NOT EXISTS "overall_result" text`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_weekly_client" ON "kitchen_weekly_records" ("client_id")`);
   await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_weekly_client_date_nosite"
+    ON "kitchen_weekly_records" ("client_id", "week_commencing")
+    WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_weekly_client_site_date"
+    ON "kitchen_weekly_records" ("client_id", "site_id", "week_commencing")
+    WHERE "site_id" IS NOT NULL
+  `);
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "kitchen_probe_checks" (
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
@@ -1148,6 +1158,16 @@ async function migrateAuditFixes2026_08() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_probe_client" ON "kitchen_probe_checks" ("client_id")`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_probe_client_date_nosite"
+    ON "kitchen_probe_checks" ("client_id", "check_date")
+    WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_kitchen_probe_client_site_date"
+    ON "kitchen_probe_checks" ("client_id", "site_id", "check_date")
+    WHERE "site_id" IS NOT NULL
+  `);
 }
 
 async function migrateLegacyCategories() {
