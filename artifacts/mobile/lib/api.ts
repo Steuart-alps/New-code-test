@@ -9,6 +9,16 @@
 
 let _token: string | null = null;
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 export function setToken(token: string | null): void {
   _token = token;
 }
@@ -23,7 +33,7 @@ export async function apiFetch<T = unknown>(
     'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string> | undefined),
   };
-  if (_token) {
+  if (_token && !headers.Authorization) {
     headers['Authorization'] = `Bearer ${_token}`;
   }
   const res = await fetch(`${base}${path}`, { ...options, headers });
@@ -32,12 +42,13 @@ export async function apiFetch<T = unknown>(
   try {
     data = await res.json();
   } catch {
-    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    if (!res.ok) throw new ApiError(`Request failed (${res.status})`, res.status);
     return undefined as T;
   }
   if (!res.ok) {
-    throw new Error(
+    throw new ApiError(
       (data as Record<string, string>)?.error ?? `Request failed (${res.status})`,
+      res.status,
     );
   }
   return data as T;

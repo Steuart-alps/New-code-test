@@ -695,6 +695,8 @@ const MobileTotpVerificationBody = z.object({
 });
 
 const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const MOBILE_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const MOBILE_SESSION_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function hashMobileLoginChallenge(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -708,8 +710,8 @@ async function issueMobileSession(user: {
   clientId: number | null;
 }) {
   const token = randomBytes(32).toString("hex");
-  // 90-day expiry — long enough for regular field use, refreshed on each login
-  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  // 90-day expiry — long enough for regular field use, refreshed near expiry.
+  const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
 
   await db.execute(sql`
     INSERT INTO mobile_sessions (user_id, token, expires_at)
@@ -718,6 +720,7 @@ async function issueMobileSession(user: {
 
   return {
     token,
+    expiresAt: expiresAt.toISOString(),
     user: {
       id: user.id,
       email: user.email,
@@ -862,7 +865,7 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
     `);
 
     const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
     await tx.execute(sql`
       INSERT INTO mobile_sessions (user_id, token, expires_at)
       VALUES (${user.id}, ${token}, ${expiresAt})
@@ -871,6 +874,7 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
     return {
       status: "success" as const,
       token,
+      expiresAt: expiresAt.toISOString(),
       user: {
         id: user.id,
         email: user.email,
@@ -890,7 +894,66 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
     return;
   }
 
-  res.json({ token: verification.token, user: verification.user });
+  res.json({
+    token: verification.token,
+    expiresAt: verification.expiresAt,
+    user: verification.user,
+  });
+});
+
+/**
+ * POST /api/auth/mobile-refresh
+ * Rotates a valid bearer token once it is within seven days of expiry.
+ */
+router.post("/auth/mobile-refresh", requireAuth, async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const currentToken = auth.slice(7);
+  const refreshed = await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      SELECT id, user_id, expires_at
+      FROM mobile_sessions
+      WHERE token = ${currentToken}
+      LIMIT 1
+      FOR UPDATE
+    `);
+    const session = result.rows?.[0] as {
+      id: number;
+      user_id: number;
+      expires_at: Date | string;
+    } | undefined;
+    const currentExpiresAt = session ? new Date(session.expires_at) : null;
+
+    if (!session || !currentExpiresAt || currentExpiresAt.getTime() <= Date.now()) {
+      return null;
+    }
+
+    if (currentExpiresAt.getTime() - Date.now() >= MOBILE_SESSION_REFRESH_WINDOW_MS) {
+      return { token: currentToken, expiresAt: currentExpiresAt.toISOString() };
+    }
+
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + MOBILE_SESSION_TTL_MS);
+    await tx.execute(sql`
+      DELETE FROM mobile_sessions
+      WHERE id = ${session.id}
+    `);
+    await tx.execute(sql`
+      INSERT INTO mobile_sessions (user_id, token, expires_at)
+      VALUES (${session.user_id}, ${token}, ${expiresAt})
+    `);
+    return { token, expiresAt: expiresAt.toISOString() };
+  });
+
+  if (!refreshed) {
+    res.status(401).json({ error: "Your session has expired. Please sign in again." });
+    return;
+  }
+  res.json(refreshed);
 });
 
 /**

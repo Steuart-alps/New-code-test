@@ -2816,6 +2816,10 @@ async function migrateMobileSessions() {
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_mobile_sessions_token"
     ON "mobile_sessions" ("token")
   `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_mobile_sessions_expires_at"
+    ON "mobile_sessions" ("expires_at")
+  `);
 }
 
 async function migrateMobileLoginChallenges() {

@@ -3,11 +3,13 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
-import { apiFetch, setToken } from './api';
+import { ApiError, apiFetch, setToken } from './api';
 import {
   clearOtherPendingIssueUploadRecovery,
   clearPendingIssueUploadRecovery,
@@ -15,6 +17,8 @@ import {
 import { registerForPushNotifications, unregisterPushToken } from './push';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
+const TOKEN_EXPIRY_KEY = 'complytrack_mobile_token_expiry';
+const REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface AuthUser {
   id: number;
@@ -27,6 +31,11 @@ export interface AuthUser {
 interface MeResponse {
   user: AuthUser;
   services?: 'all' | string[] | null;
+}
+
+interface MobileSessionResponse {
+  token: string;
+  expiresAt: string;
 }
 
 interface AuthContextType {
@@ -50,6 +59,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [services, setServices] = useState<'all' | string[] | null>(null);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const authGeneration = useRef(0);
 
   const applyToken = useCallback((t: string | null) => {
     setToken(t);
@@ -62,6 +73,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return (services as string[]).includes(key);
   }
 
+  const refreshSessionIfNeeded = useCallback(async (forceCheck = false) => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const generation = authGeneration.current;
+    const operation = (async () => {
+      const expiry = await SecureStore.getItemAsync(TOKEN_EXPIRY_KEY);
+      const expiryMs = expiry ? Date.parse(expiry) : Number.NaN;
+      if (
+        !forceCheck &&
+        Number.isFinite(expiryMs) &&
+        expiryMs - Date.now() >= REFRESH_WINDOW_MS
+      ) {
+        return;
+      }
+
+      const refreshed = await apiFetch<MobileSessionResponse>(
+        '/api/auth/mobile-refresh',
+        { method: 'POST' },
+      );
+      if (authGeneration.current !== generation) {
+        // Logout or a new login happened while refresh was in flight. Ensure a
+        // token rotated by the server cannot survive that local auth change.
+        await apiFetch('/api/auth/mobile-logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${refreshed.token}` },
+        }).catch(() => {});
+        return;
+      }
+      await SecureStore.setItemAsync(TOKEN_KEY, refreshed.token);
+      await SecureStore.setItemAsync(TOKEN_EXPIRY_KEY, refreshed.expiresAt);
+      applyToken(refreshed.token);
+    })().finally(() => {
+      refreshInFlight.current = null;
+    });
+    refreshInFlight.current = operation;
+    return operation;
+  }, [applyToken]);
+
   // On mount: restore token from SecureStore and validate with /api/auth/me
   useEffect(() => {
     (async () => {
@@ -69,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const stored = await SecureStore.getItemAsync(TOKEN_KEY);
         if (stored) {
           applyToken(stored);
+          await refreshSessionIfNeeded(true);
           const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
           // /api/auth/me returns { user, services } or just the user object
           if (me && typeof me === 'object' && 'user' in me) {
@@ -82,16 +131,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Re-register the device for push on every authenticated app start.
           void registerForPushNotifications();
         }
-      } catch {
-        // Stale or invalid token — clear it
-        await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
-         await clearPendingIssueUploadRecovery().catch(() => {});
-        applyToken(null);
+      } catch (error: unknown) {
+        // Clear only a definitively invalid session. Network/server failures
+        // retain the credential so foregrounding can retry later.
+        if (error instanceof ApiError && error.status === 401) {
+          await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+          await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
+          await clearPendingIssueUploadRecovery().catch(() => {});
+          applyToken(null);
+        }
       } finally {
         setIsLoading(false);
       }
     })();
-  }, [applyToken]);
+  }, [applyToken, refreshSessionIfNeeded]);
+
+  // Re-check the session whenever the app returns to the foreground.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      void (async () => {
+        try {
+          const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+          if (!stored) return;
+          applyToken(stored);
+          await refreshSessionIfNeeded();
+          if (!user) {
+            const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
+            if (me && typeof me === 'object' && 'user' in me) {
+              setUser((me as MeResponse).user);
+              setServices((me as MeResponse).services ?? null);
+            } else {
+              setUser(me as AuthUser);
+              setServices(null);
+            }
+            void registerForPushNotifications();
+          }
+        } catch (error: unknown) {
+          if (!(error instanceof ApiError) || error.status !== 401) return;
+          await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+          await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
+          applyToken(null);
+          setUser(null);
+          setServices(null);
+        }
+      })();
+    });
+    return () => subscription.remove();
+  }, [applyToken, refreshSessionIfNeeded, user]);
 
   const login = useCallback(
     async (
@@ -100,8 +187,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       pendingToken?: string,
       code?: string,
     ): Promise<{ pendingToken?: string }> => {
+      authGeneration.current += 1;
       const res = pendingToken
-        ? await apiFetch<{ token: string; user: AuthUser }>(
+        ? await apiFetch<{ token: string; expiresAt: string; user: AuthUser }>(
             '/api/auth/mobile-login/verify-totp',
             {
               method: 'POST',
@@ -109,7 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             },
           )
         : await apiFetch<
-            { token: string; user: AuthUser } | { pendingToken: string }
+            | { token: string; expiresAt: string; user: AuthUser }
+            | { pendingToken: string }
           >('/api/auth/mobile-login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
@@ -117,7 +206,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if ('pendingToken' in res) {
         return { pendingToken: res.pendingToken };
       }
-      const ok = res as { token: string; user: AuthUser };
+      const ok = res as { token: string; expiresAt: string; user: AuthUser };
       // A different account must never inherit another user's recoverable
       // photo uploads on this shared device. Preserve only a recovery record
       // that demonstrably belongs to the account completing this login.
@@ -130,6 +219,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await clearPendingIssueUploadRecovery().catch(() => {});
       }
       await SecureStore.setItemAsync(TOKEN_KEY, ok.token);
+      await SecureStore.setItemAsync(TOKEN_EXPIRY_KEY, ok.expiresAt);
       applyToken(ok.token);
       setUser(ok.user);
       // Fetch services after login via /me
@@ -149,6 +239,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    // Cancel any detached restore/refresh before the first asynchronous step.
+    authGeneration.current += 1;
     // Clear recoverable local photo references before any best-effort network
     // work, so signing out is reliable even while offline.
     await clearPendingIssueUploadRecovery().catch(() => {});
@@ -160,6 +252,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Best-effort
     }
     await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+    await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
     applyToken(null);
     setUser(null);
     setServices(null);
