@@ -354,7 +354,7 @@ const emptyForm = () => ({
 
 export default function IncidentsPage() {
   const { toast } = useToast();
-  const { activeClientId, hasService } = useAuth();
+  const { activeClientId, hasService, client } = useAuth();
   const canAdmin = useCanAdmin();
   const qc = useQueryClient();
   const apiFetch = useIncidentsApi();
@@ -363,6 +363,9 @@ export default function IncidentsPage() {
   const [filterStatus, setFilterStatus] = useState<Status | "all">("all");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
+  const [filterSite, setFilterSite] = useState("all");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
   const [filterRiddor, setFilterRiddor] = useState(false);
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
@@ -417,6 +420,9 @@ export default function IncidentsPage() {
     if (filterStatus !== "all") rows = rows.filter(r => r.status === filterStatus);
     if (filterSeverity !== "all") rows = rows.filter(r => r.severity === filterSeverity);
     if (filterType !== "all") rows = rows.filter(r => r.incidentType === filterType);
+    if (filterSite !== "all") rows = rows.filter(r => String(r.siteId) === filterSite);
+    if (filterFrom) rows = rows.filter(r => r.incidentDate.slice(0, 10) >= filterFrom);
+    if (filterTo) rows = rows.filter(r => r.incidentDate.slice(0, 10) <= filterTo);
     if (filterRiddor) rows = rows.filter(r => r.riddorReportable);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -428,7 +434,7 @@ export default function IncidentsPage() {
       );
     }
     return rows;
-  }, [incidents, filterStatus, filterSeverity, filterType, filterRiddor, search]);
+  }, [incidents, filterStatus, filterSeverity, filterType, filterSite, filterFrom, filterTo, filterRiddor, search]);
 
   const riddorOutstanding = summary?.riddorOutstanding ?? 0;
 
@@ -441,7 +447,25 @@ export default function IncidentsPage() {
     (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const handleExportRegister = () => {
+    if (filterFrom && filterTo && filterFrom > filterTo) {
+      toast({
+        title: "Invalid date range",
+        description: "The from date must be on or before the to date.",
+        variant: "destructive",
+      });
+      return;
+    }
     const rows = [...filtered].sort((a, b) => (a.incidentDate < b.incidentDate ? 1 : -1));
+    const filteredRiddorOutstanding = rows.filter(r => r.riddorReportable && !r.reportedToHse).length;
+    const selectedSite = filterSite === "all" ? "All sites" : siteName(Number(filterSite));
+    const dateRange = `${filterFrom ? fmt(filterFrom) : "Earliest record"} to ${filterTo ? fmt(filterTo) : "Latest record"}`;
+    const filterParts = [
+      filterStatus !== "all" ? `Status: ${STATUS_LABELS[filterStatus]}` : "",
+      filterSeverity !== "all" ? `Severity: ${severityLabel(filterSeverity)}` : "",
+      filterType !== "all" ? `Type: ${typeLabel(filterType)}` : "",
+      filterRiddor ? "RIDDOR only" : "",
+      search.trim() ? `Search: "${search.trim()}"` : "",
+    ].filter(Boolean).join(" · ");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Incident Register</title>
 <style>
   body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
@@ -452,24 +476,28 @@ export default function IncidentsPage() {
   th { background: #f0ede2; font-weight: bold; }
   .empty { font-size: 11px; color: #777; font-style: italic; }
   .riddor { color: #b91c1c; font-weight: bold; }
-  @media print { body { margin: 12mm; } }
+  .footer { margin-top: 12px; padding-top: 8px; border-top: 1px solid #999; font-size: 10.5px; }
+  @page { size: landscape; margin: 10mm; }
+  @media print { body { margin: 0; } }
 </style></head><body>
 <h1>Incident &amp; Accident Register</h1>
-<div class="meta">Generated ${esc(fmt(new Date().toISOString()))} — for HSE audit / insurance</div>
-<div class="meta">${rows.length} record${rows.length !== 1 ? "s" : ""}${riddorOutstanding > 0 ? ` · ${riddorOutstanding} RIDDOR report${riddorOutstanding !== 1 ? "s" : ""} outstanding` : ""}</div>
+<div class="meta"><strong>Organisation:</strong> ${esc(client?.name ?? "Organisation")} · <strong>Site:</strong> ${esc(selectedSite)}</div>
+<div class="meta"><strong>Date range:</strong> ${esc(dateRange)} · Generated ${esc(fmt(new Date().toISOString()))}</div>
+<div class="meta">${filterParts ? `Filters applied — ${esc(filterParts)} · ` : ""}${rows.length} record${rows.length !== 1 ? "s" : ""}</div>
 ${rows.length === 0 ? `<p class="empty">No incidents match the current filters.</p>` : `<table>
-<tr><th>Date</th><th>Type</th><th>Person involved</th><th>Location</th><th>Description</th><th>Severity</th><th>Actions taken</th><th>RIDDOR</th></tr>
+<tr><th>Date</th><th>Type</th><th>Severity</th><th>Person</th><th>Location</th><th>RIDDOR status</th></tr>
 ${rows.map(r => `<tr>
   <td>${fmt(r.incidentDate)}${r.incidentTime ? ` ${esc(r.incidentTime)}` : ""}</td>
-  <td>${esc(TYPE_LABELS[r.incidentType] ?? r.incidentType)}</td>
+  <td>${esc(typeLabel(r.incidentType))}</td>
+  <td>${esc(severityLabel(r.severity))}</td>
   <td>${esc(r.involvedName)}${r.involvedJobTitle ? `<br><span style="color:#666">${esc(r.involvedJobTitle)}</span>` : ""}<br><span style="color:#666">${esc(EMPLOYMENT_LABELS[r.involvedEmploymentType] ?? r.involvedEmploymentType)}</span></td>
   <td>${esc(r.location)}${r.siteId ? `<br><span style="color:#666">${esc(siteName(r.siteId))}</span>` : ""}</td>
-  <td>${esc(r.description)}${r.injuriesSustained ? `<br><span style="color:#666">Injuries: ${esc(r.injuriesSustained)}</span>` : ""}</td>
-  <td>${esc(SEVERITY_LABELS[r.severity] ?? r.severity)}</td>
-  <td>${esc([r.immediateActions, r.correctiveActions].filter(Boolean).join(" — ")) || "—"}</td>
   <td>${r.riddorReportable ? `<span class="riddor">Yes${r.reportedToHse ? ` (reported${r.hseReference ? ` ${esc(r.hseReference)}` : ""})` : " — outstanding"}</span>` : "No"}</td>
 </tr>`).join("")}
 </table>`}
+<div class="footer"><strong>RIDDOR outstanding:</strong> ${filteredRiddorOutstanding === 0
+  ? "None in the exported records."
+  : `${filteredRiddorOutstanding} item${filteredRiddorOutstanding === 1 ? "" : "s"} require${filteredRiddorOutstanding === 1 ? "s" : ""} HSE reporting.`}</div>
 </body></html>`;
     printHtmlDocument(html);
   };
@@ -632,7 +660,7 @@ ${rows.map(r => `<tr>
           <Button variant="outline" size="sm" className="gap-2 rounded-sm"
             onClick={handleExportRegister}
             title="Print or save the incident register for HSE audits / insurance">
-            <Printer className="w-4 h-4" /> Export register
+            <Printer className="w-4 h-4" /> Export PDF
           </Button>
           {canAdmin && <IncidentConfigDialog />}
           <FormOptionsEditor
@@ -691,13 +719,13 @@ ${rows.map(r => `<tr>
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         {sites.length > 0 && (
-          <Select value={filterStatus} onValueChange={v => setFilterStatus(v as Status | "all")}>
+          <Select value={filterSite} onValueChange={setFilterSite}>
             <SelectTrigger className="w-44 rounded-sm">
-              <SelectValue placeholder="All statuses" />
+              <SelectValue placeholder="All sites" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {STATUSES.map(s => <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>)}
+              <SelectItem value="all">All sites</SelectItem>
+              {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
             </SelectContent>
           </Select>
         )}
@@ -729,6 +757,20 @@ ${rows.map(r => `<tr>
             {incidentTypeOptions.map(t => <SelectItem key={t} value={t}>{typeLabel(t)}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Input
+          type="date"
+          aria-label="Incidents from date"
+          value={filterFrom}
+          onChange={e => setFilterFrom(e.target.value)}
+          className="w-40 rounded-sm"
+        />
+        <Input
+          type="date"
+          aria-label="Incidents to date"
+          value={filterTo}
+          onChange={e => setFilterTo(e.target.value)}
+          className="w-40 rounded-sm"
+        />
         <button
           onClick={() => setFilterRiddor(r => !r)}
           className={cn(
