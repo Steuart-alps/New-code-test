@@ -10,4 +10,9 @@ export { db, pool } from "@workspace/db";
 export { clientsTable, usersTable, contractorsTable, fixTrackIssuesTable } from "@workspace/db/schema";
 export { sql, eq, inArray, and } from "drizzle-orm";
 export { runRuntimeMigrations } from "../src/lib/runtimeMigrations";
-export { decryptTokenPayload } from "../src/lib/bearerTokens";
+export { reencryptQueuedTokenPayloads } from "../src/lib/runtimeMigrations";
+export {
+  encryptTokenPayload,
+  decryptTokenPayload,
+  tokenPayloadNeedsReencryption,
+} from "../src/lib/bearerTokens";

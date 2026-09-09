@@ -1,7 +1,41 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { digestBearerToken, encryptTokenPayload, decryptTokenPayload } from "./bearerTokens";
+import {
+  digestBearerToken,
+  encryptTokenPayload,
+  decryptTokenPayload,
+  tokenPayloadNeedsReencryption,
+  validateTokenEncryptionConfig,
+} from "./bearerTokens";
+
+/**
+ * Re-encrypt queued credentials onto the configured current key. Supplying an
+ * ID is useful for targeted maintenance and isolated integration tests.
+ */
+export async function reencryptQueuedTokenPayloads(queueId?: number): Promise<number> {
+  validateTokenEncryptionConfig();
+  return db.transaction(async (tx) => {
+    const rows = await tx.execute(sql`SELECT id, encrypted_token_payload
+      FROM contractor_email_queue
+      WHERE encrypted_token_payload IS NOT NULL
+        ${queueId == null ? sql`` : sql`AND id=${queueId}`}
+      FOR UPDATE`);
+    let updated = 0;
+    for (const row of rows.rows as any[]) {
+      const encoded = String(row.encrypted_token_payload);
+      if (!tokenPayloadNeedsReencryption(encoded)) continue;
+      const replacement = encryptTokenPayload(decryptTokenPayload(encoded));
+      const result = await tx.execute(sql`UPDATE contractor_email_queue
+        SET encrypted_token_payload=${replacement}, updated_at=now()
+        WHERE id=${row.id}
+          AND encrypted_token_payload=${encoded}
+        RETURNING id`);
+      if ((result.rows as any[])[0]) updated++;
+    }
+    return updated;
+  });
+}
 
 /**
  * Idempotent runtime migrations for additive schema changes.
@@ -9,6 +43,9 @@ import { digestBearerToken, encryptTokenPayload, decryptTokenPayload } from "./b
  */
 export async function runRuntimeMigrations() {
   try {
+    // Validate even on a new database with no encrypted rows, so a broken key
+    // rotation cannot let the service report ready and fail only at dispatch.
+    validateTokenEncryptionConfig();
     // ---- Session store table (connect-pg-simple) ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "sessions" (
@@ -626,9 +663,12 @@ export async function runRuntimeMigrations() {
           quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
           email_preview_json=${previewText}::jsonb,
           encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
-          WHERE id=${row.id} AND quote_token IS NOT DISTINCT FROM ${row.quote_token}`);
+          WHERE id=${row.id}
+            AND quote_token IS NOT DISTINCT FROM ${row.quote_token}
+            AND encrypted_token_payload IS NOT DISTINCT FROM ${row.encrypted_token_payload}`);
       }
     });
+    await reencryptQueuedTokenPayloads();
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_entity_type_check",

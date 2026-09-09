@@ -62,7 +62,8 @@ async function main() {
   const { outDir, outFile } = await bundleEntry();
   const lib = await import(pathToUrl(outFile));
   const {
-    runContractorComplianceReminderJob, runRuntimeMigrations, decryptTokenPayload,
+    runContractorComplianceReminderJob, runRuntimeMigrations, reencryptQueuedTokenPayloads,
+    encryptTokenPayload, decryptTokenPayload, tokenPayloadNeedsReencryption,
     db, pool, clientsTable, usersTable, contractorsTable, fixTrackIssuesTable, sql,
   } = lib;
 
@@ -224,6 +225,62 @@ async function main() {
         && hydratedFields.includes(legacyActionUrl)
         && !hydratedFields.includes(`/contractor-portal/https://`),
       hydratedFields);
+
+    const originalCurrentKey = process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY;
+    const originalKeyVersion = process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION;
+    const originalPreviousKeys = process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS;
+    let keyV3;
+    try {
+      const sourceVersion = String(migrated.encrypted_token_payload).split(".")[1];
+      const sourceSecret = originalCurrentKey ?? process.env.SESSION_SECRET;
+      const keyV2 = crypto.randomBytes(32).toString("base64url");
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY = keyV2;
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "rotation-v2";
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = JSON.stringify({
+        [sourceVersion]: sourceSecret,
+      });
+      check("database migration rewrites a queued draft onto the first dedicated key",
+        await reencryptQueuedTokenPayloads(legacyQueueId) === 1);
+      const rotatedV2 = (await db.execute(sql`SELECT encrypted_token_payload
+        FROM contractor_email_queue WHERE id=${legacyQueueId}`)).rows[0]?.encrypted_token_payload;
+      check("database ciphertext records the configured dedicated key version",
+        String(rotatedV2).startsWith("v2.rotation-v2.")
+          && !tokenPayloadNeedsReencryption(rotatedV2)
+          && decryptTokenPayload(rotatedV2).portal === legacyPortalUrl);
+      check("database re-encryption is idempotent", await reencryptQueuedTokenPayloads(legacyQueueId) === 0);
+
+      keyV3 = crypto.randomBytes(32).toString("base64url");
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY = keyV3;
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "rotation-v3";
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = JSON.stringify({
+        "rotation-v2": keyV2,
+      });
+      check("the next database rotation reads the retained previous key",
+        await reencryptQueuedTokenPayloads(legacyQueueId) === 1);
+      const rotatedV3 = (await db.execute(sql`SELECT encrypted_token_payload
+        FROM contractor_email_queue WHERE id=${legacyQueueId}`)).rows[0]?.encrypted_token_payload;
+      delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS;
+      check("draft stays decryptable after re-encryption and retirement of the previous key",
+        String(rotatedV3).startsWith("v2.rotation-v3.")
+          && decryptTokenPayload(rotatedV3).booked === legacyActionToken);
+    } finally {
+      if (keyV3) {
+        if (originalCurrentKey === undefined) delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY;
+        else process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY = originalCurrentKey;
+        if (originalKeyVersion === undefined) delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION;
+        else process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = originalKeyVersion;
+        const restoredPrevious = originalPreviousKeys ? JSON.parse(originalPreviousKeys) : {};
+        restoredPrevious["rotation-v3"] = keyV3;
+        process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = JSON.stringify(restoredPrevious);
+        await reencryptQueuedTokenPayloads(legacyQueueId);
+      }
+      if (originalCurrentKey === undefined) delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY;
+      else process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY = originalCurrentKey;
+      if (originalKeyVersion === undefined) delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION;
+      else process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = originalKeyVersion;
+      if (originalPreviousKeys === undefined) delete process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS;
+      else process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = originalPreviousKeys;
+    }
 
     // --- Run 2: dedupe, nothing new ---
     sent.length = 0;
