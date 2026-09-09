@@ -47,6 +47,8 @@ import DailyTrackStatusPage from "@/pages/daily-track-status";
 import StaffRosterPage from "@/pages/staff-roster";
 import SignOffPage from "@/pages/sign-off";
 import ContractorPortalPage from "@/pages/contractor-portal";
+import ContractorApprovalsPage from "@/pages/contractor-approvals";
+import ContractorQuotePage from "@/pages/contractor-quote";
 import IncidentsPage from "@/pages/incidents";
 import PATTrackPage  from "@/pages/pat-track";
 import PestTrackPage from "@/pages/pest-track";
@@ -124,6 +126,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
   if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;
+  if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
 
   if (isLoading) {
     return (
@@ -153,11 +156,13 @@ function ProtectedRoutes() {
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
+  const canManageContractorEmails = canAdmin || user.isMaintenanceManager === true;
   const isConsultant = user.role === "consultant";
 
   return (
     <Switch>
       <Route path="/dashboard" component={Dashboard} />
+      {canManageContractorEmails && <Route path="/contractor-approvals" component={ContractorApprovalsPage} />}
       <Route path="/contractors" component={ContractorsPage} />
       <Route path="/contractors/:id" component={ContractorDetailPage} />
       <Route path="/external" component={ExternalChecksPage} />

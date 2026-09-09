@@ -489,6 +489,115 @@ export async function runRuntimeMigrations() {
     await migrateComplianceHub();
     await migrateTrackActions();
 
+    // FixTrack contractor email approval queue.  Keep the rendered message in
+    // the queue: an approval is an approval of the exact bytes the manager saw,
+    // not of a subsequently re-rendered issue.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "contractor_email_queue" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "issue_id" integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+        "entity_type" text NOT NULL DEFAULT 'fix_track'
+          CHECK ("entity_type" IN ('fix_track','compliance','contractor_compliance')),
+        "entity_id" integer NOT NULL,
+        "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+        "mode" text NOT NULL CHECK ("mode" IN ('assign','quote')),
+        "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request')),
+        "status" text NOT NULL DEFAULT 'pending'
+          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed')),
+        "to_email" text NOT NULL CHECK (length(trim("to_email")) > 3),
+        "subject" text NOT NULL CHECK (length("subject") > 0),
+        "body_html" text NOT NULL CHECK (length("body_html") > 0),
+        "body_text" text,
+        "cc_json" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "ics_content" text,
+        "ics_filename" text,
+        "email_preview_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+        "quote_token" text UNIQUE,
+        "quote_token_expires_at" timestamp,
+        "requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "approved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "approved_at" timestamp,
+        "sent_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "sent_at" timestamp,
+        "last_error" text,
+        "idempotency_key" text NOT NULL UNIQUE,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("idempotency_key")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD COLUMN IF NOT EXISTS "entity_type" text NOT NULL DEFAULT 'fix_track',
+      ADD COLUMN IF NOT EXISTS "entity_id" integer,
+      ADD COLUMN IF NOT EXISTS "email_type" text NOT NULL DEFAULT 'assignment',
+      ADD COLUMN IF NOT EXISTS "cc_json" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS "ics_content" text,
+      ADD COLUMN IF NOT EXISTS "ics_filename" text,
+      ADD COLUMN IF NOT EXISTS "email_preview_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS "quote_token_expires_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      DROP CONSTRAINT IF EXISTS "contractor_email_queue_entity_type_check",
+      DROP CONSTRAINT IF EXISTS "contractor_email_queue_client_id_issue_id_mode_status_key"`);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD CONSTRAINT "contractor_email_queue_entity_type_check"
+      CHECK ("entity_type" IN ('fix_track','compliance','contractor_compliance'))`);
+    await db.execute(sql`
+      UPDATE contractor_email_queue q
+      SET status='cancelled', last_error='Superseded duplicate draft', updated_at=now()
+      WHERE q.status IN ('pending','sending')
+        AND EXISTS (
+          SELECT 1 FROM contractor_email_queue newer
+          WHERE newer.client_id=q.client_id
+            AND newer.entity_type=q.entity_type
+            AND newer.entity_id=q.entity_id
+            AND newer.email_type=q.email_type
+            AND newer.status IN ('pending','sending')
+            AND newer.id > q.id
+        )
+    `);
+    await db.execute(sql`DROP INDEX IF EXISTS "UQ_contractor_email_queue_active_draft"`);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_contractor_email_queue_active_draft"
+      ON contractor_email_queue (client_id,entity_type,entity_id)
+      WHERE status IN ('pending','sending')
+    `);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "issue_id" DROP NOT NULL`);
+    await db.execute(sql`UPDATE "contractor_email_queue" SET entity_id=issue_id WHERE entity_id IS NULL`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_fix_track_email_queue_client_status"
+      ON "contractor_email_queue" ("client_id","status","created_at" DESC)`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "fix_track_quote_submissions" (
+        "id" serial PRIMARY KEY,
+        "queue_id" integer NOT NULL REFERENCES "contractor_email_queue"("id") ON DELETE CASCADE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+        "price_pence" integer NOT NULL CHECK ("price_pence" >= 0),
+        "pounds_price" numeric(12,2) NOT NULL CHECK ("pounds_price" >= 0),
+        "notes" text,
+        "submitted_at" timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("queue_id")
+      )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "fix_track_quote_submissions"
+      ADD COLUMN IF NOT EXISTS "status" text NOT NULL DEFAULT 'submitted'
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "fix_track_manager_notifications" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "user_id" integer REFERENCES "users"("id") ON DELETE CASCADE,
+        "issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+        "kind" text NOT NULL,
+        "title" text NOT NULL,
+        "body" text NOT NULL,
+        "read_at" timestamp,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
     // Annual-acknowledgement flag on DocTrack documents
     await db.execute(sql`
       ALTER TABLE doc_track_documents

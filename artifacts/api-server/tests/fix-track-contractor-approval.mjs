@@ -141,8 +141,14 @@ async function main() {
   check("quote content says it is not an assignment", templates.includes("This is a request for a quote only — the job has not been assigned."));
   check("assignment content contains contractor action links", templates.includes("Mark as Booked") && templates.includes("Mark as Completed"));
   const route = await readFile(new URL("../src/routes/fix-track.ts", import.meta.url), "utf8");
-  check("concurrent dispatches may claim only approved state",
-    route.includes("email_request_status = 'approved' AND email_request_mode = ${mode}"));
+  check("concurrent dispatches may claim only one pending queue row",
+    route.includes("WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue"));
+  check("edited quote requests preserve the submission link",
+    route.includes("existingDraft.email_type === \"quote_request\"") &&
+    route.includes("/contractor-quote/${encodeURIComponent(existingDraft.quote_token)}"));
+  check("quote decisions enforce active department scope",
+    route.includes("AND (i.site_id IS NULL OR s.department_id=${deptId})") &&
+    route.includes("'fix_track',${q.issue_id},${q.department_id},${q.contractor_id}"));
   check("updates refuse a row already claimed for sending",
     route.includes('current.emailRequestStatus === "sending"'));
   check("signed site documents require matching private tenant ACL",

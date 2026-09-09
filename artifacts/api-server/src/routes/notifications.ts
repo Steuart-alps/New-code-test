@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable } from "@workspace/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
 import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
@@ -64,7 +64,7 @@ async function sendReminderForItem(opts: {
   ccList: string[];
   defaultLeadTimeDays: number;
   now: Date;
-}): Promise<void> {
+}): Promise<boolean> {
   const { item, contractor, companyName, ccList, defaultLeadTimeDays, now } = opts;
 
   const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
@@ -88,22 +88,33 @@ async function sendReminderForItem(opts: {
     scheduleLink,
   });
 
-  await sendEmail({
-    to: contractor.email!,
-    cc: ccList.length > 0 ? ccList : undefined,
-    subject: `Compliance Check Reminder: ${item.title}`,
-    html,
-    text,
-    clientId: item.clientId,
-  });
+  // Reminders use the same approval queue as FixTrack contractor mail. The
+  // unique key makes scheduler retries harmless; manager/test mail remains
+  // outside this helper and is still sent directly.
+  const cycleDate = dueDate.toISOString().slice(0, 10);
+  const queued = await db.execute(sql`
+    INSERT INTO contractor_email_queue
+      (client_id, entity_type, entity_id, contractor_id, email_type, mode,
+       to_email, subject, body_html, body_text, cc_json, email_preview_json, idempotency_key)
+    VALUES (${item.clientId}, 'compliance', ${item.id}, ${contractor.id},
+      'reminder', 'assign', ${contractor.email!},
+       ${`Compliance Check Reminder: ${item.title}`}, ${html}, ${text}, ${JSON.stringify(ccList)}::jsonb,
+      ${JSON.stringify({ subject: `Compliance Check Reminder: ${item.title}`, text, html })}::jsonb,
+      ${`reminder-${item.clientId}-${item.id}-${cycleDate}`})
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING id
+  `);
 
-  await db
-    .update(complianceItemsTable)
-    .set({ notificationSentAt: now, scheduleToken, visitScheduledAt: null })
-    .where(eq(complianceItemsTable.id, item.id));
+  if (queued.rows.length > 0) {
+    await db
+      .update(complianceItemsTable)
+      .set({ scheduleToken, visitScheduledAt: null })
+      .where(eq(complianceItemsTable.id, item.id));
+  }
+  return queued.rows.length > 0;
 }
 
-export async function runReminderJob(): Promise<{ sent: number; skipped: number; errors: number }> {
+export async function runReminderJob(): Promise<{ queued: number; sent: number; skipped: number; errors: number }> {
   const now = new Date();
 
   const items = await db
@@ -114,7 +125,7 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
 
   const settingsCache: Record<number, Record<string, string>> = {};
 
-  let sent = 0;
+  let queued = 0;
   let skipped = 0;
   let errors = 0;
 
@@ -141,14 +152,14 @@ export async function runReminderJob(): Promise<{ sent: number; skipped: number;
     });
 
     try {
-      await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
-      sent++;
+      if (await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now })) queued++;
+      else skipped++;
     } catch {
       errors++;
     }
   }
 
-  return { sent, skipped, errors };
+  return { queued, sent: 0, skipped, errors };
 }
 
 router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, async (req, res) => {
@@ -176,11 +187,11 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     itemId: number;
     title: string;
     contractorEmail: string;
-    status: "sent" | "skipped" | "error";
+    status: "queued" | "skipped" | "error";
     reason?: string | null;
   }> = [];
 
-  let sent = 0;
+  let queued = 0;
   let skipped = 0;
   let errors = 0;
 
@@ -227,9 +238,11 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
   });
 
     try {
-      await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
-      results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "sent" });
-      sent++;
+      const wasQueued = await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
+      results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email,
+        status: wasQueued ? "queued" : "skipped",
+        reason: wasQueued ? "Awaiting manager approval" : "Already queued for approval" });
+      if (wasQueued) queued++; else skipped++;
     } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send test email";
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email, status: "error", reason: message });
@@ -237,7 +250,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
     }
   }
 
-  res.json({ sent, skipped, errors, details: results });
+  res.json({ queued, sent: 0, skipped, errors, details: results });
 });
 
 router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAdmin, async (req, res) => {
@@ -270,7 +283,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
     actorEmail: req.currentUser?.email ?? null,
   });
 
-  await sendReminderForItem({
+  const queued = await sendReminderForItem({
     item,
     contractor,
     companyName,
@@ -282,7 +295,8 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
 
   // Don't echo individual CC addresses back to the caller — only a count.
   const ccSummary = ccList.length > 0 ? ` (with ${ccList.length} cc'd)` : "";
-  res.json({ success: true, message: `Reminder sent to ${contractor.email}${ccSummary}` });
+  res.json({ success: true, queued, sent: false,
+    message: queued ? `Reminder queued for manager approval${ccSummary}` : "Reminder is already awaiting manager approval" });
 });
 
 // ----- Public scheduling endpoints (no auth — token is the credential) -----
@@ -353,21 +367,18 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
       <h2 style="color: #1e293b;">Visit Confirmed</h2>
       <p>Thank you ${contractor.name}.</p>
       <p>Your visit for <strong>${item.title}</strong> is scheduled for <strong>${dateStr}</strong>.</p>
-      <p>A calendar invite is attached — open it to add the appointment to your calendar.</p>
       <p>Best regards,<br><strong>${companyName}</strong></p>
     </div>`;
-  const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\nA calendar invite is attached.\n\n${companyName}`;
+  const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\n${companyName}`;
 
-  await sendEmail({
-    to: contractor.email,
-    cc: maintenanceEmail ?? undefined,
-    subject: `Visit Confirmed: ${item.title} — ${dateStr}`,
-    html,
-    text,
-    icsAttachment: ics,
-    icsFilename: `${safeTitle}.ics`,
-    clientId: item.clientId,
-  });
+  const confirmationSubject = `Visit Confirmed: ${item.title} — ${dateStr}`;
+  await db.execute(sql`INSERT INTO contractor_email_queue
+    (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,idempotency_key)
+    VALUES (${item.clientId},'compliance',${item.id},${contractor.id},'reminder','assign',${contractor.email},
+      ${confirmationSubject},${html},${text},${JSON.stringify(maintenanceEmail ? [maintenanceEmail] : [])}::jsonb,
+      ${ics},${`${safeTitle}.ics`},${JSON.stringify({ subject: confirmationSubject, html, text })}::jsonb,
+      ${`schedule-confirmation-${item.clientId}-${item.id}-${proposed.toISOString().slice(0,10)}`})
+    ON CONFLICT (idempotency_key) DO NOTHING`);
 
   // Burn the token so the link can't be reused, and record the chosen date.
   await db

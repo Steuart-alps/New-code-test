@@ -5,10 +5,70 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { sendEmail } from "../lib/email";
+import { getPublicAppUrl } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 
 const router = Router();
+export const fixTrackQuoteRouter = Router();
 const storage = new ObjectStorageService();
+
+// Quote links are deliberately separate from action links: they remain valid
+// only for quote queue entries and cannot mutate an issue directly.
+fixTrackQuoteRouter.get("/:token", async (req, res) => {
+  const result = await db.execute(sql`SELECT q.id, q.quote_token, q.status, i.title,
+    i.description, i.location, i.issue_type, i.priority, s.name AS site_name,
+    c.name AS contractor_name
+    FROM contractor_email_queue q
+    JOIN fix_track_issues i ON i.id=q.issue_id
+    LEFT JOIN sites s ON s.id=i.site_id
+    LEFT JOIN contractors c ON c.id=q.contractor_id
+    WHERE q.quote_token=${req.params.token} AND q.mode='quote'
+      AND q.quote_token_expires_at > now()
+      AND q.status IN ('sent','approved') LIMIT 1`);
+  const q = (result.rows as any[])[0];
+  if (!q) return res.status(404).json({ error: "Quote link not found or expired" });
+  res.json({ job: { title: q.title, description: q.description, location: q.location,
+    issueType: q.issue_type, priority: q.priority, siteName: q.site_name },
+    contractorName: q.contractor_name, submitted: q.status === "approved" });
+});
+
+fixTrackQuoteRouter.post("/:token", async (req, res) => {
+  const price = typeof req.body?.poundsPrice === "number" ? req.body.poundsPrice : Number(req.body?.price);
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 5000) : null;
+  if (!Number.isFinite(price) || price < 0 || price > 100000000) return res.status(400).json({ error: "A valid pounds price is required" });
+  const result = await db.execute(sql`SELECT q.*, i.title, c.name AS contractor_name, c.email AS contractor_email
+    FROM contractor_email_queue q JOIN fix_track_issues i ON i.id=q.issue_id
+    LEFT JOIN contractors c ON c.id=q.contractor_id
+    WHERE q.quote_token=${req.params.token} AND q.mode='quote'
+      AND q.quote_token_expires_at > now()
+      AND q.status IN ('sent','approved') LIMIT 1`);
+  const q = (result.rows as any[])[0];
+  if (!q) return res.status(404).json({ error: "Quote link not found or expired" });
+  const pence = Math.round(price * 100);
+  const inserted = await db.execute(sql`INSERT INTO fix_track_quote_submissions
+    (queue_id, client_id, contractor_id, price_pence, pounds_price, notes)
+    VALUES (${q.id},${q.client_id},${q.contractor_id},${pence},${price.toFixed(2)},${notes})
+    ON CONFLICT (queue_id) DO NOTHING RETURNING id`);
+  if (!(inserted.rows as any[])[0]) return res.status(409).json({ error: "A quote has already been submitted" });
+  await db.execute(sql`UPDATE contractor_email_queue SET status='approved', updated_at=now() WHERE id=${q.id}`);
+  const managers = await db.execute(sql`SELECT id,email FROM users WHERE client_id=${q.client_id}
+    AND role IN ('client_admin','consultant') AND active=true AND email IS NOT NULL`);
+  await db.execute(sql`INSERT INTO fix_track_manager_notifications
+    (client_id,user_id,issue_id,kind,title,body)
+    SELECT ${q.client_id}, id, ${q.issue_id}, 'quote_submitted', ${"Quote submitted: " + q.title},
+      ${`A contractor submitted a quote of £${price.toFixed(2)}.`} FROM users
+    WHERE client_id=${q.client_id} AND role IN ('client_admin','consultant') AND active=true`);
+  for (const manager of (managers.rows as any[])) {
+    const reviewUrl = `${getPublicAppUrl()}/fix-track?quote=${(inserted.rows as any[])[0].id}`;
+    try { await sendEmail({ to: manager.email, subject: `Quote submitted: ${q.title}`,
+      html: `<p>A contractor submitted a quote of <strong>£${price.toFixed(2)}</strong> for ${esc(q.title)}.</p>
+        ${notes ? `<p>${esc(notes)}</p>` : ""}
+        <p><a href="${reviewUrl}">Accept &amp; Assign</a> &nbsp; <a href="${reviewUrl}">Decline</a></p>`,
+      clientId: q.client_id, idempotencyKey: `quote-notification-${q.id}-${manager.id}` }); } catch { /* submission is persisted */ }
+  }
+  res.status(201).json({ ok: true, poundsPrice: price.toFixed(2) });
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -389,15 +389,16 @@ export async function runContractorComplianceReminderJob(
           const html = buildContractorEmailHtml(contractorName, contractorAlerts, client.name, portalUrl);
           if (!html) continue;
           try {
-            await send({
-              to: [contractorEmail],
-              subject: `Compliance renewal reminder — please update your details`,
-              html,
-            });
-            result.emailsSent++;
+            await db.execute(sql`INSERT INTO contractor_email_queue
+              (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,email_preview_json,idempotency_key)
+              VALUES (${client.id},'contractor_compliance',${contractorId},${contractorId},'reminder','assign',
+                ${contractorEmail},'Compliance renewal reminder — please update your details',${html},
+                ${JSON.stringify({ subject: "Compliance renewal reminder — please update your details", html, text: "" })}::jsonb,
+                ${`contractor-compliance-${client.id}-${contractorId}-${contractorAlerts.map(a => a.milestone).sort().join("-")}`})
+              ON CONFLICT (idempotency_key) DO NOTHING`);
           } catch (ctrErr) {
             // Best-effort: never fail the whole job because a contractor email bounced.
-            logger.warn({ err: ctrErr, contractorEmail }, "Failed to send contractor compliance reminder");
+            logger.warn({ err: ctrErr, contractorEmail }, "Failed to queue contractor compliance reminder");
           }
         }
 
@@ -412,7 +413,7 @@ export async function runContractorComplianceReminderJob(
         result.emailsSent += emails.length;
         logger.info(
           { clientId: client.id, alerts: claimed.length, emails: emails.length, contractorEmails: byContractor.size },
-          "Contractor compliance reminder sent",
+          "Manager alerts sent and contractor reminders queued for approval",
         );
       } catch (innerErr) {
         if (!sent && claimed.length > 0) {

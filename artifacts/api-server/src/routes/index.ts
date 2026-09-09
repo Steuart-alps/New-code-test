@@ -38,7 +38,7 @@ import dailyTrackPmRouter from "./daily-track-pm";
 import checklistTemplatesRouter from "./checklist-templates";
 import checkRemindersRouter from "./check-reminders";
 import w3wRouter from "./w3w";
-import fixTrackPublicRouter from "./fix-track-public";
+import fixTrackPublicRouter, { fixTrackQuoteRouter } from "./fix-track-public";
 import contractorPortalRouter from "./contractor-portal";
 import incidentsRouter from "./incidents";
 import patTrackRouter from "./pat-track";
@@ -85,7 +85,14 @@ router.use(staffTrainingRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
-router.use("/fix-track", requireAuth, requireService("fixtrack"), fixTrackRouter);
+// Public contractor token links must be mounted before the protected
+// /fix-track router, otherwise its auth middleware intercepts them.
+router.use("/fix-track/action", fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", fixTrackQuoteRouter);
+router.use("/fix-track", requireAuth, (req, res, next) => {
+  if (req.path.startsWith("/contractor-email-queue")) return next();
+  return requireService("fixtrack")(req, res, next);
+}, fixTrackRouter);
 router.use(staffRosterRouter);
 router.use("/sign-off", signOffRouter); // public — no auth
 // safetrack and doctrack are now the same module; either key grants access.
@@ -123,8 +130,6 @@ router.use(complianceHubRouter);
 router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
-// Public contractor action links — no auth, token-protected
-router.use("/fix-track/action", fixTrackPublicRouter);
 // Public contractor self-service portal — no auth, token-protected
 router.use("/contractor-portal", contractorPortalRouter);
 

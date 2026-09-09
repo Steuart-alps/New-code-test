@@ -106,6 +106,13 @@ interface Issue {
   emailRequestMode?: string | null;
   emailRequestStatus?: string | null;
   emailRequestedAt?: string | null;
+  quote?: {
+    id: number;
+    status: string;
+    pricePence: number;
+    notes: string | null;
+    submittedAt: string | null;
+  };
   mediaUrls: string[];
   siteId?: number | null;
   siteName?: string | null;
@@ -865,26 +872,7 @@ export default function FixTrackPage() {
   }
 
   async function handleApproveAndSend(issue: Issue) {
-    setNotifying(n => ({ ...n, [issue.id]: true }));
-    try {
-      const approved = await apiFetch(`/fix-track/issues/${issue.id}/approve-send`, { method: "POST" });
-      const body = await approved.json();
-      if (!approved.ok) throw new Error(body.error ?? "Could not approve request");
-      const mode = body.mode as "assign" | "quote";
-      const sent = await apiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
-      const sentBody = await sent.json();
-      if (!sent.ok) throw new Error(sentBody.error ?? "Could not send contractor email");
-      toast({
-        title: mode === "quote" ? "Quote request sent" : "Job assigned",
-        description: mode === "quote" ? "The contractor has been asked for a quote." : "The contractor has been sent the job details.",
-      });
-      await load();
-    } catch (err: any) {
-      toast({ title: "Could not approve and send", description: err.message, variant: "destructive" });
-      await load();
-    } finally {
-      setNotifying(n => ({ ...n, [issue.id]: false }));
-    }
+    setLocation(`/contractor-approvals?entityType=fix_track&entityId=${issue.id}`);
   }
 
   async function handleRequestSend(issue: Issue, mode: "assign" | "quote") {
@@ -915,6 +903,36 @@ export default function FixTrackPage() {
       await load();
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  }
+
+  async function handleAcceptQuote(issue: Issue) {
+    if (!issue.quote?.id) return;
+    setNotifying(n => ({ ...n, [issue.id]: true }));
+    try {
+      const res = await apiFetch(`/fix-track/quotes/${issue.quote.id}/accept`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      toast({ title: "Quote accepted", description: "The job has been assigned." });
+      await load();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setNotifying(n => ({ ...n, [issue.id]: false }));
+    }
+  }
+
+  async function handleDeclineQuote(issue: Issue) {
+    if (!issue.quote?.id) return;
+    setNotifying(n => ({ ...n, [issue.id]: true }));
+    try {
+      const res = await apiFetch(`/fix-track/quotes/${issue.quote.id}/decline`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      toast({ title: "Quote declined" });
+      await load();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setNotifying(n => ({ ...n, [issue.id]: false }));
     }
   }
 
@@ -1278,7 +1296,29 @@ export default function FixTrackPage() {
                           Send approved {issue.emailRequestMode === "quote" ? "quote" : "job"}
                         </Button>
                       )}
-                      {issue.contractorId && issue.emailRequestStatus === "sent" && (
+                      {issue.quote && issue.quote.status === "submitted" && canAdmin && (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleAcceptQuote(issue)} disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-emerald-700 border-emerald-300 hover:bg-emerald-50">
+                            Accept & Assign
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDeclineQuote(issue)} disabled={notifying[issue.id]}
+                            className="text-xs h-7 px-2 whitespace-nowrap text-rose-700 border-rose-300 hover:bg-rose-50">
+                            Decline
+                          </Button>
+                        </>
+                      )}
+                      {issue.quote && issue.quote.status === "accepted" && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                          Quote accepted
+                        </span>
+                      )}
+                      {issue.quote && issue.quote.status === "declined" && (
+                        <span className="text-[10px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
+                          Quote declined
+                        </span>
+                      )}
+                      {issue.contractorId && issue.emailRequestStatus === "sent" && (!issue.quote || issue.quote.status === "pending") && (
                         <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 whitespace-nowrap text-center">
                           {issue.emailRequestMode === "quote" ? "Quote request sent" : "Job email sent"}
                         </span>

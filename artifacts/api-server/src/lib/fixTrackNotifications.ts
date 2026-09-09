@@ -75,6 +75,10 @@ async function dispatchContractorEmail(opts: Parameters<typeof sendEmail>[0]): P
   await sendEmail(opts);
 }
 
+export async function dispatchStoredContractorEmail(opts: Parameters<typeof sendEmail>[0]): Promise<void> {
+  await dispatchContractorEmail(opts);
+}
+
 export interface ContractorAssignmentOpts {
   contractorName:   string;
   contractorEmail:  string;
@@ -94,14 +98,15 @@ export interface ContractorAssignmentOpts {
   icsFilename?:     string;
   cc?:              string | string[];
   idempotencyKey?:  string;
+  previewOnly?:     boolean;
 }
 
-export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<void> {
+export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOpts): Promise<{ subject: string; html: string }> {
   const {
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName,
     bookedToken, completedToken, baseUrl, clientId, siteDocuments,
-    icsAttachment, icsFilename, cc, idempotencyKey,
+    icsAttachment, icsFilename, cc, idempotencyKey, previewOnly,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -179,9 +184,10 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
 </div>`;
 
   const priorityPrefix = issuePriority === "urgent" ? "[URGENT] " : "";
-  await dispatchContractorEmail({
+  const subject = `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`;
+  if (!previewOnly) await dispatchContractorEmail({
     to:      contractorEmail,
-    subject: `${priorityPrefix}Job Assigned: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
+    subject,
     html,
     clientId,
     icsAttachment,
@@ -189,6 +195,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     cc,
     idempotencyKey,
   });
+  return { subject, html };
 }
 
 // ── Quote request email ───────────────────────────────────────────────────────
@@ -207,16 +214,20 @@ export interface ContractorQuoteOpts {
   clientId:         number;
   siteDocuments?:   { name: string; url: string }[];
   idempotencyKey?:  string;
+  quoteToken?:     string;
+  baseUrl?:         string;
+  previewOnly?:     boolean;
 }
 
 /**
  * Ask a contractor for a quotation for a job — no assignment, no action
  * buttons. The contractor replies by email with their quote.
  */
-export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promise<void> {
+export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promise<{ subject: string; html: string }> {
   const {
     contractorName, contractorEmail, issueTitle, issueType, issuePriority,
     issueLocation, issueDescription, siteName, companyName, clientId, siteDocuments, idempotencyKey,
+    quoteToken, baseUrl, previewOnly,
   } = opts;
 
   const safeName     = escapeHtml(contractorName);
@@ -227,6 +238,7 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   const safeDesc     = issueDescription ? escapeHtml(issueDescription) : null;
   const safeSite     = siteName ? escapeHtml(siteName) : null;
   const safeCompany  = escapeHtml(companyName);
+  const quoteUrl = quoteToken && baseUrl ? `${baseUrl}/contractor-quote/${quoteToken}` : null;
 
   const html = `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b">
@@ -249,8 +261,9 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   </div>
 
   <p style="font-size:14px;color:#475569;margin:0 0 16px">
-    Please reply to this email with your quotation, including cost, availability, and any assumptions.
+    Please submit your quotation, including cost, availability, and any assumptions.
   </p>
+  ${quoteUrl ? `<p><a href="${quoteUrl}" style="display:inline-block;background:#8b5cf6;color:#fff;text-decoration:none;padding:12px 20px;border-radius:7px;font-weight:700">Submit Quote Online</a></p>` : ""}
 
   ${siteDocuments?.length ? `
   <div style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
@@ -267,11 +280,13 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
   </p>
 </div>`;
 
-  await dispatchContractorEmail({
+  const subject = `Quote Requested: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`;
+  if (!previewOnly) await dispatchContractorEmail({
     to:      contractorEmail,
-    subject: `Quote Requested: ${issueTitle}${siteName ? ` — ${siteName}` : ""}`,
+    subject,
     html,
     clientId,
     idempotencyKey,
   });
+  return { subject, html };
 }

@@ -7,12 +7,12 @@ import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, MinusCircle, SlidersHorizontal,
-  UtensilsCrossed, MapPin, UserPlus, Mail, Settings2,
+  UtensilsCrossed, MapPin, UserPlus, Mail, Settings2, MailWarning,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -454,6 +454,7 @@ function KitchenTrackOverdueBadge() {
 export default function Dashboard() {
   const { hasService, services } = useAuth();
   const canAdmin = useCanAdmin();
+  const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");
   const hasStandaloneDailytrackPm = hasService("dailytrack_pm");
   const hasKitchentrack = hasService("kitchentrack");
@@ -468,27 +469,30 @@ export default function Dashboard() {
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [checklistTotals, setChecklistTotals] = useState<ChecklistTotals | null>(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
+  const [pendingEmailsCount, setPendingEmailsCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!canAdmin) return;
+    if (!canManageContractorEmails) return;
     let cancelled = false;
     Promise.all([
       apiFetch("/users").then((res) => (res.ok ? res.json() : [])),
       apiFetch("/settings").then((res) => (res.ok ? res.json() : {})),
+      apiFetch("/fix-track/contractor-email-queue?status=pending").then((res) => res.ok ? res.json() : []),
     ])
-      .then(([users, settings]) => {
+      .then(([users, settings, emails]) => {
         if (cancelled) return;
         setTeamCount(Array.isArray(users) ? users.length : 0);
         const settingsRecord = settings as { notificationEmail?: unknown };
         setNotificationEmail(typeof settingsRecord.notificationEmail === "string" ? settingsRecord.notificationEmail : "");
+        setPendingEmailsCount(Array.isArray(emails) ? emails.length : 0);
       })
       .catch(() => {
         // The dashboard remains usable if setup metadata is unavailable.
       });
     return () => { cancelled = true; };
-  }, [canAdmin]);
+  }, [canManageContractorEmails]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -565,6 +569,24 @@ export default function Dashboard() {
             notificationEmail={notificationEmail}
             hasModules={services === "all" || (Array.isArray(services) && services.length > 0)}
           />
+        )}
+
+        {canManageContractorEmails && pendingEmailsCount !== null && pendingEmailsCount > 0 && (
+          <Link
+            href="/contractor-approvals"
+            className="flex items-center justify-between gap-4 rounded-xl border border-blue-200 bg-blue-50 p-4 transition-colors hover:bg-blue-100/50"
+          >
+            <div className="flex items-center gap-3 text-blue-800">
+              <MailWarning className="h-5 w-5" />
+              <div>
+                <p className="font-semibold text-sm">Contractor emails await approval</p>
+                <p className="text-xs text-blue-700/80">You have {pendingEmailsCount} message{pendingEmailsCount === 1 ? "" : "s"} waiting in the queue.</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700">
+              Review <ArrowRight className="h-4 w-4" />
+            </div>
+          </Link>
         )}
 
         {/* Loading */}

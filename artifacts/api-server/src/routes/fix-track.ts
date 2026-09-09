@@ -6,10 +6,10 @@ import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, site
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
-import { buildCalendarInvite } from "../lib/email";
+import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { getObjectAclPolicy } from "../lib/objectAcl";
-import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
+import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 
 const router = Router();
@@ -57,6 +57,27 @@ function dateOnly(value: unknown): string | null {
   if (value == null) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value).slice(0, 10);
+}
+
+async function latestQuoteForIssue(clientId: number, issueId: number) {
+  const result = await db.execute(sql`
+    SELECT qs.id, qs.price_pence, qs.notes, qs.status, qs.submitted_at
+    FROM fix_track_quote_submissions qs
+    JOIN contractor_email_queue q ON q.id = qs.queue_id
+    WHERE qs.client_id = ${clientId}
+      AND q.entity_type = 'fix_track'
+      AND q.entity_id = ${issueId}
+    ORDER BY qs.submitted_at DESC, qs.id DESC
+    LIMIT 1
+  `);
+  const quote = (result.rows as any[])[0];
+  return quote ? {
+    id: quote.id,
+    pricePence: quote.price_pence,
+    notes: quote.notes,
+    status: quote.status,
+    submittedAt: quote.submitted_at,
+  } : null;
 }
 
 /** Fields rendered into a contractor email. Any change invalidates approval. */
@@ -219,13 +240,14 @@ router.get("/issues", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(fixTrackIssuesTable.createdAt));
 
-  res.json(rows.map(r => ({
+  res.json(await Promise.all(rows.map(async r => ({
     ...r.issue,
     isOverdue: r.isOverdue,
     siteName:       r.site?.name        ?? null,
     contractorName: r.contractor?.name  ?? null,
     contractorEmail: r.contractor?.email ?? null,
-  })));
+    quote: await latestQuoteForIssue(clientId, r.issue.id),
+  }))));
 });
 
 // ── Get one ───────────────────────────────────────────────────────────────────
@@ -287,6 +309,7 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
     siteName:        r.site?.name        ?? null,
     contractorName:  r.contractor?.name  ?? null,
     contractorEmail: r.contractor?.email ?? null,
+    quote: await latestQuoteForIssue(clientId, r.issue.id),
     statusEvents: activity.filter(a => a.eventType === "status").map(a => ({
       status: a.status,
       createdAt: a.createdAt,
@@ -412,7 +435,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     }
 
     const approvalInvalidated =
-      current.emailRequestStatus === "approved" && contractorEmailContentChanged(current, data);
+      ["pending", "approved"].includes(current.emailRequestStatus ?? "") && contractorEmailContentChanged(current, data);
     const updateData: Record<string, any> = { ...data, updatedAt: new Date() };
     if (data.status === "resolved" && isStatusChange) {
       updateData.resolvedDate = new Date().toISOString().slice(0, 10);
@@ -450,6 +473,42 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       });
     }
     if (approvalInvalidated) {
+      const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
+        c.email AS contractor_email,cl.name AS company_name,q.mode,q.quote_token
+        FROM fix_track_issues i
+        LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
+        JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
+        JOIN clients cl ON cl.id=i.client_id
+        JOIN contractor_email_queue q ON q.entity_id=i.id AND q.client_id=i.client_id
+          AND q.entity_type='fix_track' AND q.status IN ('pending','approved')
+        WHERE i.id=${id} AND i.client_id=${clientId} ORDER BY q.created_at DESC LIMIT 1`);
+      const draft = (draftResult.rows as any[])[0];
+      if (draft?.contractor_email) {
+        const rendered = draft.mode === "quote"
+          ? await sendContractorQuoteEmail({
+              contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
+              issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
+              issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
+              companyName: draft.company_name, clientId, quoteToken: draft.quote_token,
+              baseUrl: getPublicAppUrl(), previewOnly: true,
+            })
+          : await sendContractorAssignmentEmail({
+              contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
+              issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
+              issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
+              companyName: draft.company_name,
+              ...(await generateActionTokens(id, clientId, draft.contractor_id)),
+              baseUrl: getPublicAppUrl(), clientId, previewOnly: true,
+            });
+        const text = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
+          contractor_id=${draft.contractor_id},to_email=${draft.contractor_email},subject=${rendered.subject},
+          body_html=${rendered.html},body_text=${text},
+          email_preview_json=${JSON.stringify({ subject: rendered.subject, html: rendered.html, text })}::jsonb,
+          approved_by=NULL,approved_at=NULL,updated_at=now()
+          WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
+            AND status IN ('pending','approved')`);
+      }
       await tx.insert(fixTrackIssueActivityTable).values({
         clientId,
         issueId: id,
@@ -622,6 +681,11 @@ function isManager(req: any): boolean {
   return !!u && (u.role === "client_admin" || u.role === "consultant" || u.isMaintenanceManager === true);
 }
 
+function queueDepartmentScope(req: any) {
+  const dept = getActiveDepartmentId(req);
+  return dept === null ? sql`` : sql` AND (department_id IS NULL OR department_id=${dept})`;
+}
+
 // Staff: request that a contractor email be sent (needs manager approval)
 router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
@@ -651,25 +715,358 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     return res.status(409).json({ error: "A contractor email has already been sent for this issue" });
   }
 
-  await db.update(fixTrackIssuesTable).set({
-    emailRequestMode: parsed.data.mode,
-    emailRequestStatus: "pending",
-    emailRequestedBy: (req.session as any).userId ?? null,
-    emailRequestedAt: new Date(),
-    emailApprovedBy: null,
-    emailApprovedAt: null,
-    emailSentBy: null,
-    emailSentAt: null,
-    updatedAt: new Date(),
-  }).where(and(...requestConditions));
-  await db.insert(fixTrackIssueActivityTable).values({
-    clientId,
-    issueId: id,
-    eventType: "email_requested",
-    note: parsed.data.mode,
-    createdBy: (req.session as any).userId ?? null,
+  // Persist the exact draft that will cross the email boundary. Approval is
+  // for these stored bytes, not for a later re-render of a changed issue.
+  const draftResult = await db.execute(sql`
+    SELECT i.title, i.description, i.location, i.priority, i.issue_type,
+           s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
+           cl.name AS company_name
+    FROM fix_track_issues i
+    LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+    JOIN contractors c ON c.id = i.contractor_id AND c.client_id = i.client_id
+    JOIN clients cl ON cl.id = i.client_id
+    WHERE i.id = ${id} AND i.client_id = ${clientId}
+    LIMIT 1
+  `);
+  const draft = (draftResult.rows as any[])[0];
+  if (!draft?.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
+  const quoteToken = parsed.data.mode === "quote" ? randomUUID() : null;
+  const quoteUrl = quoteToken ? `${getPublicAppUrl()}/contractor-quote/${quoteToken}` : null;
+  let previewSubject = parsed.data.mode === "quote"
+    ? `Quote requested: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`
+    : `Job assigned: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`;
+  let previewText = [
+    `Dear ${draft.contractor_name},`,
+    "",
+    parsed.data.mode === "quote"
+      ? `${draft.company_name} would like a quote for the following work. This is a quote request only; the job has not been assigned.`
+      : `${draft.company_name} has assigned the following work to you.`,
+    "",
+    draft.title,
+    `Site: ${draft.site_name ?? "Not specified"}`,
+    `Location: ${draft.location}`,
+    `Type: ${draft.issue_type}`,
+    `Priority: ${draft.priority}`,
+    draft.description ? `Details: ${draft.description}` : "",
+    quoteUrl ? `Submit your quote: ${quoteUrl}` : "",
+  ].filter(Boolean).join("\n");
+  let previewHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
+    <p>Dear ${escapeHtml(draft.contractor_name)},</p>
+    ${parsed.data.mode === "quote" ? "<h2>Quotation Requested</h2>" : ""}
+    <p>${parsed.data.mode === "quote"
+      ? `<strong>${escapeHtml(draft.company_name)}</strong> would like a quote for the work below. This is a quote request only; the job has not been assigned.`
+      : `<strong>${escapeHtml(draft.company_name)}</strong> has assigned the work below to you.`}</p>
+    <h2>${escapeHtml(draft.title)}</h2>
+    <p><strong>Site:</strong> ${escapeHtml(draft.site_name ?? "Not specified")}<br>
+    <strong>Location:</strong> ${escapeHtml(draft.location)}<br>
+    <strong>Type:</strong> ${escapeHtml(draft.issue_type)}<br>
+    <strong>Priority:</strong> ${escapeHtml(draft.priority)}</p>
+    ${draft.description ? `<p>${escapeHtml(draft.description)}</p>` : ""}
+    ${quoteUrl ? `<p><a href="${quoteUrl}">Submit Quote</a></p>` : ""}
+  </div>`;
+  if (parsed.data.mode === "assign") {
+    const tokens = await generateActionTokens(id, clientId, existing.contractorId);
+    const rendered = await sendContractorAssignmentEmail({
+      contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
+      issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
+      issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
+      companyName: draft.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
+      baseUrl: getPublicAppUrl(), clientId, previewOnly: true,
+    });
+    previewSubject = rendered.subject;
+    previewHtml = rendered.html;
+    previewText = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  } else {
+    const rendered = await sendContractorQuoteEmail({
+      contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
+      issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
+      issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
+      companyName: draft.company_name, clientId, quoteToken: quoteToken ?? undefined,
+      baseUrl: getPublicAppUrl(), previewOnly: true,
+    });
+    previewSubject = rendered.subject;
+    previewHtml = rendered.html;
+    previewText = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`UPDATE contractor_email_queue SET status='cancelled',
+      last_error='Replaced by a newer request', updated_at=now()
+      WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
+        AND status IN ('pending','sending')`);
+    await tx.update(fixTrackIssuesTable).set({
+      emailRequestMode: parsed.data.mode, emailRequestStatus: "pending",
+      emailRequestedBy: (req.session as any).userId ?? null, emailRequestedAt: new Date(),
+      emailApprovedBy: null, emailApprovedAt: null, emailSentBy: null, emailSentAt: null, updatedAt: new Date(),
+    }).where(and(...requestConditions));
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId, issueId: id, eventType: "email_requested", note: parsed.data.mode,
+      createdBy: (req.session as any).userId ?? null,
+    });
+    await tx.execute(sql`
+    INSERT INTO contractor_email_queue
+      (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type, to_email,
+       subject, body_html, body_text, email_preview_json, quote_token, quote_token_expires_at,
+       requested_by, idempotency_key)
+    SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, ${parsed.data.mode},
+      ${parsed.data.mode === "quote" ? "quote_request" : "assignment"},
+      c.email, ${previewSubject}, ${previewHtml}, ${previewText},
+      ${JSON.stringify({ subject: previewSubject, text: previewText, html: previewHtml })}::jsonb,
+      ${quoteToken}, ${quoteToken ? sql`now() + interval '30 days'` : null},
+      ${(req.session as any).userId ?? null}, ${randomUUID()}
+    FROM fix_track_issues i
+    LEFT JOIN sites s ON s.id = i.site_id
+    JOIN contractors c ON c.id = i.contractor_id
+    WHERE i.id = ${id} AND i.client_id = ${clientId}
+    ON CONFLICT DO NOTHING
+  `);
   });
   res.json({ ok: true, message: "Approval requested" });
+});
+
+// Manager queue endpoints. All mutations include tenant and department scope
+// in the SQL predicate, making ID guessing harmless.
+router.get("/contractor-email-queue", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const dept = getActiveDepartmentId(req);
+  const extra = dept === null ? sql`` : sql` AND (q.department_id IS NULL OR q.department_id = ${dept})`;
+  const result = await db.execute(sql`SELECT q.*, COALESCE(i.title, ci.title) AS item_title,
+    s.name AS site_name, c.name AS contractor_name,
+    (SELECT json_build_object('id',qs.id,'pricePence',qs.price_pence,'status',COALESCE(qs.status,'submitted')) FROM fix_track_quote_submissions qs WHERE qs.queue_id=q.id LIMIT 1) AS quote
+    FROM contractor_email_queue q
+    LEFT JOIN fix_track_issues i ON q.entity_type='fix_track' AND i.id=q.entity_id AND i.client_id=q.client_id
+    LEFT JOIN compliance_items ci ON q.entity_type='compliance' AND ci.id=q.entity_id AND ci.client_id=q.client_id
+    LEFT JOIN sites s ON s.id=COALESCE(i.site_id,ci.site_id)
+    LEFT JOIN contractors c ON c.id=q.contractor_id
+    WHERE q.client_id=${clientId} AND q.status='pending'${extra} ORDER BY q.created_at DESC`);
+  res.json((result.rows as any[]).map((q) => ({
+    id: q.id, entityType: q.entity_type, entityId: q.entity_id ?? q.issue_id,
+    contractorId: q.contractor_id, emailType: q.email_type ?? (q.mode === "quote" ? "quote_request" : "assignment"),
+    status: q.status, requestedBy: q.requested_by, approvedBy: q.approved_by,
+    createdAt: q.created_at, emailPreviewJson: q.email_preview_json,
+    siteName: q.site_name ?? null, contractorName: q.contractor_name ?? null,
+    jobTitle: q.item_title, quote: q.quote ?? null,
+  })));
+});
+
+router.get("/contractor-email-queue/count", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const scope = queueDepartmentScope(req);
+  const result = await db.execute(sql`SELECT count(*)::int AS count FROM contractor_email_queue
+    WHERE client_id=${clientId} AND status='pending'${scope}`);
+  res.json({ count: Number((result.rows as any[])[0]?.count ?? 0) });
+});
+
+router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const scope = queueDepartmentScope(req);
+  const qid = Number(req.params.queueId); const parsed = z.object({ subject: z.string().min(1).max(500), bodyHtml: z.string().min(1), bodyText: z.string().optional() }).safeParse(req.body);
+  if (!Number.isInteger(qid) || !parsed.success) return res.status(400).json({ error: "Invalid queue draft" });
+  const rows = await db.execute(sql`UPDATE contractor_email_queue SET subject=${parsed.data.subject}, body_html=${parsed.data.bodyHtml}, body_text=${parsed.data.bodyText ?? null}, updated_at=now()
+    WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
+  if (!(rows.rows as any[])[0]) return res.status(404).json({ error: "Queue entry not found" });
+  res.json((rows.rows as any[])[0]);
+});
+
+router.post("/contractor-email-queue/:queueId/cancel", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const scope = queueDepartmentScope(req);
+  const qid = Number(req.params.queueId);
+  const cancelled = await db.transaction(async (tx) => {
+    const rows = await tx.execute(sql`UPDATE contractor_email_queue SET status='cancelled', updated_at=now()
+      WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
+    const row = (rows.rows as any[])[0];
+    if (row?.entity_type === "fix_track" && row.entity_id) {
+      await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='rejected',updated_at=now()
+        WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
+    }
+    return row;
+  });
+  if (!cancelled) return res.status(404).json({ error: "Queue entry not found" });
+  res.json({ ok: true });
+});
+
+// Approval is atomic and idempotent: only one manager can claim a draft.
+router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  const scope = queueDepartmentScope(req);
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const qid = Number(req.params.queueId);
+  const q = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`UPDATE contractor_email_queue
+      SET status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
+    const row = (claimed.rows as any[])[0];
+    if (row?.entity_type === "fix_track" && row.entity_id) {
+      await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now()
+        WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
+    }
+    return row;
+  });
+  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  try {
+    await sendEmail({ to: q.to_email, subject: q.subject, html: q.body_html, text: q.body_text ?? undefined,
+      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
+      icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
+      clientId, idempotencyKey: q.idempotency_key });
+    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now() WHERE id=${qid} AND status='sending'`);
+    if (q.entity_type === "fix_track" && q.entity_id) {
+      await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
+        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        WHERE id=${q.entity_id} AND client_id=${clientId}`);
+    } else if (q.entity_type === "compliance" && q.entity_id) {
+      await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
+        WHERE id=${q.entity_id} AND client_id=${clientId}`);
+    }
+    res.json({ ok: true, queueId: qid, mode: q.mode, subject: q.subject, bodyHtml: q.body_html });
+  } catch (err) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`UPDATE contractor_email_queue SET status='pending', last_error=${err instanceof Error ? err.message.slice(0, 2000) : "Email failed"}, updated_at=now() WHERE id=${qid} AND status='sending'`);
+      if (q.entity_type === "fix_track" && q.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='pending',updated_at=now() WHERE id=${q.entity_id} AND client_id=${clientId} AND email_request_status='sending'`);
+    });
+    res.status(502).json({ error: "Contractor email could not be sent" });
+  }
+});
+
+router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  const scope = queueDepartmentScope(req);
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const qid = Number(req.params.queueId);
+  const p = z.object({ subject: z.string().min(1).max(500), bodyText: z.string().min(1).max(50_000) }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: "Invalid email draft" });
+  const existingResult = await db.execute(sql`SELECT quote_token,email_type FROM contractor_email_queue
+    WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`);
+  const existingDraft = (existingResult.rows as any[])[0];
+  if (!existingDraft) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  const escapedBody = escapeHtml(p.data.bodyText).replace(/\r?\n/g, "<br>");
+  const quoteLink = existingDraft.email_type === "quote_request" && existingDraft.quote_token
+    ? `<p><a href="${getPublicAppUrl()}/contractor-quote/${encodeURIComponent(existingDraft.quote_token)}">Submit Quote</a></p>`
+    : "";
+  const safeHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b"><p>${escapedBody}</p>${quoteLink}</div>`;
+  const q = await db.transaction(async (tx) => {
+    const rows = await tx.execute(sql`UPDATE contractor_email_queue SET subject=${p.data.subject}, body_html=${safeHtml}, body_text=${p.data.bodyText},
+      email_preview_json=${JSON.stringify({ subject: p.data.subject, text: p.data.bodyText, html: safeHtml })}::jsonb,
+      status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(),
+      sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
+    const row = (rows.rows as any[])[0];
+    if (row?.entity_type === "fix_track" && row.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now() WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
+    return row;
+  });
+  if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
+  try {
+    await sendEmail({
+      to: q.to_email,
+      subject: q.subject,
+      html: q.body_html,
+      text: q.body_text ?? undefined,
+      cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
+      icsAttachment: q.ics_content ?? undefined,
+      icsFilename: q.ics_filename ?? undefined,
+      clientId,
+      idempotencyKey: q.idempotency_key,
+    });
+    await db.execute(sql`UPDATE contractor_email_queue SET status='sent', sent_at=now(), updated_at=now()
+      WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
+    if (q.issue_id) {
+      await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
+        email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
+        WHERE id=${q.issue_id} AND client_id=${clientId}`);
+    } else if (q.entity_type === "compliance" && q.entity_id) {
+      await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
+        WHERE id=${q.entity_id} AND client_id=${clientId}`);
+    }
+    res.json({ ok: true, queueId: qid });
+  } catch (err) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
+        last_error=${err instanceof Error ? err.message.slice(0, 2000) : "Email failed"}, updated_at=now()
+        WHERE id=${qid} AND client_id=${clientId} AND status='sending'`);
+      if (q.entity_type === "fix_track" && q.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='pending',updated_at=now() WHERE id=${q.entity_id} AND client_id=${clientId} AND email_request_status='sending'`);
+    });
+    res.status(502).json({ error: "Contractor email could not be sent" });
+  }
+});
+
+router.post("/contractor-email-queue/:queueId/decline", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  const scope = queueDepartmentScope(req);
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const qid = Number(req.params.queueId);
+  const rows = await db.execute(sql`UPDATE contractor_email_queue SET status='cancelled', last_error='Declined by manager', updated_at=now()
+    WHERE id=${qid} AND client_id=${clientId} AND mode='quote' AND status IN ('approved','sent')${scope} RETURNING id`);
+  if (!(rows.rows as any[])[0]) return res.status(404).json({ error: "Quote not found" });
+  res.json({ ok: true });
+});
+
+router.post("/quotes/:quoteId/decline", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const id = Number(req.params.quoteId);
+  const deptId = getActiveDepartmentId(req);
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const r = await db.execute(sql`UPDATE fix_track_quote_submissions qs SET status='declined'
+    FROM contractor_email_queue q
+    JOIN fix_track_issues i ON i.id=q.issue_id AND i.client_id=q.client_id
+    LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
+    WHERE qs.id=${id} AND qs.client_id=${clientId} AND qs.status='submitted'
+      AND q.id=qs.queue_id AND q.client_id=${clientId}${deptScope}
+    RETURNING qs.id`);
+  if (!(r.rows as any[])[0]) return res.status(404).json({ error: "Quote not found" });
+  res.json({ ok: true, status: "declined" });
+});
+
+router.post("/quotes/:quoteId/accept", requireAuth, async (req, res) => {
+  const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
+  const id = Number(req.params.quoteId);
+  const deptId = getActiveDepartmentId(req);
+  const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
+  const out = await db.transaction(async (tx) => {
+    const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
+      s.name AS site_name,c.name AS contractor_name
+      FROM fix_track_quote_submissions qs
+      JOIN contractor_email_queue q ON q.id=qs.queue_id JOIN fix_track_issues i ON i.id=q.issue_id
+      LEFT JOIN sites s ON s.id=i.site_id LEFT JOIN contractors c ON c.id=q.contractor_id
+      WHERE qs.id=${id} AND qs.client_id=${clientId} AND qs.status='submitted'${deptScope}
+      FOR UPDATE OF qs,q,i`);
+    const q = (r.rows as any[])[0]; if (!q) return null;
+    const subject = `Job Assigned: ${q.title}`;
+    const text = [
+      `Dear ${q.contractor_name ?? "Contractor"},`,
+      `The job "${q.title}" has been assigned to you.`,
+      `Site: ${q.site_name ?? "Not specified"}`,
+      `Location: ${q.location ?? "Not specified"}`,
+      `Type: ${q.issue_type}`,
+      `Priority: ${q.priority}`,
+      q.description ?? "",
+    ].filter(Boolean).join("\n");
+    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
+      <p>Dear ${escapeHtml(q.contractor_name ?? "Contractor")},</p>
+      <p>The following job has been assigned to you.</p>
+      <h2>${escapeHtml(q.title)}</h2>
+      <p><strong>Site:</strong> ${escapeHtml(q.site_name ?? "Not specified")}<br>
+      <strong>Location:</strong> ${escapeHtml(q.location ?? "Not specified")}<br>
+      <strong>Type:</strong> ${escapeHtml(q.issue_type)}<br>
+      <strong>Priority:</strong> ${escapeHtml(q.priority)}</p>
+      ${q.description ? `<p>${escapeHtml(q.description)}</p>` : ""}
+    </div>`;
+    await tx.execute(sql`UPDATE fix_track_quote_submissions SET status='accepted' WHERE id=${id}`);
+    await tx.execute(sql`UPDATE fix_track_issues SET contractor_id=${q.contractor_id}, email_request_mode='assign',
+      email_request_status='pending', updated_at=now() WHERE id=${q.issue_id} AND client_id=${clientId}`);
+    await tx.execute(sql`INSERT INTO contractor_email_queue
+      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,email_preview_json,requested_by,idempotency_key)
+      VALUES (${clientId},${q.issue_id},'fix_track',${q.issue_id},${q.department_id},${q.contractor_id},'assign','assignment',${q.to_email},
+      ${subject},${html},${text},
+      ${JSON.stringify({ subject, text, html })},${(req.session as any).userId ?? null},${randomUUID()})`);
+    return q;
+  });
+  if (!out) return res.status(404).json({ error: "Quote not found" });
+  res.json({ ok: true, status: "accepted", assignmentQueued: true });
 });
 
 // Manager: approve a specific requested mode. Approval and dispatch are
@@ -729,11 +1126,19 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
     );
   }
 
-  const [row] = await db
+  const [row] = await db.transaction(async (tx) => {
+    const updated = await tx
     .update(fixTrackIssuesTable)
     .set({ emailRequestStatus: "rejected", updatedAt: new Date() })
     .where(and(...rejectConditions))
     .returning();
+    if (updated[0]) {
+      await tx.execute(sql`UPDATE contractor_email_queue SET status='cancelled',
+        last_error='Dismissed by manager', updated_at=now()
+        WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id} AND status='pending'`);
+    }
+    return updated;
+  });
   if (!row) return res.status(409).json({ error: "There is no pending contractor email request to dismiss" });
   await db.insert(fixTrackIssueActivityTable).values({
     clientId,
@@ -748,8 +1153,9 @@ router.post("/issues/:id/reject-send", requireAuth, denyViewers, async (req, res
 // ── Send to contractor (managers only) ────────────────────────────────────────
 
 router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const maybeClientId = getClientId(req);
+  if (!maybeClientId) return res.status(400).json({ error: "No client context" });
+  const clientId: number = maybeClientId;
   if (!isManager(req)) {
     return res.status(403).json({ error: "Manager approval required — use 'Request approval' instead" });
   }
@@ -769,6 +1175,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     SELECT
       fi.id, fi.title, fi.issue_type, fi.priority, fi.location, fi.description,
        fi.target_date, fi.contractor_id, fi.email_request_mode, fi.email_request_status,
+       q.quote_token,
       s.name  AS site_name,
       c.name  AS contractor_name,
       c.email AS contractor_email,
@@ -777,6 +1184,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     LEFT  JOIN sites       s  ON s.id  = fi.site_id
     LEFT  JOIN contractors c  ON c.id  = fi.contractor_id
     LEFT  JOIN clients     cl ON cl.id = fi.client_id
+     LEFT  JOIN contractor_email_queue q ON q.issue_id = fi.id AND q.client_id = fi.client_id
+       AND q.mode = 'quote' AND q.status IN ('pending','approved','sending')
     WHERE fi.id = ${id} AND fi.client_id = ${clientId}${sendDeptClause}
     LIMIT 1
   `);
@@ -790,256 +1199,42 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     return res.status(403).json({ error: "An approved contractor email request is required before sending" });
   }
   const mode = issue.email_request_mode as "assign" | "quote";
-
-  // Claim only an approved request before reaching either email sender. In
-  // particular, never allow a second request that merely observes `sending` to
-  // reach the provider: this is the final approval and concurrency gate.
-  const claim = await db.execute(sql`
-    UPDATE fix_track_issues
-    SET email_request_status = 'sending', updated_at = now()
-    WHERE id = ${id} AND client_id = ${clientId}
-      AND email_request_status = 'approved' AND email_request_mode = ${mode}${sendUpdateDeptClause}
-    RETURNING id
-  `);
-  if (!(claim.rows as any[])[0]) {
-    return res.status(409).json({ error: "This contractor email request is already being processed or has changed" });
-  }
-  const markSent = () => db.execute(sql`
-    UPDATE fix_track_issues
-    SET email_request_status = 'sent',
-        email_sent_by = ${(req.session as any).userId ?? null},
-        email_sent_at = now(),
-        updated_at = now()
-    WHERE id = ${id} AND client_id = ${clientId} AND email_request_status = 'sending'
-  `);
-  const restoreApproval = () => db.execute(sql`
-    UPDATE fix_track_issues
-    SET email_request_status = 'approved', updated_at = now()
-    WHERE id = ${id} AND client_id = ${clientId} AND email_request_status = 'sending'
-  `);
-
-  // Insert before calling the provider. The unique client/issue/mode tuple
-  // gives every dispatch a stable identity, including retries after a crash.
-  let dispatch: any;
-  let providerAccepted = false;
-  try {
-  const insertedDispatch = await db.execute(sql`
-    INSERT INTO fix_track_email_dispatches (client_id, issue_id, mode, idempotency_key, status)
-    VALUES (${clientId}, ${id}, ${mode}, ${randomUUID()}, 'sending')
-    ON CONFLICT (client_id, issue_id, mode) DO NOTHING
-    RETURNING id, idempotency_key, status
-  `);
-  dispatch = (insertedDispatch.rows as any[])[0];
-  if (!dispatch) {
-    const existingDispatch = await db.execute(sql`
-      SELECT id, idempotency_key, status
-      FROM fix_track_email_dispatches
-      WHERE client_id = ${clientId} AND issue_id = ${id} AND mode = ${mode}
-      LIMIT 1
-    `);
-    dispatch = (existingDispatch.rows as any[])[0];
-  }
-  if (!dispatch) throw new Error("Could not create contractor email dispatch");
-
-  // The provider already accepted this exact dispatch; only repair the issue
-  // state. Never submit another provider request in this case.
-  if (dispatch.status === "accepted") {
-    await markSent();
-    return res.json({ ok: true, message: mode === "quote" ? "Quote request already sent to contractor" : "Email already sent to contractor" });
-  }
-  if (dispatch.status === "failed") {
-    await db.execute(sql`
-      UPDATE fix_track_email_dispatches
-      SET status = 'sending', last_error = NULL, updated_at = now()
-      WHERE id = ${dispatch.id} AND client_id = ${clientId} AND status = 'failed'
-    `);
-  }
-
-  const markProviderAccepted = () => db.execute(sql`
-    UPDATE fix_track_email_dispatches
-    SET status = 'accepted', accepted_at = now(), last_error = NULL, updated_at = now()
-    WHERE id = ${dispatch.id} AND client_id = ${clientId}
-  `);
-    if (mode === "quote") {
-    // Quote requests carry no action tokens — just send the email.
-    const quoteDocs: { name: string; url: string }[] = [];
-    const quoteDocResult = await db.execute(sql`
-      SELECT sd.name, sd.object_path
-      FROM   fix_track_issues fi
-      JOIN   site_documents   sd ON sd.site_id = fi.site_id AND sd.client_id = fi.client_id
-      WHERE  fi.id = ${id} AND fi.client_id = ${clientId} AND fi.site_id IS NOT NULL
-      LIMIT  10
-    `);
-    for (const doc of (quoteDocResult.rows as any[])) {
-      try {
-        const url = await authorisedSiteDocumentUrl(doc.object_path as string, clientId);
-        if (url) quoteDocs.push({ name: doc.name as string, url });
-      } catch { /* skip */ }
-    }
-
-    await sendContractorQuoteEmail({
-      contractorName:   issue.contractor_name   ?? "Contractor",
-      contractorEmail:  issue.contractor_email,
-      issueTitle:       issue.title,
-      issueType:        issue.issue_type,
-      issuePriority:    issue.priority,
-      issueLocation:    issue.location,
-      issueDescription: issue.description,
-      siteName:         issue.site_name,
-      companyName:      issue.company_name ?? "ComplyTrack",
-      clientId,
-      siteDocuments:    quoteDocs.length ? quoteDocs : undefined,
-      idempotencyKey:   dispatch.idempotency_key,
-    });
-    providerAccepted = true;
-    await markProviderAccepted();
-    await markSent();
-      await db.insert(fixTrackIssueActivityTable).values({
-        clientId, issueId: id, eventType: "email_sent", note: mode,
-        createdBy: (req.session as any).userId ?? null,
-      });
-      return res.json({ ok: true, message: "Quote request sent to contractor" });
-    }
-
-    // The state claim above prevents resends. Expire any legacy action links
-    // before minting the one approved assignment's links.
-    await db.execute(sql`
-    UPDATE fix_track_action_tokens
-    SET    expires_at = now()
-    WHERE  issue_id   = ${id}
-      AND  client_id  = ${clientId}
-      AND  used_at    IS NULL
-    `);
-
-    const proto   = (req.headers["x-forwarded-proto"] as string) ?? req.protocol;
-    const host    = (req.headers["x-forwarded-host"]  as string) ?? req.get("host") ?? "";
-    const baseUrl = `${proto}://${host}`;
-
-    const tokens = await generateActionTokens(id, clientId, issue.contractor_id);
-
-  // CC the approving manager so they get a copy (and the calendar invite).
-  const rawManagerEmail = req.currentUser?.email?.trim() || undefined;
-  const managerEmail =
-    rawManagerEmail && rawManagerEmail.toLowerCase() !== String(issue.contractor_email).toLowerCase()
-      ? rawManagerEmail
-      : undefined;
-
-  // Build a calendar invite for the job visit (best-effort). Use the issue's
-  // target date if set, otherwise fall back to 2 weeks from today so the
-  // contractor always receives a calendar placeholder they can reschedule.
-  let icsAttachment: string | undefined;
-  let icsFilename: string | undefined;
-  try {
-    // Resolve the visit date: target_date if set, else 2 weeks from now.
-    let visitDate: Date;
-    if (issue.target_date) {
-      // pg returns date columns as Date objects (at UTC midnight); use UTC
-      // components so the calendar day never shifts with server timezone.
-      const raw = issue.target_date;
-      const parsed = raw instanceof Date
-        ? new Date(Date.UTC(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate(), 9, 0, 0))
-        : new Date(`${raw}T09:00:00Z`);
-      visitDate = !isNaN(parsed.getTime()) ? parsed : (() => {
-        const d = new Date(); d.setUTCDate(d.getUTCDate() + 14); d.setUTCHours(9, 0, 0, 0); return d;
-      })();
-    } else {
-      // No target date — default to 2 weeks from today at 09:00 UTC.
-      const d = new Date();
-      d.setUTCDate(d.getUTCDate() + 14);
-      d.setUTCHours(9, 0, 0, 0);
-      visitDate = d;
-    }
-
-    const fromRow = await db.execute(sql`
-      SELECT value FROM app_settings
-      WHERE client_id = ${clientId} AND key = 'smtpFrom' LIMIT 1
-    `);
-    const fromEmail =
-      ((fromRow.rows as any[])[0]?.value as string | undefined) ??
-      process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-
-    // Build the calendar invite using the existing rich builder.
-    icsAttachment = buildCalendarInvite({
-      itemTitle: `ComplyTrack Job Visit — ${issue.title}`,
-      dueDate: visitDate,
-      contractorName: issue.contractor_name ?? "Contractor",
-      contractorEmail: issue.contractor_email,
-      companyName: issue.company_name ?? "ComplyTrack",
-      fromEmail,
-      notes: issue.description ?? null,
-      extraAttendees: managerEmail ? [{ name: req.currentUser?.name ?? undefined, email: managerEmail }] : undefined,
-    });
-    icsFilename = `${(issue.title as string).replace(/[^a-z0-9]/gi, "-").toLowerCase()}.ics`;
-  } catch {
-    // Never block the email on invite generation
-  }
-
-  // Generate 30-day signed download links for site documents (best-effort).
-  const siteDocuments: { name: string; url: string }[] = [];
-  const siteDocResult = await db.execute(sql`
-    SELECT sd.name, sd.object_path
-    FROM   fix_track_issues fi
-    JOIN   site_documents   sd ON sd.site_id = fi.site_id AND sd.client_id = fi.client_id
-    WHERE  fi.id        = ${id}
-      AND  fi.client_id = ${clientId}
-      AND  fi.site_id   IS NOT NULL
-    LIMIT  10
-  `);
-
-  for (const doc of (siteDocResult.rows as any[])) {
-    try {
-      const url = await authorisedSiteDocumentUrl(doc.object_path as string, clientId);
-      if (url) siteDocuments.push({ name: doc.name as string, url });
-    } catch {
-      // Skip any document that fails — don't block the email
-    }
-  }
-
-  await sendContractorAssignmentEmail({
-    contractorName:   issue.contractor_name   ?? "Contractor",
-    contractorEmail:  issue.contractor_email,
-    issueTitle:       issue.title,
-    issueType:        issue.issue_type,
-    issuePriority:    issue.priority,
-    issueLocation:    issue.location,
-    issueDescription: issue.description,
-    siteName:         issue.site_name,
-    companyName:      issue.company_name      ?? "ComplyTrack",
-    bookedToken:      tokens.bookedToken,
-    completedToken:   tokens.completedToken,
-    baseUrl,
-    clientId,
-    siteDocuments:    siteDocuments.length ? siteDocuments : undefined,
-    icsAttachment,
-    icsFilename,
-    cc:               managerEmail,
-    idempotencyKey:   dispatch.idempotency_key,
+  const queueRow = await db.transaction(async (tx) => {
+    const queued = await tx.execute(sql`UPDATE contractor_email_queue
+      SET status='sending', approved_by=COALESCE(approved_by,${(req.session as any).userId ?? null}),
+        approved_at=COALESCE(approved_at,now()), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
+      WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue WHERE client_id=${clientId}
+        AND entity_type='fix_track' AND entity_id=${id} AND status='pending'
+        AND mode=${mode}${queueDepartmentScope(req)} ORDER BY created_at DESC LIMIT 1)
+      RETURNING *`);
+    const row = (queued.rows as any[])[0];
+    if (row) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now()
+      WHERE id=${id} AND client_id=${clientId} AND email_request_status='approved'`);
+    return row;
   });
-
-  providerAccepted = true;
-  await markProviderAccepted();
-  await markSent();
-  await db.insert(fixTrackIssueActivityTable).values({
-    clientId, issueId: id, eventType: "email_sent", note: mode,
-    createdBy: (req.session as any).userId ?? null,
-  });
-  res.json({ ok: true, message: "Email sent to contractor" });
+  if (!queueRow) return res.status(409).json({ error: "The reviewed contractor email draft is no longer pending" });
+  try {
+    await dispatchStoredContractorEmail({
+      to: queueRow.to_email, subject: queueRow.subject, html: queueRow.body_html,
+      text: queueRow.body_text ?? undefined, clientId, idempotencyKey: queueRow.idempotency_key,
+    });
+    await db.execute(sql`UPDATE contractor_email_queue SET status='sent',sent_at=now(),updated_at=now()
+      WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);
+    await db.execute(sql`UPDATE fix_track_issues SET email_request_status='sent',
+      email_sent_by=${(req.session as any).userId ?? null},email_sent_at=now(),updated_at=now()
+      WHERE id=${id} AND client_id=${clientId}`);
+    return res.json({ ok: true, message: mode === "quote" ? "Quote request sent to contractor" : "Email sent to contractor" });
   } catch (err) {
-    // Only an explicit provider failure is retryable. If provider acceptance
-    // succeeded but persisting it failed, retain `sending`: retrying with the
-    // same durable provider idempotency key is safe and cannot duplicate mail.
-    if (!providerAccepted) {
-      if (dispatch) {
-      await db.execute(sql`
-        UPDATE fix_track_email_dispatches
-        SET status = 'failed', last_error = ${err instanceof Error ? err.message.slice(0, 2000) : "Provider submission failed"}, updated_at = now()
-        WHERE id = ${dispatch.id} AND client_id = ${clientId} AND status = 'sending'
-      `).catch(() => {});
-      }
-      await restoreApproval();
-    }
-    throw err;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
+        last_error=${err instanceof Error ? err.message.slice(0,2000) : "Email failed"},updated_at=now()
+        WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);
+      await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='approved',updated_at=now()
+        WHERE id=${id} AND client_id=${clientId} AND email_request_status='sending'`);
+    });
+    return res.status(502).json({ error: "Contractor email could not be sent" });
   }
+
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────
