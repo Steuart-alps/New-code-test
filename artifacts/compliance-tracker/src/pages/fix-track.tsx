@@ -574,6 +574,17 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 // ── Priority board ────────────────────────────────────────────────────────────
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const DAY_MS = 86_400_000;
+
+function startOfLocalDay(value: string | Date): Date {
+  const date = typeof value === "string" ? new Date(`${value.slice(0, 10)}T00:00:00`) : new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function elapsedDays(from: string, to = new Date()): number {
+  return Math.max(0, Math.floor((startOfLocalDay(to).getTime() - startOfLocalDay(from).getTime()) / DAY_MS));
+}
 
 function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue) => void }) {
   // Open issues only, grouped by trade area (issueType).
@@ -617,8 +628,9 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
             {items.map(issue => {
               const priorityMeta = PRIORITIES[issue.priority] ?? PRIORITIES.medium;
               const statusMeta   = STATUSES[issue.status] ?? STATUSES.reported;
-              const overdue = issue.targetDate && new Date(issue.targetDate) < new Date()
-                && (issue.status === "reported" || issue.status === "in_progress");
+              const daysOpen = elapsedDays(issue.reportedDate);
+              const daysOverdue = issue.targetDate ? elapsedDays(issue.targetDate) : 0;
+              const overdue = daysOverdue > 0;
               return (
                 <button
                   key={issue.id}
@@ -634,12 +646,34 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
                   </div>
                   <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    {issue.siteName && <div className="truncate flex items-center gap-1"><MapPin className="w-3 h-3" /> {issue.siteName}</div>}
+                    <div className="truncate flex items-center gap-1">
+                      <MapPin className="w-3 h-3 flex-shrink-0" />
+                      <span>{issue.siteName ?? "No site"}</span>
+                    </div>
+                    <div className="truncate flex items-center gap-1">
+                      <User className="w-3 h-3 flex-shrink-0" />
+                      <span>{issue.contractorName ?? "Unassigned"}</span>
+                    </div>
                     {issue.targetDate && (
-                      <div className={cn(overdue && "text-rose-600 font-medium")}>
-                        Target {format(new Date(issue.targetDate), "dd/MM/yyyy")}{overdue ? " · overdue" : ""}
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 flex-shrink-0" />
+                        <span>Target {format(startOfLocalDay(issue.targetDate), "dd/MM/yyyy")}</span>
                       </div>
                     )}
+                    {!issue.targetDate && (
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 flex-shrink-0" />
+                        <span>No target date</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <span className="font-medium text-foreground">{daysOpen} {daysOpen === 1 ? "day" : "days"} open</span>
+                      {overdue && (
+                        <span className="font-semibold text-rose-600">
+                          {daysOverdue} {daysOverdue === 1 ? "day" : "days"} overdue
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </button>
               );
@@ -955,7 +989,7 @@ export default function FixTrackPage() {
         {activeTab === "board" && (
           loading
             ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
-            : <FixTrackBoard issues={issues} onEdit={openDetail} />
+            : <FixTrackBoard issues={issues} onEdit={openEdit} />
         )}
 
         {/* Issues tab — Filters */}
