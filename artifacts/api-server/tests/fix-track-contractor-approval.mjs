@@ -153,6 +153,17 @@ async function main() {
     route.includes('current.emailRequestStatus === "sending"'));
   check("signed site documents require matching private tenant ACL",
     route.includes('acl?.visibility !== "private" || acl.owner !== String(clientId)'));
+  check("site document query is scoped to the issue tenant and site",
+    route.includes("WHERE client_id = ${clientId} AND site_id = ${siteId}"));
+  check("issues without a site omit site documents",
+    route.includes("if (siteId == null) return [];"));
+  check("assignment drafts receive signed site documents",
+    route.includes("siteDocumentsForContractorEmail(draft.site_id, clientId)") &&
+    route.includes("baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true"));
+  check("assignment template renders site documents as clickable links",
+    templates.includes("📎 Site Documents") &&
+    templates.includes('href="${escapeHtml(d.url)}"') &&
+    templates.includes("${escapeHtml(d.name)}"));
 
   console.log(`${passed} FixTrack contractor approval checks passed, ${failures.length} failed.`);
   if (failures.length) process.exit(1);

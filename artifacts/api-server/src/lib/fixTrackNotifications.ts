@@ -168,7 +168,7 @@ export async function sendContractorAssignmentEmail(opts: ContractorAssignmentOp
     </p>
     ${siteDocuments.map(d => `
     <div style="margin-bottom:6px">
-      <a href="${d.url}" style="font-size:13px;color:#2563eb;text-decoration:none">
+      <a href="${escapeHtml(d.url)}" style="font-size:13px;color:#2563eb;text-decoration:none">
         ${escapeHtml(d.name)}
       </a>
     </div>`).join("")}
@@ -270,7 +270,7 @@ export async function sendContractorQuoteEmail(opts: ContractorQuoteOpts): Promi
     <p style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px">📎 Site Documents</p>
     ${siteDocuments.map(d => `
     <div style="margin-bottom:6px">
-      <a href="${d.url}" style="font-size:13px;color:#2563eb;text-decoration:none">${escapeHtml(d.name)}</a>
+      <a href="${escapeHtml(d.url)}" style="font-size:13px;color:#2563eb;text-decoration:none">${escapeHtml(d.name)}</a>
     </div>`).join("")}
     <p style="font-size:11px;color:#94a3b8;margin:10px 0 0">Links expire in 30 days.</p>
   </div>` : ""}

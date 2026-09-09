@@ -99,6 +99,24 @@ async function authorisedSiteDocumentUrl(objectPath: string, clientId: number): 
   }
 }
 
+async function siteDocumentsForContractorEmail(
+  siteId: number | null | undefined,
+  clientId: number,
+): Promise<{ name: string; url: string }[]> {
+  if (siteId == null) return [];
+  const result = await db.execute(sql`
+    SELECT name, object_path
+    FROM site_documents
+    WHERE client_id = ${clientId} AND site_id = ${siteId}
+    ORDER BY created_at DESC, id DESC
+  `);
+  const documents = await Promise.all((result.rows as any[]).map(async (row) => {
+    const url = await authorisedSiteDocumentUrl(String(row.object_path), clientId);
+    return url ? { name: String(row.name), url } : null;
+  }));
+  return documents.filter((document): document is { name: string; url: string } => document !== null);
+}
+
 // Gas is one issue type but three distinct trades.
 const GAS_SUBTRADES = ["gas_kitchen", "gas_fireplace", "gas_heating", "gas"];
 
@@ -484,6 +502,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         WHERE i.id=${id} AND i.client_id=${clientId} ORDER BY q.created_at DESC LIMIT 1`);
       const draft = (draftResult.rows as any[])[0];
       if (draft?.contractor_email) {
+        const siteDocuments = await siteDocumentsForContractorEmail(draft.site_id, clientId);
         const rendered = draft.mode === "quote"
           ? await sendContractorQuoteEmail({
               contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
@@ -498,7 +517,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
               issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
               companyName: draft.company_name,
               ...(await generateActionTokens(id, clientId, draft.contractor_id)),
-              baseUrl: getPublicAppUrl(), clientId, previewOnly: true,
+              baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
             });
         const text = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
@@ -718,7 +737,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   // Persist the exact draft that will cross the email boundary. Approval is
   // for these stored bytes, not for a later re-render of a changed issue.
   const draftResult = await db.execute(sql`
-    SELECT i.title, i.description, i.location, i.priority, i.issue_type,
+    SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id,
            s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
            cl.name AS company_name
     FROM fix_track_issues i
@@ -731,6 +750,9 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   const draft = (draftResult.rows as any[])[0];
   if (!draft?.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
   const quoteToken = parsed.data.mode === "quote" ? randomUUID() : null;
+  const siteDocuments = parsed.data.mode === "assign"
+    ? await siteDocumentsForContractorEmail(draft.site_id, clientId)
+    : [];
   const quoteUrl = quoteToken ? `${getPublicAppUrl()}/contractor-quote/${quoteToken}` : null;
   let previewSubject = parsed.data.mode === "quote"
     ? `Quote requested: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`
@@ -771,7 +793,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
       issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
       issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
       companyName: draft.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
-      baseUrl: getPublicAppUrl(), clientId, previewOnly: true,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
     });
     previewSubject = rendered.subject;
     previewHtml = rendered.html;
@@ -1174,7 +1196,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   const result = await db.execute(sql`
     SELECT
       fi.id, fi.title, fi.issue_type, fi.priority, fi.location, fi.description,
-       fi.target_date, fi.contractor_id, fi.email_request_mode, fi.email_request_status,
+       fi.target_date, fi.site_id, fi.contractor_id, fi.email_request_mode, fi.email_request_status,
        q.quote_token,
       s.name  AS site_name,
       c.name  AS contractor_name,
