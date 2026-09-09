@@ -377,6 +377,7 @@ export async function runRuntimeMigrations() {
     await migrateSiteDocuments();
     await migrateFixTrackV2();
     await migrateMobileSessions();
+    await migrateMobileLoginChallenges();
     await migrateIncidents();
     await migrateComplianceAuditTrail();
     await migrateSousVide();
@@ -2781,12 +2782,25 @@ async function migrateMobileSessions() {
   `);
 }
 
-// Adds optional per-site scoping to the kitchen diary and reworks the
-// uniqueness so that the same (client, date) can exist once per site plus once
-// for the whole organisation (site_id IS NULL). Because Postgres treats NULLs
-// as distinct, a single unique index over (client_id, record_date, site_id)
-// would NOT prevent two whole-org rows for the same day; so we use two partial
-// unique indexes instead.
+async function migrateMobileLoginChallenges() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "mobile_login_challenges" (
+      "id"         serial PRIMARY KEY,
+      "user_id"    integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "token_hash" text NOT NULL,
+      "expires_at" timestamp NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_mobile_login_challenges_token_hash"
+    ON "mobile_login_challenges" ("token_hash")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_mobile_login_challenges_expiry"
+    ON "mobile_login_challenges" ("expires_at")
+  `);
+}
 async function migrateFoodSafetySiteScoping() {
   // 1. Nullable site_id column (whole-org diary keeps site_id NULL).
   await db.execute(sql`

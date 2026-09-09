@@ -35,7 +35,12 @@ interface AuthContextType {
   isAuthenticated: boolean;
   services: 'all' | string[] | null;
   hasService: (key: string) => boolean;
-  login: (email: string, password: string, code?: string) => Promise<{ requires2fa: boolean }>;
+  login: (
+    email: string,
+    password: string,
+    pendingToken?: string,
+    code?: string,
+  ) => Promise<{ pendingToken?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -89,15 +94,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [applyToken]);
 
   const login = useCallback(
-    async (email: string, password: string, code?: string): Promise<{ requires2fa: boolean }> => {
-      const res = await apiFetch<
-        { token: string; user: AuthUser } | { requires2fa: true }
-      >('/api/auth/mobile-login', {
-        method: 'POST',
-        body: JSON.stringify(code ? { email, password, code } : { email, password }),
-      });
-      if ('requires2fa' in res && res.requires2fa) {
-        return { requires2fa: true };
+    async (
+      email: string,
+      password: string,
+      pendingToken?: string,
+      code?: string,
+    ): Promise<{ pendingToken?: string }> => {
+      const res = pendingToken
+        ? await apiFetch<{ token: string; user: AuthUser }>(
+            '/api/auth/mobile-login/verify-totp',
+            {
+              method: 'POST',
+              body: JSON.stringify({ pendingToken, code }),
+            },
+          )
+        : await apiFetch<
+            { token: string; user: AuthUser } | { pendingToken: string }
+          >('/api/auth/mobile-login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password }),
+          });
+      if ('pendingToken' in res) {
+        return { pendingToken: res.pendingToken };
       }
       const ok = res as { token: string; user: AuthUser };
       // A different account must never inherit another user's recoverable
@@ -125,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       // Register this device for push once the bearer token is active.
       void registerForPushNotifications();
-      return { requires2fa: false };
+      return {};
     },
     [applyToken],
   );

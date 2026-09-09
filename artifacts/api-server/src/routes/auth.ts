@@ -687,10 +687,46 @@ router.post("/auth/resend-verification", registrationRateLimit, async (req, res)
 const MobileLoginBody = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-  // Optional TOTP (or recovery) code for accounts with 2FA enabled. The mobile
-  // flow is stateless: the client re-submits credentials together with the code.
-  code: z.string().optional(),
 });
+
+const MobileTotpVerificationBody = z.object({
+  pendingToken: z.string().min(1),
+  code: z.string().min(1),
+});
+
+const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+function hashMobileLoginChallenge(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+async function issueMobileSession(user: {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  clientId: number | null;
+}) {
+  const token = randomBytes(32).toString("hex");
+  // 90-day expiry — long enough for regular field use, refreshed on each login
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+
+  await db.execute(sql`
+    INSERT INTO mobile_sessions (user_id, token, expires_at)
+    VALUES (${user.id}, ${token}, ${expiresAt})
+  `);
+
+  return {
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      clientId: user.clientId ?? null,
+    },
+  };
+}
 
 /**
  * POST /api/auth/mobile-login
@@ -728,45 +764,133 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  // 2FA: if the account has TOTP enabled, require a code. The mobile client
-  // re-submits email + password + code (stateless — no pending session).
+  // Do not issue a bearer token until a second request proves possession of the
+  // user's authenticator. Only a digest of the short-lived challenge is stored.
   if (result.user.totpEnabled && result.user.totpSecret) {
-    const trimmed = (body.data.code ?? "").trim();
-    if (!trimmed) {
-      res.json({ requires2fa: true });
-      return;
-    }
-    if (/^\d{6}$/.test(trimmed)) {
-      if (!verifyToken(trimmed, result.user.totpSecret)) {
-        res.status(401).json({ error: "Incorrect code. Please try again." });
-        return;
-      }
-    } else {
-      // Treat as a one-time recovery code and consume only the matching row.
-      if (!await consumeRecoveryCode(result.user.id, trimmed)) {
-        res.status(401).json({ error: "Incorrect code. Please try again." });
-        return;
-      }
-    }
+    const pendingToken = randomBytes(32).toString("hex");
+    const tokenHash = hashMobileLoginChallenge(pendingToken);
+    const expiresAt = new Date(Date.now() + MOBILE_LOGIN_CHALLENGE_TTL_MS);
+    await db.execute(sql`DELETE FROM mobile_login_challenges WHERE expires_at <= now()`);
+    await db.execute(sql`
+      INSERT INTO mobile_login_challenges (user_id, token_hash, expires_at)
+      VALUES (${result.user.id}, ${tokenHash}, ${expiresAt})
+    `);
+    res.json({ pendingToken });
+    return;
   }
 
-  const token = randomBytes(32).toString("hex");
-  // 90-day expiry — long enough for regular field use, refreshed on each login
-  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  res.json(await issueMobileSession(result.user));
+});
 
-  await db.execute(sql`
-    INSERT INTO mobile_sessions (user_id, token, expires_at)
-    VALUES (${result.user.id}, ${token}, ${expiresAt})
-  `);
+/**
+ * POST /api/auth/mobile-login/verify-totp
+ * Exchanges a valid five-minute login challenge and 2FA code for a bearer token.
+ */
+router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) => {
+  const body = MobileTotpVerificationBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Pending token and verification code are required" });
+    return;
+  }
 
-  const safeUser = {
-    id: result.user.id,
-    email: result.user.email,
-    name: result.user.name,
-    role: result.user.role,
-    clientId: result.user.clientId ?? null,
-  };
-  res.json({ token, user: safeUser });
+  const tokenHash = hashMobileLoginChallenge(body.data.pendingToken);
+  const verification = await db.transaction(async (tx) => {
+    // Lock the challenge for the full exchange so concurrent requests cannot
+    // consume recovery factors or issue more than one bearer session.
+    const challengeResult = await tx.execute(sql`
+      SELECT
+        c.id AS challenge_id,
+        u.id,
+        u.email,
+        u.name,
+        u.role,
+        u.client_id,
+        u.active,
+        u.totp_enabled,
+        u.totp_secret
+      FROM mobile_login_challenges c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.token_hash = ${tokenHash}
+        AND c.expires_at > now()
+      LIMIT 1
+      FOR UPDATE OF c
+    `);
+    const user = challengeResult.rows?.[0] as {
+      challenge_id: number;
+      id: number;
+      email: string;
+      name: string;
+      role: string;
+      client_id: number | null;
+      active: boolean;
+      totp_enabled: boolean;
+      totp_secret: string | null;
+    } | undefined;
+
+    if (!user || !user.active || !user.totp_enabled || !user.totp_secret) {
+      return { status: "invalid-challenge" as const };
+    }
+
+    const code = body.data.code.trim();
+    let codeIsValid: boolean;
+    if (/^\d{6}$/.test(code)) {
+      codeIsValid = verifyToken(code, user.totp_secret);
+    } else {
+      const recoveryResult = await tx.execute(sql`
+        UPDATE totp_recovery_codes
+        SET used_at = now()
+        WHERE id = (
+          SELECT id
+          FROM totp_recovery_codes
+          WHERE user_id = ${user.id}
+            AND code_hash = ${hashRecoveryCode(code)}
+            AND used_at IS NULL
+          LIMIT 1
+          FOR UPDATE
+        ) AND used_at IS NULL
+        RETURNING id
+      `);
+      codeIsValid = (recoveryResult.rows?.length ?? 0) > 0;
+    }
+    if (!codeIsValid) {
+      return { status: "invalid-code" as const };
+    }
+
+    await tx.execute(sql`
+      DELETE FROM mobile_login_challenges
+      WHERE id = ${user.challenge_id}
+    `);
+
+    const token = randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    await tx.execute(sql`
+      INSERT INTO mobile_sessions (user_id, token, expires_at)
+      VALUES (${user.id}, ${token}, ${expiresAt})
+    `);
+
+    return {
+      status: "success" as const,
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        clientId: user.client_id,
+      },
+    };
+  });
+
+  if (verification.status === "invalid-challenge") {
+    res.status(401).json({ error: "This verification request is invalid or has expired. Please sign in again." });
+    return;
+  }
+  if (verification.status === "invalid-code") {
+    res.status(401).json({ error: "Incorrect code. Please try again." });
+    return;
+  }
+
+  res.json({ token: verification.token, user: verification.user });
 });
 
 /**

@@ -25,7 +25,7 @@ export default function LoginScreen() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [needs2fa, setNeeds2fa] = useState(false);
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [usingRecoveryCode, setUsingRecoveryCode] = useState(false);
   const passwordRef = useRef<TextInput>(null);
@@ -33,25 +33,32 @@ export default function LoginScreen() {
 
   async function handleLogin() {
     if (!email.trim() || !password) return;
-    if (needs2fa && !code.trim()) return;
+    if (pendingToken && !code.trim()) return;
     setError('');
     setLoading(true);
     try {
       const result = await login(
         email.trim().toLowerCase(),
         password,
-        needs2fa ? code.trim() : undefined,
+        pendingToken ?? undefined,
+        pendingToken ? code.trim() : undefined,
       );
-      if (result.requires2fa) {
-        setNeeds2fa(true);
+      if (result.pendingToken) {
+        setPendingToken(result.pendingToken);
         setLoading(false);
         setTimeout(() => codeRef.current?.focus(), 100);
         return;
       }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Sign-in failed. Please try again.';
+      if (message.toLowerCase().includes('invalid or has expired')) {
+        setPendingToken(null);
+        setCode('');
+      }
       setError(
-        err instanceof Error ? err.message : 'Sign-in failed. Please try again.',
+        message,
       );
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
@@ -60,7 +67,7 @@ export default function LoginScreen() {
   }
 
   const disabled =
-    !email.trim() || !password || loading || (needs2fa && !code.trim());
+    !email.trim() || !password || loading || (pendingToken !== null && !code.trim());
 
   return (
     <View style={[styles.root, { backgroundColor: colors.navy }]}>
@@ -138,6 +145,7 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!pendingToken}
               returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
               testID="email-input"
@@ -167,6 +175,7 @@ export default function LoginScreen() {
                 placeholderTextColor={colors.mutedForeground}
                 secureTextEntry={!showPw}
                 autoCapitalize="none"
+                editable={!pendingToken}
                 returnKeyType="go"
                 onSubmitEditing={handleLogin}
                 testID="password-input"
@@ -185,7 +194,7 @@ export default function LoginScreen() {
             </View>
 
             {/* 2FA code */}
-            {needs2fa && (
+            {pendingToken && (
               <>
                 <Text
                   style={[
@@ -240,6 +249,21 @@ export default function LoginScreen() {
                      {usingRecoveryCode ? 'Use authenticator code' : 'Use a recovery code'}
                    </Text>
                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setPendingToken(null);
+                      setCode('');
+                      setUsingRecoveryCode(false);
+                      setError('');
+                      setTimeout(() => passwordRef.current?.focus(), 50);
+                    }}
+                    style={{ marginTop: 10 }}
+                    testID="restart-login-btn"
+                  >
+                    <Text style={{ color: colors.mutedForeground, fontWeight: '600' }}>
+                      Sign in again
+                    </Text>
+                  </TouchableOpacity>
               </>
             )}
 
