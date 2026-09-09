@@ -22,3 +22,9 @@ Every resolved shared track action requires an authenticated resolver sign-off. 
 **Why:** Inspection evidence must identify the real signed-in person who closed an action, while preserving their name even if the account is later renamed or removed.
 
 **How to apply:** Apply this to every module using the shared action register and FixTrack's native resolution flow. Keep resolved actions immutable and require remedial work, evidence, resolution notes, resolver ID, resolver-name snapshot, drawn signature, and resolution time. One resolver signs; do not add a second-person or risk-based approval requirement.
+
+Non-GreenTrack actions may optionally create one linked FixTrack issue. A recorded “No” keeps the action in its originating track but may be changed to “Yes” later. Once linked, the original action must be completed only by resolving FixTrack; copy the authenticated resolver, signature, repair notes, evidence reference, and completion time back atomically.
+
+**Why:** Physical repairs and contractor work need FixTrack workflow without losing the original module’s compliance evidence or allowing two records to diverge.
+
+**How to apply:** Preserve a one-to-one tenant- and site-scoped link, reject duplicate escalation and site changes, and keep GreenTrack excluded. FixTrack resolution and the originating action update must share one database transaction.

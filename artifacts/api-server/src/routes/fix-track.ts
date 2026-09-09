@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, usersTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
+import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, trackActionsTable, usersTable } from "@workspace/db/schema";
+import { eq, and, or, isNull, inArray, desc, ne, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
@@ -474,6 +474,12 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       .limit(1);
     if (!current) return { kind: "not_found" as const };
     if (current.emailRequestStatus === "sending") return { kind: "email_sending" as const };
+    const [linkedAction] = await tx.select().from(trackActionsTable).where(and(
+      eq(trackActionsTable.clientId, clientId),
+      eq(trackActionsTable.fixTrackIssueId, id),
+    )).for("update");
+    if (linkedAction && "siteId" in data && data.siteId !== linkedAction.siteId) return { kind: "linked_site_locked" as const };
+    if (linkedAction && !await canAccessSite(linkedAction.siteId, clientId, updateDeptId)) return { kind: "linked_site_forbidden" as const };
 
     // Re-run auto-matching when the type changes unless the caller explicitly
     // chose a contractor. Multiple or zero matches leave the job unassigned.
@@ -537,6 +543,23 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         status: data.status,
         createdBy: (req.session as any).userId ?? null,
       });
+    }
+    if (data.status === "resolved" && isStatusChange) {
+      await tx.update(trackActionsTable).set({
+        status: "resolved",
+        remedialAction: updated[0].solutionNotes?.trim() || `Repair completed through FixTrack issue #${id}`,
+        evidenceReference: `FixTrack issue #${id}${updated[0].mediaUrls?.length ? " with attached media evidence" : ""}`,
+        resolutionNotes: `Resolved automatically when linked FixTrack issue #${id} was signed off.`,
+        resolvedBy: req.currentUser!.id,
+        resolvedByName: updateData.resolvedByName,
+        resolverSignature: data.resolverSignature,
+        resolvedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(trackActionsTable.id, linkedAction?.id ?? -1),
+        eq(trackActionsTable.clientId, clientId),
+        ne(trackActionsTable.status, "resolved"),
+      ));
     }
     if (approvalInvalidated) {
         const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
@@ -632,6 +655,12 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (transitionResult.kind === "email_sending") {
     return res.status(409).json({ error: "This issue cannot be changed while its approved contractor email is sending" });
+  }
+  if (transitionResult.kind === "linked_site_locked") {
+    return res.status(409).json({ error: "A linked FixTrack issue must remain at the originating action's site" });
+  }
+  if (transitionResult.kind === "linked_site_forbidden") {
+    return res.status(403).json({ error: "The originating module action is outside your active department" });
   }
   res.json(transitionResult.row);
 });

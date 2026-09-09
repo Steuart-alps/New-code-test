@@ -35,6 +35,8 @@ export interface TrackAction {
   instructionSnapshot?: string | null;
   sourceKind?: string | null;
   sourceRecordId?: number | null;
+  fixTrackIssueId?: number | null;
+  fixTrackDisposition?: "linked" | "not_needed" | null;
   provenance?: "product_default" | "template" | "one_off" | null;
   templateId?: number | null;
   createdAt?: string | null;
@@ -201,6 +203,24 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
     }
   }
 
+  async function decideFixTrack(action: TrackAction, create: boolean) {
+    setSubmitting(true);
+    try {
+      const response = await apiFetch(`/track-actions/${action.id}/fix-track`, {
+        method: "POST",
+        body: JSON.stringify({ create }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(errorMessage(data, "Unable to update the FixTrack link"));
+      toast({ title: create ? "Added to FixTrack" : "Action kept in this track" });
+      await loadActions();
+    } catch (error) {
+      toast({ title: "Couldn't update FixTrack", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const unresolved = actions.filter(action => action.status !== "resolved");
   const resolved = actions.filter(action => action.status === "resolved");
 
@@ -232,7 +252,10 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 
           <div className="space-y-3" aria-live="polite">
             {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading actions…</div> : unresolved.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No unresolved actions for this module.</p> : unresolved.map(action => (
-               <ActionRow key={action.id} action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => setPendingSignature({ action, values })} />
+              <div key={action.id}>
+                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
+                {moduleKey !== "green" && <FixTrackChoice action={action} canMutate={canMutate} submitting={submitting} onDecision={create => decideFixTrack(action, create)} />}
+              </div>
             ))}
           </div>
 
@@ -246,6 +269,12 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
       }} />
     </section>
   );
+}
+
+function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
+  if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
+  if (!canMutate) return null;
+  return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Add it to FixTrack now?" : "Does this action require FixTrack repair or contractor work?"}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Yes, add to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;
 }
 
 function ActionRow({ action, sites, siteName, canMutate, submitting, resolution, onResolutionChange, onStart, onUpdate, onResolve }: { action: TrackAction; sites: Site[]; siteName?: string; canMutate: boolean; submitting: boolean; resolution?: { remedialAction: string; evidenceReference: string; resolutionNotes: string }; onResolutionChange?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void; onStart?: () => void; onUpdate?: (patch: Record<string, unknown>) => void; onResolve?: (value: { remedialAction: string; evidenceReference: string; resolutionNotes: string }) => void }) {

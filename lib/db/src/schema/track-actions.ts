@@ -28,6 +28,8 @@ export const trackActionsTable = pgTable("track_actions", {
   module: text("module").notNull(),
   sourceKind: text("source_kind"),
   sourceRecordId: integer("source_record_id"),
+  fixTrackIssueId: integer("fix_track_issue_id"),
+  fixTrackDisposition: text("fix_track_disposition"),
   templateId: integer("template_id").references(() => trackActionTemplatesTable.id, { onDelete: "set null" }),
   provenance: text("provenance").notNull().default("one_off"),
   title: text("title").notNull(),

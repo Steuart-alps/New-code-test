@@ -807,6 +807,8 @@ async function migrateTrackActions() {
       "module" text NOT NULL,
       "source_kind" text,
       "source_record_id" integer,
+      "fix_track_issue_id" integer,
+      "fix_track_disposition" text,
       "template_id" integer,
       "provenance" text NOT NULL DEFAULT 'one_off',
       "title" text NOT NULL,
@@ -864,6 +866,9 @@ async function migrateTrackActions() {
   await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolved_by_name" text`);
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolver_signature" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "fix_track_disposition" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_actions_fix_track_issue" ON "track_actions" ("fix_track_issue_id") WHERE "fix_track_issue_id" IS NOT NULL`);
   await db.execute(sql`
     UPDATE "track_actions" a
     SET "resolved_by_name" = u.name

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { departmentsTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
+import { departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
@@ -58,6 +58,7 @@ const patchSchema = z.object({
   evidenceReference: nullableText, resolutionNotes: nullableText,
   resolverSignature: drawnSignature.optional(),
 }).strict();
+const fixTrackDecisionSchema = z.object({ create: z.boolean() }).strict();
 
 async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
   if (siteId == null) return true;
@@ -224,6 +225,38 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if ("error" in result) return res.status(result.status).json({ error: result.error });
   res.status(201).json(result.row);
 });
+router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req); const id = Number(req.params.id); const parsed = fixTrackDecisionSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || id <= 0 || !parsed.success) return res.status(400).json({ error: "Invalid request" });
+  const departmentId = getActiveDepartmentId(req);
+  const result = await db.transaction(async (tx) => {
+    const [action] = await tx.select().from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
+    if (!action) return { status: 404 as const, error: "Action not found" };
+    if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
+    if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
+    if (!await canAccessSite(action.siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden site" };
+    if (!parsed.data.create) {
+      const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
+      return { status: 200 as const, row };
+    }
+    if (action.fixTrackIssueId) return { status: 200 as const, row: action };
+    const [site] = action.siteId ? await tx.select({ name: sitesTable.name }).from(sitesTable).where(and(eq(sitesTable.id, action.siteId), eq(sitesTable.clientId, clientId))).limit(1) : [];
+    const [issue] = await tx.insert(fixTrackIssuesTable).values({
+      clientId, siteId: action.siteId, title: action.title, issueType: "general",
+      location: site?.name ?? "See originating module action",
+      description: [action.instruction, `Originating module: ${action.module}`, `Module action: ${action.id}`].filter(Boolean).join("\n"),
+      priority: action.severity === "urgent" ? "urgent" : action.severity === "action_required" ? "high" : "medium",
+      status: "reported", reportedBy: req.currentUser!.name, reportedDate: new Date().toISOString().slice(0, 10),
+      targetDate: action.dueDate, assignedTo: action.ownerName, createdBy: req.currentUser!.id,
+    }).returning();
+    await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
+    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
+    if (!row) return { status: 409 as const, error: "This action was linked by another user" };
+    return { status: 201 as const, row };
+  });
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  res.status(result.status).json(result.row);
+});
 router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); const id = Number(req.params.id); const parsed = patchSchema.safeParse(req.body); if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" }); if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });
   if (parsed.data.resolverSignature && parsed.data.status !== "resolved") return res.status(400).json({ error: "A resolver signature can only be submitted with final resolution" });
@@ -240,6 +273,7 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
+    if (nextStatus === "resolved" && current.fixTrackIssueId) return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
