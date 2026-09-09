@@ -10,10 +10,10 @@ import { buildCalendarInvite } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
+import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 
 const router = Router();
 const storage = new ObjectStorageService();
-const DEFAULT_FIX_TRACK_STALE_DAYS = 7;
 const alertSettingsSchema = z.object({ staleDays: z.number().int().min(1).max(365) });
 
 async function finalizeIssueMedia(paths: string[] | undefined, clientId: number): Promise<string | null> {
@@ -110,10 +110,7 @@ router.get("/alert-settings", requireAuth, requireClientAdmin, async (req, res) 
     .from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
     .limit(1);
-  const parsed = Number.parseInt(row?.value ?? "", 10);
-  const staleDays = Number.isFinite(parsed) && parsed >= 1 && parsed <= 365
-    ? parsed
-    : DEFAULT_FIX_TRACK_STALE_DAYS;
+  const staleDays = parseFixTrackStaleDays(row?.value) ?? DEFAULT_FIX_TRACK_STALE_DAYS;
   res.json({ staleDays });
 });
 
@@ -122,21 +119,17 @@ router.put("/alert-settings", requireAuth, requireClientAdmin, async (req, res) 
   if (!parsed.success) return res.status(400).json({ error: "Escalation timing must be between 1 and 365 days" });
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "Client context required" });
-  const [existing] = await db.select({ id: appSettingsTable.id })
-    .from(appSettingsTable)
-    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
-    .limit(1);
-  if (existing) {
-    await db.update(appSettingsTable)
-      .set({ value: String(parsed.data.staleDays), updatedAt: new Date() })
-      .where(eq(appSettingsTable.id, existing.id));
-  } else {
-    await db.insert(appSettingsTable).values({
+  await db.insert(appSettingsTable)
+    .values({
       clientId,
       key: "fixTrackStaleDays",
       value: String(parsed.data.staleDays),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [appSettingsTable.clientId, appSettingsTable.key],
+      set: { value: String(parsed.data.staleDays), updatedAt: new Date() },
     });
-  }
   res.json({ staleDays: parsed.data.staleDays });
 });
 
@@ -212,15 +205,23 @@ router.get("/issues", requireAuth, async (req, res) => {
   if (siteId)    conditions.push(eq(fixTrackIssuesTable.siteId, Number(siteId)));
 
   const rows = await db
-    .select({ issue: fixTrackIssuesTable, site: sitesTable, contractor: contractorsTable })
+    .select({
+      issue: fixTrackIssuesTable,
+      site: sitesTable,
+      contractor: contractorsTable,
+      isOverdue: sql<boolean>`${fixTrackIssuesTable.status} IN ('reported', 'in_progress')
+        AND ${fixTrackIssuesTable.targetDate} IS NOT NULL
+        AND ${fixTrackIssuesTable.targetDate} < CURRENT_DATE`,
+    })
     .from(fixTrackIssuesTable)
-    .leftJoin(sitesTable,       eq(fixTrackIssuesTable.siteId,        sitesTable.id))
-    .leftJoin(contractorsTable, eq(fixTrackIssuesTable.contractorId,   contractorsTable.id))
+    .leftJoin(sitesTable, and(eq(fixTrackIssuesTable.siteId, sitesTable.id), eq(sitesTable.clientId, clientId)))
+    .leftJoin(contractorsTable, and(eq(fixTrackIssuesTable.contractorId, contractorsTable.id), eq(contractorsTable.clientId, clientId)))
     .where(and(...conditions))
     .orderBy(desc(fixTrackIssuesTable.createdAt));
 
   res.json(rows.map(r => ({
     ...r.issue,
+    isOverdue: r.isOverdue,
     siteName:       r.site?.name        ?? null,
     contractorName: r.contractor?.name  ?? null,
     contractorEmail: r.contractor?.email ?? null,
@@ -245,10 +246,17 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
   }
 
   const [r] = await db
-    .select({ issue: fixTrackIssuesTable, site: sitesTable, contractor: contractorsTable })
+    .select({
+      issue: fixTrackIssuesTable,
+      site: sitesTable,
+      contractor: contractorsTable,
+      isOverdue: sql<boolean>`${fixTrackIssuesTable.status} IN ('reported', 'in_progress')
+        AND ${fixTrackIssuesTable.targetDate} IS NOT NULL
+        AND ${fixTrackIssuesTable.targetDate} < CURRENT_DATE`,
+    })
     .from(fixTrackIssuesTable)
-    .leftJoin(sitesTable,       eq(fixTrackIssuesTable.siteId,      sitesTable.id))
-    .leftJoin(contractorsTable, eq(fixTrackIssuesTable.contractorId, contractorsTable.id))
+    .leftJoin(sitesTable, and(eq(fixTrackIssuesTable.siteId, sitesTable.id), eq(sitesTable.clientId, clientId)))
+    .leftJoin(contractorsTable, and(eq(fixTrackIssuesTable.contractorId, contractorsTable.id), eq(contractorsTable.clientId, clientId)))
     .where(and(...conditions))
     .limit(1);
   if (!r) return res.status(404).json({ error: "Not found" });
@@ -275,6 +283,7 @@ router.get("/issues/:id", requireAuth, async (req, res) => {
 
   res.json({
     ...r.issue,
+    isOverdue: r.isOverdue,
     siteName:        r.site?.name        ?? null,
     contractorName:  r.contractor?.name  ?? null,
     contractorEmail: r.contractor?.email ?? null,

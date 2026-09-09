@@ -4,6 +4,7 @@ import { appSettingsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 
 const router: IRouter = Router();
 
@@ -132,25 +133,25 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     }
     rawBody.trackSummaryRouting = validated.value;
   }
+  if (rawBody.fixTrackStaleDays !== undefined) {
+    const parsed = parseFixTrackStaleDays(rawBody.fixTrackStaleDays);
+    if (parsed === null) {
+      res.status(400).json({ error: "FixTrack escalation timing must be a whole number between 1 and 365 days" });
+      return;
+    }
+    rawBody.fixTrackStaleDays = String(parsed);
+  }
 
   for (const key of SETTING_KEYS) {
     const value = rawBody[key];
     if (value !== undefined) {
-      const existing = await db
-        .select()
-        .from(appSettingsTable)
-        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
-
-      if (existing.length > 0) {
-        await db
-          .update(appSettingsTable)
-          .set({ value: value ?? null, updatedAt: new Date() })
-          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
-      } else {
-        await db
-          .insert(appSettingsTable)
-          .values({ clientId, key, value: value ?? null, updatedAt: new Date() });
-      }
+      await db
+        .insert(appSettingsTable)
+        .values({ clientId, key, value: value ?? null, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: [appSettingsTable.clientId, appSettingsTable.key],
+          set: { value: value ?? null, updatedAt: new Date() },
+        });
     }
   }
 

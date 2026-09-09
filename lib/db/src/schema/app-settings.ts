@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 
 export const appSettingsTable = pgTable("app_settings", {
@@ -9,6 +9,8 @@ export const appSettingsTable = pgTable("app_settings", {
   key: text("key").notNull(),
   value: text("value"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_app_settings_client_key").on(table.clientId, table.key),
+]);
 
 export type AppSetting = typeof appSettingsTable.$inferSelect;

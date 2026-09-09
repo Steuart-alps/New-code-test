@@ -110,6 +110,7 @@ interface Issue {
   siteId?: number | null;
   siteName?: string | null;
   createdAt: string;
+  isOverdue: boolean;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -629,8 +630,6 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
               const priorityMeta = PRIORITIES[issue.priority] ?? PRIORITIES.medium;
               const statusMeta   = STATUSES[issue.status] ?? STATUSES.reported;
               const daysOpen = elapsedDays(issue.reportedDate);
-              const daysOverdue = issue.targetDate ? elapsedDays(issue.targetDate) : 0;
-              const overdue = daysOverdue > 0;
               return (
                 <button
                   key={issue.id}
@@ -668,10 +667,8 @@ function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue)
                     )}
                     <div className="flex items-center justify-between gap-2 pt-1">
                       <span className="font-medium text-foreground">{daysOpen} {daysOpen === 1 ? "day" : "days"} open</span>
-                      {overdue && (
-                        <span className="font-semibold text-rose-600">
-                          {daysOverdue} {daysOverdue === 1 ? "day" : "days"} overdue
-                        </span>
+                      {issue.isOverdue && (
+                        <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>
                       )}
                     </div>
                   </div>
@@ -802,6 +799,7 @@ export default function FixTrackPage() {
       delete payload.createdAt;
       delete payload.updatedAt;
       delete payload.createdBy;
+      delete payload.isOverdue;
       delete payload.resolvedDate;
 
       if (editing) {
@@ -1131,6 +1129,7 @@ export default function FixTrackPage() {
                         </span>
                         <span className={cn("text-xs px-2 py-0.5 rounded-md border font-medium", typeMeta.color)}>{typeMeta.label}</span>
                         <span className={cn("text-xs px-2 py-0.5 rounded-md border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
+                        {issue.isOverdue && <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>}
                         {issue.siteName && <span className="text-xs px-2 py-0.5 rounded-md border border-border text-muted-foreground">{issue.siteName}</span>}
                       </div>
                       <div className="text-xs text-muted-foreground space-y-0.5">

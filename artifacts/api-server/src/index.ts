@@ -224,6 +224,19 @@ function startScheduler() {
   });
   logger.info("FixTrack overdue alert scheduler started (daily at 08:40)");
 
+  // Recovery-only reconciliation resumes persisted pending/sending snapshots
+  // with their original provider idempotency key. It never creates a new
+  // digest, so manager alerts still originate only from the daily schedule.
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      const result = await runFixTrackOverdueAlertJob(undefined, { recoverOnly: true });
+      if (result.clientsEmailed > 0) logger.info({ result }, "FixTrack alert recovery complete");
+    } catch (err) {
+      logger.error({ err }, "FixTrack alert recovery failed");
+    }
+  });
+  logger.info("FixTrack alert recovery scheduler started (every 5 minutes)");
+
   // Notify tenant managers about overdue bike hires (daily scan; initial alert
   // then a safely claimed weekly repeat while the hire remains active).
   cron.schedule("20 8 * * *", async () => {
@@ -458,4 +471,9 @@ app.listen(port, async (err?: any) => {
   // Catch up trial reminders on startup too, so a server that was down at
   // 08:15 doesn't miss the 3-day warning window (deduped per client).
   setTimeout(runTrialReminders, 20_000);
+  setTimeout(() => {
+    void runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }).catch((err) => {
+      logger.error({ err }, "FixTrack startup alert recovery failed");
+    });
+  }, 25_000);
 });

@@ -1698,6 +1698,20 @@ async function migrateCheckPhotos() {
 
 // ---- FixTrack v2: contractor trades, contractorId on issues, action tokens ----
 async function migrateFixTrackV2() {
+  // Settings are tenant/key values. Keep the newest historical duplicate
+  // before enforcing the invariant needed by atomic upserts.
+  await db.execute(sql`
+    DELETE FROM "app_settings" older
+    USING "app_settings" newer
+    WHERE older."client_id" = newer."client_id"
+      AND older."key" = newer."key"
+      AND older."id" < newer."id"
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_app_settings_client_key"
+    ON "app_settings" ("client_id", "key")
+  `);
+
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "fix_track_issue_activity" (
       "id"         serial PRIMARY KEY,
@@ -1867,46 +1881,94 @@ async function migrateFixTrackV2() {
       ADD COLUMN IF NOT EXISTS "completion_document_path" text
   `);
 
-  // Restart-safe delivery log for the daily overdue-issue alert digest.
+  // Persist the exact daily digest before dispatch so retries can reuse the
+  // provider idempotency key and recover after process termination.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "fix_track_alert_log" (
       "id"        serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "log_date"  date NOT NULL DEFAULT CURRENT_DATE,
+      "status"    text NOT NULL DEFAULT 'sent',
+      "idempotency_key" text,
+      "issue_snapshot" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "recipient_emails" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "recipient_user_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
       "sent_at"   timestamp,
-      "status"    text NOT NULL DEFAULT 'claimed',
-      "claim_token" text,
-      "claimed_at" timestamp,
+      "updated_at" timestamp NOT NULL DEFAULT now(),
       UNIQUE ("client_id", "log_date")
     )
   `);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "status" text NOT NULL DEFAULT 'sent'`);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "idempotency_key" text`);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "issue_snapshot" jsonb NOT NULL DEFAULT '[]'::jsonb`);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "recipient_emails" jsonb NOT NULL DEFAULT '[]'::jsonb`);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "recipient_user_ids" jsonb NOT NULL DEFAULT '[]'::jsonb`);
+  await db.execute(sql`ALTER TABLE "fix_track_alert_log" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
   await db.execute(sql`
     ALTER TABLE "fix_track_alert_log"
-      ADD COLUMN IF NOT EXISTS "status" text,
-      ADD COLUMN IF NOT EXISTS "claim_token" text,
-      ADD COLUMN IF NOT EXISTS "claimed_at" timestamp
-  `);
-  await db.execute(sql`
-    ALTER TABLE "fix_track_alert_log"
-      ALTER COLUMN "sent_at" DROP NOT NULL,
-      ALTER COLUMN "sent_at" DROP DEFAULT
+      ALTER COLUMN "sent_at" DROP NOT NULL
   `);
   await db.execute(sql`
     UPDATE "fix_track_alert_log"
-    SET "status" = CASE WHEN "sent_at" IS NULL THEN 'claimed' ELSE 'sent' END
+    SET "status" = CASE WHEN "sent_at" IS NULL THEN 'pending' ELSE 'sent' END
     WHERE "status" IS NULL
   `);
   await db.execute(sql`
     ALTER TABLE "fix_track_alert_log"
-      ALTER COLUMN "status" SET DEFAULT 'claimed',
+      ALTER COLUMN "status" SET DEFAULT 'sent',
       ALTER COLUMN "status" SET NOT NULL
   `);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_fix_track_alert_log_client" ON "fix_track_alert_log" ("client_id")
   `);
   await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS "IDX_fix_track_alert_log_claim"
-    ON "fix_track_alert_log" ("status", "claimed_at")
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fix_track_alert_log_idempotency"
+    ON "fix_track_alert_log" ("idempotency_key")
+    WHERE "idempotency_key" IS NOT NULL
+  `);
+
+  // Per-issue dates suppress alerts on consecutive mornings without hiding an
+  // unresolved issue forever.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "fix_track_escalation_log" (
+      "id"        serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "issue_id"  integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
+      "log_date"  date NOT NULL DEFAULT CURRENT_DATE,
+      "sent_at"   timestamp NOT NULL DEFAULT now(),
+      UNIQUE ("issue_id", "log_date")
+    )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "fix_track_escalation_log"
+      ADD COLUMN IF NOT EXISTS "log_date" date NOT NULL DEFAULT CURRENT_DATE
+  `);
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'fix_track_escalation_log'
+          AND column_name = 'milestone'
+      ) THEN
+        ALTER TABLE "fix_track_escalation_log" ALTER COLUMN "milestone" DROP NOT NULL;
+      END IF;
+    END $$;
+  `);
+  await db.execute(sql`
+    DELETE FROM "fix_track_escalation_log" newer
+    USING "fix_track_escalation_log" older
+    WHERE newer.issue_id = older.issue_id
+      AND newer.log_date = older.log_date
+      AND newer.id > older.id
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_fix_track_escalation_issue_date"
+    ON "fix_track_escalation_log" ("issue_id", "log_date")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_fix_track_escalation_log_client"
+    ON "fix_track_escalation_log" ("client_id")
   `);
 }
 

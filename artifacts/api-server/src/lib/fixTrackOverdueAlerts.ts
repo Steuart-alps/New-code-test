@@ -1,49 +1,24 @@
 /**
  * Daily FixTrack overdue / stale-issue alert job.
  *
- * For each active client, emails the client's managers (client_admin users
- * and maintenance managers) a digest of open issues that either:
- *   - are URGENT and past their target date, or
- *   - are URGENT and have had no update for N days (default 7, configurable
- *     per-client via the app_settings key `fixTrackStaleDays`).
+ * For each active client, emails client admins a digest of open issues that:
+ *   - are urgent/high priority and have had no update for more than 24 hours, or
+ *   - have passed their target date (regardless of priority).
  *
- * `updated_at` is bumped on every status change / notes edit, so "no update in N
- * days" is our proxy for "unactioned for N days".
- *
- * Throttled to one email per client per day via fix_track_alert_log (claim-first
- * dedupe, mirroring docAckReminders / bikeOverdueReminders).
+ * A client/day claim prevents concurrent split digests. Per-issue dated log
+ * rows suppress the same issue on the immediately following morning.
  */
 
 import { db } from "@workspace/db";
-import { clientsTable, usersTable, appSettingsTable } from "@workspace/db/schema";
+import { appSettingsTable, clientsTable, usersTable } from "@workspace/db/schema";
 import { and, eq, or, sql } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
-
-/** Default days an open issue may sit unactioned before it's chased. */
-export const DEFAULT_STALE_DAYS = 7;
-export const ALERT_CLAIM_LEASE_MINUTES = 30;
+import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "./fixTrackAlertSettings";
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/**
- * Read the per-client "stale after N days" threshold from app_settings
- * (key `fixTrackStaleDays`), falling back to the default. Clamped to a sane
- * range so a bad value can't disable or spam the job.
- */
-export async function getStaleDays(clientId: number): Promise<number> {
-  const [row] = await db
-    .select({ value: appSettingsTable.value })
-    .from(appSettingsTable)
-    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, "fixTrackStaleDays")))
-    .limit(1);
-  const parsed = row?.value ? Number.parseInt(row.value, 10) : NaN;
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_STALE_DAYS;
-  return Math.min(parsed, 365);
 }
 
 interface OverdueIssue {
@@ -53,65 +28,106 @@ interface OverdueIssue {
   priority: string;
   status: string;
   target_date: string | null;
-  updated_at: string;
+  reported_date: string;
+  created_at: string;
   site_name: string | null;
+  contractor_name: string | null;
+  issue_type: string;
+  days_open: number;
   reason: string; // "overdue" | "stale"
+  stale_days: number;
 }
 
-/**
- * Open urgent issues that need a chase because they are past their target date
- * or have had no update for `staleDays` days.
- */
+interface PendingDigest {
+  id: number;
+  log_date: string;
+  idempotency_key: string;
+  issue_snapshot: OverdueIssue[];
+  recipient_emails: string[];
+  recipient_user_ids: number[];
+}
+
+export async function getStaleDays(clientId: number): Promise<number> {
+  const [setting] = await db
+    .select({ value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(and(
+      eq(appSettingsTable.clientId, clientId),
+      eq(appSettingsTable.key, "fixTrackStaleDays"),
+    ))
+    .limit(1);
+  return parseFixTrackStaleDays(setting?.value) ?? DEFAULT_FIX_TRACK_STALE_DAYS;
+}
+
+/** Open overdue issues and urgent/high issues inactive beyond the tenant threshold. */
 export async function getOverdueUrgentIssues(
   clientId: number,
-  staleDays: number = DEFAULT_STALE_DAYS,
+  staleDays?: number,
 ): Promise<OverdueIssue[]> {
+  const effectiveStaleDays = staleDays ?? await getStaleDays(clientId);
   const result = await db.execute(sql`
     SELECT
-      fi.id, fi.title, fi.location, fi.priority, fi.status,
-      fi.target_date, fi.updated_at,
+      fi.id, fi.title, fi.location, fi.priority, fi.status, fi.issue_type,
+      fi.target_date, fi.reported_date, fi.created_at, fi.updated_at,
       s.name AS site_name,
+      c.name AS contractor_name,
+      GREATEST(0, CURRENT_DATE - fi.reported_date)::int AS days_open,
+      ${effectiveStaleDays}::int AS stale_days,
       CASE
         WHEN fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE THEN 'overdue'
         ELSE 'stale'
       END AS reason
     FROM  fix_track_issues fi
-    LEFT  JOIN sites s ON s.id = fi.site_id
+    LEFT  JOIN sites s ON s.id = fi.site_id AND s.client_id = fi.client_id
+    LEFT  JOIN contractors c ON c.id = fi.contractor_id AND c.client_id = fi.client_id
     WHERE fi.client_id = ${clientId}
       AND fi.status IN ('reported', 'in_progress')
-      AND fi.priority = 'urgent'
       AND (
         (fi.target_date IS NOT NULL AND fi.target_date < CURRENT_DATE)
-        OR fi.updated_at < now() - (${staleDays} * interval '1 day')
+        OR (
+          fi.priority IN ('urgent', 'high')
+          AND fi.updated_at < now() - (${effectiveStaleDays} * interval '1 day')
+        )
       )
-    ORDER BY fi.target_date ASC NULLS LAST, fi.updated_at ASC
+      AND NOT EXISTS (
+        SELECT 1 FROM fix_track_escalation_log fel
+        WHERE fel.client_id = fi.client_id
+          AND fel.issue_id = fi.id
+          AND fel.log_date >= CURRENT_DATE - 1
+      )
+    ORDER BY fi.issue_type, fi.target_date ASC NULLS LAST, fi.created_at ASC
   `);
   return (result.rows ?? []) as unknown as OverdueIssue[];
 }
 
-function buildEmailHtml(issues: OverdueIssue[], appUrl: string): string {
+export function buildFixTrackAlertEmail(issues: OverdueIssue[], appUrl: string): { html: string; text: string } {
   const fmtDate = (d: string) =>
     new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  const rows = issues
-    .map((i) => {
+  const groups = new Map<string, OverdueIssue[]>();
+  for (const issue of issues) groups.set(issue.issue_type, [...(groups.get(issue.issue_type) ?? []), issue]);
+  const sections = [...groups.entries()].map(([trade, tradeIssues]) => {
+    const rows = tradeIssues.map((i) => {
       const detail =
         i.reason === "overdue" && i.target_date
           ? `Target date passed (${fmtDate(i.target_date)})`
-          : `No update since ${fmtDate(i.updated_at)}`;
+          : `No update for more than ${i.stale_days} day${i.stale_days === 1 ? "" : "s"}`;
+      const issueUrl = `${appUrl}/fix-track/${i.id}`;
       return `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
           <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(i.title)}</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px;">
-            ${i.site_name ? `${esc(i.site_name)} · ` : ""}${i.location ? `${esc(i.location)} · ` : ""}${esc(i.status)}
+            Site: ${esc(i.site_name ?? "No site")} · Contractor: ${esc(i.contractor_name ?? "Unassigned")} · ${i.days_open} day${i.days_open === 1 ? "" : "s"} open
           </div>
           <div style="font-size:12px;color:#b91c1c;margin-top:4px;">${esc(detail)}</div>
+          <a href="${issueUrl}" style="display:inline-block;margin-top:6px;color:#2563eb;font-size:12px;font-weight:600;">Open issue →</a>
         </td>
       </tr>`;
-    })
-    .join("");
+    }).join("");
+    return `<h3 style="margin:24px 0 8px;color:#0f172a;">${esc(trade.split("_").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" "))}</h3><table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;"><tbody>${rows}</tbody></table>`;
+  }).join("");
 
-  return `
+  const html = `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"/></head>
@@ -125,9 +141,7 @@ function buildEmailHtml(issues: OverdueIssue[], appUrl: string): string {
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
         ${issues.length} maintenance issue${issues.length !== 1 ? "s are" : " is"} overdue or have been left unactioned. Please review and take action in FixTrack.
       </p>
-      <table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;">
-        <tbody>${rows}</tbody>
-      </table>
+      ${sections}
       <div style="margin-top:28px;text-align:center;">
         <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
           Open ComplyTrack →
@@ -135,11 +149,17 @@ function buildEmailHtml(issues: OverdueIssue[], appUrl: string): string {
       </div>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as a maintenance manager.
+      ComplyTrack by ALPS Consulting · You are receiving this as an account administrator.
     </div>
   </div>
 </body>
 </html>`;
+  const text = [...groups.entries()].flatMap(([trade, tradeIssues]) => [
+    trade.split("_").map(w => w[0]?.toUpperCase() + w.slice(1)).join(" "),
+    ...tradeIssues.map(i => `- ${i.title} — ${i.site_name ?? "No site"} — ${i.contractor_name ?? "Unassigned"} — ${i.days_open} days open — ${appUrl}/fix-track/${i.id}`),
+    "",
+  ]).join("\n");
+  return { html, text };
 }
 
 export interface FixTrackOverdueJobResult {
@@ -153,6 +173,12 @@ type EmailSender = typeof sendEmail;
 
 export async function runFixTrackOverdueAlertJob(
   send: EmailSender = sendEmail,
+  options: {
+    /** Resume persisted work only; do not create a new daily digest. */
+    recoverOnly?: boolean;
+    /** Test hook for simulating termination after provider acceptance. */
+    afterSend?: () => Promise<void>;
+  } = {},
 ): Promise<FixTrackOverdueJobResult> {
   const result: FixTrackOverdueJobResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
   const appUrl = getPublicAppUrl();
@@ -165,83 +191,141 @@ export async function runFixTrackOverdueAlertJob(
   for (const client of clients) {
     result.clientsChecked++;
     try {
-      const staleDays = await getStaleDays(client.id);
-      const issues = await getOverdueUrgentIssues(client.id, staleDays);
-      if (issues.length === 0) continue;
-
-      // Managers: client_admin users OR maintenance managers.
-      const managers = await db
-        .select({ id: usersTable.id, email: usersTable.email })
-        .from(usersTable)
-        .where(and(
-          eq(usersTable.clientId, client.id),
-          eq(usersTable.active, true),
-          or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
-        ))
-        .limit(30);
-      const emails = [...new Set(managers.map((m) => m.email).filter(Boolean) as string[])];
-      const userIds = [...new Set(managers.map((m) => m.id))];
-      if (emails.length === 0) continue;
-
-      // Claim atomically. An abandoned claim can be recovered after the lease,
-      // while a completed row can never be reclaimed.
-      const claimToken = randomUUID();
-      const claim = await db.execute(sql`
-        INSERT INTO fix_track_alert_log
-          (client_id, log_date, status, claim_token, claimed_at, sent_at)
-        VALUES
-          (${client.id}, CURRENT_DATE, 'claimed', ${claimToken}, now(), NULL)
-        ON CONFLICT (client_id, log_date) DO UPDATE
-        SET status = 'claimed',
-            claim_token = EXCLUDED.claim_token,
-            claimed_at = now()
-        WHERE fix_track_alert_log.status <> 'sent'
+      // Resume an abandoned pending digest first. Its exact recipients, issue
+      // snapshot and provider key are persisted, making crash recovery safe.
+      const pendingResult = await db.execute(sql`
+        SELECT id, log_date, idempotency_key, issue_snapshot,
+               recipient_emails, recipient_user_ids
+        FROM fix_track_alert_log
+        WHERE client_id = ${client.id}
           AND (
-            fix_track_alert_log.claim_token IS NULL
-            OR fix_track_alert_log.claimed_at < now() - (${ALERT_CLAIM_LEASE_MINUTES} * interval '1 minute')
+            status = 'pending'
+            OR (status = 'sending' AND updated_at < now() - interval '15 minutes')
           )
-        RETURNING id, log_date
+        ORDER BY log_date, id
+        LIMIT 1
       `);
-      const claimed = ((claim as any).rows ?? [])[0];
-      if (!claimed?.id) continue;
+      let digest = ((pendingResult.rows ?? []) as unknown as PendingDigest[])[0];
 
-      const subject = `⚠️ ${issues.length} maintenance issue${issues.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
-      const logDate = String(claimed.log_date).slice(0, 10);
-      const idempotencyKey = `fixtrack-urgent-alert:${client.id}:${logDate}`;
+      if (!digest) {
+        if (options.recoverOnly) continue;
+        // An actively leased older digest is not yet eligible for recovery, but
+        // it must still block creation of a new daily snapshot. Otherwise the
+        // same issues could be dispatched under two different daily keys.
+        const unsent = await db.execute(sql`
+          SELECT 1 FROM fix_track_alert_log
+          WHERE client_id = ${client.id} AND status IN ('pending', 'sending')
+          LIMIT 1
+        `);
+        if ((unsent.rows ?? []).length > 0) continue;
+
+        const issues = await getOverdueUrgentIssues(client.id);
+        if (issues.length === 0) continue;
+
+        const managers = await db
+          .select({ id: usersTable.id, email: usersTable.email })
+          .from(usersTable)
+          .where(and(
+            eq(usersTable.clientId, client.id),
+            eq(usersTable.active, true),
+            or(eq(usersTable.role, "client_admin"), eq(usersTable.isMaintenanceManager, true)),
+          ));
+        const emails = [...new Set(managers.map((m) => m.email).filter(Boolean) as string[])];
+        const userIds = [...new Set(managers.map((m) => m.id))];
+        if (emails.length === 0) continue;
+
+        const today = new Date().toISOString().slice(0, 10);
+        const idempotencyKey = `fixtrack-escalation-${client.id}-${today}`;
+        const claim = await db.execute(sql`
+          INSERT INTO fix_track_alert_log (
+            client_id, log_date, status, idempotency_key, issue_snapshot,
+            recipient_emails, recipient_user_ids, sent_at, updated_at
+          )
+          VALUES (
+            ${client.id}, CURRENT_DATE, 'pending', ${idempotencyKey},
+            ${JSON.stringify(issues)}::jsonb, ${JSON.stringify(emails)}::jsonb,
+            ${JSON.stringify(userIds)}::jsonb, NULL, now()
+          )
+          ON CONFLICT (client_id, log_date) DO NOTHING
+          RETURNING id, log_date, idempotency_key, issue_snapshot,
+                    recipient_emails, recipient_user_ids
+        `);
+        digest = ((claim.rows ?? []) as unknown as PendingDigest[])[0];
+        if (!digest) continue;
+      }
+
+      const claimedIssues = digest.issue_snapshot;
+      const emails = digest.recipient_emails;
+      const userIds = digest.recipient_user_ids;
+
+      // Only one worker may dispatch this snapshot. A process that dies after
+      // acquiring it leaves a recoverable lease rather than a permanent lock.
+      const dispatchClaim = await db.execute(sql`
+        UPDATE fix_track_alert_log
+        SET status = 'sending', updated_at = now()
+        WHERE id = ${digest.id}
+          AND (
+            status = 'pending'
+            OR (status = 'sending' AND updated_at < now() - interval '15 minutes')
+          )
+        RETURNING id
+      `);
+      if ((dispatchClaim.rows ?? []).length === 0) continue;
+
+      const subject = `⚠️ ${claimedIssues.length} maintenance issue${claimedIssues.length !== 1 ? "s" : ""} need attention — ComplyTrack`;
+      const email = buildFixTrackAlertEmail(claimedIssues, appUrl);
+      let providerAccepted = false;
       try {
         await send({
           to: emails,
           subject,
-          html: buildEmailHtml(issues, appUrl),
+          ...email,
           clientId: client.id,
-          idempotencyKey,
+          idempotencyKey: digest.idempotency_key,
         });
+        providerAccepted = true;
+        await options.afterSend?.();
       } catch (sendErr) {
-        await db.execute(sql`
-          DELETE FROM fix_track_alert_log
-          WHERE id = ${claimed.id} AND status = 'claimed' AND claim_token = ${claimToken}
-        `);
+        if (!providerAccepted) {
+          await db.execute(sql`
+            UPDATE fix_track_alert_log
+            SET status = 'pending', updated_at = now()
+            WHERE id = ${digest.id} AND status = 'sending'
+          `);
+        }
         throw sendErr;
       }
 
-      // Finalise before push. If the process died after provider acceptance,
-      // the expired lease would retry with the same provider idempotency key.
-      await db.execute(sql`
-        UPDATE fix_track_alert_log
-        SET status = 'sent', sent_at = now(), claim_token = NULL, claimed_at = NULL
-        WHERE id = ${claimed.id} AND status = 'claimed' AND claim_token = ${claimToken}
-      `);
+      // Finalize the issue cooldowns and digest state together. If the process
+      // dies before commit, the pending snapshot replays with the same provider
+      // key, so Resend accepts it idempotently and finalization can retry.
+      await db.transaction(async (tx) => {
+        for (const issue of claimedIssues) {
+          await tx.execute(sql`
+            INSERT INTO fix_track_escalation_log (client_id, issue_id, log_date, sent_at)
+            SELECT ${client.id}, fi.id, CURRENT_DATE, now()
+            FROM fix_track_issues fi
+            WHERE fi.id = ${issue.id} AND fi.client_id = ${client.id}
+            ON CONFLICT (issue_id, log_date) DO NOTHING
+          `);
+        }
+        await tx.execute(sql`
+          UPDATE fix_track_alert_log
+          SET status = 'sent', sent_at = now(), updated_at = now()
+          WHERE id = ${digest.id} AND status = 'sending'
+        `);
+      });
 
       // Push managers a matching alert (best-effort; never blocks the job).
       await sendPushToUsers(userIds, {
         title: "Maintenance issues need attention",
-        body: `${issues.length} issue${issues.length !== 1 ? "s" : ""} overdue or unactioned in FixTrack.`,
+        body: `${claimedIssues.length} issue${claimedIssues.length !== 1 ? "s" : ""} overdue or unactioned in FixTrack.`,
         data: { route: "/(tabs)/issues" },
       });
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;
-      logger.info({ clientId: client.id, issues: issues.length, emails: emails.length }, "FixTrack overdue alert sent");
+      logger.info({ clientId: client.id, issues: claimedIssues.length, emails: emails.length }, "FixTrack overdue alert sent");
     } catch (err) {
       result.errors++;
       logger.error({ err, clientId: client.id }, "FixTrack overdue alert failed");
