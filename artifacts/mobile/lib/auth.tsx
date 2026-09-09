@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
@@ -56,6 +57,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [services, setServices] = useState<'all' | string[] | null>(null);
@@ -65,7 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const applyToken = useCallback((t: string | null) => {
     setToken(t);
     setAuthTokenGetter(t ? () => t : null);
-  }, []);
+    if (!t) queryClient.clear();
+  }, [queryClient]);
 
   function hasService(key: string): boolean {
     if (services === null || services === undefined) return true;

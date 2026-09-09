@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useAuth } from '@/lib/auth';
 
 interface CheckModule {
   id: string;
@@ -117,7 +118,11 @@ export default function ChecksScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { hasService } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const visibleModules = MODULES.filter(
+    (mod) => mod.id !== 'incident' || hasService('incidenttrack'),
+  );
 
   return (
     <ScrollView
@@ -138,7 +143,7 @@ export default function ChecksScreen() {
       </View>
 
       <View style={styles.content}>
-        {MODULES.map((mod) => (
+        {visibleModules.map((mod) => (
           <TouchableOpacity
             key={mod.id}
             style={[

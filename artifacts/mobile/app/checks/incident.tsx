@@ -28,15 +28,14 @@ import { apiFetch } from '@/lib/api';
 
 const MODULE_COLOR = '#ef4444';
 
-// ─── Enums (match api-server createSchema exactly) ───────────────────────────
-const INCIDENT_TYPES = [
+const DEFAULT_INCIDENT_TYPES = [
   { value: 'accident', label: 'Accident' },
   { value: 'near_miss', label: 'Near miss' },
   { value: 'dangerous_occurrence', label: 'Dangerous occurrence' },
   { value: 'occupational_disease', label: 'Occupational disease' },
 ] as const;
 
-const SEVERITIES = [
+const DEFAULT_SEVERITIES = [
   { value: 'minor', label: 'Minor', color: '#22c55e' },
   { value: 'moderate', label: 'Moderate', color: '#f59e0b' },
   { value: 'serious', label: 'Serious', color: '#f97316' },
@@ -50,8 +49,6 @@ const EMPLOYMENT_TYPES = [
   { value: 'member_of_public', label: 'Member of public' },
 ] as const;
 
-type IncidentType = (typeof INCIDENT_TYPES)[number]['value'];
-type Severity = (typeof SEVERITIES)[number]['value'];
 type EmploymentType = (typeof EMPLOYMENT_TYPES)[number]['value'];
 
 interface Site {
@@ -70,6 +67,19 @@ interface Incident {
   riddorReportable: boolean;
 }
 
+interface FormOptionsResponse {
+  options?: {
+    incident_types?: string[];
+    incident_severities?: string[];
+  };
+}
+
+function optionLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -80,7 +90,7 @@ function formatDate(dateStr: string): string {
 }
 
 function severityColor(severity: string): string {
-  const found = SEVERITIES.find((s) => s.value === severity);
+  const found = DEFAULT_SEVERITIES.find((s) => s.value === severity);
   return found?.color ?? '#94a3b8';
 }
 
@@ -89,15 +99,15 @@ export default function IncidentScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
-  const { hasService } = useAuth();
+  const { hasService, user } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const [showForm, setShowForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Form state
-  const [incidentType, setIncidentType] = useState<IncidentType>('accident');
-  const [severity, setSeverity] = useState<Severity>('minor');
+  const [incidentType, setIncidentType] = useState('accident');
+  const [severity, setSeverity] = useState('minor');
   const [incidentDate, setIncidentDate] = useState(today());
   const [incidentTime, setIncidentTime] = useState('');
   const [location, setLocation] = useState('');
@@ -109,27 +119,25 @@ export default function IncidentScreen() {
   const [firstAidGiven, setFirstAidGiven] = useState(false);
   const [firstAiderName, setFirstAiderName] = useState('');
   const [witnesses, setWitnesses] = useState('');
-  const [riddorReportable, setRiddorReportable] = useState(false);
   const [immediateActions, setImmediateActions] = useState('');
   const [reportedBy, setReportedBy] = useState('');
   const [siteId, setSiteId] = useState<number | null>(null);
 
-  // Service gate
-  if (!hasService('incidenttrack')) {
-    return (
-      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
-        <Feather name="lock" size={40} color={colors.mutedForeground} />
-        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>IncidentTrack</Text>
-        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
-          IncidentTrack is not enabled on your account. Contact your administrator to activate this module.
-        </Text>
-      </View>
-    );
-  }
-
   const { data: sites = [] } = useQuery<Site[]>({
-    queryKey: ['sites'],
+    queryKey: ['sites', user?.clientId],
     queryFn: () => apiFetch('/api/sites'),
+    enabled: hasService('incidenttrack'),
+  });
+
+  const {
+    data: formOptions,
+    isLoading: optionsLoading,
+    isError: optionsError,
+    refetch: refetchOptions,
+  } = useQuery<FormOptionsResponse>({
+    queryKey: ['form-options', user?.clientId],
+    queryFn: () => apiFetch('/api/form-options'),
+    enabled: hasService('incidenttrack'),
   });
 
   const {
@@ -137,19 +145,36 @@ export default function IncidentScreen() {
     isLoading: incidentsLoading,
     refetch: refetchIncidents,
   } = useQuery<Incident[]>({
-    queryKey: ['incidents'],
+    queryKey: ['incidents', user?.clientId],
     queryFn: () => apiFetch('/api/incidents'),
+    enabled: hasService('incidenttrack'),
   });
+
+  const incidentTypes =
+    formOptions?.options?.incident_types?.length
+      ? formOptions.options.incident_types
+      : [];
+  const severities =
+    formOptions?.options?.incident_severities?.length
+      ? formOptions.options.incident_severities
+      : [];
+  const optionsReady = incidentTypes.length > 0 && severities.length > 0;
+  const effectiveIncidentType = incidentTypes.includes(incidentType)
+    ? incidentType
+    : (incidentTypes[0] ?? 'accident');
+  const effectiveSeverity = severities.includes(severity)
+    ? severity
+    : (severities[0] ?? 'minor');
 
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch('/api/incidents', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: async () => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['incidents'] });
+      qc.invalidateQueries({ queryKey: ['incidents', user?.clientId] });
       // Reset form
-      setIncidentType('accident');
-      setSeverity('minor');
+      setIncidentType(incidentTypes[0] ?? 'accident');
+      setSeverity(severities[0] ?? 'minor');
       setIncidentDate(today());
       setIncidentTime('');
       setLocation('');
@@ -161,7 +186,6 @@ export default function IncidentScreen() {
       setFirstAidGiven(false);
       setFirstAiderName('');
       setWitnesses('');
-      setRiddorReportable(false);
       setImmediateActions('');
       setReportedBy('');
       setSiteId(null);
@@ -175,6 +199,10 @@ export default function IncidentScreen() {
   });
 
   function handleSubmit() {
+    if (!optionsReady) {
+      Alert.alert('Form unavailable', 'Incident options have not loaded. Please retry.');
+      return;
+    }
     if (!location.trim()) {
       Alert.alert('Location required', 'Please enter where the incident happened.');
       return;
@@ -192,15 +220,14 @@ export default function IncidentScreen() {
       return;
     }
     const body: Record<string, unknown> = {
-      incidentType,
-      severity,
+      incidentType: effectiveIncidentType,
+      severity: effectiveSeverity,
       incidentDate,
       location: location.trim(),
       description: description.trim(),
       involvedName: involvedName.trim(),
       involvedEmploymentType,
       firstAidGiven,
-      riddorReportable,
       reportedBy: reportedBy.trim(),
       ...(incidentTime.trim() ? { incidentTime: incidentTime.trim() } : {}),
       ...(involvedJobTitle.trim() ? { involvedJobTitle: involvedJobTitle.trim() } : {}),
@@ -220,6 +247,18 @@ export default function IncidentScreen() {
   }
 
   const recentIncidents = [...incidents].slice(0, 15);
+
+  if (!hasService('incidenttrack')) {
+    return (
+      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
+        <Feather name="lock" size={40} color={colors.mutedForeground} />
+        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>IncidentTrack</Text>
+        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
+          IncidentTrack is not enabled on your account. Contact your administrator to activate this module.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -249,13 +288,39 @@ export default function IncidentScreen() {
 
       {/* Log button */}
       <View style={styles.section}>
-        <TouchableOpacity
-          style={[styles.addBtn, { backgroundColor: colors.navy }]}
-          onPress={() => { setShowForm((v) => !v); }}
-        >
-          <Feather name={showForm ? 'x' : 'plus'} size={18} color="#ffffff" />
-          <Text style={styles.addBtnText}>{showForm ? 'Cancel' : 'Log new incident'}</Text>
-        </TouchableOpacity>
+        {optionsError ? (
+          <View style={[styles.optionsError, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionsErrorText, { color: colors.foreground }]}>
+              Incident form options could not be loaded.
+            </Text>
+            <TouchableOpacity
+              style={[styles.retryBtn, { borderColor: colors.primary }]}
+              onPress={() => { void refetchOptions(); }}
+            >
+              <Feather name="refresh-cw" size={16} color={colors.primary} />
+              <Text style={[styles.retryText, { color: colors.primary }]}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.addBtn,
+              { backgroundColor: colors.navy },
+              (optionsLoading || !optionsReady) && { opacity: 0.6 },
+            ]}
+            onPress={() => { setShowForm((v) => !v); }}
+            disabled={optionsLoading || !optionsReady}
+          >
+            {optionsLoading ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <>
+                <Feather name={showForm ? 'x' : 'plus'} size={18} color="#ffffff" />
+                <Text style={styles.addBtnText}>{showForm ? 'Cancel' : 'Log new incident'}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Form */}
@@ -266,20 +331,20 @@ export default function IncidentScreen() {
             <Text style={[styles.label, { color: colors.foreground }]}>Incident type</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                {INCIDENT_TYPES.map((t) => (
+                {incidentTypes.map((value) => (
                   <TouchableOpacity
-                    key={t.value}
+                    key={value}
                     style={[
                       styles.chip,
                       {
-                        borderColor: incidentType === t.value ? colors.primary : colors.border,
-                        backgroundColor: incidentType === t.value ? colors.primary + '1a' : colors.card,
+                        borderColor: effectiveIncidentType === value ? colors.primary : colors.border,
+                        backgroundColor: effectiveIncidentType === value ? colors.primary + '1a' : colors.card,
                       },
                     ]}
-                    onPress={() => setIncidentType(t.value)}
+                    onPress={() => setIncidentType(value)}
                   >
-                    <Text style={[styles.chipText, { color: incidentType === t.value ? colors.primary : colors.mutedForeground }]}>
-                      {t.label}
+                    <Text style={[styles.chipText, { color: effectiveIncidentType === value ? colors.primary : colors.mutedForeground }]}>
+                      {optionLabel(value)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -291,23 +356,26 @@ export default function IncidentScreen() {
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>Severity</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {SEVERITIES.map((s) => (
+              {severities.map((value) => {
+                const optionColor = severityColor(value);
+                return (
                 <TouchableOpacity
-                  key={s.value}
+                  key={value}
                   style={[
                     styles.resultBtn,
                     {
-                      borderColor: severity === s.value ? s.color : colors.border,
-                      backgroundColor: severity === s.value ? s.color + '22' : colors.card,
+                      borderColor: effectiveSeverity === value ? optionColor : colors.border,
+                      backgroundColor: effectiveSeverity === value ? optionColor + '22' : colors.card,
                     },
                   ]}
-                  onPress={() => setSeverity(s.value)}
+                  onPress={() => setSeverity(value)}
                 >
-                  <Text style={[styles.resultBtnText, { color: severity === s.value ? s.color : colors.mutedForeground }]}>
-                    {s.label}
+                  <Text style={[styles.resultBtnText, { color: effectiveSeverity === value ? optionColor : colors.mutedForeground }]}>
+                    {optionLabel(value)}
                   </Text>
                 </TouchableOpacity>
-              ))}
+                );
+              })}
             </View>
           </View>
 
@@ -522,12 +590,6 @@ export default function IncidentScreen() {
             />
           </View>
 
-          {/* RIDDOR */}
-          <View style={[styles.field, styles.switchRow]}>
-            <Text style={[styles.label, { color: colors.foreground, marginBottom: 0 }]}>RIDDOR reportable?</Text>
-            <Switch value={riddorReportable} onValueChange={setRiddorReportable} trackColor={{ true: MODULE_COLOR }} />
-          </View>
-
           {/* Reported by */}
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>Reported by</Text>
@@ -575,8 +637,8 @@ export default function IncidentScreen() {
           </View>
         ) : (
           recentIncidents.map((inc) => {
-            const sev = SEVERITIES.find((s) => s.value === inc.severity);
-            const typLabel = INCIDENT_TYPES.find((t) => t.value === inc.incidentType)?.label ?? inc.incidentType;
+            const sev = DEFAULT_SEVERITIES.find((s) => s.value === inc.severity);
+            const typLabel = optionLabel(inc.incidentType);
             return (
               <View
                 key={inc.id}
@@ -685,6 +747,30 @@ const styles = StyleSheet.create({
   addBtnText: {
     color: '#ffffff',
     fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  optionsError: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 14,
+    gap: 12,
+  },
+  optionsErrorText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  retryText: {
+    fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
   },
   formCard: {
