@@ -255,7 +255,8 @@ const issueCreate = z.object({
   siteId:        z.number().int().nullable().optional(),
 });
 
-const issueUpdate = issueCreate.partial();
+const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
+const issueUpdate = issueCreate.partial().extend({ resolverSignature: drawnSignature.optional() });
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
@@ -440,6 +441,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
 
   const data = parsed.data as any;
   delete data.resolvedDate;
+  if (data.resolverSignature && data.status !== "resolved") {
+    return res.status(400).json({ error: "A resolver signature can only be submitted with final resolution" });
+  }
   if ("issueType" in data && data.issueType != null) {
     // Allow a value unchanged from the stored record even if it is no longer in
     // the client's effective list; reject only NEW values not in the list.
@@ -496,6 +500,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       ["pending", "approved"].includes(current.emailRequestStatus ?? "") && contractorEmailContentChanged(current, data);
     const updateData: Record<string, any> = { ...data, updatedAt: new Date() };
     if (data.status === "resolved" && isStatusChange) {
+      if (!data.resolverSignature) return { kind: "resolver_signature_required" as const };
       const resolverName = req.currentUser!.name?.trim();
       if (!resolverName) return { kind: "resolver_name_required" as const };
       updateData.resolvedDate = new Date().toISOString().slice(0, 10);
@@ -618,6 +623,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (transitionResult.kind === "resolver_name_required") {
     return res.status(400).json({ error: "Your account must have a name before resolving an issue" });
+  }
+  if (transitionResult.kind === "resolver_signature_required") {
+    return res.status(400).json({ error: "A drawn signature is required before resolving an issue" });
   }
   if (transitionResult.kind === "conflict") {
     return res.status(409).json({ error: "Issue status changed; refresh and try again" });

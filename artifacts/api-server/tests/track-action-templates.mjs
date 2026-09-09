@@ -1,6 +1,7 @@
 // Integration coverage for the required-action template catalogue.
 // Run through run-track-action-templates.sh to boot a disposable API when needed.
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const SIGNATURE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 let passed = 0; const failures = [];
 const check = (name, ok, detail = "") => ok ? passed++ : (failures.push(`${name}${detail ? ` — ${detail}` : ""}`), console.error(`FAIL: ${name} ${detail}`));
 const status = (name, response, expected) => check(name, expected.includes(response.status), `expected ${expected.join("/")} got ${response.status}`);
@@ -56,9 +57,11 @@ async function main() {
   const oneOff = await admin("POST", "/track-actions", { module: "fire", title: "one off", severity: "monitor", instruction: "one off instruction", siteId: alphaSite.data?.id });
   status("create one-off action", oneOff, [201]); check("one-off provenance", oneOff.data?.provenance === "one_off");
   status("resolution rejects missing evidence", await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed" }), [400]);
-  const resolvedAction = await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed", evidenceReference: "photo-1", resolutionNotes: "completed" });
+  status("resolution rejects missing signature", await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed", evidenceReference: "photo-1", resolutionNotes: "completed" }), [400]);
+  const resolvedAction = await admin("PATCH", `/track-actions/${oneOff.data?.id}`, { status: "resolved", remedialAction: "fixed", evidenceReference: "photo-1", resolutionNotes: "completed", resolverSignature: SIGNATURE });
   status("resolution permits all evidence", resolvedAction, [200]);
   check("resolution snapshots authenticated resolver name", resolvedAction.data?.resolvedByName === "Template Admin", `got ${resolvedAction.data?.resolvedByName}`);
+  check("resolution stores drawn signature", resolvedAction.data?.resolverSignature === SIGNATURE);
 
   const staffEmail = `action-staff-${Date.now()}@test.local`; const viewerEmail = `action-viewer-${Date.now()}@test.local`;
   status("create alpha staff", await admin("POST", "/users", { name: "Action staff", email: staffEmail, password: "password-123", role: "client_staff", clientId, departmentId: alpha.data?.id }), [200, 201]);

@@ -21,6 +21,7 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   targetDate: date("target_date"),
   resolvedDate: date("resolved_date"),
   resolvedByName: text("resolved_by_name"),
+  resolverSignature: text("resolver_signature"),
   solutionNotes: text("solution_notes"),
   // Pending contractor-email approval request ("assign" | "quote")
   emailRequestMode: text("email_request_mode"),

@@ -43,6 +43,7 @@ export const trackActionsTable = pgTable("track_actions", {
   createdBy: integer("created_by"),
   resolvedBy: integer("resolved_by"),
   resolvedByName: text("resolved_by_name"),
+  resolverSignature: text("resolver_signature"),
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

@@ -9,6 +9,7 @@ const router = Router();
 const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident"] as const;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
+const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
 const scopeFields = {
   siteId: z.number().int().positive().nullable().optional(),
   departmentId: z.number().int().positive().nullable().optional(),
@@ -55,6 +56,7 @@ const patchSchema = z.object({
   status: z.enum(["open", "in_progress", "resolved"]).optional(), siteId: z.number().int().positive().nullable().optional(),
   ownerName: nullableText, dueDate: z.string().date().nullable().optional(), remedialAction: nullableText,
   evidenceReference: nullableText, resolutionNotes: nullableText,
+  resolverSignature: drawnSignature.optional(),
 }).strict();
 
 async function canAccessSite(siteId: number | null | undefined, clientId: number, departmentId: number | null) {
@@ -224,6 +226,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 });
 router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); const id = Number(req.params.id); const parsed = patchSchema.safeParse(req.body); if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" }); if (!parsed.success || !Object.keys(parsed.data).length) return res.status(400).json({ error: parsed.success ? "No changes supplied" : parsed.error.flatten() });
+  if (parsed.data.resolverSignature && parsed.data.status !== "resolved") return res.status(400).json({ error: "A resolver signature can only be submitted with final resolution" });
   const departmentId = getActiveDepartmentId(req);
   const result = await db.transaction(async (tx) => {
     const [current] = await tx.select().from(trackActionsTable).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId))).for("update");
@@ -237,8 +240,8 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
-    if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes))) {
-      return { status: 400 as const, error: "remedialAction, evidenceReference and resolutionNotes are required to resolve an action" };
+    if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
+      return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
     if (nextStatus === "resolved") {

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 import { cn } from "@/lib/utils";
 
 type Severity = "monitor" | "action_required" | "urgent";
@@ -29,6 +30,7 @@ export interface TrackAction {
   evidenceReference?: string | null;
   resolutionNotes?: string | null;
   resolvedByName?: string | null;
+  resolverSignature?: string | null;
   instruction?: string | null;
   instructionSnapshot?: string | null;
   sourceKind?: string | null;
@@ -62,6 +64,7 @@ interface RequiredActionTemplate {
 }
 
 const emptyDraft = { title: "", instruction: "", severity: "monitor" as Severity, siteId: "", ownerName: "", dueDate: "", templateId: "" };
+type ResolutionValues = { remedialAction: string; evidenceReference: string; resolutionNotes: string };
 const severityStyles: Record<Severity, string> = {
   monitor: "bg-slate-100 text-slate-700 border-slate-200",
   action_required: "bg-amber-50 text-amber-800 border-amber-200",
@@ -83,7 +86,8 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
-  const [resolution, setResolution] = useState<Record<string, { remedialAction: string; evidenceReference: string; resolutionNotes: string }>>({});
+  const [resolution, setResolution] = useState<Record<string, ResolutionValues>>({});
+  const [pendingSignature, setPendingSignature] = useState<{ action: TrackAction; values: ResolutionValues } | null>(null);
 
   const canMutate = user?.role !== "client_viewer" && !!user;
   const loadActions = useCallback(async () => {
@@ -228,13 +232,18 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 
           <div className="space-y-3" aria-live="polite">
             {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading actions…</div> : unresolved.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No unresolved actions for this module.</p> : unresolved.map(action => (
-              <ActionRow key={action.id} action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => updateAction(action, { status: "resolved", ...values })} />
+               <ActionRow key={action.id} action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => setPendingSignature({ action, values })} />
             ))}
           </div>
 
-          {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <div key={action.id}><ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />{action.resolvedByName && <p className="-mt-3 border-x border-b bg-slate-50 px-4 pb-3 text-xs text-muted-foreground">Signed off as complete by <strong className="text-foreground">{action.resolvedByName}</strong></p>}</div>)}</CollapsibleContent></Collapsible>}
+          {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <div key={action.id}><ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />{action.resolvedByName && <div className="-mt-3 border-x border-b bg-slate-50 px-4 pb-3 text-xs text-muted-foreground"><p>Signed off as complete by <strong className="text-foreground">{action.resolvedByName}</strong></p>{action.resolverSignature && <img src={action.resolverSignature} alt={`Signature of ${action.resolvedByName}`} className="mt-2 h-14 max-w-52 rounded-sm border bg-white object-contain" />}</div>}</div>)}</CollapsibleContent></Collapsible>}
         </CardContent>
       </Card>
+      <DrawnSignatureDialog open={!!pendingSignature} busy={submitting} onCancel={() => setPendingSignature(null)} onConfirm={async resolverSignature => {
+        if (!pendingSignature) return;
+        await updateAction(pendingSignature.action, { status: "resolved", ...pendingSignature.values, resolverSignature });
+        setPendingSignature(null);
+      }} />
     </section>
   );
 }

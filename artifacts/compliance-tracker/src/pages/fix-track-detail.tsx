@@ -12,6 +12,7 @@ import {
   MapPin, User, FileText, Send, Camera, Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
 
 // ── Types & Constants ─────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ interface Issue {
   targetDate?: string | null;
   resolvedDate?: string | null;
   resolvedByName?: string | null;
+  resolverSignature?: string | null;
   solutionNotes?: string | null;
   completionDocumentPath?: string | null;
   emailRequestMode?: string | null;
@@ -241,6 +243,7 @@ export default function FixTrackDetailPage() {
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -266,11 +269,15 @@ export default function FixTrackDetailPage() {
     if (params?.id) loadIssue();
   }, [params?.id, hasFixtrack]);
 
-  async function handleStatusChange(newStatus: string) {
+  async function handleStatusChange(newStatus: string, resolverSignature?: string) {
     if (!issue || statusBusy) return;
+    if (newStatus === "resolved" && !resolverSignature) {
+      setSignatureOpen(true);
+      return;
+    }
     setStatusBusy(true);
     try {
-      const payload = { status: newStatus };
+      const payload = { status: newStatus, ...(resolverSignature ? { resolverSignature } : {}) };
       
       const res = await apiFetch(`/fix-track/issues/${issue.id}`, {
         method: "PUT",
@@ -541,9 +548,10 @@ export default function FixTrackDetailPage() {
               </div>
             )}
             {issue.resolvedByName && ["resolved", "closed"].includes(issue.status) && (
-              <p className="w-full text-xs text-muted-foreground">
-                Signed off as complete by <strong className="text-foreground">{issue.resolvedByName}</strong>
-              </p>
+              <div className="w-full text-xs text-muted-foreground">
+                <p>Signed off as complete by <strong className="text-foreground">{issue.resolvedByName}</strong></p>
+                {issue.resolverSignature && <img src={issue.resolverSignature} alt={`Signature of ${issue.resolvedByName}`} className="mt-2 h-14 max-w-52 rounded-sm border bg-white object-contain" />}
+              </div>
             )}
             
             <div className="flex-1 flex gap-2 w-full">
@@ -572,6 +580,10 @@ export default function FixTrackDetailPage() {
           </div>
         </div>
       )}
+      <DrawnSignatureDialog open={signatureOpen} busy={statusBusy} onCancel={() => setSignatureOpen(false)} onConfirm={async signature => {
+        await handleStatusChange("resolved", signature);
+        setSignatureOpen(false);
+      }} />
     </AppLayout>
   );
 }

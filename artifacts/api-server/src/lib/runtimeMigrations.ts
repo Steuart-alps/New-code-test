@@ -824,6 +824,7 @@ async function migrateTrackActions() {
       "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "resolved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "resolved_by_name" text,
+      "resolver_signature" text,
       "resolved_at" timestamp,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
@@ -862,6 +863,7 @@ async function migrateTrackActions() {
   // have a human creator, whereas API-created records continue to set it.
   await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);
   await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolved_by_name" text`);
+  await db.execute(sql`ALTER TABLE "track_actions" ADD COLUMN IF NOT EXISTS "resolver_signature" text`);
   await db.execute(sql`
     UPDATE "track_actions" a
     SET "resolved_by_name" = u.name
@@ -881,6 +883,10 @@ async function migrateTrackActions() {
         status <> 'resolved'
         OR (resolved_by IS NOT NULL AND nullif(trim(resolved_by_name), '') IS NOT NULL)
       )
+  `);
+  await db.execute(sql`
+    ALTER TABLE "track_actions"
+      DROP CONSTRAINT IF EXISTS "CK_track_actions_resolver_signature"
   `);
   // A source record ID is only unique within its table. Preserve old rows
   // (whose source_kind remains NULL) while making new automated actions
@@ -2002,6 +2008,10 @@ async function migrateFixTrackV2() {
   await db.execute(sql`
     ALTER TABLE "fix_track_issues"
     ADD COLUMN IF NOT EXISTS "resolved_by_name" text
+  `);
+  await db.execute(sql`
+    ALTER TABLE "fix_track_issues"
+    ADD COLUMN IF NOT EXISTS "resolver_signature" text
   `);
   // Settings are tenant/key values. Keep the newest historical duplicate
   // before enforcing the invariant needed by atomic upserts.

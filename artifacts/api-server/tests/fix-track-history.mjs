@@ -1,6 +1,7 @@
 // Focused FixTrack detail/history regression coverage.
 // Usage: node tests/fix-track-history.mjs (with the API server running).
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const SIGNATURE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const date = new Date().toISOString().slice(0, 10);
 let passed = 0;
 const failures = [];
@@ -60,8 +61,10 @@ async function main() {
     (await owner("PUT", `/fix-track/issues/${id}`, { status: "in_progress" })).status === 200);
   check("append attributed note",
     (await owner("POST", `/fix-track/issues/${id}/notes`, { note: "Engineer booked" })).status === 200);
+  check("reject resolution without drawn signature",
+    (await owner("PUT", `/fix-track/issues/${id}`, { status: "resolved" })).status === 400);
   check("advance in progress → resolved",
-    (await owner("PUT", `/fix-track/issues/${id}`, { status: "resolved" })).status === 200);
+    (await owner("PUT", `/fix-track/issues/${id}`, { status: "resolved", resolverSignature: SIGNATURE })).status === 200);
   check("advance resolved → closed",
     (await owner("PUT", `/fix-track/issues/${id}`, { status: "closed" })).status === 200);
 
@@ -70,6 +73,7 @@ async function main() {
   check("resolved issue snapshots authenticated resolver name",
     detail.data?.resolvedByName === "owner FixTrack User",
     JSON.stringify(detail.data));
+  check("resolved issue stores drawn signature", detail.data?.resolverSignature === SIGNATURE);
   check("status history is chronological and complete",
     JSON.stringify(detail.data?.statusEvents?.map((event) => event.status)) ===
       JSON.stringify(["reported", "in_progress", "resolved", "closed"]),

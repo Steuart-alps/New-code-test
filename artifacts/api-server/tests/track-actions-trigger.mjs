@@ -1,6 +1,7 @@
 // Focused integration coverage for database-created operational actions.
 // Usage: node tests/track-actions-trigger.mjs (with the API server running).
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const SIGNATURE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const date = new Date().toISOString().slice(0, 10);
 let cookie = "";
 let failures = 0;
@@ -75,7 +76,7 @@ async function main() {
     title: legActions[0]?.title, severity: legActions[0]?.severity, dueDate: legActions[0]?.dueDate,
   }) === JSON.stringify(initialActionFields));
   assert("resolve action", (await request("PATCH", `/track-actions/${action?.id}`, {
-    status: "resolved", remedialAction: "Fixed", evidenceReference: "Test evidence", resolutionNotes: "Closed",
+    status: "resolved", remedialAction: "Fixed", evidenceReference: "Test evidence", resolutionNotes: "Closed", resolverSignature: SIGNATURE,
   })).status === 200);
   assert("source update after resolution", (await request("PUT", `/legionella/${failed.data?.id}`, { result: "fail", notes: "new source evidence" })).status === 200);
   const resolved = sourceAction(await actions("legionella"), "legionella_checks", failed.data?.id);
