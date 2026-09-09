@@ -43,6 +43,11 @@ function resultRows(result: any): any[] {
   return result.rows ?? result ?? [];
 }
 
+function csvCell(value: string): string {
+  const safeValue = /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safeValue.replace(/"/g, "\"\"")}"`;
+}
+
 async function ownedSite(clientId: number, siteId: number | null | undefined) {
   if (siteId == null) return true;
   const result = await db.execute(sql`SELECT id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
@@ -83,6 +88,75 @@ router.get("/appliances", requireAuth, async (req, res) => {
   `);
 
   res.json(rows.rows ?? rows);
+});
+
+const registerQuerySchema = z.object({
+  siteId: z.coerce.number().int().positive().optional(),
+  status: z.enum(["all", "overdue"]).default("all"),
+});
+
+router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const parsed = registerQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "A valid site and status are required" });
+
+  const departmentId = getActiveDepartmentId(req);
+  const { siteId, status } = parsed.data;
+  if (siteId !== undefined) {
+    const access = await siteAccess(clientId, siteId, departmentId);
+    if (access === "missing") return res.status(400).json({ error: "Invalid siteId for this client" });
+    if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const today = todayIso();
+  const result = await db.execute(sql`
+    SELECT
+      a.name, a.asset_tag, a.appliance_type, a.location, a.active,
+      latest.test_date AS last_test_date,
+      latest.result AS last_result,
+      latest.tested_by,
+      latest.next_test_date
+    FROM pat_appliances a
+    LEFT JOIN LATERAL (
+      SELECT test_date, result, tested_by, next_test_date
+      FROM pat_tests
+      WHERE appliance_id=a.id AND client_id=a.client_id
+      ORDER BY test_date DESC, created_at DESC
+      LIMIT 1
+    ) latest ON true
+    LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
+    WHERE a.client_id=${clientId}
+      ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${siteId !== undefined ? sql`AND a.site_id=${siteId}` : sql``}
+      ${status === "overdue" ? sql`AND latest.next_test_date < ${today}::date` : sql``}
+    ORDER BY a.name ASC, a.id ASC
+  `);
+
+  const headings = ["Appliance name", "Asset tag", "Type", "Location", "Last test date", "Result", "Tested by", "Next due date", "Status"];
+  const rows = resultRows(result).map((row: any) => {
+    const nextDue = row.next_test_date ? String(row.next_test_date).slice(0, 10) : "";
+    const testResult = row.last_result === "pass" ? "Pass" : row.last_result === "fail" ? "Fail" : "";
+    const registerStatus = !row.active
+      ? "Inactive"
+      : !row.last_test_date
+        ? "Not tested"
+        : row.last_result === "fail"
+          ? "Failed"
+          : nextDue && nextDue < today
+            ? "Overdue"
+            : "Up to date";
+    return [
+      row.name ?? "", row.asset_tag ?? "", row.appliance_type ?? "", row.location ?? "",
+      row.last_test_date ? String(row.last_test_date).slice(0, 10) : "", testResult,
+      row.tested_by ?? "", nextDue, registerStatus,
+    ].map((value) => csvCell(String(value))).join(",");
+  });
+  const scope = siteId !== undefined ? `site-${siteId}` : "all-sites";
+  const filename = `pat-test-register-${scope}-${status}-${today}.csv`;
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(`\uFEFF${[headings.map(csvCell).join(","), ...rows].join("\r\n")}`);
 });
 
 router.post("/appliances", requireAuth, denyViewers, async (req, res) => {
