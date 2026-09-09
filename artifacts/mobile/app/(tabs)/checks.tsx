@@ -121,7 +121,9 @@ export default function ChecksScreen() {
   const { hasService } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const visibleModules = MODULES.filter(
-    (mod) => mod.id !== 'incident' || hasService('incidenttrack'),
+    (mod) =>
+      (mod.id !== 'incident' || hasService('incidenttrack')) &&
+      (mod.id !== 'pat' || hasService('pattrack')),
   );
 
   return (

@@ -7,9 +7,9 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +24,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -52,9 +53,14 @@ interface PatTest {
 }
 
 type Result = 'pass' | 'fail';
+type ApplianceStatus = 'failed' | 'overdue' | 'dueSoon' | 'ok' | 'dueDateNeeded' | 'untested';
+
+function localIsoDate(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate();
 }
 
 function formatDate(dateStr: string): string {
@@ -65,7 +71,19 @@ function formatDate(dateStr: string): string {
 function nextTestDefault(): string {
   const d = new Date();
   d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  return localIsoDate(d);
+}
+
+function applianceStatus(appliance: Appliance): ApplianceStatus {
+  if (!appliance.last_test_date) return 'untested';
+  if (appliance.last_result === 'fail') return 'failed';
+  if (!appliance.next_test_date) return 'dueDateNeeded';
+  const due = appliance.next_test_date.slice(0, 10);
+  const todayDate = today();
+  if (due < todayDate) return 'overdue';
+  const inThirtyDays = new Date();
+  inThirtyDays.setDate(inThirtyDays.getDate() + 30);
+  return due <= localIsoDate(inThirtyDays) ? 'dueSoon' : 'ok';
 }
 
 export default function PatScreen() {
@@ -73,7 +91,8 @@ export default function PatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const qc = useQueryClient();
-  const { hasService } = useAuth();
+  const { user, hasService } = useAuth();
+  const serviceEnabled = hasService('pattrack');
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const [showForm, setShowForm] = useState(false);
@@ -84,21 +103,8 @@ export default function PatScreen() {
   const [result, setResult] = useState<Result>('pass');
   const [testDate, setTestDate] = useState(today());
   const [nextTestDate, setNextTestDate] = useState(nextTestDefault());
-  const [testedBy, setTestedBy] = useState('');
+  const [testedBy, setTestedBy] = useState(user?.name ?? '');
   const [notes, setNotes] = useState('');
-
-  // Service gate
-  if (!hasService('pattrack')) {
-    return (
-      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
-        <Feather name="lock" size={40} color={colors.mutedForeground} />
-        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>PATtrack</Text>
-        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
-          PATtrack is not enabled on your account. Contact your administrator to activate this module.
-        </Text>
-      </View>
-    );
-  }
 
   const {
     data: appliances = [],
@@ -107,6 +113,7 @@ export default function PatScreen() {
   } = useQuery<Appliance[]>({
     queryKey: ['pat-appliances'],
     queryFn: () => apiFetch('/api/pat-track/appliances'),
+    enabled: serviceEnabled,
   });
 
   const {
@@ -116,6 +123,7 @@ export default function PatScreen() {
   } = useQuery<PatTest[]>({
     queryKey: ['pat-tests'],
     queryFn: () => apiFetch('/api/pat-track/tests'),
+    enabled: serviceEnabled,
   });
 
   const { mutate, isPending } = useMutation({
@@ -130,7 +138,7 @@ export default function PatScreen() {
       setResult('pass');
       setTestDate(today());
       setNextTestDate(nextTestDefault());
-      setTestedBy('');
+      setTestedBy(user?.name ?? '');
       setNotes('');
       setShowForm(false);
       Alert.alert('Logged', 'PAT test recorded successfully.');
@@ -141,17 +149,37 @@ export default function PatScreen() {
     },
   });
 
+  if (!serviceEnabled) {
+    return (
+      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
+        <Feather name="lock" size={40} color={colors.mutedForeground} />
+        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>PATtrack</Text>
+        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
+          PATtrack is not enabled on your account. Contact your administrator to activate this module.
+        </Text>
+      </View>
+    );
+  }
+
   function handleSubmit() {
     if (applianceId === null) {
       Alert.alert('Appliance required', 'Please choose the appliance you tested.');
+      return;
+    }
+    if (!testedBy.trim()) {
+      Alert.alert('Tester required', 'Enter the name of the person who carried out the test.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(testDate) || !/^\d{4}-\d{2}-\d{2}$/.test(nextTestDate)) {
+      Alert.alert('Check dates', 'Enter the test and next due dates as YYYY-MM-DD.');
       return;
     }
     const body: Record<string, unknown> = {
       applianceId,
       testDate,
       result,
-      ...(nextTestDate.trim() ? { nextTestDate: nextTestDate.trim() } : {}),
-      ...(testedBy.trim() ? { testedBy: testedBy.trim() } : {}),
+      nextTestDate: nextTestDate.trim(),
+      testedBy: testedBy.trim(),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
     };
     mutate(body);
@@ -165,10 +193,33 @@ export default function PatScreen() {
 
   const recentTests = [...tests].slice(0, 15);
 
+  function openLogForm(appliance: Appliance) {
+    setApplianceId(appliance.id);
+    setResult('pass');
+    setTestDate(today());
+    setNextTestDate(nextTestDefault());
+    setTestedBy(user?.name ?? '');
+    setNotes('');
+    setShowForm(true);
+  }
+
+  const statusDisplay: Record<
+    ApplianceStatus,
+    { label: string; color: string; icon: React.ComponentProps<typeof Feather>['name'] }
+  > = {
+    failed: { label: 'Failed', color: colors.destructive, icon: 'x-circle' },
+    overdue: { label: 'Overdue', color: colors.destructive, icon: 'alert-circle' },
+    dueSoon: { label: 'Due soon', color: colors.warning, icon: 'clock' },
+    ok: { label: 'OK', color: colors.success, icon: 'check-circle' },
+    dueDateNeeded: { label: 'Due date needed', color: colors.warning, icon: 'calendar' },
+    untested: { label: 'Untested', color: colors.mutedForeground, icon: 'minus-circle' },
+  };
+
   return (
-    <ScrollView
+    <KeyboardAwareScrollViewCompat
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingBottom: Platform.OS === 'web' ? 34 : 40 }}
+      bottomOffset={20}
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -191,53 +242,80 @@ export default function PatScreen() {
         </View>
       </View>
 
-      {/* Log button */}
+      {/* Appliance status list */}
       <View style={styles.section}>
-        <TouchableOpacity
-          style={[styles.addBtn, { backgroundColor: colors.navy }]}
-          onPress={() => setShowForm((v) => !v)}
-        >
-          <Feather name={showForm ? 'x' : 'plus'} size={18} color="#ffffff" />
-          <Text style={styles.addBtnText}>{showForm ? 'Cancel' : 'Log PAT test'}</Text>
-        </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Appliances</Text>
+        <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
+          Tap an appliance to log its latest test.
+        </Text>
+        {appliancesLoading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+        ) : appliances.length === 0 ? (
+          <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="zap" size={22} color={colors.mutedForeground} />
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              No appliances found. Add appliances on the web app first.
+            </Text>
+          </View>
+        ) : (
+          appliances.map((appliance) => {
+            const status = applianceStatus(appliance);
+            const display = statusDisplay[status];
+            return (
+              <TouchableOpacity
+                key={appliance.id}
+                testID={`pat-appliance-${appliance.id}`}
+                activeOpacity={0.75}
+                style={[styles.applianceCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => openLogForm(appliance)}
+              >
+                <View style={[styles.statusIcon, { backgroundColor: display.color + '1a' }]}>
+                  <Feather name={display.icon} size={20} color={display.color} />
+                </View>
+                <View style={styles.applianceBody}>
+                  <Text style={[styles.applianceName, { color: colors.foreground }]}>{appliance.name}</Text>
+                  <Text style={[styles.applianceMeta, { color: colors.mutedForeground }]}>
+                    {[appliance.asset_tag, appliance.location, appliance.appliance_type].filter(Boolean).join(' · ') || 'No asset details'}
+                  </Text>
+                  <Text style={[styles.applianceDue, { color: colors.mutedForeground }]}>
+                    {appliance.next_test_date ? `Next due ${formatDate(appliance.next_test_date.slice(0, 10))}` : 'No test date recorded'}
+                  </Text>
+                </View>
+                <View style={[styles.statusBadge, { backgroundColor: display.color + '1a' }]}>
+                  <Text style={[styles.statusBadgeText, { color: display.color }]}>{display.label}</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            );
+          })
+        )}
       </View>
 
       {/* Form */}
-      {showForm && (
-        <View style={styles.formCard}>
-          {/* Appliance picker */}
-          <View style={styles.field}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Appliance</Text>
-            {appliancesLoading ? (
-              <ActivityIndicator color={colors.mutedForeground} style={{ alignSelf: 'flex-start' }} />
-            ) : appliances.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                No appliances found. Add appliances on the web app first.
+      <Modal
+        visible={showForm}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAwareScrollViewCompat
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalContent}
+            bottomOffset={20}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.formHeading}>
+            <View>
+              <Text style={[styles.formTitle, { color: colors.foreground }]}>Log test</Text>
+              <Text style={[styles.formAppliance, { color: colors.mutedForeground }]}>
+                {appliances.find((item) => item.id === applianceId)?.name}
               </Text>
-            ) : (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {appliances.map((a) => {
-                  const selected = applianceId === a.id;
-                  return (
-                    <TouchableOpacity
-                      key={a.id}
-                      style={[
-                        styles.chip,
-                        {
-                          borderColor: selected ? colors.primary : colors.border,
-                          backgroundColor: selected ? colors.primary + '1a' : colors.card,
-                        },
-                      ]}
-                      onPress={() => setApplianceId(a.id)}
-                    >
-                      <Text style={[styles.chipText, { color: selected ? colors.primary : colors.mutedForeground }]}>
-                        {a.name}{a.asset_tag ? ` (${a.asset_tag})` : ''}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+            </View>
+            <TouchableOpacity testID="pat-close-form" onPress={() => setShowForm(false)}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
           </View>
 
           {/* Result */}
@@ -250,6 +328,7 @@ export default function PatScreen() {
               ]).map((opt) => (
                 <TouchableOpacity
                   key={opt.value}
+                  testID={`pat-result-${opt.value}`}
                   style={[
                     styles.resultBtn,
                     {
@@ -282,7 +361,7 @@ export default function PatScreen() {
           {/* Next test date */}
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>
-              Next test date <Text style={{ color: colors.mutedForeground }}>(optional)</Text>
+              Next due date
             </Text>
             <TextInput
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
@@ -296,7 +375,7 @@ export default function PatScreen() {
           {/* Tested by */}
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>
-              Tested by <Text style={{ color: colors.mutedForeground }}>(optional)</Text>
+              Tested by
             </Text>
             <TextInput
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
@@ -327,6 +406,7 @@ export default function PatScreen() {
           {/* Submit */}
           <View style={styles.field}>
             <TouchableOpacity
+              testID="pat-submit-test"
               style={[
                 styles.submitBtn,
                 { backgroundColor: colors.navy },
@@ -348,8 +428,10 @@ export default function PatScreen() {
               Test records are linked to the appliance. Manage appliances on the web app.
             </Text>
           </View>
+            </View>
+          </KeyboardAwareScrollViewCompat>
         </View>
-      )}
+      </Modal>
 
       {/* Recent tests */}
       <View style={styles.section}>
@@ -421,7 +503,7 @@ export default function PatScreen() {
           ))
         )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 
@@ -484,6 +566,33 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     marginBottom: 2,
   },
+  sectionSub: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    marginBottom: 2,
+  },
+  applianceCard: {
+    minHeight: 78,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  statusIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  applianceBody: { flex: 1 },
+  applianceName: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  applianceMeta: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  applianceDue: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 4 },
+  statusBadge: { borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  statusBadgeText: { fontSize: 10, fontFamily: 'Inter_600SemiBold' },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -498,10 +607,33 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   formCard: {
-    marginHorizontal: 16,
-    marginTop: 4,
-    paddingTop: 4,
+    width: '100%',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalScroll: {
+    flexGrow: 0,
+    maxHeight: '92%',
+  },
+  modalContent: {
+    paddingHorizontal: 12,
+    paddingTop: 24,
+    paddingBottom: 12,
+  },
+  formHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  formTitle: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  formAppliance: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 2 },
   field: {
     marginBottom: 18,
   },
