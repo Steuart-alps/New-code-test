@@ -1,8 +1,8 @@
-import crypto from "crypto";
 import { appendFile } from "node:fs/promises";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sendEmail, escapeHtml } from "./email";
+import { digestBearerToken, newBearerToken } from "./bearerTokens";
 
 // ── Token generation ──────────────────────────────────────────────────────────
 
@@ -20,15 +20,15 @@ export async function generateActionTokens(
   clientId: number,
   contractorId: number,
 ): Promise<ActionTokens> {
-  const bookedToken    = crypto.randomBytes(32).toString("hex");
-  const completedToken = crypto.randomBytes(32).toString("hex");
+  const bookedToken    = newBearerToken();
+  const completedToken = newBearerToken();
   const expiresAt      = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
   await db.execute(sql`
-    INSERT INTO fix_track_action_tokens (token, issue_id, client_id, contractor_id, action, expires_at)
+    INSERT INTO fix_track_action_tokens (token, token_hash, issue_id, client_id, contractor_id, action, expires_at)
     VALUES
-      (${bookedToken},    ${issueId}, ${clientId}, ${contractorId}, 'booked',    ${expiresAt}),
-      (${completedToken}, ${issueId}, ${clientId}, ${contractorId}, 'completed', ${expiresAt})
+      (NULL, ${digestBearerToken(bookedToken)},    ${issueId}, ${clientId}, ${contractorId}, 'booked',    ${expiresAt}),
+      (NULL, ${digestBearerToken(completedToken)}, ${issueId}, ${clientId}, ${contractorId}, 'completed', ${expiresAt})
   `);
 
   return { bookedToken, completedToken };

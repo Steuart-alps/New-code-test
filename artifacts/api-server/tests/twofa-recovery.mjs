@@ -18,12 +18,14 @@ const entry = join(tmp, "entry.mjs");
 execSync(`npx esbuild src/lib/totp.ts --bundle --format=esm --platform=node --outfile=${entry}`, { stdio: "pipe" });
 const { generateToken } = await import(entry);
 
+let sessionIp = 30;
 function makeSession() {
   let cookie = "";
+  const forwardedFor = `198.51.100.${sessionIp++}`;
   return async (method, path, body) => {
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": forwardedFor, ...(cookie ? { cookie } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = res.headers.get("set-cookie");
@@ -32,6 +34,23 @@ function makeSession() {
     try { data = await res.json(); } catch {}
     return { status: res.status, data };
   };
+}
+
+async function mobileRequest(method, path, body, token, ipSuffix) {
+  const headers = {
+    "Content-Type": "application/json",
+    // Keep mobile regression calls isolated from the suite's login limiter.
+    "X-Forwarded-For": `198.51.100.${ipSuffix}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return { status: res.status, data };
 }
 
 async function main() {
@@ -97,6 +116,32 @@ async function main() {
   check("used recovery code is rejected", reused.status === 401, `got ${reused.status}`);
   const secondCode = await s3("POST", "/auth/2fa/verify", { code: recoveryCodes?.[1] });
   check("a different recovery code still works", secondCode.status === 200, JSON.stringify(secondCode.data));
+
+  // ── Mobile stateless 2FA login ─────────────────────────────────────────────
+  const mobileCredentials = { email: staffEmail, password: "password-456" };
+  const mobileNoCode = await mobileRequest("POST", "/auth/mobile-login", mobileCredentials, undefined, 11);
+  check("mobile login requires 2fa without code", mobileNoCode.status === 200 && mobileNoCode.data?.requires2fa === true,
+    JSON.stringify(mobileNoCode.data));
+  const mobileBadCode = await mobileRequest("POST", "/auth/mobile-login",
+    { ...mobileCredentials, code: "000000" }, undefined, 12);
+  check("mobile login rejects bad 2fa code", mobileBadCode.status === 401, `got ${mobileBadCode.status}`);
+
+  const mobileTotp = await mobileRequest("POST", "/auth/mobile-login",
+    { ...mobileCredentials, code: generateToken(setup.data.secret) }, undefined, 13);
+  check("mobile login accepts valid TOTP", mobileTotp.status === 200, JSON.stringify(mobileTotp.data));
+  check("mobile login returns bearer token", typeof mobileTotp.data?.token === "string" && mobileTotp.data.token.length > 0);
+  const mobileMe = await mobileRequest("GET", "/auth/me", undefined, mobileTotp.data?.token, 14);
+  check("mobile bearer token authenticates /auth/me",
+    mobileMe.status === 200 && mobileMe.data?.user?.email === staffEmail, JSON.stringify(mobileMe.data));
+
+  const mobileRecoveryCode = recoveryCodes?.[2];
+  const mobileRecovery = await mobileRequest("POST", "/auth/mobile-login",
+    { ...mobileCredentials, code: mobileRecoveryCode }, undefined, 15);
+  check("mobile login accepts one-time recovery code", mobileRecovery.status === 200, JSON.stringify(mobileRecovery.data));
+  check("mobile recovery login returns bearer token", typeof mobileRecovery.data?.token === "string" && mobileRecovery.data.token.length > 0);
+  const mobileRecoveryReuse = await mobileRequest("POST", "/auth/mobile-login",
+    { ...mobileCredentials, code: mobileRecoveryCode }, undefined, 16);
+  check("mobile recovery code reuse is rejected", mobileRecoveryReuse.status === 401, `got ${mobileRecoveryReuse.status}`);
 
   // ── Admin reset: re-enable 2FA, then admin clears it ───────────────────────
   const regenerated = await s3("POST", "/auth/2fa/recovery-codes/regenerate", { password: "password-456" });

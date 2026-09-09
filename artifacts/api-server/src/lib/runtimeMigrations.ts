@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { digestBearerToken, encryptTokenPayload, decryptTokenPayload } from "./bearerTokens";
 
 /**
  * Idempotent runtime migrations for additive schema changes.
@@ -431,7 +432,8 @@ export async function runRuntimeMigrations() {
         "id"            serial PRIMARY KEY,
         "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
         "contractor_id" integer NOT NULL REFERENCES "contractors"("id") ON DELETE CASCADE,
-        "token"         text NOT NULL UNIQUE,
+        "token"         text UNIQUE,
+        "token_hash"    text,
         "expires_at"    timestamp NOT NULL,
         "created_at"    timestamp NOT NULL DEFAULT now(),
         UNIQUE ("contractor_id")
@@ -440,10 +442,20 @@ export async function runRuntimeMigrations() {
     // A token can be withdrawn without deleting its issuance/audit history.
     // issued_by is deliberately nullable for scheduler-issued legacy links.
     await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ADD COLUMN IF NOT EXISTS "token_hash" text`);
+    await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ALTER COLUMN "token" DROP NOT NULL`);
+    const portalLegacy = await db.execute(sql`SELECT id, token FROM contractor_portal_tokens WHERE token IS NOT NULL`);
+    for (const row of (portalLegacy.rows as any[])) {
+      await db.execute(sql`UPDATE contractor_portal_tokens SET token_hash=${digestBearerToken(row.token)}, token=NULL WHERE id=${row.id}`);
+    }
     await db.execute(sql`ALTER TABLE "contractor_portal_tokens" ADD COLUMN IF NOT EXISTS "issued_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_tokens_token"
       ON "contractor_portal_tokens" ("token")
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_tokens_token_hash"
+      ON "contractor_portal_tokens" ("token_hash")
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "contractor_portal_audit_log" (
@@ -515,6 +527,7 @@ export async function runRuntimeMigrations() {
         "ics_filename" text,
         "email_preview_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
         "quote_token" text UNIQUE,
+        "quote_token_hash" text,
         "quote_token_expires_at" timestamp,
         "requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
         "approved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
@@ -536,7 +549,87 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "ics_content" text,
       ADD COLUMN IF NOT EXISTS "ics_filename" text,
       ADD COLUMN IF NOT EXISTS "email_preview_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
-      ADD COLUMN IF NOT EXISTS "quote_token_expires_at" timestamp`);
+      ADD COLUMN IF NOT EXISTS "quote_token_expires_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "quote_token_hash" text,
+      ADD COLUMN IF NOT EXISTS "encrypted_token_payload" text`);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
+    // This credential-scrubbing migration assumes one application instance starts
+    // at a time and finishes migrations before readiness. Zero-downtime deployment
+    // alongside an older writer is intentionally not supported.
+    await db.transaction(async (tx) => {
+      const legacy = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
+        subject, body_html, body_text, email_preview_json, encrypted_token_payload
+        FROM contractor_email_queue FOR UPDATE`);
+      for (const row of (legacy.rows as any[])) {
+        const payload: Record<string, string> = row.encrypted_token_payload
+          ? decryptTokenPayload(row.encrypted_token_payload)
+          : {};
+        let subject = String(row.subject ?? "");
+        let html = String(row.body_html ?? "");
+        let text = row.body_text == null ? null : String(row.body_text);
+        let previewText = JSON.stringify(row.email_preview_json ?? {});
+        const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal)\/([a-z0-9-]{32,})/ig;
+        const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
+        const candidates = [...all.matchAll(bearerPattern)];
+        if (candidates.length === 0 && row.quote_token == null) continue;
+        const discovered: Array<[string, string]> = [];
+        const rawQuote = row.quote_token ? String(row.quote_token) : null;
+        if (rawQuote) payload.quote = rawQuote;
+        for (const match of candidates) {
+          const route = match[1].toLowerCase();
+          const token = match[2];
+          if (route === "contractor-quote") {
+            payload.quote ??= token;
+            discovered.push([token, "{{QUOTE_TOKEN}}"]);
+          } else if (route === "contractor-portal") {
+            payload.portal ??= token;
+            discovered.push([token, "{{PORTAL_URL}}"]);
+          }
+          else {
+            const issueId = Number(row.issue_id ?? row.entity_id);
+            if (!Number.isInteger(issueId)) {
+              throw new Error(`Cannot classify legacy action token without an issue id in contractor_email_queue row ${row.id}`);
+            }
+            const action = await tx.execute(sql`SELECT action FROM fix_track_action_tokens
+              WHERE token_hash=${digestBearerToken(token)}
+                AND issue_id=${issueId}
+                AND client_id=${row.client_id} LIMIT 1`);
+            const kind = String((action.rows as any[])[0]?.action ?? "");
+            if (kind === "booked" || kind === "completed") {
+              payload[kind] = token;
+              discovered.push([token, `{{${kind.toUpperCase()}_TOKEN}}`]);
+            }
+            else throw new Error(`Cannot safely classify legacy action token in contractor_email_queue row ${row.id}`);
+          }
+        }
+        const replacements: Array<[string, string]> = [...discovered];
+        if (payload.quote) replacements.push([payload.quote, "{{QUOTE_TOKEN}}"]);
+        if (payload.booked) replacements.push([payload.booked, "{{BOOKED_TOKEN}}"]);
+        if (payload.completed) replacements.push([payload.completed, "{{COMPLETED_TOKEN}}"]);
+        if (payload.portal) replacements.push([payload.portal, "{{PORTAL_URL}}"]);
+        // Full portal URLs must be replaced before their token suffixes or
+        // hydration would duplicate the URL prefix.
+        replacements.sort(([left], [right]) => right.length - left.length);
+        for (const [raw, placeholder] of replacements) {
+          subject = subject.split(raw).join(placeholder);
+          html = html.split(raw).join(placeholder);
+          if (text != null) text = text.split(raw).join(placeholder);
+          previewText = previewText.split(raw).join(placeholder);
+        }
+        const remaining = [subject, html, text ?? "", previewText].join("\n");
+        if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i.test(remaining)) {
+          throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
+        }
+        const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
+        await tx.execute(sql`UPDATE contractor_email_queue SET
+          quote_token_hash=COALESCE(quote_token_hash, ${payload.quote ? digestBearerToken(payload.quote) : null}),
+          quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
+          email_preview_json=${previewText}::jsonb,
+          encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
+          WHERE id=${row.id} AND quote_token IS NOT DISTINCT FROM ${row.quote_token}`);
+      }
+    });
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_entity_type_check",
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_client_id_issue_id_mode_status_key"`);
@@ -1967,7 +2060,8 @@ async function migrateFixTrackV2() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "fix_track_action_tokens" (
       "id"                     serial PRIMARY KEY,
-      "token"                  text NOT NULL UNIQUE,
+      "token"                  text UNIQUE,
+      "token_hash"             text,
       "issue_id"               integer NOT NULL REFERENCES "fix_track_issues"("id") ON DELETE CASCADE,
       "client_id"              integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "contractor_id"          integer REFERENCES "contractors"("id") ON DELETE SET NULL,
@@ -1979,9 +2073,15 @@ async function migrateFixTrackV2() {
       "created_at"             timestamp NOT NULL DEFAULT now()
     )
   `);
+  await db.execute(sql`ALTER TABLE "fix_track_action_tokens" ADD COLUMN IF NOT EXISTS "token_hash" text`);
+  await db.execute(sql`ALTER TABLE "fix_track_action_tokens" ALTER COLUMN "token" DROP NOT NULL`);
+  const actionLegacy = await db.execute(sql`SELECT id, token FROM fix_track_action_tokens WHERE token IS NOT NULL`);
+  for (const row of (actionLegacy.rows as any[])) {
+    await db.execute(sql`UPDATE fix_track_action_tokens SET token_hash=${digestBearerToken(row.token)}, token=NULL WHERE id=${row.id}`);
+  }
   await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS "IDX_fix_track_action_tokens_token"
-    ON "fix_track_action_tokens" ("token")
+    CREATE UNIQUE INDEX IF NOT EXISTS "IDX_fix_track_action_tokens_token_hash"
+    ON "fix_track_action_tokens" ("token_hash")
   `);
 
   // Completion document path stored on the issue so managers can download it

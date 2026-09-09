@@ -7,5 +7,7 @@ export {
   DBS_MAX_AGE_YEARS,
 } from "../src/lib/contractorComplianceReminders";
 export { db, pool } from "@workspace/db";
-export { clientsTable, usersTable, contractorsTable } from "@workspace/db/schema";
+export { clientsTable, usersTable, contractorsTable, fixTrackIssuesTable } from "@workspace/db/schema";
 export { sql, eq, inArray, and } from "drizzle-orm";
+export { runRuntimeMigrations } from "../src/lib/runtimeMigrations";
+export { decryptTokenPayload } from "../src/lib/bearerTokens";

@@ -1,5 +1,4 @@
 import { Router, type IRouter } from "express";
-import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { contractorsTable } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -11,6 +10,7 @@ import {
 import { z } from "zod";
 import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
+import { digestBearerToken, newBearerToken } from "../lib/bearerTokens";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -207,16 +207,17 @@ router.post("/contractors/:id/portal-link", requireAuth, requireClientAdmin, asy
     return;
   }
 
-  const token = randomBytes(32).toString("hex");
+   const token = newBearerToken();
   const expiresAt = new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000);
   await db.execute(sql`
     INSERT INTO contractor_portal_tokens
-      (client_id, contractor_id, token, expires_at, revoked_at, issued_by, created_at)
+       (client_id, contractor_id, token, token_hash, expires_at, revoked_at, issued_by, created_at)
     VALUES
-      (${contractor.clientId}, ${contractor.id}, ${token}, ${expiresAt}, NULL, ${req.currentUser?.id ?? null}, now())
+       (${contractor.clientId}, ${contractor.id}, NULL, ${digestBearerToken(token)}, ${expiresAt}, NULL, ${req.currentUser?.id ?? null}, now())
     ON CONFLICT (contractor_id) DO UPDATE SET
       client_id = EXCLUDED.client_id,
-      token = EXCLUDED.token,
+       token = NULL,
+       token_hash = EXCLUDED.token_hash,
       expires_at = EXCLUDED.expires_at,
       revoked_at = NULL,
       issued_by = EXCLUDED.issued_by,

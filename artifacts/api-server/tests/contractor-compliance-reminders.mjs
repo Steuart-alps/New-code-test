@@ -5,7 +5,7 @@
 // and verifies:
 //   - insurance expiring within 30 days OR already expired is alerted
 //   - insurance expiring far in the future is NOT alerted
-//   - a DBS check older than 3 years is alerted; a recent one is not
+//   - an expired DBS/PVG record is alerted; a current one is not
 //   - only client_admin / maintenance-manager users are emailed
 //   - a second run sends nothing (dedupe by contractor+milestone)
 //   - renewing the insurance date produces a new milestone and re-alerts
@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import crypto from "node:crypto";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,12 +54,6 @@ async function bundleEntry() {
 function daysFromNow(days) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
-function yearsAgo(years) {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - years);
-  return d;
-}
-
 function pathToUrl(p) {
   return new URL(`file://${p}`).href;
 }
@@ -66,7 +61,10 @@ function pathToUrl(p) {
 async function main() {
   const { outDir, outFile } = await bundleEntry();
   const lib = await import(pathToUrl(outFile));
-  const { runContractorComplianceReminderJob, db, pool, clientsTable, usersTable, contractorsTable, sql } = lib;
+  const {
+    runContractorComplianceReminderJob, runRuntimeMigrations, decryptTokenPayload,
+    db, pool, clientsTable, usersTable, contractorsTable, fixTrackIssuesTable, sql,
+  } = lib;
 
   const tag = `contractorcompl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let clientId = null;
@@ -119,8 +117,12 @@ async function main() {
     const insSoon = await seedContractor("ins-soon", { publicLiabilityExpiry: daysFromNow(10) });
     const insExpired = await seedContractor("ins-expired", { publicLiabilityExpiry: daysFromNow(-5) });
     const insFar = await seedContractor("ins-far", { publicLiabilityExpiry: daysFromNow(200) });
-    const dbsOld = await seedContractor("dbs-old", { dbsCheckDate: yearsAgo(4) });
-    const dbsRecent = await seedContractor("dbs-recent", { dbsCheckDate: yearsAgo(1) });
+    const dbsOld = await seedContractor("dbs-old", {});
+    const dbsRecent = await seedContractor("dbs-recent", {});
+    // dbs_expiry_date is a runtime-migrated column not yet represented by the
+    // shared Drizzle schema, so seed it explicitly.
+    await db.execute(sql`UPDATE contractors SET dbs_expiry_date = ${daysFromNow(-10)} WHERE id = ${dbsOld.id}`);
+    await db.execute(sql`UPDATE contractors SET dbs_expiry_date = ${daysFromNow(200)} WHERE id = ${dbsRecent.id}`);
 
     // --- Run 1 ---
     const sent = [];
@@ -149,6 +151,79 @@ async function main() {
       !recipients.includes(`${tag}-viewer@test.local`),
       `recipients=${JSON.stringify(recipients)}`,
     );
+    const queuedResult = await db.execute(sql`
+      SELECT status, email_type, to_email, body_html, body_text, email_preview_json,
+             quote_token, encrypted_token_payload
+      FROM contractor_email_queue
+      WHERE client_id = ${clientId} AND entity_type = 'contractor_compliance'
+      ORDER BY id
+    `);
+    const queued = queuedResult.rows;
+    check("run1: contractor reminders wait for manager approval",
+      queued.length === 3 && queued.every((row) => row.status === "pending" && row.email_type === "reminder"),
+      JSON.stringify(queued));
+    check("run1: contractor reminders do not bypass the approval queue",
+      queued.every((row) => !recipients.includes(row.to_email)),
+      `recipients=${JSON.stringify(recipients)}`);
+    check("run1: every persisted reminder field is bearer-free",
+      queued.every((row) => {
+        const persisted = JSON.stringify(row);
+        return row.quote_token == null
+          && !/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i.test(persisted)
+          && persisted.includes("{{PORTAL_URL}}")
+          && typeof row.encrypted_token_payload === "string";
+      }), JSON.stringify(queued));
+
+    // Regression for the partially-migrated shape: ciphertext and a NULL legacy
+    // token column existed, but rendered fields could still contain plaintext.
+    const legacyActionToken = "b".repeat(64);
+    const legacyActionUrl = `https://example.test/api/fix-track/action/${legacyActionToken}`;
+    const [legacyIssue] = await db.insert(fixTrackIssuesTable).values({
+      clientId, title: "Legacy migration issue", location: "Plant room",
+      reportedBy: "Test", reportedDate: new Date().toISOString().slice(0, 10),
+    }).returning();
+    await db.execute(sql`INSERT INTO fix_track_action_tokens
+      (token,token_hash,issue_id,client_id,contractor_id,action,expires_at)
+      VALUES (NULL,${crypto.createHash("sha256").update(legacyActionToken).digest("hex")},
+        ${legacyIssue.id},${clientId},${insSoon.id},'booked',now()+interval '30 days')`);
+    const legacyQueue = (await db.execute(sql`
+      SELECT id, encrypted_token_payload FROM contractor_email_queue
+      WHERE client_id=${clientId} AND entity_type='contractor_compliance'
+      ORDER BY id LIMIT 1
+    `)).rows[0];
+    const legacyQueueId = legacyQueue?.id;
+    const legacyPortalUrl = decryptTokenPayload(legacyQueue.encrypted_token_payload).portal;
+    const legacyPortalToken = legacyPortalUrl.split("/").pop();
+    await db.execute(sql`UPDATE contractor_email_queue SET
+      subject=${`Credential ${legacyPortalUrl}`},
+      body_text=${`Open ${legacyPortalUrl} and ${legacyActionUrl}`},
+      email_preview_json=${JSON.stringify({ subject: `Credential ${legacyActionUrl}`, text: legacyPortalUrl })}::jsonb,
+      issue_id=${legacyIssue.id}, entity_id=${legacyIssue.id}, entity_type='fix_track',
+      quote_token=NULL
+      WHERE id=${legacyQueueId}`);
+    await runRuntimeMigrations();
+    await runRuntimeMigrations();
+    const migrated = (await db.execute(sql`SELECT subject,body_html,body_text,email_preview_json,
+      quote_token,encrypted_token_payload FROM contractor_email_queue WHERE id=${legacyQueueId}`)).rows[0];
+    const migratedFields = JSON.stringify(migrated);
+    const migratedPayload = decryptTokenPayload(migrated.encrypted_token_payload);
+    const hydratedFields = migratedFields
+      .replaceAll("{{PORTAL_URL}}", migratedPayload.portal)
+      .replaceAll("{{BOOKED_TOKEN}}", migratedPayload.booked);
+    check("migration rerun scrubs encrypted/null-token queue rows including subject",
+      migrated.quote_token == null
+        && !migratedFields.includes(legacyPortalToken)
+        && !migratedFields.includes(legacyActionToken)
+        && migratedFields.includes("{{PORTAL_URL}}")
+        && migratedFields.includes("{{BOOKED_TOKEN}}")
+        && migratedPayload.portal === legacyPortalUrl
+        && migratedPayload.booked === legacyActionToken,
+      migratedFields);
+    check("migrated placeholders hydrate to the original links without duplicated prefixes",
+      hydratedFields.includes(legacyPortalUrl)
+        && hydratedFields.includes(legacyActionUrl)
+        && !hydratedFields.includes(`/contractor-portal/https://`),
+      hydratedFields);
 
     // --- Run 2: dedupe, nothing new ---
     sent.length = 0;

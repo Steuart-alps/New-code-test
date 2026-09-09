@@ -31,3 +31,5 @@
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
 - [Concurrent task reconciliation](concurrent-task-reconciliation.md) — task merges can drop untracked main-workspace helpers; recheck status and typecheck immediately after reconciliation.
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
+- [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.
+- [Queued bearer credentials](queued-bearer-credentials.md) — persist placeholders plus encrypted payloads; never store working contractor links in rendered queue fields.

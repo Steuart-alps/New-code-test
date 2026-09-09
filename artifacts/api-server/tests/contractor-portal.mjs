@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import crypto from "node:crypto";
 
 const BASE = process.env.API_BASE;
 if (!BASE) throw new Error("API_BASE is required; use tests/run-contractor-portal.sh");
@@ -48,6 +49,7 @@ async function publicRequest(method, route, body) {
 }
 
 let db, pool, sql, clientIds = [];
+const digest = (token) => crypto.createHash("sha256").update(token).digest("hex");
 try {
   const outfile = path.join(outDir, "db.mjs");
   await build({
@@ -92,16 +94,18 @@ try {
   const issue2 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
   const token2 = issue2.data?.token;
   check("reissue gives different token", issue2.status === 201 && token2 !== token1);
+  const [storedToken] = (await db.execute(sql`SELECT token, token_hash FROM contractor_portal_tokens WHERE contractor_id = ${contractorId}`)).rows;
+  check("portal raw token is not stored", storedToken?.token == null && storedToken?.token_hash === digest(token2));
   check("reissue invalidates old token", (await publicRequest("GET", `/contractor-portal/${token1}`)).status === 404);
 
-  await db.execute(sql`UPDATE contractor_portal_tokens SET expires_at = now() - interval '1 minute' WHERE token = ${token2}`);
+  await db.execute(sql`UPDATE contractor_portal_tokens SET expires_at = now() - interval '1 minute' WHERE token_hash = ${digest(token2)}`);
   check("expired token rejected", (await publicRequest("GET", `/contractor-portal/${token2}`)).status === 404);
   const issue3 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
   const token3 = issue3.data.token;
 
-  await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${foreign.clientId} WHERE token = ${token3}`);
+  await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${foreign.clientId} WHERE token_hash = ${digest(token3)}`);
   check("token/client inconsistency rejected", (await publicRequest("GET", `/contractor-portal/${token3}`)).status === 404);
-  await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${owner.clientId} WHERE token = ${token3}`);
+  await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${owner.clientId} WHERE token_hash = ${digest(token3)}`);
 
   const managerCert = await owner.request("POST", `/contractors/${contractorId}/certificates`, {
     certificateName: "Manager certificate", issuer: "Issuer", notes: "manager-only-note",

@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { digestBearerToken } from "../lib/bearerTokens";
 
 const router = Router();
 export const fixTrackQuoteRouter = Router();
@@ -20,10 +21,10 @@ fixTrackQuoteRouter.get("/:token", async (req, res) => {
     i.description, i.location, i.issue_type, i.priority, s.name AS site_name,
     c.name AS contractor_name
     FROM contractor_email_queue q
-    JOIN fix_track_issues i ON i.id=q.issue_id
-    LEFT JOIN sites s ON s.id=i.site_id
-    LEFT JOIN contractors c ON c.id=q.contractor_id
-    WHERE q.quote_token=${req.params.token} AND q.mode='quote'
+    JOIN fix_track_issues i ON i.id=q.issue_id AND i.client_id=q.client_id
+    LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=q.client_id
+    LEFT JOIN contractors c ON c.id=q.contractor_id AND c.client_id=q.client_id
+     WHERE q.quote_token_hash=${digestBearerToken(req.params.token)} AND q.mode='quote'
       AND q.quote_token_expires_at > now()
       AND q.status IN ('sent','approved') LIMIT 1`);
   const q = (result.rows as any[])[0];
@@ -38,9 +39,9 @@ fixTrackQuoteRouter.post("/:token", async (req, res) => {
   const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 5000) : null;
   if (!Number.isFinite(price) || price < 0 || price > 100000000) return res.status(400).json({ error: "A valid pounds price is required" });
   const result = await db.execute(sql`SELECT q.*, i.title, c.name AS contractor_name, c.email AS contractor_email
-    FROM contractor_email_queue q JOIN fix_track_issues i ON i.id=q.issue_id
-    LEFT JOIN contractors c ON c.id=q.contractor_id
-    WHERE q.quote_token=${req.params.token} AND q.mode='quote'
+    FROM contractor_email_queue q JOIN fix_track_issues i ON i.id=q.issue_id AND i.client_id=q.client_id
+    LEFT JOIN contractors c ON c.id=q.contractor_id AND c.client_id=q.client_id
+     WHERE q.quote_token_hash=${digestBearerToken(req.params.token)} AND q.mode='quote'
       AND q.quote_token_expires_at > now()
       AND q.status IN ('sent','approved') LIMIT 1`);
   const q = (result.rows as any[])[0];
@@ -74,7 +75,8 @@ fixTrackQuoteRouter.post("/:token", async (req, res) => {
 
 interface TokenRow {
   id: number;
-  token: string;
+  token: string | null;
+  token_hash: string;
   issue_id: number;
   client_id: number;
   contractor_id: number | null;
@@ -105,11 +107,11 @@ async function lookupToken(token: string): Promise<TokenRow | null> {
       cl.name        AS company_name
       ,c.name        AS contractor_name
     FROM   fix_track_action_tokens t
-    JOIN   fix_track_issues fi ON fi.id  = t.issue_id
+    JOIN   fix_track_issues fi ON fi.id = t.issue_id AND fi.client_id = t.client_id
     LEFT   JOIN sites       s  ON s.id   = fi.site_id
     JOIN   clients          cl ON cl.id  = t.client_id
     LEFT   JOIN contractors c  ON c.id   = t.contractor_id AND c.client_id = t.client_id
-    WHERE  t.token = ${token}
+    WHERE  t.token_hash = ${digestBearerToken(token)}
     LIMIT  1
   `);
   return ((result.rows as any[])[0] as TokenRow) ?? null;

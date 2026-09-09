@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
+import { digestBearerToken } from "../lib/bearerTokens";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -73,7 +74,7 @@ async function validateToken(token: string): Promise<TokenRow | null> {
       c.public_liability_expiry, c.dbs_type, c.dbs_expiry_date
     FROM contractor_portal_tokens cpt
     JOIN contractors c ON c.id = cpt.contractor_id
-    WHERE cpt.token = ${token}
+     WHERE cpt.token_hash = ${digestBearerToken(token)}
       AND cpt.expires_at > now()
       AND cpt.revoked_at IS NULL
       AND cpt.client_id = c.client_id

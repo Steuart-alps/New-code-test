@@ -17,7 +17,6 @@
  * concurrent runs can't double-send; the claim is released if the send fails.
  */
 
-import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
@@ -25,6 +24,7 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { sendPushToUsers } from "./pushNotifications";
+import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
 
 /** Insurance is flagged when it expires within this many days (or has expired). */
 export const INSURANCE_LEAD_DAYS = 30;
@@ -176,13 +176,14 @@ export async function generateOrRefreshPortalToken(
   clientId: number,
   contractorId: number,
 ): Promise<string> {
-  const token = randomBytes(32).toString("hex");
+  const token = newBearerToken();
   const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   await db.execute(sql`
-    INSERT INTO contractor_portal_tokens (client_id, contractor_id, token, expires_at)
-    VALUES (${clientId}, ${contractorId}, ${token}, ${expiresAt})
+    INSERT INTO contractor_portal_tokens (client_id, contractor_id, token, token_hash, expires_at)
+    VALUES (${clientId}, ${contractorId}, NULL, ${digestBearerToken(token)}, ${expiresAt})
     ON CONFLICT (contractor_id) DO UPDATE SET
-      token      = EXCLUDED.token,
+      token      = NULL,
+      token_hash = EXCLUDED.token_hash,
       expires_at = EXCLUDED.expires_at,
       revoked_at = NULL,
       created_at = now()
@@ -386,14 +387,19 @@ export async function runContractorComplianceReminderJob(
           } catch (tokenErr) {
             logger.warn({ err: tokenErr, contractorId }, "Failed to generate contractor portal token — sending email without link");
           }
-          const html = buildContractorEmailHtml(contractorName, contractorAlerts, client.name, portalUrl);
+           const rawHtml = buildContractorEmailHtml(contractorName, contractorAlerts, client.name, portalUrl);
+           const html = portalUrl
+             ? rawHtml.replaceAll(portalUrl, "{{PORTAL_URL}}")
+             : rawHtml;
+           const encryptedPortal = portalUrl ? encryptTokenPayload({ portal: portalUrl }) : null;
           if (!html) continue;
           try {
             await db.execute(sql`INSERT INTO contractor_email_queue
-              (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,email_preview_json,idempotency_key)
+              (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,email_preview_json,encrypted_token_payload,idempotency_key)
               VALUES (${client.id},'contractor_compliance',${contractorId},${contractorId},'reminder','assign',
                 ${contractorEmail},'Compliance renewal reminder — please update your details',${html},
-                ${JSON.stringify({ subject: "Compliance renewal reminder — please update your details", html, text: "" })}::jsonb,
+                 ${JSON.stringify({ subject: "Compliance renewal reminder — please update your details", html, text: "" })}::jsonb,
+                 ${encryptedPortal},
                 ${`contractor-compliance-${client.id}-${contractorId}-${contractorAlerts.map(a => a.milestone).sort().join("-")}`})
               ON CONFLICT (idempotency_key) DO NOTHING`);
           } catch (ctrErr) {

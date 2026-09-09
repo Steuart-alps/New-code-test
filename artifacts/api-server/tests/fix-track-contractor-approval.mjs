@@ -3,9 +3,13 @@
 //
 // This deliberately never calls the post-approval dispatch endpoint: its
 // purpose is to prove that a pending request cannot cross the outbound boundary.
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, rm } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const execFile = promisify(execFileCallback);
 const today = new Date().toISOString().slice(0, 10);
 let passed = 0;
 const failures = [];
@@ -62,6 +66,19 @@ async function contractorIssue(request, suffix) {
   return issue.data?.id;
 }
 
+async function userSession(owner, label, role, clientId) {
+  const email = `fix-email-${label}-${Date.now()}-${Math.random()}@test.local`;
+  const created = await owner("POST", "/users", {
+    name: `${label} user`, email, password: "password-123", role, clientId,
+  });
+  check(`${label}: create ${role}`, created.status === 201, String(created.status));
+  const request = session();
+  check(`${label}: login`, (await request("POST", "/auth/login", {
+    email, password: "password-123",
+  })).status === 200);
+  return request;
+}
+
 async function main() {
   if (!process.env.FIXTRACK_TEST_EMAIL_OUTBOX) {
     throw new Error("FIXTRACK_TEST_EMAIL_OUTBOX must be set by the self-booting test runner");
@@ -69,10 +86,26 @@ async function main() {
   await writeFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "");
   const owner = await tenant("owner");
   const foreign = await tenant("foreign");
+  const ownerMe = await owner("GET", "/auth/me");
+  const ownerClientId = ownerMe.data?.user?.clientId ?? ownerMe.data?.client?.id;
+  const staff = await userSession(owner, "staff", "client_staff", ownerClientId);
+  const viewer = await userSession(owner, "viewer", "client_viewer", ownerClientId);
   const quoteId = await contractorIssue(owner, "quote");
+  const quoteContractor = (await owner("GET", `/fix-track/issues/${quoteId}`)).data?.contractorId;
+
+  check("legacy direct reminder endpoint is retired",
+    (await owner("POST", `/contractors/${quoteContractor}/send-reminder`)).status === 410);
+  check("legacy reminder sends nothing",
+    (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8")).trim() === "");
 
   check("quote request is queued, not sent",
     (await owner("POST", `/fix-track/issues/${quoteId}/request-send`, { mode: "quote" })).status === 200);
+  check("non-manager cannot approve quote",
+    (await staff("POST", `/fix-track/issues/${quoteId}/approve-send`)).status === 403);
+  check("non-manager cannot send quote",
+    (await staff("POST", `/fix-track/issues/${quoteId}/send-to-contractor`)).status === 403);
+  check("viewer cannot request a contractor quote",
+    (await viewer("POST", `/fix-track/issues/${quoteId}/request-send`, { mode: "quote" })).status === 403);
   const blocked = await owner("POST", `/fix-track/issues/${quoteId}/send-to-contractor`);
   check("no contractor send before approval", blocked.status === 403, `${blocked.status}: ${blocked.data?.error}`);
 
@@ -122,6 +155,30 @@ async function main() {
   check("concurrent dispatch produces one provider submission", outbox.length === 1, JSON.stringify(outbox));
   check("quote dispatch content remains a quote, not assignment",
     outbox[0]?.includes("QUOTE REQUEST") && outbox[0]?.includes("job has not been assigned"));
+  const sentQuoteMessage = JSON.parse(outbox[0]);
+  const quoteTokenMatch = sentQuoteMessage.html?.match(/\/contractor-quote\/([a-f0-9]{64})/);
+  check("quote email contains a high-entropy submission link", !!quoteTokenMatch);
+  if (quoteTokenMatch) {
+    const quotePage = await fetch(`${BASE}/fix-track/quotes/public/${quoteTokenMatch[1]}`);
+    check("hashed quote token resolves before submission", quotePage.status === 200, String(quotePage.status));
+    const submittedQuote = await fetch(`${BASE}/fix-track/quotes/public/${quoteTokenMatch[1]}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poundsPrice: 1250, notes: "Route-level one-time submission check" }),
+    });
+    check("contractor can submit a quote once", submittedQuote.status === 201, String(submittedQuote.status));
+    const repeatedQuote = await fetch(`${BASE}/fix-track/quotes/public/${quoteTokenMatch[1]}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poundsPrice: 1250 }),
+    });
+    check("quote submission link cannot create a second quote", repeatedQuote.status === 409, String(repeatedQuote.status));
+  }
+  const publicRoute = await readFile(new URL("../src/routes/fix-track-public.ts", import.meta.url), "utf8");
+  const notifications = await readFile(new URL("../src/lib/fixTrackNotifications.ts", import.meta.url), "utf8");
+  check("quote and action credentials use digests for lookup/storage",
+    publicRoute.includes("quote_token_hash") && publicRoute.includes("token_hash") &&
+    notifications.includes("token_hash") && notifications.includes("digestBearerToken"));
 
   const assignId = await contractorIssue(owner, "assign");
   check("assignment request is queued",
@@ -129,6 +186,71 @@ async function main() {
   const assignment = await owner("POST", `/fix-track/issues/${assignId}/approve-send`);
   check("assignment remains distinct approved action",
     assignment.status === 200 && assignment.data?.mode === "assign", JSON.stringify(assignment.data));
+
+  const rejectedId = await contractorIssue(owner, "rejected");
+  check("rejection queues assignment request",
+    (await owner("POST", `/fix-track/issues/${rejectedId}/request-send`, { mode: "assign" })).status === 200);
+  check("manager can reject assignment request",
+    (await owner("POST", `/fix-track/issues/${rejectedId}/reject-send`)).status === 200);
+  check("rejected request cannot dispatch",
+    [403, 409].includes((await owner("POST", `/fix-track/issues/${rejectedId}/send-to-contractor`)).status));
+  check("rejected request sent nothing",
+    (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8")).trim().split("\n").filter(Boolean).length === 1);
+
+  const retryId = await contractorIssue(owner, "provider-failure");
+  check("provider failure test request queues",
+    (await owner("POST", `/fix-track/issues/${retryId}/request-send`, { mode: "assign" })).status === 200);
+  check("provider failure test approves",
+    (await owner("POST", `/fix-track/issues/${retryId}/approve-send`)).status === 200);
+  // The test outbox is the provider boundary. Temporarily replace it with a
+  // directory so appendFile fails, then restore it for the retry assertion.
+  await rm(process.env.FIXTRACK_TEST_EMAIL_OUTBOX);
+  await mkdir(process.env.FIXTRACK_TEST_EMAIL_OUTBOX);
+  const failedDispatch = await owner("POST", `/fix-track/issues/${retryId}/send-to-contractor`);
+  check("provider failure leaves dispatch retryable", failedDispatch.status === 502);
+  const retryState = await owner("GET", `/fix-track/issues/${retryId}`);
+  check("provider failure restores approved state",
+    retryState.data?.emailRequestStatus === "approved", JSON.stringify(retryState.data));
+  await rm(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, { recursive: true });
+  await writeFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "");
+  check("retry after provider failure succeeds",
+    (await owner("POST", `/fix-track/issues/${retryId}/send-to-contractor`)).status === 200);
+  const retryOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const bookedMatch = retryOutbox[0]?.html?.match(/\/api\/fix-track\/action\/([a-f0-9]{64})/);
+  check("assignment email contains a high-entropy contractor action link", !!bookedMatch);
+  if (bookedMatch) {
+    const firstAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
+    check("hashed contractor action token resolves", firstAction.status === 200, String(firstAction.status));
+    const repeatedAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
+    check("contractor action token remains one-time", repeatedAction.status === 200 &&
+      (await repeatedAction.text()).includes("Already recorded"));
+  }
+
+  const expiredQuoteId = await contractorIssue(owner, "expired-quote");
+  check("expired quote test request queues",
+    (await owner("POST", `/fix-track/issues/${expiredQuoteId}/request-send`, { mode: "quote" })).status === 200);
+  check("expired quote test request approves",
+    (await owner("POST", `/fix-track/issues/${expiredQuoteId}/approve-send`)).status === 200);
+  check("expired quote test request dispatches",
+    (await owner("POST", `/fix-track/issues/${expiredQuoteId}/send-to-contractor`)).status === 200);
+  const expiryOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const expiredTokenMatch = expiryOutbox.at(-1)?.html?.match(/\/contractor-quote\/([a-f0-9]{64})/);
+  check("expiry fixture contains a quote token", !!expiredTokenMatch);
+  if (expiredTokenMatch) {
+    const tokenHash = createHash("sha256").update(expiredTokenMatch[1]).digest("hex");
+    await execFile("psql", [process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+      `UPDATE contractor_email_queue SET quote_token_expires_at=now()-interval '1 minute' WHERE quote_token_hash='${tokenHash}'`]);
+    const expiredGet = await fetch(`${BASE}/fix-track/quotes/public/${expiredTokenMatch[1]}`);
+    check("expired quote link cannot be opened", expiredGet.status === 404, String(expiredGet.status));
+    const expiredPost = await fetch(`${BASE}/fix-track/quotes/public/${expiredTokenMatch[1]}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poundsPrice: 100 }),
+    });
+    check("expired quote link cannot submit", expiredPost.status === 404, String(expiredPost.status));
+  }
 
   check("tenant isolation blocks approval",
     [400, 403, 404, 409].includes((await foreign("POST", `/fix-track/issues/${quoteId}/approve-send`)).status));
@@ -138,14 +260,27 @@ async function main() {
   // Template assertions make the legally/materially different outcomes explicit
   // without submitting an email to an external provider.
   const templates = await readFile(new URL("../src/lib/fixTrackNotifications.ts", import.meta.url), "utf8");
+  const migrations = await readFile(new URL("../src/lib/runtimeMigrations.ts", import.meta.url), "utf8");
+  check("new contractor action credentials are stored only as digests",
+    templates.includes("(NULL, ${digestBearerToken(bookedToken)}") &&
+    templates.includes("(NULL, ${digestBearerToken(completedToken)}"));
+  check("public contractor actions look up the digest, not the raw token",
+    publicRoute.includes("t.token_hash = ${digestBearerToken(token)}") &&
+    !publicRoute.includes("t.token = ${token}"));
+  check("legacy contractor action tokens are backfilled then scrubbed",
+    migrations.includes("token_hash=${digestBearerToken(row.token)}, token=NULL"));
   check("quote content says it is not an assignment", templates.includes("This is a request for a quote only — the job has not been assigned."));
   check("assignment content contains contractor action links", templates.includes("Mark as Booked") && templates.includes("Mark as Completed"));
   const route = await readFile(new URL("../src/routes/fix-track.ts", import.meta.url), "utf8");
   check("concurrent dispatches may claim only one pending queue row",
     route.includes("WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue"));
   check("edited quote requests preserve the submission link",
-    route.includes("existingDraft.email_type === \"quote_request\"") &&
-    route.includes("/contractor-quote/${encodeURIComponent(existingDraft.quote_token)}"));
+    route.includes("decryptTokenPayload(existingDraft.encrypted_token_payload).quote") &&
+    route.includes("/contractor-quote/{{QUOTE_TOKEN}}"));
+  check("action token lookup binds issue and client",
+    publicRoute.includes("fi.id = t.issue_id AND fi.client_id = t.client_id"));
+  check("quote token lookup binds issue and client",
+    publicRoute.includes("i.id=q.issue_id AND i.client_id=q.client_id"));
   check("quote decisions enforce active department scope",
     route.includes("AND (i.site_id IS NULL OR s.department_id=${deptId})") &&
     route.includes("'fix_track',${q.issue_id},${q.department_id},${q.contractor_id}"));
