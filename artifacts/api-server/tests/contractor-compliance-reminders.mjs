@@ -236,9 +236,9 @@ async function main() {
       const keyV2 = crypto.randomBytes(32).toString("base64url");
       process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY = keyV2;
       process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "rotation-v2";
-      process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = JSON.stringify({
-        [sourceVersion]: sourceSecret,
-      });
+      process.env.CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS = sourceVersion === "session-v1"
+        ? JSON.stringify({})
+        : JSON.stringify({ [sourceVersion]: sourceSecret });
       check("database migration rewrites a queued draft onto the first dedicated key",
         await reencryptQueuedTokenPayloads(legacyQueueId) === 1);
       const rotatedV2 = (await db.execute(sql`SELECT encrypted_token_payload

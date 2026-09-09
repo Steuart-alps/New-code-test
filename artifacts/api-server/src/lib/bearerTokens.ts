@@ -112,7 +112,9 @@ export function decryptTokenPayload(encoded: string): Record<string, string> {
     const current = currentEncryptionKey();
     const secret = version === current.version
       ? current.secret
-      : previousEncryptionKeys()[version];
+      : version === "session-v1"
+        ? process.env.SESSION_SECRET
+        : previousEncryptionKeys()[version];
     if (!secret) throw new Error(`No contractor token encryption key is available for version ${version}`);
     const aad = parts[0] === ENVELOPE_VERSION ? `${ENVELOPE_VERSION}.${version}` : undefined;
     return decryptWithSecret(ivText, tagText, ciphertextText, secret, aad);

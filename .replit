@@ -199,3 +199,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 FEEDBACK_RECIPIENT_EMAIL = "Info@alpsconsultancy.co.uk"
+CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "2026-09-01"
