@@ -33,3 +33,4 @@
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
 - [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.
 - [Queued bearer credentials](queued-bearer-credentials.md) — persist placeholders plus encrypted payloads; never store working contractor links in rendered queue fields.
+- [Contractor token key rotation](contractor-token-key-rotation.md) — version every key; drain old writers, migrate with the previous key retained, then retire it in a later deployment.
