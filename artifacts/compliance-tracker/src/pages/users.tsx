@@ -110,8 +110,8 @@ function UserDialog({
       const method = user ? "PUT" : "POST";
       const res = await apiFetch(path, { method, body: JSON.stringify(body) });
       if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error ?? "Failed to save");
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error ?? `Failed to save user (${res.status})`);
       }
       onSaved();
       onClose();
@@ -193,12 +193,12 @@ function UserDialog({
           {(form.role === "client_staff" || form.role === "client_viewer") && (
             <div className="space-y-2">
               <Label>Department scope</Label>
-              <Select value={form.departmentId} onValueChange={v => setForm(f => ({ ...f, departmentId: v }))}>
+              <Select value={form.departmentId || NO_DEPT_VALUE} onValueChange={v => setForm(f => ({ ...f, departmentId: v === NO_DEPT_VALUE ? "" : v }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select department..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No department</SelectItem>
+                  <SelectItem value={NO_DEPT_VALUE}>No department</SelectItem>
                   {departments.map(d => (
                     <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
                   ))}
