@@ -375,6 +375,7 @@ export async function runRuntimeMigrations() {
     await migrateGreenTrack();
     await migrateSwimTrack();
     await migrateSiteDocuments();
+    await migrateClientDocuments();
     await migrateFixTrackV2();
     await migrateMobileSessions();
     await migrateMobileLoginChallenges();
@@ -2452,6 +2453,29 @@ async function migrateSiteDocuments() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_site_documents_site"
     ON "site_documents" ("client_id", "site_id")
+  `);
+}
+
+// ---- Generic client documents ----
+async function migrateClientDocuments() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "client_documents" (
+      "id"             serial PRIMARY KEY,
+      "client_id"      integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "name"           text NOT NULL,
+      "description"    text,
+      "object_path"    text NOT NULL,
+      "file_size"      integer,
+      "mime_type"      text,
+      "uploaded_by_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "uploaded_by_name" text,
+      "created_at"     timestamp NOT NULL DEFAULT now(),
+      "updated_at"     timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_client_documents_client"
+    ON "client_documents" ("client_id", "created_at")
   `);
 }
 

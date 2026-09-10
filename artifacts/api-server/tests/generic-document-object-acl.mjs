@@ -117,7 +117,7 @@ assert.equal(response.status, 403, "foreign tenant cannot read owner's finalized
 // A nonexistent object must never create a database document row.
 response = await owner("POST", "/documents", {
   name: "missing-policy",
-  objectPath: "/objects/uploads/does-not-exist",
+  objectPath: objectPath.replace(/\/[^/]+$/, "/does-not-exist"),
   mimeType: "application/pdf",
 });
 assert.equal(response.status, 400, "missing object registration is rejected");

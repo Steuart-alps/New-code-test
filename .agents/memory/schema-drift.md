@@ -10,3 +10,5 @@ Rule: never trust the `CREATE TABLE IF NOT EXISTS` definitions in the api-server
 **How to apply:** before writing raw SQL against a table, check the actual columns (`information_schema.columns`) or grep how existing routes query it. Route code is a more reliable reference than the migration file.
 
 **Dropping legacy indexes safely:** never match candidates with `pg_get_indexdef LIKE '%...%'` — a wider unique index (e.g. same cols + one more) matches too and gets silently dropped. Resolve exact key attnums via `pg_index.indkey` (require exact column set, no expressions, no predicate).
+
+**Route coverage:** a Drizzle table definition can exist without a runtime-created table. Add a fresh-database route test whenever a new route depends on a table, so missing runtime migrations fail before launch.
