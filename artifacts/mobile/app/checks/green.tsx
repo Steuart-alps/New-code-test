@@ -40,6 +40,8 @@ type MachineType =
   | 'tractor'
   | 'fairway_mower'
   | 'ride_on_cylinder'
+  | 'ride_on'
+  | 'pedestrian'
   | 'walk_behind'
   | 'ride_on_rotary'
   | 'hedge_trimmer'
@@ -109,6 +111,8 @@ const MACHINE_LABELS: Record<MachineType, string> = {
   tractor: 'Tractor',
   fairway_mower: 'Fairway mower',
   ride_on_cylinder: 'Ride-on cylinder mower',
+  ride_on: 'Ride-on equipment',
+  pedestrian: 'Pedestrian equipment',
   walk_behind: 'Walk-behind mower',
   ride_on_rotary: 'Ride-on rotary mower',
   hedge_trimmer: 'Hedge trimmer',
@@ -168,6 +172,20 @@ const DEFINITIONS: Record<MachineType, ChecklistDefinition[]> = {
     { key: 'brakes', label: 'Brakes and parking brake operate correctly', section: 'Controls' },
     { key: 'controls', label: 'Operator controls and emergency stop operate correctly', section: 'Controls' },
     { key: 'leaks', label: 'No fuel, oil or hydraulic leaks visible', section: 'Condition' },
+  ],
+  ride_on: [
+    { key: 'guards', label: 'Guards and covers are fitted and secure', section: 'Protective equipment' },
+    { key: 'blades', label: 'Blades, cylinders or cutting units are secure', section: 'Working parts' },
+    { key: 'brakes', label: 'Brakes and parking brake operate correctly', section: 'Controls' },
+    { key: 'controls', label: 'Operator controls and emergency stop operate correctly', section: 'Controls' },
+    { key: 'leaks', label: 'No fuel, oil or hydraulic leaks visible', section: 'Condition' },
+  ],
+  pedestrian: [
+    { key: 'working_parts', label: 'Blade, cylinder or working parts are secure', section: 'Working parts' },
+    { key: 'guards', label: 'Guards, discharge flap and handles are sound', section: 'Protective equipment' },
+    { key: 'controls', label: 'Dead-man control and stop switch operate correctly', section: 'Controls' },
+    { key: 'condition', label: 'Wheels, casing and height adjustment are secure', section: 'Condition' },
+    { key: 'area', label: 'Area checked for people, debris and hidden hazards', section: 'Before starting' },
   ],
   walk_behind: [
     { key: 'blade', label: 'Blade, cylinder or cutting deck is secure and undamaged', section: 'Working parts' },

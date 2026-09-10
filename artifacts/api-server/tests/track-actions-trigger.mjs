@@ -150,6 +150,32 @@ async function main() {
     { siteId: null },
   )).status === 409);
 
+  const importedRoster = await request("POST", "/green-track/machines/import", {
+    rows: [
+      { name: "Imported ride-on", type: "ride-on", serialNo: "IMPORT-001", siteId },
+      { name: "Imported pedestrian", type: "pedestrian", regNo: "IMPORT-002", siteId },
+    ],
+  });
+  assert("Green equipment roster imports approved aliases",
+    importedRoster.status === 201 && importedRoster.data?.imported === 2);
+  const importedMachines = await request("GET", "/green-track/machines");
+  const importedTypes = new Map(
+    (importedMachines.data ?? []).map((item) => [item.name, item.type]),
+  );
+  assert("Green roster creates ride-on and pedestrian equipment types",
+    importedTypes.get("Imported ride-on") === "ride_on" &&
+    importedTypes.get("Imported pedestrian") === "pedestrian");
+  const duplicateRoster = await request("POST", "/green-track/machines/import", {
+    rows: [{ name: "Imported ride-on again", type: "ride-on", serialNo: "IMPORT-001", siteId }],
+  });
+  assert("Green roster skips duplicate equipment identifiers",
+    duplicateRoster.status === 201 && duplicateRoster.data?.imported === 0 &&
+    duplicateRoster.data?.skipped?.length === 1);
+  const invalidRoster = await request("POST", "/green-track/machines/import", {
+    rows: [{ name: "Invalid imported machine", type: "not-a-green-type", siteId }],
+  });
+  assert("Green roster rejects unknown equipment types", invalidRoster.status === 400);
+
   const swimSession = await request("POST", "/swim-track/sessions", {
     siteId, sessionDate: date, preSessionResult: "not-a-result", result: "urgent_action",
   });

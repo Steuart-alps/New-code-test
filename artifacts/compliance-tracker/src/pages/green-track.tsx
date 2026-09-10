@@ -1507,6 +1507,7 @@ function GreenTrackPageInternal() {
   const [filterMachine, setFilterMachine] = useState("");
 
   // Dialogs
+  const [machineImportDialog, setMachineImportDialog] = useState(false);
   const [machineDialog, setMachineDialog] = useState(false);
   const [editMachine, setEditMachine] = useState<Machine | null>(null);
   const [preUseDialog, setPreUseDialog] = useState(false);
@@ -1737,9 +1738,14 @@ function GreenTrackPageInternal() {
               </Select>
             )}
             {activeTab === "fleet" && canAdmin && (
-              <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditMachine(null); setMachineDialog(true); }}>
-                <Plus className="w-3.5 h-3.5" /> Add machine
-              </Button>
+              <>
+                <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" onClick={() => setMachineImportDialog(true)}>
+                  <Upload className="w-3.5 h-3.5" /> Upload roster
+                </Button>
+                <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditMachine(null); setMachineDialog(true); }}>
+                  <Plus className="w-3.5 h-3.5" /> Add machine
+                </Button>
+              </>
             )}
             {activeTab === "pre-use" && (
               <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditPreUse(null); setPreUseDialog(true); }}>
@@ -2331,6 +2337,9 @@ function GreenTrackPageInternal() {
         {activeTab === "actions" && (
           <ModuleActionsPanel moduleKey="green" />
         )}
+
+      <MachineImportDialog open={machineImportDialog} onClose={() => setMachineImportDialog(false)}
+        sites={sites} onImported={invalidate} />
 
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}
         machine={editMachine} sites={sites} onSaved={invalidate} />
