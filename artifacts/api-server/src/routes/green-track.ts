@@ -17,6 +17,11 @@ export const MACHINE_TYPES = [
   "utility_vehicle",
   "sprayer_spreader",
   "aerator",
+  "atv_quad",
+  "blower",
+  "chainsaw",
+  "hedge_trimmer",
+  "topdresser",
   "scarifier",
   "roller",
   "edger_strimmer",
@@ -131,10 +136,29 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
     const {
        machineId, checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, notes,
+       checklistItems, fuelLevel, defectNoted, notes,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+
+    let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null = null;
+    if (checklistItems !== undefined) {
+      if (!Array.isArray(checklistItems) || checklistItems.length === 0) {
+        return res.status(400).json({ error: "checklistItems must contain at least one item" });
+      }
+      parsedChecklist = checklistItems.map((item: any) => ({
+        key: String(item?.key ?? "").trim(),
+        label: String(item?.label ?? "").trim(),
+        section: String(item?.section ?? "General").trim(),
+        status: item?.status,
+        ...(item?.note?.trim() ? { note: String(item.note).trim() } : {}),
+      }));
+      if (parsedChecklist.some(item =>
+        !item.key || !item.label || !["ok", "fail", "na"].includes(item.status)
+      )) {
+        return res.status(400).json({ error: "Every checklist item needs a key, label and OK, FAIL or N/A status" });
+      }
+    }
 
     // Verify machine belongs to client
     const machineCheck = await db.execute(sql`
@@ -146,18 +170,22 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
 
     // The checklist is the source of truth. Never persist caller-supplied
     // aliases such as "advisory" as a newly recorded observation.
-    const canonicalResult = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
-      .some((value) => value === false) ? "fail" : "pass";
+    const canonicalResult = parsedChecklist
+      ? (parsedChecklist.some(item => item.status === "fail") ? "fail" : "pass")
+      : ([fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+        .some((value) => value === false) ? "fail" : "pass");
     const result = await db.execute(sql`
       INSERT INTO green_pre_use_checks (
          client_id, machine_id, check_date, operator, operator_roster_id,
         fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
-        defect_noted, result, notes
+         defect_noted, result, notes, checklist_items, fuel_level, submitted_at
       ) VALUES (
          ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
         ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
         ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
-        ${defectNoted ?? false}, ${canonicalResult}, ${notes?.trim() ?? null}
+         ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
+         ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
+         ${fuelLevel?.trim() ?? null}, now()
       )
       RETURNING *
     `);
@@ -173,17 +201,38 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
     const {
        checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, notes,
+       checklistItems, fuelLevel, defectNoted, notes,
     } = req.body;
     const existing = (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
     if (!existing) return res.status(404).json({ error: "Check not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, operatorRosterId, operator, existing.operator_roster_id, existing.operator);
     if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null | undefined;
+    if (checklistItems !== undefined) {
+      if (!Array.isArray(checklistItems) || checklistItems.length === 0) {
+        return res.status(400).json({ error: "checklistItems must contain at least one item" });
+      }
+      parsedChecklist = checklistItems.map((item: any) => ({
+        key: String(item?.key ?? "").trim(),
+        label: String(item?.label ?? "").trim(),
+        section: String(item?.section ?? "General").trim(),
+        status: item?.status,
+        ...(item?.note?.trim() ? { note: String(item.note).trim() } : {}),
+      }));
+      if (parsedChecklist.some(item =>
+        !item.key || !item.label || !["ok", "fail", "na"].includes(item.status)
+      )) {
+        return res.status(400).json({ error: "Every checklist item needs a key, label and OK, FAIL or N/A status" });
+      }
+    }
     const value = (input: any, stored: any) => input === undefined ? stored : input;
     const merged = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
       .map((input, index) => value(input, [existing.fluid_levels_ok, existing.tyres_ok, existing.blades_ok, existing.guards_ok, existing.controls_ok, existing.lights_ok, existing.cleanliness_ok][index]));
-    const canonicalResult = merged
-      .some((value) => value === false) ? "fail" : "pass";
+    const storedChecklist = Array.isArray(existing.checklist_items) ? existing.checklist_items : null;
+    const effectiveChecklist = parsedChecklist === undefined ? storedChecklist : parsedChecklist;
+    const canonicalResult = effectiveChecklist
+      ? (effectiveChecklist.some((item: any) => item.status === "fail") ? "fail" : "pass")
+      : (merged.some((value) => value === false) ? "fail" : "pass");
     const result = await db.execute(sql`
       UPDATE green_pre_use_checks
        SET check_date = ${value(checkDate, existing.check_date)},
@@ -191,8 +240,13 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
            fluid_levels_ok = ${merged[0]}, tyres_ok = ${merged[1]},
           blades_ok = ${merged[2]}, guards_ok = ${merged[3]},
           controls_ok = ${merged[4]}, lights_ok = ${merged[5]},
-          cleanliness_ok = ${merged[6]}, defect_noted = ${value(defectNoted, existing.defect_noted)},
-          result = ${canonicalResult}, notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}
+           cleanliness_ok = ${merged[6]},
+           defect_noted = ${effectiveChecklist ? effectiveChecklist.some((item: any) => item.status === "fail") : value(defectNoted, existing.defect_noted)},
+           result = ${canonicalResult},
+           notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null},
+           checklist_items = ${parsedChecklist === undefined ? existing.checklist_items ?? null : JSON.stringify(parsedChecklist)},
+           fuel_level = ${fuelLevel === undefined ? existing.fuel_level ?? null : fuelLevel?.trim() ?? null},
+           submitted_at = COALESCE(submitted_at, now())
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);

@@ -167,6 +167,11 @@ const MACHINE_TYPE_LABELS: Record<string, string> = {
   utility_vehicle:   "Utility vehicle",
   sprayer_spreader:  "Sprayer / spreader",
   aerator:           "Aerator",
+  atv_quad:          "ATV / quad bike",
+  blower:            "Blower",
+  chainsaw:          "Chainsaw",
+  hedge_trimmer:     "Hedge trimmer",
+  topdresser:        "Topdresser",
   scarifier:         "Scarifier / verticut",
   roller:            "Roller",
   edger_strimmer:    "Edger / strimmer",
@@ -244,6 +249,15 @@ interface PreUseCheck {
   defectNoted: boolean;
   result: string;
   notes: string | null;
+  checklistItems: Array<{
+    key: string;
+    label: string;
+    section: string;
+    status: "ok" | "fail" | "na";
+    note?: string;
+  }> | null;
+  fuelLevel: string | null;
+  submittedAt: string | null;
 }
 
 interface ServiceRecord {
@@ -1633,10 +1647,11 @@ function GreenTrackPageInternal() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      {["Machine", "Date", "Result", "Operator", "Defect?", "Photos", ""].map(h => (
+                      {["Machine", "Date", "Result", "Operator", "Checklist", "Defect?", "Photos", ""].map(h => (
                         <th key={h} className={cn(
                           "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
                           h === "Operator" && "hidden md:table-cell",
+                          h === "Checklist" && "hidden lg:table-cell",
                           h === "Photos" && "hidden sm:table-cell",
                           h === "" && "w-20",
                         )}>{h}</th>
@@ -1653,6 +1668,37 @@ function GreenTrackPageInternal() {
                         <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(c.checkDate)}</td>
                         <td className="px-4 py-3"><ResultBadge result={c.result} /></td>
                         <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{c.operator ?? "—"}</td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          {(() => {
+                            const items = (c.checklistItems ?? (c as any).checklist_items ?? []) as PreUseCheck["checklistItems"];
+                            const failed = items?.filter(item => item.status === "fail") ?? [];
+                            const answered = items?.length ?? 0;
+                            if (!answered) return <span className="text-xs text-muted-foreground">Legacy 7-point check</span>;
+                            return (
+                              <details className="max-w-[330px]">
+                                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                                  {answered} items · {failed.length ? `${failed.length} failed` : "no failures"}
+                                  {(c.fuelLevel ?? (c as any).fuel_level) ? ` · Fuel ${c.fuelLevel ?? (c as any).fuel_level}` : ""}
+                                </summary>
+                                <div className="mt-2 space-y-1.5 rounded-sm border border-border bg-muted/20 p-2 text-xs">
+                                  {items?.map(item => (
+                                    <div key={item.key} className="flex gap-2">
+                                      <span className={cn(
+                                        "font-semibold uppercase",
+                                        item.status === "fail" ? "text-rose-700" : item.status === "ok" ? "text-emerald-700" : "text-muted-foreground",
+                                      )}>
+                                        {item.status === "na" ? "N/A" : item.status}
+                                      </span>
+                                      <span className="text-muted-foreground">
+                                        {item.label}{item.note ? ` — ${item.note}` : ""}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           {c.defectNoted ? (
                             <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-700 border-amber-200">

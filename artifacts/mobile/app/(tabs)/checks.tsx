@@ -97,6 +97,14 @@ const MODULES: CheckModule[] = [
     checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
   },
   {
+    id: 'green',
+    label: 'GreenTrack',
+    subtitle: 'Pre-use grounds equipment check',
+    icon: 'tool',
+    iconColor: '#6f8750',
+    checks: ['Choose machine', 'Check safety points', 'Fuel / charge', 'Sign off'],
+  },
+  {
     id: 'aqua',
     label: 'AquaTrack',
     subtitle: 'Pool checks & swim sessions',
@@ -123,7 +131,8 @@ export default function ChecksScreen() {
   const visibleModules = MODULES.filter(
     (mod) =>
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
-      (mod.id !== 'pat' || hasService('pattrack')),
+      (mod.id !== 'pat' || hasService('pattrack')) &&
+      (mod.id !== 'green' || hasService('greentrack')),
   );
 
   return (
@@ -165,6 +174,8 @@ export default function ChecksScreen() {
                 router.push('/checks/pat' as any);
               } else if (mod.id === 'cleaning') {
                 router.push('/checks/cleaning' as any);
+              } else if (mod.id === 'green') {
+                router.push('/checks/green' as any);
               } else if (mod.id === 'safe-track') {
                 router.push('/checks/safe-track' as any);
               } else {

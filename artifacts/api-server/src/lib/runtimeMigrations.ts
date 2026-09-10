@@ -1802,8 +1802,19 @@ async function migrateGreenTrack() {
       "defect_noted"    boolean NOT NULL DEFAULT false,
       "result"          text NOT NULL DEFAULT 'pass',
       "notes"           text,
+      "checklist_items" jsonb,
+      "fuel_level"      text,
+      "submitted_at"    timestamp,
       "created_at"      timestamp NOT NULL DEFAULT now()
     )
+  `);
+  // These columns are additive so existing GreenTrack records remain readable
+  // while the staff-facing checklist can retain its item-level evidence.
+  await db.execute(sql`
+    ALTER TABLE "green_pre_use_checks"
+      ADD COLUMN IF NOT EXISTS "checklist_items" jsonb,
+      ADD COLUMN IF NOT EXISTS "fuel_level" text,
+      ADD COLUMN IF NOT EXISTS "submitted_at" timestamp
   `);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_green_pre_use_client_date"

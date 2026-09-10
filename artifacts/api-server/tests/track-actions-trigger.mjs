@@ -119,10 +119,26 @@ async function main() {
     machineId: failedMachine.data?.id,
     checkDate: date,
     operator: "Test Greenkeeper",
+    checklistItems: [
+      { key: "guards", label: "Guards and shields fitted", section: "Safety devices", status: "ok" },
+      { key: "blades", label: "Blades secure and undamaged", section: "Working parts", status: "fail", note: "Loose blade guard" },
+    ],
+    fuelLevel: "half",
     guardsOk: false,
     notes: "Guard needs attention",
   });
   assert("Green failed check is recorded", failedGreenCheck.status === 201 && failedGreenCheck.data?.result === "fail");
+  const detailedItems = failedGreenCheck.data?.checklistItems ?? failedGreenCheck.data?.checklist_items;
+  assert("Green detailed checklist is stored", Array.isArray(detailedItems) && detailedItems.length === 2);
+  assert("Green checklist stores fuel and submission time",
+    (failedGreenCheck.data?.fuelLevel ?? failedGreenCheck.data?.fuel_level) === "half" &&
+    Boolean(failedGreenCheck.data?.submittedAt ?? failedGreenCheck.data?.submitted_at));
+  const invalidGreenCheck = await request("POST", "/green-track/pre-use-checks", {
+    machineId: failedMachine.data?.id,
+    checkDate: date,
+    checklistItems: [{ key: "guards", label: "Guards", section: "Safety", status: "pending" }],
+  });
+  assert("Green checklist rejects unanswered status", invalidGreenCheck.status === 400);
   const greenActions = sourceAction(await actions("green"), "green_pre_use_checks", failedGreenCheck.data?.id);
   assert("Green failed check creates one in-track action", greenActions.length === 1);
   assert("Green action names its machine", greenActions[0]?.title === "Pre-use check action: Greens mower");
