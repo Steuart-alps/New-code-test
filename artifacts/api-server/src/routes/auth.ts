@@ -12,7 +12,7 @@ import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { passkeysTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
-import { sendSystemEmail, getPublicAppUrl } from "../lib/email";
+import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { getPerSitePrice, getServicePrice, countClientSites, quantityForSiteCount } from "../lib/billing";
 import { ADDON_KEYS, BUNDLE_KEY, getEntitledServices } from "../lib/services";
@@ -760,30 +760,32 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
     await seedStarterContent(clientId);
   }
 
-  // Send the verification email — best-effort, never blocks account creation.
-  try {
-    const appUrl = getPublicAppUrl();
-    const verifyUrl = `${appUrl.replace(/\/$/, "")}/verify-email?token=${verificationToken}`;
-    await sendSystemEmail({
-      to: user.email,
-      subject: "Verify your ComplyTrack email address",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1e293b;">Verify your email address</h2>
-          <p>Hi ${name},</p>
-          <p>Thanks for signing up for ComplyTrack. Please confirm your email address to activate your account.</p>
-          <p style="margin: 24px 0;">
-            <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
-          </p>
-          <p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>
-          <p>Best regards,<br><strong>ComplyTrack</strong></p>
-        </div>
-      `,
-      text: `Hi ${name},\n\nPlease verify your ComplyTrack email address by opening this link:\n${verifyUrl}\n\nThis link expires in 24 hours. If you did not create this account, you can ignore this email.\n\nBest regards,\nComplyTrack`,
-    });
-  } catch (err) {
+  // Send one combined welcome and verification email in the background.
+  // Delivery is best-effort and must never delay or fail account creation.
+  const appUrl = getPublicAppUrl().replace(/\/$/, "");
+  const verifyUrl = `${appUrl}/verify-email?token=${verificationToken}`;
+  const safeName = escapeHtml(name);
+  void sendSystemEmail({
+    to: user.email,
+    subject: "Welcome to ComplyTrack — verify your email",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1e293b;">Welcome to ComplyTrack</h2>
+        <p>Hi ${safeName},</p>
+        <p>Your ComplyTrack account has been created. Please confirm your email address to activate it.</p>
+        <p style="margin: 24px 0;">
+          <a href="${verifyUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Verify email address</a>
+        </p>
+        <p>Once you're signed in, start by <strong>adding your first site</strong>, then <strong>invite your team</strong> so everyone can keep compliance records up to date.</p>
+        <p>You can access ComplyTrack at <a href="${appUrl}">${appUrl}</a>.</p>
+        <p>This verification link expires in 24 hours. If you did not create this account, you can ignore this email.</p>
+        <p>Best regards,<br><strong>ComplyTrack</strong></p>
+      </div>
+    `,
+    text: `Hi ${name},\n\nWelcome to ComplyTrack. Your account has been created.\n\nPlease verify your email address:\n${verifyUrl}\n\nOnce you're signed in, add your first site and invite your team so everyone can keep compliance records up to date.\n\nOpen ComplyTrack: ${appUrl}\n\nThis verification link expires in 24 hours. If you did not create this account, you can ignore this email.\n\nBest regards,\nComplyTrack`,
+  }).catch((err) => {
     req.log.error({ err }, "Failed to send welcome email");
-  }
+  });
 
   // Create a Stripe customer in the background so billing setup later is
   // seamless. Failure here never blocks account creation.
