@@ -1,5 +1,5 @@
-export * from "./generated/api";
-export * from "./generated/types";
+export * from './generated/api';
+export * from './generated/types';
 
 // Names generated in BOTH ./generated/api and ./generated/types must be
 // explicitly re-exported to resolve the export-* ambiguity (TS2308).
@@ -13,7 +13,3 @@ export {
   SendRemindersResponse,
   TestEmailResponse,
 } from "./generated/api";
-export * from "./generated/api";
-export * from "./generated/types";
-export * from './generated/api';
-export * from './generated/types';

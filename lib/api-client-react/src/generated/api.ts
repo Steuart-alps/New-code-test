@@ -6644,3 +6644,4 @@ export const useDeleteLegionellaCheck = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getDeleteLegionellaCheckMutationOptions(options));
     }
+

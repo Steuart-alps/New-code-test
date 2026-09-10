@@ -1,10 +1,12 @@
 ---
-name: Typecheck vs build
-description: The real build signal in this repo is esbuild/vite, not repo-wide tsc.
+name: Typecheck and Orval barrels
+description: Root typecheck is valid; Orval barrel formatting must remain compatible with regeneration.
 ---
 
-# Trust the build, not repo-wide tsc
+# Keep root typecheck and Orval regeneration healthy
 
-Repo-wide `tsc --noEmit` fails here because it depends on generated codegen and built workspace package output that aren't present in the dev environment. The dev workflows compile sources directly via esbuild (api-server) and vite (frontend).
+Treat the root typecheck as a required validation signal. In manually maintained Orval barrel files, use single-quoted wildcard exports because Orval detects existing exports using an exact single-quoted string match.
 
-**How to apply:** verify changes with a clean esbuild/vite build + server start + live route responses. Don't treat the standing repo-wide typecheck failures as something a single task introduced — just confirm a file you changed isn't a new source of errors.
+**Why:** Double-quoted exports are semantically equivalent to TypeScript, but repeated Orval regeneration does not recognize them and appends duplicate single-quoted exports. Duplicate wildcard exports can obscure or reintroduce ambiguous generated names.
+
+**How to apply:** After changing the OpenAPI spec or Orval configuration, run codegen and the root typecheck. Confirm a second codegen run leaves manually maintained barrel files unchanged.

@@ -984,3 +984,4 @@ siteId?: number;
 export type GetLegionellaStatusParams = {
 siteId?: number;
 };
+

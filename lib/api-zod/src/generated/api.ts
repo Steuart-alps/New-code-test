@@ -1923,3 +1923,5 @@ export const DeleteLegionellaCheckParams = zod.object({
 })
 
 export const DeleteLegionellaCheckResponse = zod.void()
+
+
