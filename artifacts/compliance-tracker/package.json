@@ -10,6 +10,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test:signup-plan": "node tests/signup-plan.test.mjs",
     "test:nav-groups": "node tests/nav-groups.test.mjs",
+    "test:kitchen-dashboard-status": "node tests/kitchen-dashboard-status.test.mjs",
     "test:training-matrix": "node tests/training-matrix.test.mjs",
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",

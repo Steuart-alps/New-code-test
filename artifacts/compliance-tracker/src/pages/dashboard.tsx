@@ -2,12 +2,13 @@ import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
+import { summarizeKitchenStatuses, type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, MinusCircle, SlidersHorizontal,
-  UtensilsCrossed, MapPin, UserPlus, Mail, Settings2, MailWarning,
+  MapPin, UserPlus, Mail, Settings2, MailWarning,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -418,33 +419,60 @@ function DailyTrackSnapshotCard({ totals, loading }: { totals: ChecklistTotals |
   );
 }
 
-// ── KitchenTrack overdue indicator ────────────────────────────────────────────
+// ── KitchenTrack status indicator ─────────────────────────────────────────────
 
-function KitchenTrackOverdueBadge() {
-  const [missing, setMissing] = useState<boolean | null>(null);
+type KitchenCheckStatus = {
+  status: KitchenCheckState;
+};
+
+function KitchenTrackStatusPill() {
+  const [statuses, setStatuses] = useState<KitchenCheckStatus[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const today = new Date().toISOString().slice(0, 10);
     (async () => {
       try {
-        const res = await apiFetch("/food-safety");
+        const res = await apiFetch("/food-safety/status");
         if (!cancelled && res.ok) {
-          const records: { recordDate: string; submittedAt: string | null }[] = await res.json();
-          const todayRecord = records.find(r => r.recordDate === today && r.submittedAt);
-          setMissing(!todayRecord);
+          const json: unknown = await res.json();
+          setStatuses(Array.isArray(json) ? json as KitchenCheckStatus[] : []);
         }
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  if (missing === null || !missing) return null;
+  if (!statuses?.length) return null;
+
+  const { overdue, dueSoon, ok, never, tone, label } = summarizeKitchenStatuses(
+    statuses.map(({ status }) => status),
+  );
+  const pillClass = tone === "overdue"
+    ? "bg-rose-100 text-rose-700"
+    : tone === "due_soon"
+    ? "bg-amber-100 text-amber-700"
+    : tone === "never"
+    ? "bg-muted text-muted-foreground"
+    : "bg-emerald-100 text-emerald-700";
 
   return (
-    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">
-      <UtensilsCrossed className="w-3 h-3" />
-      Today's record missing
+    <span className="inline-flex items-center gap-2">
+      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium shrink-0", pillClass)}>
+        {label}
+      </span>
+      <span
+        className="hidden text-xs text-muted-foreground tabular-nums shrink-0 md:inline"
+        aria-label={`${overdue} overdue, ${dueSoon} due soon, ${ok} clear, ${never} never recorded`}
+        title="Overdue / due soon / clear / never recorded"
+      >
+        <span className={overdue > 0 ? "font-semibold text-rose-700" : undefined}>{overdue}</span>
+        {" / "}
+        <span className={dueSoon > 0 ? "font-semibold text-amber-700" : undefined}>{dueSoon}</span>
+        {" / "}
+        <span className={ok > 0 ? "font-semibold text-emerald-700" : undefined}>{ok}</span>
+        {" / "}
+        <span>{never}</span>
+      </span>
     </span>
   );
 }
@@ -620,7 +648,7 @@ export default function Dashboard() {
               <TrackRow
                 key={track.trackId}
                 track={track}
-                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchentrack" ? <KitchenTrackOverdueBadge /> : null}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill /> : null}
               />
             ))}
           </div>
