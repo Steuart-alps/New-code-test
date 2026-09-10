@@ -15,3 +15,17 @@ type = "text"
 title = "UK Compliance Comparison — Research Notes"
 description = "Running research plan and source-review checklist for the track-by-track UK comparison."
 logical_id = "8573715b-217c-4c2a-ada0-3fa53b8f2ce6"
+
+[[outputs]]
+id = "d3O11D8HvGzFQBTo5ClOf"
+uri = "file://artifacts/mobile/expo-go-qr.png"
+type = "image"
+title = "Expo Go QR code"
+description = "Scan this QR code with Expo Go on your iPhone. It points to the currently running SDK 57 mobile workflow."
+logical_id = "9355b1bf-5197-4ea2-8df4-858e33277e8c"
+content_hash = "sha256:8500aaae352e3dda525566675f7ac8b6d325fbba54fa1ac2fb880d4d278532ec"
+size = 1375
+mtime_ms = 1789054081100
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:b1c00cfa-ecaf-4a16-a178-69b15ffe6eb7/9355b1bf-5197-4ea2-8df4-858e33277e8c/ca2deff9-9a2d-4008-b6f3-8d2fe5978de9"
+storage_version_token = "1789054082284675"
+content_type = "image/png"
