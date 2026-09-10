@@ -6,9 +6,66 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { createCleaningSchedulePdf, type CleaningScheduleCompletion } from "../lib/cleaningSchedulePdf";
 
 const router = Router();
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+});
+
+const exportQuery = z.object({
+  from: isoDate,
+  to: isoDate,
+  frequency: z.enum(["daily", "weekly", "monthly"]),
+});
+
+router.get("/export", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const parsed = exportQuery.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Valid from, to and frequency query parameters are required" });
+  const { from, to, frequency } = parsed.data;
+  if (from > to) return res.status(400).json({ error: "The start date must be on or before the end date" });
+
+  const [logsResult, clientResult] = await Promise.all([
+    db.execute(sql`
+      SELECT log_date, frequency, completions, signed_by, submitted_at
+      FROM kitchen_cleaning_logs
+      WHERE client_id = ${clientId}
+        AND log_date >= ${from}
+        AND log_date <= ${to}
+        AND frequency = ${frequency}
+      ORDER BY log_date ASC
+    `),
+    db.execute(sql`SELECT name FROM clients WHERE id = ${clientId} LIMIT 1`),
+  ]);
+
+  const logs = logsResult.rows.map((row: any) => ({
+    date: String(row.log_date),
+    frequency: String(row.frequency),
+    completions: (Array.isArray(row.completions) ? row.completions : []) as CleaningScheduleCompletion[],
+    signedBy: row.signed_by ? String(row.signed_by) : "",
+    submittedAt: row.submitted_at ? new Date(row.submitted_at) : null,
+  }));
+  const businessName = String((clientResult.rows[0] as any)?.name ?? "");
+  const pdf = await createCleaningSchedulePdf({
+    businessName,
+    dateFrom: from,
+    dateTo: to,
+    frequency: frequency.charAt(0).toUpperCase() + frequency.slice(1),
+    generatedAt: new Date().toLocaleDateString("en-GB"),
+    logs,
+  });
+  const filename = `cleaning-schedule-${frequency}-${from}-to-${to}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", pdf.length);
+  return res.send(pdf);
+});
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 

@@ -17,13 +17,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { format, startOfWeek, startOfMonth, parseISO, addWeeks, subWeeks, addMonths, subMonths } from "date-fns";
+import { format, startOfWeek, startOfMonth, parseISO, addWeeks, subWeeks, addMonths, subMonths, subDays } from "date-fns";
 import {
   CheckSquare, Plus, Trash2, ChevronLeft, ChevronRight, Save,
-  Pencil, Settings, CheckCircle2, ClipboardList, CalendarDays, Loader2, X, Printer,
+  Pencil, Settings, CheckCircle2, ClipboardList, CalendarDays, Loader2, X, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { printHtmlDocument } from "@/lib/download";
+import { API_BASE } from "@/lib/api";
+import { downloadFile } from "@/lib/download";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -339,7 +340,7 @@ function HistoryPanel({ history, onSelect }: {
 // ── Main tab ──────────────────────────────────────────────────────────────────
 
 export default function CleaningScheduleTab() {
-  const { user } = useAuth();
+  const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
 
@@ -353,6 +354,11 @@ export default function CleaningScheduleTab() {
   const [loading, setLoading]           = useState(false);
   const [saving, setSaving]             = useState(false);
   const [manageOpen, setManageOpen]     = useState(false);
+  const [exportOpen, setExportOpen]     = useState(false);
+  const [exporting, setExporting]       = useState(false);
+  const [exportFrom, setExportFrom]     = useState(format(subDays(new Date(), 30), "yyyy-MM-dd"));
+  const [exportTo, setExportTo]         = useState(todayIso());
+  const [exportFrequency, setExportFrequency] = useState<Frequency>("daily");
 
   const submitted = !!log?.submitted_at;
 
@@ -522,54 +528,30 @@ export default function CleaningScheduleTab() {
   const doneCount = completions.filter(c => c.done).length;
   const totalCount = completions.length;
 
-  // ── Export completion record (for food hygiene inspections) ──────────────
-
-  const esc = (s: string | null | undefined) =>
-    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  function handleExportRecord() {
-    if (completions.length === 0) {
-      toast({ title: "No tasks to export", description: "There are no cleaning tasks for this period." });
+  async function handleDownloadPdf() {
+    if (exportFrom > exportTo) {
+      toast({ title: "Choose a valid date range", description: "The start date must be before the end date.", variant: "destructive" });
       return;
     }
-    const rows = byArea.flatMap(group =>
-      group.items.map(({ c }) => ({ area: group.area, c }))
-    );
-    const submittedLabel = log?.submitted_at
-      ? `Signed off ${format(parseISO(log.submitted_at), "d MMM yyyy 'at' HH:mm")}`
-      : "Draft — not yet signed off";
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Cleaning Schedule Record</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .empty { font-size: 11px; color: #777; font-style: italic; }
-  .done { color: #15803d; font-weight: bold; }
-  .not-done { color: #b91c1c; }
-  .signoff { margin-top: 18px; font-size: 11px; }
-  @media print { body { margin: 12mm; } }
-</style></head><body>
-<h1>Cleaning Schedule Completion Record</h1>
-<div class="meta">${esc(freqLabel(activeFreq))} schedule — ${esc(periodLabel(activeFreq, periodDate))}</div>
-<div class="meta">Generated ${esc(format(new Date(), "dd MMM yyyy"))} — for food hygiene inspection</div>
-<div class="meta">${doneCount} of ${totalCount} task${totalCount !== 1 ? "s" : ""} completed</div>
-${rows.length === 0 ? `<p class="empty">No cleaning tasks configured for this period.</p>` : `<table>
-<tr><th>Area</th><th>Task</th><th>Frequency</th><th>Completed</th><th>Completed by</th><th>Notes</th></tr>
-${rows.map(({ area, c }) => `<tr>
-  <td>${esc(area)}</td>
-  <td>${esc(c.taskName)}</td>
-  <td>${esc(freqLabel(activeFreq))}</td>
-  <td>${c.done ? `<span class="done">Done</span>` : `<span class="not-done">Not done</span>`}</td>
-  <td>${esc(c.doneBy) || "—"}</td>
-  <td>${esc(c.notes) || ""}</td>
-</tr>`).join("")}
-</table>`}
-<div class="signoff">Signed off by: <strong>${esc(signedBy) || "—"}</strong> · ${esc(submittedLabel)}</div>
-</body></html>`;
-    printHtmlDocument(html);
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ from: exportFrom, to: exportTo, frequency: exportFrequency });
+      if (activeClientId) params.set("clientId", String(activeClientId));
+      await downloadFile(
+        `${API_BASE}/kitchen-cleaning/export?${params}`,
+        `cleaning-schedule-${exportFrequency}-${exportFrom}-to-${exportTo}.pdf`,
+      );
+      setExportOpen(false);
+      toast({ title: "Cleaning record downloaded", description: "The PDF is ready for your food hygiene records." });
+    } catch (error) {
+      toast({
+        title: "Unable to download PDF",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -598,11 +580,14 @@ ${rows.map(({ area, c }) => `<tr>
           })}
         </div>
         <div className={cn("flex items-center gap-2", canAdmin ? "ml-auto" : "sm:ml-auto")}>
-          <Button variant="outline" size="sm" onClick={handleExportRecord}
-            disabled={completions.length === 0}
-            title="Print or save this cleaning record for food hygiene inspections">
-            <Printer className="w-4 h-4 mr-2" /> Export record
-          </Button>
+          {canAdmin && (
+            <Button variant="outline" size="sm" onClick={() => {
+              setExportFrequency(activeFreq);
+              setExportOpen(true);
+            }}>
+              <Download className="w-4 h-4 mr-2" /> Download PDF
+            </Button>
+          )}
           {canAdmin && (
             <Button variant="outline" size="sm" onClick={() => setManageOpen(true)}>
               <Settings className="w-4 h-4 mr-2" /> Manage Tasks
@@ -777,6 +762,49 @@ ${rows.map(({ area, c }) => `<tr>
 
       {/* ── History ── */}
       <HistoryPanel history={history} onSelect={handleHistorySelect} />
+
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display">Download cleaning record</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Choose the logs to include in the PDF for your food hygiene records.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Frequency</Label>
+              <Select value={exportFrequency} onValueChange={value => setExportFrequency(value as Frequency)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="cleaning-export-from">From</Label>
+                <Input id="cleaning-export-from" type="date" value={exportFrom}
+                  max={exportTo} onChange={event => setExportFrom(event.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cleaning-export-to">To</Label>
+                <Input id="cleaning-export-to" type="date" value={exportTo}
+                  min={exportFrom} max={todayIso()} onChange={event => setExportTo(event.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>Cancel</Button>
+            <Button onClick={handleDownloadPdf} disabled={exporting || !exportFrom || !exportTo}>
+              {exporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              Download PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Manage dialog ── */}
       <ManageTasksDialog
