@@ -375,6 +375,47 @@ async function testRecordValidation(admin, ts) {
   const editInvalid = await admin("PUT", `/incidents/${legacyId}`, { incidentType: "another_bad_type" });
   expectStatus("record: PUT to new invalid type → 400", editInvalid.status, 400);
 
+  // TrainTrack preserves the historical "Other" wildcard only while that
+  // option is active for the client. The UI submits the nonblank description,
+  // rather than persisting the literal picker label.
+  const customTrainingType = `Bespoke equipment induction ${ts}`;
+  expectOk(
+    "record: enable TrainTrack Other wildcard",
+    (await admin("PUT", "/form-options/traintrack_types", { items: ["Other"] })).status,
+  );
+  const customTraining = await admin("POST", "/train-track/records", {
+    recordType: "internal",
+    staffName: "Jane Doe",
+    trainingType: customTrainingType,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  expectOk("record: TrainTrack custom type accepted while Other active", customTraining.status, [201]);
+  const customTrainingId = customTraining.data?.id;
+
+  expectOk(
+    "record: disable TrainTrack Other wildcard",
+    (await admin("PUT", "/form-options/traintrack_types", { items: ["Fire Safety Awareness"] })).status,
+  );
+  const rejectedTraining = await admin("POST", "/train-track/records", {
+    recordType: "internal",
+    staffName: "John Doe",
+    trainingType: `Unlisted training ${ts}`,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  expectStatus("record: TrainTrack custom type rejected while Other disabled", rejectedTraining.status, 400);
+
+  if (Number.isInteger(customTrainingId)) {
+    const unchangedTraining = await admin("PATCH", `/train-track/records/${customTrainingId}`, {
+      trainingType: customTrainingType,
+      notes: "Legacy custom type remains editable",
+    });
+    expectOk("record: unchanged custom TrainTrack type remains editable", unchangedTraining.status, [200]);
+    await admin("DELETE", `/train-track/records/${customTrainingId}`);
+  }
+  await admin("DELETE", "/form-options/traintrack_types");
+
   // Cleanup: reset the list and remove created incidents.
   await admin("DELETE", "/form-options/incident_types");
   await admin("DELETE", `/incidents/${legacyId}`);

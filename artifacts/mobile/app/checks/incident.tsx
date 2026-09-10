@@ -70,7 +70,6 @@ interface Incident {
 interface FormOptionsResponse {
   options?: {
     incident_types?: string[];
-    incident_severities?: string[];
   };
 }
 
@@ -154,11 +153,8 @@ export default function IncidentScreen() {
     formOptions?.options?.incident_types?.length
       ? formOptions.options.incident_types
       : [];
-  const severities =
-    formOptions?.options?.incident_severities?.length
-      ? formOptions.options.incident_severities
-      : [];
-  const optionsReady = incidentTypes.length > 0 && severities.length > 0;
+  const severities: readonly string[] = DEFAULT_SEVERITIES.map((option) => option.value);
+  const optionsReady = incidentTypes.length > 0;
   const effectiveIncidentType = incidentTypes.includes(incidentType)
     ? incidentType
     : (incidentTypes[0] ?? 'accident');

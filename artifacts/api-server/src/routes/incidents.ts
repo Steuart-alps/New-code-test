@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import {
   incidentsTable, incidentRiddorEventsTable, sitesTable, appSettingsTable, usersTable,
-  INCIDENT_STATUSES, EMPLOYMENT_TYPES,
+  INCIDENT_STATUSES, INCIDENT_SEVERITIES, EMPLOYMENT_TYPES,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
@@ -13,11 +13,10 @@ import { appendAuditEvent } from "../lib/audit";
 const router = Router();
 
 const createSchema = z.object({
-  // incidentType/severity are validated against the client's effective option
-  // list at request time (custom or default) rather than a fixed enum, so each
-  // client can customise these vocabularies. Kept as trimmed strings here.
+  // Incident type is validated against the client's effective option list.
+  // Severity remains fixed because serious/fatal values drive summary metrics.
   incidentType: z.string().min(1).max(60).default("accident"),
-  severity: z.string().min(1).max(60).default("minor"),
+  severity: z.enum(INCIDENT_SEVERITIES).default("minor"),
   status: z.enum(INCIDENT_STATUSES).default("open"),
   incidentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   incidentTime: z.string().max(10).nullable().optional(),
@@ -51,7 +50,6 @@ const createSchema = z.object({
 // against the current, tenant-scoped option list.
 const updateSchema = createSchema.partial().extend({
   incidentType: z.string().min(1).optional(),
-  severity: z.string().min(1).optional(),
 });
 
 function allowedSites(clientId: number, deptId: number) {
@@ -98,9 +96,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   if (status && (INCIDENT_STATUSES as readonly string[]).includes(status))
     conditions.push(eq(incidentsTable.status, status));
-  // severity/incidentType filters are free-form (per-client customisable),
-  // so accept any non-empty value and let the equality match narrow results.
-  if (severity)
+  if (severity && (INCIDENT_SEVERITIES as readonly string[]).includes(severity))
     conditions.push(eq(incidentsTable.severity, severity));
   if (incidentType)
     conditions.push(eq(incidentsTable.incidentType, incidentType));
@@ -168,12 +164,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", issues: parsed.error.issues });
   const data = parsed.data;
 
-  const [allowedTypes, allowedSeverities] = await Promise.all([
-    getEffectiveOptionList(clientId, "incident_types"),
-    getEffectiveOptionList(clientId, "incident_severities"),
-  ]);
+  const allowedTypes = await getEffectiveOptionList(clientId, "incident_types");
   if (!allowedTypes.includes(data.incidentType)) return res.status(400).json({ error: "Invalid incident type" });
-  if (!allowedSeverities.includes(data.severity)) return res.status(400).json({ error: "Invalid severity" });
 
   if (!await canAccessSite(clientId, data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
@@ -224,11 +216,6 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     const allowedTypes = await getEffectiveOptionList(clientId, "incident_types");
     if (!allowedTypes.includes(parsed.data.incidentType)) return res.status(400).json({ error: "Invalid incident type" });
   }
-  if (parsed.data.severity !== undefined && parsed.data.severity !== existing.severity) {
-    const allowedSeverities = await getEffectiveOptionList(clientId, "incident_severities");
-    if (!allowedSeverities.includes(parsed.data.severity)) return res.status(400).json({ error: "Invalid severity" });
-  }
-
   if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
   const { riddorRationale, submittedAt, submissionEvidence, ...updateData } = parsed.data;

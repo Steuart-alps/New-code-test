@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
 import { contractorsTable } from "@workspace/db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -8,9 +8,10 @@ import {
   DeleteContractorParams,
 } from "@workspace/api-zod";
 import { z } from "zod";
-import { requireAuth, requireClientAdmin, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { filterName } from "../lib/contentFilter";
 import { digestBearerToken, newBearerToken } from "../lib/bearerTokens";
+import { getEffectiveOptionList } from "../lib/formOptions";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
@@ -66,11 +67,30 @@ async function portalAudit(
 }
 
 /** Sanitise the trades array from the request body. */
-function parseTrades(raw: unknown): string[] {
+function parseTrades(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return [];
-  return (raw as unknown[])
-    .filter((t): t is string => typeof t === "string")
-    .slice(0, 20);
+  if (raw.length > 20 || raw.some(t => typeof t !== "string")) return null;
+  const trades = raw.map(t => (t as string).trim());
+  if (trades.some(t => !t || t.length > 60)) return null;
+  if (new Set(trades.map(t => t.toLowerCase())).size !== trades.length) return null;
+  return trades;
+}
+
+async function validateTrades(clientId: number, raw: unknown, existing: string[] = []) {
+  const trades = parseTrades(raw);
+  if (!trades) return null;
+  const allowed = await getEffectiveOptionList(clientId, "fixtrack_trades");
+  return trades.every(trade => existing.includes(trade) || allowed.includes(trade)) ? trades : null;
+}
+
+async function contractorInActiveClient(req: Request, contractorId: number) {
+  const clientId = getClientId(req);
+  if (!clientId) return undefined;
+  const [contractor] = await db.select().from(contractorsTable).where(and(
+    eq(contractorsTable.id, contractorId),
+    eq(contractorsTable.clientId, clientId),
+  ));
+  return contractor;
 }
 
 router.get("/contractors", requireAuth, async (req, res) => {
@@ -89,10 +109,14 @@ router.get("/contractors", requireAuth, async (req, res) => {
 
 router.post("/contractors", requireAuth, requireClientAdmin, async (req, res) => {
   const body     = CreateContractorBody.parse(req.body);
-  const trades   = parseTrades(req.body?.trades);
   const clientId = getClientId(req);
   if (!clientId) {
     res.status(400).json({ error: "clientId required" });
+    return;
+  }
+  const trades = await validateTrades(clientId, req.body?.trades);
+  if (!trades) {
+    res.status(400).json({ error: "Trades must use active client trade options" });
     return;
   }
   const nameCheck = filterName(body.name);
@@ -124,13 +148,9 @@ router.post("/contractors", requireAuth, requireClientAdmin, async (req, res) =>
 router.get("/contractors/:id", requireAuth, async (req, res) => {
   const { id } = GetContractorParams.parse({ id: Number(req.params.id) });
 
-  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, id));
+  const contractor = await contractorInActiveClient(req, id);
   if (!contractor) {
     res.status(404).json({ error: "Contractor not found" });
-    return;
-  }
-  if (!canAccessClient(req, contractor.clientId)) {
-    res.status(403).json({ error: "Forbidden" });
     return;
   }
   res.json(contractor);
@@ -139,6 +159,11 @@ router.get("/contractors/:id", requireAuth, async (req, res) => {
 router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = UpdateContractorParams.parse({ id: Number(req.params.id) });
   const body    = UpdateContractorBody.parse(req.body);
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "clientId required" });
+    return;
+  }
 
   const nameCheck = filterName(body.name);
   if (!nameCheck.ok) {
@@ -160,20 +185,28 @@ router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res)
     }
   }
 
-  const existing = await db.select().from(contractorsTable).where(eq(contractorsTable.id, id));
-  if (!existing[0] || !canAccessClient(req, existing[0].clientId)) {
+  const existing = await db.select().from(contractorsTable)
+    .where(and(eq(contractorsTable.id, id), eq(contractorsTable.clientId, clientId)));
+  if (!existing[0]) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
 
   // Merge trades only when explicitly supplied in the request body
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
-  if ("trades" in req.body) updateData.trades = parseTrades(req.body.trades);
+  if ("trades" in req.body) {
+    const trades = await validateTrades(clientId, req.body.trades, existing[0].trades ?? []);
+    if (!trades) {
+      res.status(400).json({ error: "Trades must use active client trade options" });
+      return;
+    }
+    updateData.trades = trades;
+  }
 
   const [contractor] = await db
     .update(contractorsTable)
     .set(updateData as any)
-    .where(and(eq(contractorsTable.id, id), eq(contractorsTable.clientId, existing[0].clientId)))
+    .where(and(eq(contractorsTable.id, id), eq(contractorsTable.clientId, clientId)))
     .returning();
   res.json(contractor);
 });
@@ -181,13 +214,16 @@ router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res)
 router.delete("/contractors/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const { id } = DeleteContractorParams.parse({ id: Number(req.params.id) });
 
-  const existing = await db.select().from(contractorsTable).where(eq(contractorsTable.id, id));
-  if (!existing[0] || !canAccessClient(req, existing[0].clientId)) {
+  const existing = await contractorInActiveClient(req, id);
+  if (!existing) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
 
-  await db.delete(contractorsTable).where(eq(contractorsTable.id, id));
+  await db.delete(contractorsTable).where(and(
+    eq(contractorsTable.id, id),
+    eq(contractorsTable.clientId, existing.clientId),
+  ));
   res.status(204).send();
 });
 
@@ -201,8 +237,8 @@ router.post("/contractors/:id/portal-link", requireAuth, requireClientAdmin, asy
     return;
   }
   const body = PortalLinkBody.parse(req.body ?? {});
-  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!contractor || !canAccessClient(req, contractor.clientId)) {
+  const contractor = await contractorInActiveClient(req, contractorId);
+  if (!contractor) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
@@ -240,8 +276,8 @@ router.delete("/contractors/:id/portal-link", requireAuth, requireClientAdmin, a
     res.status(400).json({ error: "Invalid contractor ID" });
     return;
   }
-  const [contractor] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!contractor || !canAccessClient(req, contractor.clientId)) {
+  const contractor = await contractorInActiveClient(req, contractorId);
+  if (!contractor) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
@@ -258,15 +294,15 @@ router.delete("/contractors/:id/portal-link", requireAuth, requireClientAdmin, a
 
 router.get("/contractors/:id/certificates", requireAuth, async (req, res) => {
   const contractorId = Number(req.params.id);
-  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!existing || !canAccessClient(req, existing.clientId)) {
+  const existing = await contractorInActiveClient(req, contractorId);
+  if (!existing) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
   const certs = await db.execute(sql`
     SELECT id, certificate_name, issuer, completed_date, expiry_date, notes, created_at, updated_at
     FROM contractor_certificates
-    WHERE contractor_id = ${contractorId}
+    WHERE contractor_id = ${contractorId} AND client_id = ${existing.clientId}
     ORDER BY expiry_date ASC NULLS LAST, certificate_name ASC
   `);
   res.json(certs.rows ?? []);
@@ -274,8 +310,8 @@ router.get("/contractors/:id/certificates", requireAuth, async (req, res) => {
 
 router.post("/contractors/:id/certificates", requireAuth, requireClientAdmin, async (req, res) => {
   const contractorId = Number(req.params.id);
-  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!existing || !canAccessClient(req, existing.clientId)) {
+  const existing = await contractorInActiveClient(req, contractorId);
+  if (!existing) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
@@ -294,8 +330,8 @@ router.post("/contractors/:id/certificates", requireAuth, requireClientAdmin, as
 router.put("/contractors/:id/certificates/:certId", requireAuth, requireClientAdmin, async (req, res) => {
   const contractorId = Number(req.params.id);
   const certId = Number(req.params.certId);
-  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!existing || !canAccessClient(req, existing.clientId)) {
+  const existing = await contractorInActiveClient(req, contractorId);
+  if (!existing) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
@@ -308,10 +344,11 @@ router.put("/contractors/:id/certificates/:certId", requireAuth, requireClientAd
       expiry_date      = ${body.expiryDate ?? null},
       notes            = ${body.notes ?? null},
       updated_at       = now()
-    WHERE id = ${certId} AND contractor_id = ${contractorId}
+    WHERE id = ${certId} AND contractor_id = ${contractorId} AND client_id = ${existing.clientId}
   `);
   const [cert] = (await db.execute(sql`
-    SELECT * FROM contractor_certificates WHERE id = ${certId}
+    SELECT * FROM contractor_certificates
+    WHERE id = ${certId} AND contractor_id = ${contractorId} AND client_id = ${existing.clientId}
   `)).rows;
   if (!cert) { res.status(404).json({ error: "Certificate not found" }); return; }
   res.json(cert);
@@ -320,13 +357,14 @@ router.put("/contractors/:id/certificates/:certId", requireAuth, requireClientAd
 router.delete("/contractors/:id/certificates/:certId", requireAuth, requireClientAdmin, async (req, res) => {
   const contractorId = Number(req.params.id);
   const certId = Number(req.params.certId);
-  const [existing] = await db.select().from(contractorsTable).where(eq(contractorsTable.id, contractorId));
-  if (!existing || !canAccessClient(req, existing.clientId)) {
+  const existing = await contractorInActiveClient(req, contractorId);
+  if (!existing) {
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
   await db.execute(sql`
-    DELETE FROM contractor_certificates WHERE id = ${certId} AND contractor_id = ${contractorId}
+    DELETE FROM contractor_certificates
+    WHERE id = ${certId} AND contractor_id = ${contractorId} AND client_id = ${existing.clientId}
   `);
   res.status(204).send();
 });

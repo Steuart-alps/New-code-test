@@ -7,7 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Plus, X, RotateCcw } from "lucide-react";
+import { Settings, Plus, X, RotateCcw, Undo2 } from "lucide-react";
 import {
   useFormOptions, useFormOptionsApi, type FormOptionKey,
 } from "@/hooks/use-form-options";
@@ -68,18 +68,31 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
     setNewItem("");
   };
 
-  const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
+  const updateItem = (idx: number, value: string) =>
+    setItems(items.map((item, i) => i === idx ? value : item));
+  const disableItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
+  const disabledDefaults = (data?.defaults?.[optionKey] ?? [])
+    .filter(item => !items.some(active => active.toLowerCase() === item.toLowerCase()));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["form-options"] });
 
   const handleSave = async () => {
-    if (items.length === 0) {
+    const cleaned = items.map(item => item.trim());
+    if (cleaned.length === 0) {
       toast({ title: "List cannot be empty", variant: "destructive" });
+      return;
+    }
+    if (cleaned.some(item => !item)) {
+      toast({ title: "Options cannot be blank", variant: "destructive" });
+      return;
+    }
+    if (new Set(cleaned.map(item => item.toLowerCase())).size !== cleaned.length) {
+      toast({ title: "Options must be unique", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      await call(`/${optionKey}`, { method: "PUT", body: JSON.stringify({ items }) });
+      await call(`/${optionKey}`, { method: "PUT", body: JSON.stringify({ items: cleaned }) });
       invalidate();
       toast({ title: "Options saved" });
       setOpen(false);
@@ -120,18 +133,25 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
 
         <div className="space-y-3 py-1">
           <p className="text-xs text-muted-foreground">
-            Customise the options shown in this dropdown. Existing records keep
-            their current values even if you remove an option.
+            Rename options directly, or disable options you no longer use.
+            Existing records keep their current values when an option changes.
           </p>
 
           <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-1">
             {items.map((item, idx) => (
-              <div key={`${item}-${idx}`} className="flex items-center gap-2 rounded-sm border px-2.5 py-1.5">
-                <span className="flex-1 text-sm truncate" title={item}>{label(item)}</span>
+              <div key={idx} className="flex items-center gap-2 rounded-sm border px-2.5 py-1.5">
+                <Input
+                  value={item}
+                  onChange={event => updateItem(idx, event.target.value)}
+                  className="h-8 flex-1"
+                  maxLength={60}
+                  aria-label={`Rename ${label(item)}`}
+                />
                 <Button
                   type="button" variant="ghost" size="icon"
-                  className="h-6 w-6 shrink-0" onClick={() => removeItem(idx)}
-                  aria-label={`Remove ${label(item)}`}
+                  className="h-7 w-7 shrink-0" onClick={() => disableItem(idx)}
+                  aria-label={`Disable ${label(item)}`}
+                  title="Disable option"
                 >
                   <X className="w-3.5 h-3.5" />
                 </Button>
@@ -141,6 +161,26 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
               <p className="text-sm text-muted-foreground italic px-1">No options yet — add one below.</p>
             )}
           </div>
+
+          {disabledDefaults.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Disabled defaults</p>
+              {disabledDefaults.map(item => (
+                <div key={item} className="flex items-center justify-between gap-2 rounded-sm border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground">
+                  <span className="truncate">{label(item)}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1"
+                    onClick={() => setItems([...items, item])}
+                  >
+                    <Undo2 className="w-3.5 h-3.5" /> Enable
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <Input

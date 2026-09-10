@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -230,7 +230,8 @@ function MediaGallery({ urls }: { urls: string[] }) {
 
 export default function FixTrackDetailPage() {
   const [, params] = useRoute("/fix-track/:id");
-  const { user, hasService } = useAuth();
+  const { user, hasService, activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
   const hasFixtrack = hasService("fixtrack");
   const canEdit = user?.role !== "client_viewer";
   const { toast } = useToast();
@@ -249,7 +250,7 @@ export default function FixTrackDetailPage() {
 
   async function loadIssue() {
     try {
-      const res = await apiFetch(`/fix-track/issues/${params?.id}`);
+      const res = await clientApiFetch(`/fix-track/issues/${params?.id}`);
       if (!res.ok) throw new Error("Not found");
       const data = await res.json();
       setIssue(data);
@@ -262,12 +263,14 @@ export default function FixTrackDetailPage() {
   }
 
   useEffect(() => {
+    setIssue(null);
+    setLoading(true);
     if (!hasFixtrack) {
       setLocation("/fix-track");
       return;
     }
     if (params?.id) loadIssue();
-  }, [params?.id, hasFixtrack]);
+  }, [params?.id, hasFixtrack, activeClientId]);
 
   async function handleStatusChange(newStatus: string, resolverSignature?: string) {
     if (!issue || statusBusy) return;
@@ -279,7 +282,7 @@ export default function FixTrackDetailPage() {
     try {
       const payload = { status: newStatus, ...(resolverSignature ? { resolverSignature } : {}) };
       
-      const res = await apiFetch(`/fix-track/issues/${issue.id}`, {
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -299,7 +302,7 @@ export default function FixTrackDetailPage() {
     if (!noteText.trim() || !issue || savingNote) return;
     setSavingNote(true);
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/notes`, {
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}/notes`, {
         method: "POST",
         body: JSON.stringify({ note: noteText.trim() }),
       });

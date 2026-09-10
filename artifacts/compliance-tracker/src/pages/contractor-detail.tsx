@@ -3,7 +3,6 @@ import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import {
-  useGetContractor,
   useListComplianceItems,
   useSendReminderForItem
 } from "@workspace/api-client-react";
@@ -19,7 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { ExpiryBadge } from "@/components/badges";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { useAuth } from "@/context/auth-context";
 import { format } from "date-fns";
 import {
   Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft, Send,
@@ -118,23 +118,44 @@ export default function ContractorDetailPage() {
   const params = useParams();
   const id = parseInt(params.id || "0");
   const qc = useQueryClient();
+  const { activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();
-  const { data: contractor, isLoading: loadingContractor } = useGetContractor(id);
+  const { data: contractor, isLoading: loadingContractor } = useQuery<any>({
+    queryKey: ["contractor", id, activeClientId],
+    queryFn: async () => {
+      const response = await clientApiFetch(`/contractors/${id}`);
+      if (!response.ok) throw new Error("Failed to load contractor");
+      return response.json();
+    },
+    enabled: !!id && !!activeClientId,
+  });
   const { data: items = [] } = useListComplianceItems({ contractorId: id });
 
   // Certificates
   const { data: certs = [], isLoading: loadingCerts } = useQuery<ContractorCert[]>({
-    queryKey: ["contractor-certs", id],
+    queryKey: ["contractor-certs", id, activeClientId],
     queryFn: async () => {
-      const res = await apiFetch(`/contractors/${id}/certificates`);
+      const res = await clientApiFetch(`/contractors/${id}/certificates`);
       if (!res.ok) throw new Error("Failed to load certificates");
       return res.json();
     },
-    enabled: !!id,
+    enabled: !!id && !!activeClientId,
   });
 
-  const { deleteContractor, deleteItem } = useAppMutations();
+  const { deleteItem } = useAppMutations();
+  const deleteContractor = useMutation({
+    mutationFn: async () => {
+      const response = await clientApiFetch(`/contractors/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete contractor");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contractors"] });
+      navigate("/contractors");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const sendReminder = useSendReminderForItem({
     mutation: {
       onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
@@ -189,7 +210,7 @@ export default function ContractorDetailPage() {
       const url = editingCert
         ? `/contractors/${id}/certificates/${editingCert.id}`
         : `/contractors/${id}/certificates`;
-      const res = await apiFetch(url, {
+      const res = await clientApiFetch(url, {
         method: editingCert ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
@@ -205,7 +226,7 @@ export default function ContractorDetailPage() {
 
   const deleteCert = useMutation({
     mutationFn: async (certId: number) => {
-      const res = await apiFetch(`/contractors/${id}/certificates/${certId}`, { method: "DELETE" });
+      const res = await clientApiFetch(`/contractors/${id}/certificates/${certId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
     },
     onSuccess: () => {
@@ -552,7 +573,7 @@ export default function ContractorDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { deleteContractor.mutate({ id }); window.location.href = "/contractors"; }}>
+              onClick={() => deleteContractor.mutate()}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

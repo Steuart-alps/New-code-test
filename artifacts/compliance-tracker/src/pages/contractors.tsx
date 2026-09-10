@@ -1,19 +1,32 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { useListContractors } from "@workspace/api-client-react";
+import type { Contractor } from "@workspace/api-client-react";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Building, Mail, Phone, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { LiabilityBadge, DbsReviewBadge } from "@/components/badges";
+import { useAuth } from "@/context/auth-context";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 
 export default function ContractorsPage() {
   const [search, setSearch] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const { activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
 
-  const { data: contractors = [], isLoading } = useListContractors();
+  const { data: contractors = [], isLoading } = useQuery<Contractor[]>({
+    queryKey: ["contractors", activeClientId],
+    queryFn: async () => {
+      const response = await clientApiFetch("/contractors");
+      if (!response.ok) throw new Error("Failed to load contractors");
+      return response.json();
+    },
+    enabled: !!activeClientId,
+  });
 
   const filtered = contractors.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 

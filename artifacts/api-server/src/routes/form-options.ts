@@ -64,7 +64,6 @@ router.put("/:key", requireAuth, denyViewers, requireClientAdmin, async (req, re
 
   const check = validateOptionList(req.body?.items);
   if (!check.ok) return res.status(400).json({ error: check.error });
-
   await saveOption(clientId, key, check.value);
   res.json({ ok: true, items: check.value });
 });

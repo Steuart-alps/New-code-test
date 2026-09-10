@@ -323,8 +323,8 @@ function IncidentConfigDialog() {
 // ─── Empty form ───────────────────────────────────────────────────────────────
 
 const emptyForm = () => ({
-  incidentType: "accident" as string,
-  severity: "minor" as string,
+  incidentType: "" as string,
+  severity: "" as string,
   status: "open" as Status,
   incidentDate: new Date().toISOString().slice(0, 10),
   incidentTime: "",
@@ -379,14 +379,27 @@ export default function IncidentsPage() {
   const { data: incidentConfig } = useGetIncidentConfig();
   const { data: formOptions } = useFormOptions();
   const incidentTypeOptions = pickOptions(formOptions, "incident_types");
-  const severityOptions = pickOptions(formOptions, "incident_severities");
+  const severityOptions: readonly string[] = SEVERITIES;
   // When editing a record whose stored value has since been removed from the
   // effective list, keep that value selectable so other fields can be edited
-  // without being forced to change the type/severity.
-  const withCurrent = (opts: string[], current: string | undefined) =>
-    current && !opts.includes(current) ? [...opts, current] : opts;
-  const formTypeOptions = withCurrent(incidentTypeOptions, form.incidentType);
-  const formSeverityOptions = withCurrent(severityOptions, form.severity);
+  // without being forced to change the type.
+  const withCurrent = (opts: readonly string[], current: string | undefined) =>
+    current && !opts.includes(current) ? [...opts, current] : [...opts];
+  const formTypeOptions = withCurrent(incidentTypeOptions, editItem ? form.incidentType : undefined);
+  const formSeverityOptions = withCurrent(severityOptions, editItem ? form.severity : undefined);
+
+  useEffect(() => {
+    if (!showDialog || editItem) return;
+    setForm(current => ({
+      ...current,
+      incidentType: incidentTypeOptions.includes(current.incidentType)
+        ? current.incidentType
+        : (incidentTypeOptions[0] ?? ""),
+      severity: severityOptions.includes(current.severity)
+        ? current.severity
+        : (severityOptions[0] ?? ""),
+    }));
+  }, [showDialog, editItem, incidentTypeOptions, severityOptions]);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -520,6 +533,8 @@ ${rows.map(r => `<tr>
   function openAdd() {
     setEditItem(null);
     const f = emptyForm();
+    f.incidentType = incidentTypeOptions[0] ?? "";
+    f.severity = severityOptions[0] ?? "";
     if (incidentConfig?.incident_default_reporter) f.reportedBy = incidentConfig.incident_default_reporter;
     setForm(f);
     setFormSection("details");
@@ -668,12 +683,6 @@ ${rows.map(r => `<tr>
             title="Incident types"
             triggerLabel="Customise types"
             labelFor={typeLabel}
-          />
-          <FormOptionsEditor
-            optionKey="incident_severities"
-            title="Severities"
-            triggerLabel="Customise severities"
-            labelFor={severityLabel}
           />
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Log Incident

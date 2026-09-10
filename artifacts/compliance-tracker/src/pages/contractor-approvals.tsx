@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +32,8 @@ interface EmailQueueItem {
 
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
+  const { activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
@@ -42,13 +45,14 @@ export default function ContractorApprovalsPage() {
   const [submittingId, setSubmittingId] = useState<number | null>(null);
 
   useEffect(() => {
+    setItems([]);
     fetchItems();
-  }, []);
+  }, [activeClientId]);
 
   async function fetchItems() {
     setLoading(true);
     try {
-      const res = await apiFetch("/fix-track/contractor-email-queue?status=pending");
+      const res = await clientApiFetch("/fix-track/contractor-email-queue?status=pending");
       if (res.ok) {
         setItems(await res.json());
       }
@@ -95,7 +99,7 @@ export default function ContractorApprovalsPage() {
       const payload = modifiedPreview
         ? { subject: modifiedPreview.subject, bodyText: modifiedPreview.text }
         : {};
-      const res = await apiFetch(`/fix-track/contractor-email-queue/${id}/${endpoint}`, {
+      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${id}/${endpoint}`, {
         method: "POST",
         body: JSON.stringify(payload)
       });
@@ -114,7 +118,7 @@ export default function ContractorApprovalsPage() {
     if (!confirm("Are you sure you want to cancel this email request?")) return;
     setSubmittingId(id);
     try {
-      const res = await apiFetch(`/fix-track/contractor-email-queue/${id}/cancel`, {
+      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${id}/cancel`, {
         method: "POST"
       });
       if (!res.ok) throw new Error("Failed to cancel email");

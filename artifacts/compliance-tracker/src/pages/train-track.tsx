@@ -279,20 +279,14 @@ export default function TrainTrackPage() {
     enabled: !!activeClientId,
   });
 
-  // Effective (per-client customisable) training-type suggestions. "Other" is
-  // always offered last so the free-text fallback stays available even if a
-  // client removes it from their custom list.
+  // Effective per-client training types. Existing records whose type has since
+  // been disabled are added to the relevant edit form below.
   const { data: formOptions } = useFormOptions();
-  const trainingTypeOptions = useMemo(() => {
-    const opts = pickOptions(formOptions, "traintrack_types").filter(t => t !== "Other");
-    return [...opts, "Other"];
-  }, [formOptions]);
-  // Known named types (everything except the "Other" free-text bucket) — used
-  // to decide whether a stored value is a custom entry.
-  const knownTrainingTypes = useMemo(
-    () => trainingTypeOptions.filter(t => t !== "Other"),
-    [trainingTypeOptions],
+  const trainingTypeOptions = useMemo(
+    () => pickOptions(formOptions, "traintrack_types"),
+    [formOptions],
   );
+  const otherTrainingEnabled = trainingTypeOptions.includes("Other");
 
   // split by type
   const certs     = useMemo(() => allRecords.filter(r => r.record_type === "certificate"), [allRecords]);
@@ -363,11 +357,13 @@ export default function TrainTrackPage() {
   function openEdit(r: TrainingRecord) {
     setEditRecord(r);
     if (r.record_type === "certificate") {
-      const isCustom = r.training_type ? !knownTrainingTypes.includes(r.training_type) : false;
+      const useOtherDescription = !!r.training_type
+        && !trainingTypeOptions.includes(r.training_type)
+        && otherTrainingEnabled;
       setCertForm({
         staffName: r.staff_name,
-        trainingType: isCustom ? "Other" : (r.training_type ?? ""),
-        customType: isCustom ? (r.training_type ?? "") : "",
+        trainingType: useOtherDescription ? "Other" : (r.training_type ?? ""),
+        customType: useOtherDescription ? (r.training_type ?? "") : "",
         provider: r.provider ?? "",
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         expiryDate: r.expiry_date?.slice(0, 10) ?? "",
@@ -386,11 +382,13 @@ export default function TrainTrackPage() {
         signature: r.signature ?? null,
       });
     } else {
-      const isCustom = r.training_type ? !knownTrainingTypes.includes(r.training_type) : false;
+      const useOtherDescription = !!r.training_type
+        && !trainingTypeOptions.includes(r.training_type)
+        && otherTrainingEnabled;
       setInternalForm({
         staffName: r.staff_name,
-        trainingType: isCustom ? "Other" : (r.training_type ?? ""),
-        customType: isCustom ? (r.training_type ?? "") : "",
+        trainingType: useOtherDescription ? "Other" : (r.training_type ?? ""),
+        customType: useOtherDescription ? (r.training_type ?? "") : "",
         trainer: r.trainer ?? "",
         completedDate: r.completed_date?.slice(0, 10) ?? "",
         siteId: r.site_id ? String(r.site_id) : "",
@@ -410,9 +408,16 @@ export default function TrainTrackPage() {
         const f = certForm;
         if (!f.staffName.trim()) throw new Error("Staff name is required");
         if (!f.trainingType) throw new Error("Training type is required");
+        if (
+          f.trainingType === "Other"
+          && !f.customType.trim()
+          && editRecord?.training_type !== "Other"
+        ) throw new Error("Describe the training type");
         if (!f.provider.trim()) throw new Error("Provider is required");
         if (!f.completedDate) throw new Error("Completed date is required");
-        const trainingType = f.trainingType === "Other" && f.customType.trim() ? f.customType.trim() : f.trainingType;
+        const trainingType = f.trainingType === "Other"
+          ? (f.customType.trim() || "Other")
+          : f.trainingType;
         body = {
           recordType: "certificate",
           staffName: f.staffName.trim(),
@@ -443,9 +448,16 @@ export default function TrainTrackPage() {
         const f = internalForm;
         if (!f.staffName.trim())  throw new Error("Staff name is required");
         if (!f.trainingType)      throw new Error("Training / equipment is required");
+        if (
+          f.trainingType === "Other"
+          && !f.customType.trim()
+          && editRecord?.training_type !== "Other"
+        ) throw new Error("Describe the training or equipment");
         if (!f.trainer.trim())    throw new Error("Delivered by is required");
         if (!f.completedDate)     throw new Error("Date is required");
-        const trainingType = f.trainingType === "Other" && f.customType.trim() ? f.customType.trim() : f.trainingType;
+        const trainingType = f.trainingType === "Other"
+          ? (f.customType.trim() || "Other")
+          : f.trainingType;
         body = {
           recordType: "internal",
           staffName: f.staffName.trim(),
@@ -1029,7 +1041,8 @@ ${rows.map(r => `<tr>
                   })}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
-                      {trainingTypeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {[...trainingTypeOptions, ...certForm.trainingType && !trainingTypeOptions.includes(certForm.trainingType) ? [certForm.trainingType] : []]
+                        .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   {certForm.trainingType === "Other" && (
@@ -1153,15 +1166,16 @@ ${rows.map(r => `<tr>
                   <Select value={internalForm.trainingType} onValueChange={v => setInternalForm(f => ({ ...f, trainingType: v, customType: "" }))}>
                     <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select or describe…" /></SelectTrigger>
                     <SelectContent>
-                      {trainingTypeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {[...trainingTypeOptions, ...internalForm.trainingType && !trainingTypeOptions.includes(internalForm.trainingType) ? [internalForm.trainingType] : []]
+                        .map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {internalForm.trainingType === "Other" && (
-                    <Input placeholder="e.g. Commercial dishwasher operation, Fryer changeover, Lone worker procedure…"
-                      value={internalForm.customType}
-                      onChange={e => setInternalForm(f => ({ ...f, customType: e.target.value }))}
-                      className="mt-2 rounded-sm" />
-                  )}
+                {internalForm.trainingType === "Other" && (
+                  <Input placeholder="e.g. Commercial dishwasher operation, Fryer changeover, Lone worker procedure…"
+                    value={internalForm.customType}
+                    onChange={e => setInternalForm(f => ({ ...f, customType: e.target.value }))}
+                    className="mt-2 rounded-sm" />
+                )}
                 </div>
                 <div>
                   <Label htmlFor="trainer">Delivered By *</Label>

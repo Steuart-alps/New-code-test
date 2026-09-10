@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Contractor } from "@workspace/api-client-react";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -82,6 +82,7 @@ export function ContractorFormDialog({
   contractor?: (Contractor & { trades?: string[] }) | null;
 }) {
   const { toast } = useToast();
+  const clientApiFetch = useActiveClientApi();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [trades, setTrades] = useState<string[]>([]);
@@ -157,13 +158,13 @@ export function ContractorFormDialog({
         dbsExpiryDate:         data.dbsExpiryDate || null,
       };
       if (contractor) {
-        const res = await apiFetch(`/contractors/${contractor.id}`, {
+        const res = await clientApiFetch(`/contractors/${contractor.id}`, {
           method: "PUT",
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json()).error ?? "Update failed");
       } else {
-        const res = await apiFetch("/contractors", {
+        const res = await clientApiFetch("/contractors", {
           method: "POST",
           body: JSON.stringify(payload),
         });

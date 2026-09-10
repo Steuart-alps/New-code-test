@@ -1,8 +1,6 @@
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
-import {
-  INCIDENT_TYPES, INCIDENT_SEVERITIES,
-} from "@workspace/db/schema";
+import { INCIDENT_TYPES } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 
 /**
@@ -87,7 +85,6 @@ export const DEFAULT_TRAINTRACK_TYPES = [
  */
 export const FORM_OPTION_DEFAULTS: Record<string, readonly string[]> = {
   incident_types:            INCIDENT_TYPES,
-  incident_severities:      INCIDENT_SEVERITIES,
   fixtrack_issue_types:      DEFAULT_FIXTRACK_ISSUE_TYPES,
   fixtrack_trades:           DEFAULT_FIXTRACK_TRADES,
   premises_inspection_types: DEFAULT_PREMISES_INSPECTION_TYPES,
