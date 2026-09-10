@@ -6,7 +6,7 @@ import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/d
 import { eq, and, inArray } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
-import { sendSystemEmail, getPublicAppUrl } from "../lib/email";
+import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 
 const router = Router();
 
@@ -40,6 +40,7 @@ async function sendInviteEmail(user: { id: number; email: string; name: string }
 
     const appUrl = getPublicAppUrl();
     const setupUrl = `${appUrl}/reset-password?token=${token}`;
+    const safeName = escapeHtml(user.name);
 
     await sendSystemEmail({
       to: user.email,
@@ -47,7 +48,7 @@ async function sendInviteEmail(user: { id: number; email: string; name: string }
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #1e293b;">You've been invited to ComplyTrack</h2>
-          <p>Hi ${user.name},</p>
+          <p>Hi ${safeName},</p>
           <p>An administrator has created a ComplyTrack account for you. Click the button below to set your password and get started. This link will expire in <strong>24 hours</strong>.</p>
           <p style="margin: 24px 0;">
             <a href="${setupUrl}" style="background: #2563eb; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">Set Your Password</a>
