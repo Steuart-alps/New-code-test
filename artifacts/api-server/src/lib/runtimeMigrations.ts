@@ -888,6 +888,46 @@ async function migrateTrackActions() {
     CREATE INDEX IF NOT EXISTS "IDX_track_actions_site"
     ON "track_actions" ("site_id")
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_evidence" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "module" text NOT NULL,
+      "source_kind" text,
+      "source_record_id" integer,
+      "action_id" integer REFERENCES "track_actions"("id") ON DELETE SET NULL,
+      "evidence_type" text NOT NULL
+        CHECK ("evidence_type" IN ('observation', 'photo', 'document', 'certificate', 'test_result', 'verification', 'other')),
+      "title" text NOT NULL,
+      "details" text NOT NULL,
+      "reference" text,
+      "recorded_by" integer NOT NULL REFERENCES "users"("id") ON DELETE RESTRICT,
+      "recorded_by_name" text NOT NULL,
+      "recorded_at" timestamp NOT NULL DEFAULT now(),
+      "review_status" text NOT NULL DEFAULT 'recorded'
+        CHECK ("review_status" IN ('recorded', 'verified', 'rejected')),
+      "reviewed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "reviewed_by_name" text,
+      "reviewed_at" timestamp,
+      "review_notes" text,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT "CK_track_evidence_review"
+        CHECK (
+          review_status = 'recorded'
+          OR (reviewed_by IS NOT NULL AND nullif(trim(reviewed_by_name), '') IS NOT NULL
+            AND reviewed_at IS NOT NULL AND nullif(trim(review_notes), '') IS NOT NULL)
+        )
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_evidence_client_module"
+    ON "track_evidence" ("client_id", "module", "created_at")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_evidence_action"
+    ON "track_evidence" ("action_id")
+  `);
   // Earlier installs created this column as required. Automated records do not
   // have a human creator, whereas API-created records continue to set it.
   await db.execute(sql`ALTER TABLE "track_actions" ALTER COLUMN "created_by" DROP NOT NULL`);

@@ -94,6 +94,9 @@ export * from "./staff-kiosk"
 export * from "./track-actions"
 ;
 
+export * from "./track-evidence"
+;
+
 export * from "./documents"
 ;
 export * from "./feedback-reports"
