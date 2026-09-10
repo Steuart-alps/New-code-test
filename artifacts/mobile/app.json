@@ -7,12 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#162d42"
-    },
     "ios": {
       "supportsTablet": false
     },
@@ -30,7 +24,14 @@
       "expo-font",
       "expo-web-browser",
       "expo-notifications",
-      "expo-dev-client",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#162d42"
+        }
+      ],
       [
         "expo-image-picker",
         {
