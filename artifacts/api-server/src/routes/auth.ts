@@ -10,6 +10,7 @@ import { requireAuth } from "../middleware/requireAuth";
 import { loginRateLimit, makeLoginRateLimit, registrationRateLimit } from "../lib/loginRateLimit";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
+import { passkeysTable } from "@workspace/db/schema";
 import { eq, and, gt, isNull, sql } from "drizzle-orm";
 import { sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
@@ -19,6 +20,17 @@ import { seedStarterContent } from "../lib/seedStarterContent";
 import { isClientBillingLocked } from "../lib/trialLock";
 import { logger } from "../lib/logger";
 import { nameIsClean } from "../lib/contentFilter";
+import {
+  authenticationOptionsForUser,
+  decodePasskeyBytes,
+  encodePasskeyBytes,
+  getPasskeyOrigin,
+  getPasskeyRpId,
+  getUserPasskeys,
+  hasUserPasskey,
+  registrationOptionsForUser,
+} from "../lib/passkeys";
+import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
 const router = Router();
 
@@ -112,11 +124,29 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
   delete (req.session as any).userId;
   delete (req.session as any).pending2faUserId;
   delete (req.session as any).pending2faSetupUserId;
+  delete (req.session as any).pendingPasskeyUserId;
+  delete (req.session as any).pendingPasskeyChallenge;
 
+  const userPasskeys = await getUserPasskeys(result.user.id);
   // Existing users must prove their second factor before a session is issued.
   if (result.user.totpEnabled && result.user.totpSecret) {
     (req.session as any).pending2faUserId = result.user.id;
-    res.json({ requires2fa: true });
+    if (userPasskeys.length > 0) {
+      const options = await authenticationOptionsForUser(userPasskeys);
+      (req.session as any).pendingPasskeyUserId = result.user.id;
+      (req.session as any).pendingPasskeyChallenge = options.challenge;
+      res.json({ requires2fa: true, requiresPasskey: true, passkeyOptions: options });
+    } else {
+      res.json({ requires2fa: true });
+    }
+    return;
+  }
+
+  if (userPasskeys.length > 0) {
+    const options = await authenticationOptionsForUser(userPasskeys);
+    (req.session as any).pendingPasskeyUserId = result.user.id;
+    (req.session as any).pendingPasskeyChallenge = options.challenge;
+    res.json({ requiresPasskey: true, passkeyOptions: options });
     return;
   }
 
@@ -134,6 +164,69 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
   // routes until the setup endpoint verifies a code from their new authenticator.
   (req.session as any).pending2faSetupUserId = result.user.id;
   res.json({ requires2faSetup: true });
+});
+
+// POST /auth/passkeys/authenticate — complete password + passkey sign-in.
+router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
+  const userId = (req.session as any).pendingPasskeyUserId as number | undefined;
+  const expectedChallenge = (req.session as any).pendingPasskeyChallenge as string | undefined;
+  if (!userId || !expectedChallenge) {
+    res.status(400).json({ error: "No pending passkey sign-in" });
+    return;
+  }
+
+  const credentialId = String(req.body?.id ?? "");
+  const [credential] = await db
+    .select()
+    .from(passkeysTable)
+    .where(eq(passkeysTable.credentialId, credentialId))
+    .limit(1);
+  if (!credential || credential.userId !== userId) {
+    res.status(401).json({ error: "Passkey is not registered for this account" });
+    return;
+  }
+
+  try {
+    const verification = await verifyAuthenticationResponse({
+      response: req.body,
+      expectedChallenge,
+      expectedOrigin: getPasskeyOrigin(),
+      expectedRPID: getPasskeyRpId(),
+      credential: {
+        id: credential.credentialId,
+        publicKey: decodePasskeyBytes(credential.publicKey),
+        counter: credential.counter,
+        transports: (credential.transports ?? []) as any,
+      },
+    });
+    if (!verification.verified) {
+      res.status(401).json({ error: "Passkey verification failed" });
+      return;
+    }
+
+    await db.update(passkeysTable)
+      .set({ counter: verification.authenticationInfo.newCounter, lastUsedAt: new Date() })
+      .where(eq(passkeysTable.id, credential.id));
+    const user = await getUserById(userId);
+    if (!user || !user.active) {
+      res.status(401).json({ error: "Invalid session" });
+      return;
+    }
+    delete (req.session as any).pendingPasskeyUserId;
+    delete (req.session as any).pendingPasskeyChallenge;
+    delete (req.session as any).pending2faUserId;
+    req.session.userId = user.id;
+    const withClient = await getUserWithClientByEmail(user.email);
+    const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
+    res.json({
+      user: safeUser,
+      client: withClient?.client ?? null,
+      billingLocked: false,
+      services: "all",
+    });
+  } catch {
+    res.status(401).json({ error: "Passkey verification failed" });
+  }
 });
 
 // POST /auth/2fa/verify — complete a pending 2FA login by supplying a TOTP code
@@ -187,6 +280,95 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
 function getTwoFactorSetupUserId(req: any): number | undefined {
   return req.currentUser?.id ?? req.session?.pending2faSetupUserId;
 }
+
+function getPasskeySetupUserId(req: any): number | undefined {
+  return req.currentUser?.id ?? req.session?.pending2faSetupUserId;
+}
+
+router.post("/auth/passkeys/registration/options", async (req, res) => {
+  const userId = getPasskeySetupUserId(req);
+  if (!userId) { res.status(401).json({ error: "Sign in to register a passkey" }); return; }
+  const user = await getUserById(userId);
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  const credentials = await getUserPasskeys(userId);
+  const options = await registrationOptionsForUser(user, credentials);
+  (req.session as any).pendingPasskeyRegistrationUserId = userId;
+  (req.session as any).pendingPasskeyRegistrationChallenge = options.challenge;
+  res.json(options);
+});
+
+router.post("/auth/passkeys/registration/verify", async (req, res) => {
+  const userId = (req.session as any).pendingPasskeyRegistrationUserId as number | undefined;
+  const expectedChallenge = (req.session as any).pendingPasskeyRegistrationChallenge as string | undefined;
+  if (!userId || !expectedChallenge) {
+    res.status(400).json({ error: "No pending passkey registration" });
+    return;
+  }
+  try {
+    const verification = await verifyRegistrationResponse({
+      response: req.body,
+      expectedChallenge,
+      expectedOrigin: getPasskeyOrigin(),
+      expectedRPID: getPasskeyRpId(),
+    });
+    if (!verification.verified || !verification.registrationInfo) {
+      res.status(400).json({ error: "Passkey registration was not verified" });
+      return;
+    }
+    const credential = verification.registrationInfo.credential;
+    await db.insert(passkeysTable).values({
+      userId,
+      credentialId: credential.id,
+      publicKey: encodePasskeyBytes(credential.publicKey),
+      counter: credential.counter,
+      transports: credential.transports ? [...credential.transports] : null,
+      deviceType: verification.registrationInfo.credentialDeviceType,
+      backedUp: verification.registrationInfo.credentialBackedUp,
+    });
+    delete (req.session as any).pendingPasskeyRegistrationUserId;
+    delete (req.session as any).pendingPasskeyRegistrationChallenge;
+    const setupPending = (req.session as any).pending2faSetupUserId === userId;
+    if (setupPending) {
+      delete (req.session as any).pending2faSetupUserId;
+      req.session.userId = userId;
+    }
+    res.json({ ok: true, setupComplete: setupPending });
+  } catch (error: any) {
+    if (error?.code === "23505") {
+      res.status(409).json({ error: "That passkey is already registered" });
+      return;
+    }
+    res.status(400).json({ error: "Passkey registration failed" });
+  }
+});
+
+router.get("/auth/passkeys", requireAuth, async (req, res) => {
+  const credentials = await getUserPasskeys(req.currentUser!.id);
+  res.json({
+    passkeys: credentials.map((credential) => ({
+      id: credential.id,
+      deviceType: credential.deviceType,
+      backedUp: credential.backedUp,
+      createdAt: credential.createdAt,
+      lastUsedAt: credential.lastUsedAt,
+    })),
+  });
+});
+
+router.delete("/auth/passkeys/:id", requireAuth, async (req, res) => {
+  const passkeyId = Number(req.params.id);
+  if (!Number.isInteger(passkeyId)) { res.status(400).json({ error: "Invalid passkey" }); return; }
+  const [credential] = await db.select().from(passkeysTable)
+    .where(and(eq(passkeysTable.id, passkeyId), eq(passkeysTable.userId, req.currentUser!.id))).limit(1);
+  if (!credential) { res.status(404).json({ error: "Passkey not found" }); return; }
+  if (!req.currentUser!.totpEnabled && (await getUserPasskeys(req.currentUser!.id)).length <= 1) {
+    res.status(400).json({ error: "Add another security method before removing your only passkey" });
+    return;
+  }
+  await db.delete(passkeysTable).where(eq(passkeysTable.id, passkeyId));
+  res.json({ ok: true });
+});
+
 
 // GET /auth/2fa/setup — generate a fresh TOTP secret + QR code for a signed-in
 // or setup-pending user.
@@ -332,11 +514,12 @@ router.get("/auth/me", async (req, res) => {
   }
 
   const { totpSecret: _s, ...safeUser } = user;
-  if (!user.totpEnabled) {
+  const passkeys = await getUserPasskeys(user.id);
+  if (!user.totpEnabled && passkeys.length === 0) {
     res.json({ requires2faSetup: true, user: safeUser });
     return;
   }
-  res.json({ user: safeUser, client, billingLocked, services });
+  res.json({ user: safeUser, client, billingLocked, services, passkeyCount: passkeys.length });
 });
 
 const ForgotPasswordBody = z.object({
