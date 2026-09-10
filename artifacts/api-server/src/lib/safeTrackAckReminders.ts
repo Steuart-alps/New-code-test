@@ -1,8 +1,7 @@
 /**
- * Weekly SafeTrack acknowledgement reminder job.
+ * Daily SafeTrack acknowledgement reminder job.
  *
- * A reminder is due seven days after a required document was published.  One
- * tenant-scoped digest is claimed per week before delivery, which prevents
+ * One tenant-scoped digest is claimed per day before delivery, which prevents
  * concurrent schedulers from sending duplicate manager notifications.
  */
 import { db } from "@workspace/db";
@@ -13,12 +12,11 @@ import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
 
-export const SAFE_TRACK_ACK_REMINDER_DAYS = 7;
-
 export interface OutstandingDocSummary {
   title: string;
   docType: "Risk Assessment" | "SOP" | "Handbook";
   siteName: string | null;
+  outstanding: string[];
   outstandingCount: number;
   acknowledgedCount: number;
   staffTotal: number;
@@ -36,6 +34,7 @@ interface RequiredDocument {
 
 interface RosterStaff {
   id: number;
+  name: string;
   site_id: number | null;
   site_department_id: number | null;
 }
@@ -52,36 +51,39 @@ function esc(value: string | null | undefined): string {
  */
 export async function getOutstandingSafeTrackAcknowledgements(
   clientId: number,
-  now = new Date(),
 ): Promise<OutstandingDocSummary[]> {
-  const cutoff = new Date(now.getTime() - SAFE_TRACK_ACK_REMINDER_DAYS * 86_400_000);
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.site_id, s.name AS site_name, d.department_id,
            d.document_type, d.doc_type
     FROM (
-      SELECT id, title, site_id, department_id, created_at, 'ra'::text AS document_type,
+      SELECT id, title, site_id, department_id, 'ra'::text AS document_type,
              'Risk Assessment'::text AS doc_type
       FROM safe_risk_assessments
       WHERE client_id = ${clientId} AND requires_acknowledgement = true
       UNION ALL
-      SELECT id, title, site_id, department_id, created_at, 'sop'::text, 'SOP'::text
+      SELECT id, title, site_id, department_id, 'sop'::text, 'SOP'::text
       FROM safe_sops
       WHERE client_id = ${clientId} AND requires_acknowledgement = true
       UNION ALL
-      SELECT id, title, site_id, department_id, COALESCE(published_at, created_at), 'handbook'::text,
+      SELECT id, title, site_id, department_id, 'handbook'::text,
              'Handbook'::text
       FROM safe_handbook
       WHERE client_id = ${clientId} AND requires_acknowledgement = true
     ) d
     LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = ${clientId}
-    WHERE d.created_at <= ${cutoff}
     ORDER BY d.title ASC
   `);
   const docs = (docsResult.rows ?? []) as unknown as RequiredDocument[];
   if (!docs.length) return [];
 
   const staffResult = await db.execute(sql`
-    SELECT staff.id, staff.site_id, site.department_id AS site_department_id
+    SELECT staff.id,
+      COALESCE(
+        NULLIF(trim(staff.name), ''),
+        NULLIF(trim(concat_ws(' ', staff.first_name, staff.last_name)), ''),
+        'Unnamed staff member'
+      ) AS name,
+      staff.site_id, site.department_id AS site_department_id
     FROM staff_roster staff
     LEFT JOIN sites site ON site.id = staff.site_id AND site.client_id = ${clientId}
     WHERE staff.client_id = ${clientId} AND staff.active = true
@@ -109,16 +111,17 @@ export async function getOutstandingSafeTrackAcknowledgements(
       ? siteStaff
       : siteStaff.filter((member) => member.site_department_id === doc.department_id);
     if (!relevantStaff.length) return [];
-    const outstandingCount = relevantStaff.filter(
+    const outstanding = relevantStaff.filter(
       (member) => !acknowledged.has(`${doc.document_type}:${doc.id}:${member.id}`),
-    ).length;
-    if (!outstandingCount) return [];
+    );
+    if (!outstanding.length) return [];
     return [{
       title: doc.title,
       docType: doc.doc_type,
       siteName: doc.site_name,
-      outstandingCount,
-      acknowledgedCount: relevantStaff.length - outstandingCount,
+      outstanding: outstanding.map((member) => member.name),
+      outstandingCount: outstanding.length,
+      acknowledgedCount: relevantStaff.length - outstanding.length,
       staffTotal: relevantStaff.length,
     }];
   });
@@ -133,7 +136,7 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
         ${doc.acknowledgedCount}/${doc.staffTotal} acknowledged
       </div>
       <div style="font-size:12px;color:#b45309;margin-top:4px;">
-        ${doc.outstandingCount} acknowledgement${doc.outstandingCount === 1 ? "" : "s"} outstanding
+        Waiting on: ${doc.outstanding.map(esc).join(", ")}
       </div>
     </td></tr>`).join("");
   return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
@@ -141,7 +144,7 @@ function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
     <p>Required SafeTrack documents still need staff acknowledgement. Open the secure register to review and follow up.</p>
     <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
     <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
-    <p style="font-size:12px;color:#64748b;">This summary deliberately contains counts only. Sign in to view acknowledgement details.</p>
+    <p style="font-size:12px;color:#64748b;">Sign in to review acknowledgement details and follow up.</p>
   </body></html>`;
 }
 
@@ -158,7 +161,7 @@ export interface SafeTrackAckReminderDependencies {
   appUrl?: () => string;
   listClients?: () => Promise<{ id: number; name: string }[]>;
   isSafeTrackEntitled?: (clientId: number) => Promise<boolean>;
-  getOutstanding?: (clientId: number, now: Date) => Promise<OutstandingDocSummary[]>;
+  getOutstanding?: (clientId: number) => Promise<OutstandingDocSummary[]>;
   getRecipients?: (clientId: number) => Promise<{ emails: string[] }>;
   claim?: (clientId: number) => Promise<number | null>;
   release?: (claimId: number) => Promise<void>;
@@ -175,7 +178,7 @@ async function claimReminder(clientId: number): Promise<number | null> {
     if (!((locked.rows ?? [])[0] as any)?.locked) return null;
     const recent = await tx.execute(sql`
       SELECT 1 FROM safe_track_ack_reminder_log
-      WHERE client_id = ${clientId} AND sent_at > now() - interval '7 days'
+       WHERE client_id = ${clientId} AND sent_at > now() - interval '1 day'
       LIMIT 1
     `);
     if ((recent.rows ?? []).length) return null;
@@ -199,7 +202,6 @@ export async function runSafeTrackAckReminderJob(
   const result: SafeTrackAckReminderJobResult = {
     clientsChecked: 0, clientsAlerted: 0, emailsSent: 0, remindersClaimed: 0, errors: 0,
   };
-  const now = dependencies.now?.() ?? new Date();
   const listClients = dependencies.listClients ?? (() => db.select({ id: clientsTable.id, name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.active, true)));
   const isSafeTrackEntitled = dependencies.isSafeTrackEntitled ?? defaultEntitlement;
   const getOutstanding = dependencies.getOutstanding ?? getOutstandingSafeTrackAcknowledgements;
@@ -214,7 +216,7 @@ export async function runSafeTrackAckReminderJob(
     let claimId: number | null = null;
     try {
       if (!await isSafeTrackEntitled(client.id)) continue;
-      const outstanding = await getOutstanding(client.id, now);
+      const outstanding = await getOutstanding(client.id);
       if (!outstanding.length) continue;
       const recipients = await getRecipients(client.id);
       const emails = [...new Set(recipients.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];

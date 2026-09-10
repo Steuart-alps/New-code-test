@@ -8,7 +8,7 @@ export function registerSafeTrackAckReminderSchedule(
   schedule: CronSchedule,
   run: () => Promise<unknown> = runSafeTrackAckReminderJob,
 ): void {
-  schedule("30 9 * * 1", async () => {
+  schedule("50 8 * * *", async () => {
     logger.info("Running SafeTrack acknowledgement reminder job...");
     try {
       const result = await run();

@@ -52,18 +52,22 @@ try {
   await db.execute(sql`INSERT INTO staff_roster (client_id, name, active) VALUES (${primary}, 'Elsewhere', true)`);
   const doc = await db.execute(sql`
     INSERT INTO safe_risk_assessments (client_id, site_id, department_id, title, requires_acknowledgement, created_at)
-    VALUES (${primary}, ${siteId}, ${departmentId}, 'Due site document', true, now() - interval '8 days') RETURNING id`);
+    VALUES (${primary}, ${siteId}, ${departmentId}, 'Due site document', true, now()) RETURNING id`);
   await db.execute(sql`
     INSERT INTO safe_risk_assessments (client_id, site_id, title, requires_acknowledgement, created_at)
-    VALUES (${primary}, ${siteId}, 'Not due', true, now() - interval '2 days')`);
+    VALUES (${primary}, ${siteId}, 'Second required document', true, now())`);
   await db.execute(sql`
     INSERT INTO safe_risk_assessments (client_id, title, requires_acknowledgement, created_at)
     VALUES (${foreign}, 'Foreign document', true, now() - interval '8 days')`);
   const gaps = await getOutstandingSafeTrackAcknowledgements(primary, new Date());
-  assert.deepEqual(gaps.map((gap) => [gap.title, gap.staffTotal, gap.outstandingCount]), [["Due site document", 1, 1]]);
+  assert.deepEqual(gaps.map((gap) => [gap.title, gap.staffTotal, gap.outstanding]), [
+    ["Due site document", 1, ["Active"]],
+    ["Second required document", 1, ["Active"]],
+  ]);
   // One live acknowledgement clears the only active site staff member.
   await db.execute(sql`INSERT INTO safe_track_acknowledgements (client_id, document_type, document_id, staff_roster_id, staff_name) VALUES (${primary}, 'ra', ${doc.rows[0].id}, ${active.rows[0].id}, 'Active')`);
-  assert.equal((await getOutstandingSafeTrackAcknowledgements(primary, new Date())).length, 0);
+  const remaining = await getOutstandingSafeTrackAcknowledgements(primary);
+  assert.deepEqual(remaining.map((gap) => gap.title), ["Second required document"]);
   await db.execute(sql`DELETE FROM safe_track_acknowledgements WHERE client_id = ${primary}`);
   const sent = [];
   const deps = {
@@ -71,16 +75,31 @@ try {
     listClients: async () => [{ id: primary, name: "Primary" }],
     isSafeTrackEntitled: async () => true,
     getRecipients: async () => ({ emails: ["manager@test.local", "MANAGER@test.local", "failed@test.local"] }),
-    send: async ({ to }) => { if (to === "failed@test.local") throw new Error("mail failure"); sent.push(to); },
+    send: async ({ to, html }) => {
+      if (to === "failed@test.local") throw new Error("mail failure");
+      assert.match(html, /Risk Assessment/);
+      assert.match(html, /Waiting on: Active/);
+      sent.push(to);
+    },
   };
   // Two concurrent real database claims: only one scheduler gets the digest.
   const [one, two] = await Promise.all([runSafeTrackAckReminderJob(deps), runSafeTrackAckReminderJob(deps)]);
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
   assert.equal(sent.length, 1);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
+  let fullyAcknowledgedSendCalled = false;
+  const fullyAcknowledged = await runSafeTrackAckReminderJob({
+    ...deps,
+    getOutstanding: async () => [],
+    claim: async () => { throw new Error("claim must not run without outstanding acknowledgements"); },
+    send: async () => { fullyAcknowledgedSendCalled = true; },
+  });
+  assert.equal(fullyAcknowledged.clientsAlerted, 0);
+  assert.equal(fullyAcknowledged.emailsSent, 0);
+  assert.equal(fullyAcknowledgedSendCalled, false);
   const schedules = [];
   registerSafeTrackAckReminderSchedule((expression, task) => schedules.push({ expression, task }), async () => {});
-  assert.equal(schedules[0].expression, "30 9 * * 1");
+  assert.equal(schedules[0].expression, "50 8 * * *");
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {
