@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import {
-  ShieldCheck, CheckCircle2, Eye, EyeOff, ArrowLeft, ChevronDown,
+  ShieldCheck, CheckCircle2, Eye, EyeOff, ArrowLeft, ChevronDown, Bug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,13 @@ import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { parseSignupPlan, registrationPlanFields } from "@/lib/signup-plan";
 import alpsLogo from "@/assets/alps-logo.png";
+
+const PESTTRACK_RECOMMENDED_BUSINESS_TYPES = new Set([
+  "hotel_accommodation",
+  "restaurant_cafe_pub",
+  "care_home_healthcare",
+  "holiday_park_campsite",
+]);
 
 export default function SignupPage() {
   const [, navigate] = useLocation();
@@ -31,6 +38,8 @@ export default function SignupPage() {
     password.length === 0 ? null :
     password.length < 8   ? "weak" :
     password.length < 12  ? "good" : "strong";
+  const recommendPestTrack = PESTTRACK_RECOMMENDED_BUSINESS_TYPES.has(businessType);
+  const pestTrackIncluded = planSelection.bundle || planSelection.services.includes("pesttrack");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -159,6 +168,19 @@ export default function SignupPage() {
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 </div>
+                {recommendPestTrack && (
+                  <div className="flex items-start gap-3 border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900">
+                    <Bug className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                    <div>
+                      <p className="text-sm font-medium">PestTrack is recommended for your business</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-emerald-800">
+                        {pestTrackIncluded
+                          ? "It is included in your selected plan, ready to use after signup."
+                          : "Use it to record pest-control visits, activity and follow-up actions. You can activate it from module settings after signup."}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
