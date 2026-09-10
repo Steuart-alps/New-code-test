@@ -38,3 +38,4 @@
 - [Contractor token key rotation](contractor-token-key-rotation.md) — version every key; drain old writers, migrate with the previous key retained, then retire it in a later deployment.
 - [Roster reconciliation identity](roster-reconciliation-identity.md) — payroll IDs are authoritative; preserve roster IDs, adopt legacy rows only by one unambiguous match, and deactivate rather than delete.
 - [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.
+- [Mobile draft hydration](mobile-draft-hydration.md) — server refreshes must never overwrite dirty mobile form state; reset abandoned edits before changing query scope.

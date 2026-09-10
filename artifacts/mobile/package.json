@@ -8,6 +8,7 @@
     "build": "node scripts/build.js",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:cleaning-schedule": "node tests/cleaning-schedule-logic.mjs",
     "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear",
     "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear",
     "validate:production": "pnpm run export:ios && pnpm run export:android"

@@ -73,7 +73,7 @@ const MODULES: CheckModule[] = [
     subtitle: 'Kitchen cleaning schedule',
     icon: 'check-circle',
     iconColor: '#14b8a6',
-    checks: ['Tick off today\u2019s cleaning tasks'],
+    checks: ['Daily, weekly and monthly schedules'],
   },
   {
     id: 'incident',

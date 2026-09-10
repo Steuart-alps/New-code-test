@@ -1,6 +1,6 @@
 /**
  * Cleaning Schedule Screen
- * Lets staff tick off daily cleaning tasks during a shift.
+ * Lets staff tick off cleaning tasks during a shift.
  * Shows progress indicator and recent history.
  * Gated behind hasService("kitchentrack").
  */
@@ -13,6 +13,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -23,7 +24,12 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
-import { apiFetch } from '@/lib/api';
+import { ApiError, apiFetch } from '@/lib/api';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import {
+  cleaningPeriodDate,
+  type CleaningFrequency,
+} from '@/components/cleaning-schedule-logic';
 
 const MODULE_COLOR = '#14b8a6';
 
@@ -52,12 +58,9 @@ interface CleaningLog {
   frequency: string;
   completions: CompletionItem[] | null;
   signed_by: string | null;
+  submitted_at?: string | null;
   completed_count?: number;
   total_count?: number;
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function formatDate(dateStr: string): string {
@@ -73,43 +76,33 @@ export default function CleaningScreen() {
   const { user, hasService } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
-  const date = today();
-  const frequency = 'daily';
+  const [frequency, setFrequency] = useState<CleaningFrequency>('daily');
+  const date = cleaningPeriodDate(frequency);
 
   // Initials used to record who completed each task
   const [initials, setInitials] = useState<string>(user?.name ?? '');
   const [refreshing, setRefreshing] = useState(false);
-
-  // Service gate
-  if (!hasService('kitchentrack')) {
-    return (
-      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
-        <Feather name="lock" size={40} color={colors.mutedForeground} />
-        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>Cleaning Schedule</Text>
-        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
-          KitchenTrack is not enabled on your account. Contact your administrator to activate this module.
-        </Text>
-      </View>
-    );
-  }
+  const [dirty, setDirty] = useState(false);
 
   const {
     data: tasks = [],
     isLoading: tasksLoading,
+    isFetching: tasksFetching,
     refetch: refetchTasks,
   } = useQuery<CleaningTask[]>({
     queryKey: ['kitchen-cleaning-tasks'],
     queryFn: () => apiFetch<CleaningTask[]>('/api/kitchen-cleaning/tasks'),
   });
 
-  const dailyTasks = useMemo(
-    () => tasks.filter((t) => t.frequency === 'daily'),
-    [tasks],
+  const visibleTasks = useMemo(
+    () => tasks.filter((t) => t.frequency === frequency),
+    [frequency, tasks],
   );
 
   const {
     data: log,
     isLoading: logLoading,
+    isFetching: logFetching,
     refetch: refetchLog,
   } = useQuery<CleaningLog | null>({
     queryKey: ['kitchen-cleaning-log', date, frequency],
@@ -117,7 +110,7 @@ export default function CleaningScreen() {
       apiFetch<CleaningLog>(
         `/api/kitchen-cleaning/logs?date=${date}&frequency=${frequency}`,
       ).catch((err: Error) => {
-        if (/404/.test(err.message) || /not found/i.test(err.message)) return null;
+        if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }),
   });
@@ -131,43 +124,61 @@ export default function CleaningScreen() {
     queryFn: () => apiFetch<CleaningLog[]>('/api/kitchen-cleaning/logs/history'),
   });
 
-  // Local map of taskId -> done, seeded from the server log
   const [checked, setChecked] = useState<Record<number, boolean>>({});
+  const [doneBy, setDoneBy] = useState<Record<number, string>>({});
 
   useEffect(() => {
+    if (dirty) return;
+    const next: Record<number, boolean> = {};
+    const nextDoneBy: Record<number, string> = {};
     if (log?.completions) {
-      const next: Record<number, boolean> = {};
       for (const c of log.completions) {
-        if (typeof c.taskId === 'number') next[c.taskId] = !!c.done;
+        if (typeof c.taskId === 'number') {
+          next[c.taskId] = !!c.done;
+          if (c.doneBy) nextDoneBy[c.taskId] = c.doneBy;
+        }
       }
-      setChecked(next);
     }
-  }, [log]);
+    setChecked(next);
+    setDoneBy(nextDoneBy);
+    setInitials(log?.signed_by ?? user?.name ?? '');
+    setDirty(false);
+  }, [dirty, log, user?.name]);
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (nextChecked: Record<number, boolean>) => {
-      const completions: CompletionItem[] = dailyTasks.map((t) => ({
+    mutationFn: ({ submit }: { submit: boolean }) => {
+      const staffName = initials.trim();
+      if (!staffName) throw new Error('Enter your name before saving.');
+      const completions: CompletionItem[] = visibleTasks.map((t) => ({
         taskId: t.id,
         taskArea: t.area,
         taskName: t.task,
-        done: !!nextChecked[t.id],
-        ...(nextChecked[t.id] && initials ? { doneBy: initials } : {}),
+        done: !!checked[t.id],
+        ...(checked[t.id] ? { doneBy: doneBy[t.id] ?? staffName } : {}),
       }));
-      return apiFetch('/api/kitchen-cleaning/logs', {
+      return apiFetch<CleaningLog>('/api/kitchen-cleaning/logs', {
         method: 'POST',
         body: JSON.stringify({
           logDate: date,
           frequency,
           completions,
-          signedBy: initials || null,
+          signedBy: staffName,
+          submittedAt: submit ? new Date().toISOString() : null,
         }),
       });
     },
-    onSuccess: async (_data, vars) => {
+    onSuccess: async (savedLog, vars) => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.setQueryData(['kitchen-cleaning-log', date, frequency], savedLog);
+      setDirty(false);
       qc.invalidateQueries({ queryKey: ['kitchen-cleaning-log', date, frequency] });
       qc.invalidateQueries({ queryKey: ['kitchen-cleaning-history'] });
-      setChecked(vars);
+      Alert.alert(
+        vars.submit ? 'Schedule signed off' : 'Draft saved',
+        vars.submit
+          ? `The ${frequency} cleaning schedule has been signed off.`
+          : 'Your progress has been saved and can be continued later.',
+      );
     },
     onError: (err: Error) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -175,54 +186,39 @@ export default function CleaningScreen() {
     },
   });
 
-  function ensureInitials(afterSet: (value: string) => void) {
-    if (initials.trim()) {
-      afterSet(initials.trim());
-      return;
-    }
-    if (Platform.OS === 'web') {
-      const entered =
-        typeof window !== 'undefined'
-          ? window.prompt('Enter your initials to record who completed the task')
-          : '';
-      const value = (entered ?? '').trim();
-      if (!value) return;
-      setInitials(value);
-      afterSet(value);
-      return;
-    }
-    Alert.prompt?.(
-      'Your initials',
-      'Enter your initials to record who completed the task',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Save',
-          onPress: (value?: string) => {
-            const v = (value ?? '').trim();
-            if (!v) return;
-            setInitials(v);
-            afterSet(v);
-          },
-        },
-      ],
-      'plain-text',
-      initials,
-    );
+  function toggle(taskId: number) {
+    const willBeDone = !checked[taskId];
+    setChecked((current) => ({ ...current, [taskId]: willBeDone }));
+    setDoneBy((current) => {
+      const next = { ...current };
+      if (willBeDone && initials.trim()) next[taskId] = initials.trim();
+      if (!willBeDone) delete next[taskId];
+      return next;
+    });
+    setDirty(true);
   }
 
-  function toggle(taskId: number) {
-    const apply = () => {
-      const next = { ...checked, [taskId]: !checked[taskId] };
-      setChecked(next);
-      mutate(next);
+  function chooseFrequency(next: CleaningFrequency) {
+    if (next === frequency) return;
+    const switchFrequency = () => {
+      setChecked({});
+      setDoneBy({});
+      setInitials(user?.name ?? '');
+      setDirty(false);
+      setFrequency(next);
     };
-    const canPrompt = Platform.OS === 'web' || typeof Alert.prompt === 'function';
-    if (!initials.trim() && canPrompt) {
-      ensureInitials(() => apply());
+    if (dirty) {
+      Alert.alert(
+        'Discard unsaved changes?',
+        'Save your draft before changing schedule frequency, or discard these changes.',
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', onPress: switchFrequency },
+        ],
+      );
       return;
     }
-    apply();
+    switchFrequency();
   }
 
   async function onRefresh() {
@@ -232,13 +228,27 @@ export default function CleaningScreen() {
   }
 
   const isLoading = tasksLoading || logLoading;
-  const doneCount = dailyTasks.filter((t) => checked[t.id]).length;
-  const total = dailyTasks.length;
+  const isBusy = isLoading || tasksFetching || logFetching || refreshing;
+  const doneCount = visibleTasks.filter((t) => checked[t.id]).length;
+  const total = visibleTasks.length;
   const progress = total > 0 ? doneCount / total : 0;
-  const recentHistory = history.filter((h) => h.frequency === 'daily').slice(0, 7);
+  const recentHistory = history.filter((h) => h.frequency === frequency).slice(0, 7);
+  const isSubmitted = !!log?.submitted_at;
+
+  if (!hasService('kitchentrack')) {
+    return (
+      <View style={[styles.gated, { backgroundColor: colors.background, paddingTop: topPad + 16 }]}>
+        <Feather name="lock" size={40} color={colors.mutedForeground} />
+        <Text style={[styles.gatedTitle, { color: colors.foreground }]}>Cleaning Schedule</Text>
+        <Text style={[styles.gatedSub, { color: colors.mutedForeground }]}>
+          KitchenTrack is not enabled on your account. Contact your administrator to activate this module.
+        </Text>
+      </View>
+    );
+  }
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollViewCompat
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ paddingBottom: Platform.OS === 'web' ? 34 : 40 }}
       refreshControl={
@@ -256,7 +266,7 @@ export default function CleaningScreen() {
               <Feather name="check-circle" size={14} color={MODULE_COLOR} />
               <Text style={[styles.moduleBadgeText, { color: MODULE_COLOR }]}>Cleaning</Text>
             </View>
-            <Text style={styles.headerTitle}>Today&apos;s Cleaning Tasks</Text>
+            <Text style={styles.headerTitle}>Cleaning Schedule</Text>
           </View>
           <View style={{ width: 22 }} />
         </View>
@@ -274,15 +284,7 @@ export default function CleaningScreen() {
                 {doneCount} of {total} tasks completed
               </Text>
             </View>
-            <TouchableOpacity
-              style={styles.initialsBtn}
-              onPress={() => ensureInitials(() => {})}
-            >
-              <Feather name="edit-2" size={12} color={MODULE_COLOR} />
-              <Text style={[styles.initialsText, { color: MODULE_COLOR }]}>
-                {initials.trim() ? initials.trim() : 'Set name'}
-              </Text>
-            </TouchableOpacity>
+              {isSubmitted && <Feather name="check-circle" size={24} color={colors.success} />}
           </View>
           {/* Progress bar */}
           <View style={[styles.progressBarBg, { backgroundColor: colors.border }]}>
@@ -303,12 +305,58 @@ export default function CleaningScreen() {
         </View>
       </View>
 
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Schedule frequency</Text>
+        <View style={styles.frequencyRow}>
+          {(['daily', 'weekly', 'monthly'] as const).map((option) => (
+            <TouchableOpacity
+              key={option}
+              testID={`cleaning-frequency-${option}`}
+              onPress={() => chooseFrequency(option)}
+              disabled={isBusy}
+              style={[
+                styles.frequencyButton,
+                {
+                  backgroundColor: frequency === option ? MODULE_COLOR : colors.card,
+                  borderColor: frequency === option ? MODULE_COLOR : colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.frequencyText, { color: frequency === option ? '#ffffff' : colors.foreground }]}>
+                {option.charAt(0).toUpperCase() + option.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Completed by</Text>
+        <TextInput
+          testID="cleaning-staff-name"
+          value={initials}
+          onChangeText={(value) => {
+            setInitials(value);
+            setDirty(true);
+          }}
+          editable={!isSubmitted && !isBusy}
+          placeholder="Enter your name"
+          placeholderTextColor={colors.mutedForeground}
+          style={[styles.nameInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]}
+        />
+        {isSubmitted && (
+          <View style={[styles.signedNotice, { borderColor: colors.success, backgroundColor: `${colors.success}18` }]}>
+            <Feather name="lock" size={16} color={colors.success} />
+            <Text style={[styles.signedText, { color: colors.success }]}>Signed off by {log?.signed_by}</Text>
+          </View>
+        )}
+      </View>
+
       {/* Task list */}
       <View style={[styles.section, { gap: 8 }]}>
-        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Daily tasks</Text>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+          {frequency.charAt(0).toUpperCase() + frequency.slice(1)} tasks
+        </Text>
         {isLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
-        ) : dailyTasks.length === 0 ? (
+        ) : visibleTasks.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Feather name="check-circle" size={32} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No cleaning tasks</Text>
@@ -317,7 +365,7 @@ export default function CleaningScreen() {
             </Text>
           </View>
         ) : (
-          dailyTasks.map((t) => {
+          visibleTasks.map((t) => {
             const isDone = !!checked[t.id];
             return (
               <TouchableOpacity
@@ -331,7 +379,8 @@ export default function CleaningScreen() {
                 ]}
                 activeOpacity={0.7}
                 onPress={() => toggle(t.id)}
-                disabled={isPending}
+                disabled={isPending || isSubmitted || isBusy}
+                testID={`cleaning-task-${t.id}`}
               >
                 <View
                   style={[
@@ -361,16 +410,33 @@ export default function CleaningScreen() {
         )}
       </View>
 
-      <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-        <Text style={[styles.footerNote, { color: colors.mutedForeground }]}>
-          Ticked tasks are saved instantly. Pull down to refresh. Weekly and monthly schedules can be signed off on the web app.
-        </Text>
-      </View>
+      {!isSubmitted && visibleTasks.length > 0 && (
+        <View style={styles.actions}>
+          <TouchableOpacity
+            testID="cleaning-save-draft"
+            disabled={isPending || isBusy || !initials.trim()}
+            onPress={() => mutate({ submit: false })}
+            style={[styles.secondaryAction, { borderColor: MODULE_COLOR }, (!initials.trim() || isPending || isBusy) && styles.disabled]}
+          >
+            <Feather name="save" size={18} color={MODULE_COLOR} />
+            <Text style={[styles.secondaryActionText, { color: MODULE_COLOR }]}>Save draft</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="cleaning-sign-off"
+            disabled={isPending || isBusy || !initials.trim()}
+            onPress={() => mutate({ submit: true })}
+            style={[styles.primaryAction, { backgroundColor: colors.navy }, (!initials.trim() || isPending || isBusy) && styles.disabled]}
+          >
+            {isPending ? <ActivityIndicator color="#ffffff" /> : <Feather name="check" size={18} color="#ffffff" />}
+            <Text style={styles.primaryActionText}>Sign off</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Recent history */}
       {!historyLoading && recentHistory.length > 0 && (
         <View style={[styles.section, { marginTop: 8 }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Recent daily logs</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Recent {frequency} logs</Text>
           {recentHistory.map((h) => {
             const done = h.completed_count ?? 0;
             const tot = h.total_count ?? 0;
@@ -400,7 +466,7 @@ export default function CleaningScreen() {
           })}
         </View>
       )}
-    </ScrollView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 
@@ -483,17 +549,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
-  initialsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  initialsText: {
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  frequencyRow: { flexDirection: 'row', gap: 8 },
+  frequencyButton: { flex: 1, borderWidth: 1, borderRadius: 7, paddingVertical: 10, alignItems: 'center' },
+  frequencyText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  fieldLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginTop: 4 },
+  nameInput: { height: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
+  signedNotice: { borderWidth: 1, borderRadius: 7, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  signedText: { flex: 1, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   progressBarBg: {
     height: 8,
     borderRadius: 4,
@@ -542,12 +604,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
   },
-  footerNote: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  actions: { paddingHorizontal: 16, paddingTop: 20, flexDirection: 'row', gap: 10 },
+  secondaryAction: { flex: 1, height: 50, borderWidth: 1, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  secondaryActionText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  primaryAction: { flex: 1, height: 50, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  primaryActionText: { color: '#ffffff', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  disabled: { opacity: 0.5 },
   historyRow: {
     flexDirection: 'row',
     alignItems: 'center',
