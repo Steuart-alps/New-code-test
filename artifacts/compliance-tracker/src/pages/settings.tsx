@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
 import { useGetSettings } from "@workspace/api-client-react";
@@ -1978,6 +1979,7 @@ export default function SettingsPage() {
 
         {/* Two-Factor Authentication */}
         <TwoFactorCard />
+        <PasskeyCard />
       </div>
     </AppLayout>
   );
@@ -2180,6 +2182,93 @@ function TwoFactorCard() {
             )}
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PasskeyCard() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [passkeys, setPasskeys] = useState<Array<{ id: number; deviceType: string | null; backedUp: boolean; createdAt: string; lastUsedAt: string | null }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const data = await apiFetch<{ passkeys: typeof passkeys }>("/auth/passkeys");
+      setPasskeys(data.passkeys);
+    } catch (e: any) {
+      setError(e.message ?? "Could not load passkeys");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function addPasskey() {
+    setError("");
+    setSaving(true);
+    try {
+      const options = await apiFetch("/auth/passkeys/registration/options", { method: "POST", body: "{}" });
+      const response = await startRegistration({ optionsJSON: options });
+      await apiFetch("/auth/passkeys/registration/verify", { method: "POST", body: JSON.stringify(response) });
+      await load();
+      toast({ title: "Passkey added", description: "You can now use it when signing in." });
+    } catch (e: any) {
+      setError(e.message ?? "Passkey registration failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePasskey(id: number) {
+    setError("");
+    try {
+      await apiFetch(`/auth/passkeys/${id}`, { method: "DELETE" });
+      setPasskeys(current => current.filter(passkey => passkey.id !== id));
+      toast({ title: "Passkey removed" });
+    } catch (e: any) {
+      setError(e.message ?? "Could not remove passkey");
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <KeyRound className="w-4 h-4" /> Passkeys
+        </CardTitle>
+        <CardDescription>
+          Sign in with Face ID, Touch ID, your device PIN, or a security key instead of typing a one-time code.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-4">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading passkeys…</p>
+        ) : passkeys.length > 0 ? (
+          <div className="space-y-2">
+            {passkeys.map(passkey => (
+              <div key={passkey.id} className="flex items-center justify-between gap-3 rounded-sm border border-border px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">{passkey.deviceType === "singleDevice" ? "This device" : "Passkey"}</p>
+                  <p className="text-xs text-muted-foreground">Added {new Date(passkey.createdAt).toLocaleDateString()}</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" className="rounded-sm" onClick={() => removePasskey(passkey.id)}>
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No passkeys are registered yet.</p>
+        )}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button type="button" variant="outline" className="rounded-sm gap-2" onClick={addPasskey} disabled={saving}>
+          <KeyRound className="w-4 h-4" /> {saving ? "Waiting for passkey…" : "Add a passkey"}
+        </Button>
       </CardContent>
     </Card>
   );

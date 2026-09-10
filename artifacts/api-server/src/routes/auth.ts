@@ -27,10 +27,11 @@ import {
   getPasskeyOrigin,
   getPasskeyRpId,
   getUserPasskeys,
-  hasUserPasskey,
   registrationOptionsForUser,
 } from "../lib/passkeys";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+
+const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const router = Router();
 
@@ -126,6 +127,7 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
   delete (req.session as any).pending2faSetupUserId;
   delete (req.session as any).pendingPasskeyUserId;
   delete (req.session as any).pendingPasskeyChallenge;
+  delete (req.session as any).pendingPasskeyChallengeCreatedAt;
 
   const userPasskeys = await getUserPasskeys(result.user.id);
   // Existing users must prove their second factor before a session is issued.
@@ -135,6 +137,7 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
       const options = await authenticationOptionsForUser(userPasskeys);
       (req.session as any).pendingPasskeyUserId = result.user.id;
       (req.session as any).pendingPasskeyChallenge = options.challenge;
+      (req.session as any).pendingPasskeyChallengeCreatedAt = Date.now();
       res.json({ requires2fa: true, requiresPasskey: true, passkeyOptions: options });
     } else {
       res.json({ requires2fa: true });
@@ -146,6 +149,7 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
     const options = await authenticationOptionsForUser(userPasskeys);
     (req.session as any).pendingPasskeyUserId = result.user.id;
     (req.session as any).pendingPasskeyChallenge = options.challenge;
+    (req.session as any).pendingPasskeyChallengeCreatedAt = Date.now();
     res.json({ requiresPasskey: true, passkeyOptions: options });
     return;
   }
@@ -170,7 +174,11 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
 router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
   const userId = (req.session as any).pendingPasskeyUserId as number | undefined;
   const expectedChallenge = (req.session as any).pendingPasskeyChallenge as string | undefined;
-  if (!userId || !expectedChallenge) {
+  const challengeCreatedAt = (req.session as any).pendingPasskeyChallengeCreatedAt as number | undefined;
+  if (!userId || !expectedChallenge || !challengeCreatedAt || Date.now() - challengeCreatedAt > PASSKEY_CHALLENGE_TTL_MS) {
+    delete (req.session as any).pendingPasskeyUserId;
+    delete (req.session as any).pendingPasskeyChallenge;
+    delete (req.session as any).pendingPasskeyChallengeCreatedAt;
     res.status(400).json({ error: "No pending passkey sign-in" });
     return;
   }
@@ -214,6 +222,7 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
     }
     delete (req.session as any).pendingPasskeyUserId;
     delete (req.session as any).pendingPasskeyChallenge;
+    delete (req.session as any).pendingPasskeyChallengeCreatedAt;
     delete (req.session as any).pending2faUserId;
     req.session.userId = user.id;
     const withClient = await getUserWithClientByEmail(user.email);
@@ -257,6 +266,9 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
   }
 
   delete (req.session as any).pending2faUserId;
+  delete (req.session as any).pendingPasskeyUserId;
+  delete (req.session as any).pendingPasskeyChallenge;
+  delete (req.session as any).pendingPasskeyChallengeCreatedAt;
   req.session.userId = user.id;
 
   const withClient = await getUserWithClientByEmail(user.email);
@@ -294,13 +306,18 @@ router.post("/auth/passkeys/registration/options", async (req, res) => {
   const options = await registrationOptionsForUser(user, credentials);
   (req.session as any).pendingPasskeyRegistrationUserId = userId;
   (req.session as any).pendingPasskeyRegistrationChallenge = options.challenge;
+  (req.session as any).pendingPasskeyRegistrationCreatedAt = Date.now();
   res.json(options);
 });
 
 router.post("/auth/passkeys/registration/verify", async (req, res) => {
   const userId = (req.session as any).pendingPasskeyRegistrationUserId as number | undefined;
   const expectedChallenge = (req.session as any).pendingPasskeyRegistrationChallenge as string | undefined;
-  if (!userId || !expectedChallenge) {
+  const challengeCreatedAt = (req.session as any).pendingPasskeyRegistrationCreatedAt as number | undefined;
+  if (!userId || !expectedChallenge || !challengeCreatedAt || Date.now() - challengeCreatedAt > PASSKEY_CHALLENGE_TTL_MS) {
+    delete (req.session as any).pendingPasskeyRegistrationUserId;
+    delete (req.session as any).pendingPasskeyRegistrationChallenge;
+    delete (req.session as any).pendingPasskeyRegistrationCreatedAt;
     res.status(400).json({ error: "No pending passkey registration" });
     return;
   }
@@ -327,6 +344,7 @@ router.post("/auth/passkeys/registration/verify", async (req, res) => {
     });
     delete (req.session as any).pendingPasskeyRegistrationUserId;
     delete (req.session as any).pendingPasskeyRegistrationChallenge;
+    delete (req.session as any).pendingPasskeyRegistrationCreatedAt;
     const setupPending = (req.session as any).pending2faSetupUserId === userId;
     if (setupPending) {
       delete (req.session as any).pending2faSetupUserId;

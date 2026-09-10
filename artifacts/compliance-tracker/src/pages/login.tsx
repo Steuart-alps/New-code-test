@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
+import type { PasskeyOptions } from "@/context/auth-context";
 import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import alpsLogo from "@/assets/alps-logo.png";
 
-type View = "login" | "totp" | "forgot" | "forgot-sent";
+type View = "login" | "totp" | "passkey" | "forgot" | "forgot-sent";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -23,6 +25,7 @@ export default function LoginPage() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [passkeyOptions, setPasskeyOptions] = useState<PasskeyOptions | null>(null);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -30,8 +33,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const result = await login(email, password);
+      setPasskeyOptions(result.passkeyOptions ?? null);
       if (result.requires2fa) {
         setView("totp");
+      } else if (result.requiresPasskey) {
+        setView("passkey");
       }
       if (result.requiresEmailVerification) {
         navigate("/verify-email");
@@ -42,6 +48,28 @@ export default function LoginPage() {
       } else {
         setError(err instanceof Error ? err.message : "Login failed");
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handlePasskey() {
+    if (!passkeyOptions) return;
+    setError("");
+    setLoading(true);
+    try {
+      const response = await startAuthentication({ optionsJSON: passkeyOptions as any });
+      const res = await fetch(`${baseUrl}/auth/passkeys/authenticate`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(response),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Passkey verification failed");
+      await refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Passkey verification failed");
     } finally {
       setLoading(false);
     }
@@ -227,6 +255,11 @@ export default function LoginPage() {
                     <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading || totpCode.replace(/[\s-]/g, "").length < 6}>
                       {loading ? "Verifying..." : "Verify"}
                     </Button>
+                    {passkeyOptions && (
+                      <Button type="button" variant="outline" className="w-full h-12 rounded-[2px]" onClick={handlePasskey} disabled={loading}>
+                        <KeyRound className="w-4 h-4 mr-2" /> Use a passkey instead
+                      </Button>
+                    )}
                     <button
                       type="button"
                       onClick={() => { setError(""); setTotpCode(""); setView("login"); }}
@@ -242,6 +275,34 @@ export default function LoginPage() {
                       Lost access to your authenticator?
                     </button>
                   </form>
+                </motion.div>
+              )}
+
+              {view === "passkey" && (
+                <motion.div
+                  key="passkey"
+                  initial={{ opacity: 0, x: 16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -16 }}
+                  transition={{ duration: 0.3 }}
+                  className="text-center"
+                >
+                  <div className="flex justify-center mb-6">
+                    <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                      <KeyRound className="w-7 h-7 text-primary" />
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-display text-[#162D42] mb-2">Use your passkey</h2>
+                  <p className="text-sm text-muted-foreground mb-8">
+                    Confirm your identity with the passkey saved on this device or security key.
+                  </p>
+                  {error && <p className="bg-destructive/10 border-l-2 border-destructive text-destructive text-sm px-4 py-3 mb-5">{error}</p>}
+                  <Button type="button" className="w-full h-12 rounded-[2px]" onClick={handlePasskey} disabled={loading}>
+                    {loading ? "Waiting for passkey…" : "Continue with passkey"}
+                  </Button>
+                  <button type="button" onClick={() => { setError(""); setView("login"); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-[#162D42] transition-colors mx-auto mt-6">
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
+                  </button>
                 </motion.div>
               )}
 

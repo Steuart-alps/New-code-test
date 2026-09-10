@@ -16,6 +16,8 @@ export interface AuthUser {
   isMaintenanceManager?: boolean;
 }
 
+export type PasskeyOptions = Record<string, unknown>;
+
 export interface AuthClient {
   id: number;
   name: string;
@@ -31,7 +33,7 @@ interface AuthContextValue {
   client: AuthClient | null;
   billingLocked: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requires2faSetup?: boolean; requiresEmailVerification?: boolean }>;
+  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean; requiresEmailVerification?: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   activeClientId: number | null;
@@ -181,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setIsLoading(false));
   }, []);
 
-  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requires2faSetup?: boolean; requiresEmailVerification?: boolean }> {
+  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requiresPasskey?: boolean; passkeyOptions?: PasskeyOptions; requires2faSetup?: boolean; requiresEmailVerification?: boolean }> {
     const res = await apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -193,7 +195,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw error;
     }
     const data = await res.json();
-    if (data.requires2fa) return { requires2fa: true };
+    if (data.requires2fa || data.requiresPasskey) {
+      return { requires2fa: Boolean(data.requires2fa), requiresPasskey: Boolean(data.requiresPasskey), passkeyOptions: data.passkeyOptions };
+    }
     if (data.requires2faSetup) {
       setNeedsTwoFactorSetup(true);
       return { requires2fa: false, requires2faSetup: true };
