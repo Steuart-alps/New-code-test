@@ -414,7 +414,7 @@ async function main() {
   }
 
   // Viewers are read-only: all mutations must be rejected, even in their own dept.
-  expectBlocked(
+  expectForbidden(
     "viewer: POST /fire-safety rejected",
     (await viewer("POST", "/fire-safety", {
       checkType: "alarm",
@@ -446,7 +446,7 @@ async function main() {
     // evade the same department boundary.
     expectBlocked(`unassigned ${role}: export rejected`, (await session("GET", "/export")).status);
   }
-  expectBlocked(
+  expectForbidden(
     "viewer: POST /legionella rejected",
     (await viewer("POST", "/legionella", {
       checkType: "calorifier_temp",
@@ -456,33 +456,33 @@ async function main() {
     })).status,
   );
   if (fireAlphaId) {
-    expectBlocked(
+    expectForbidden(
       "viewer: PUT /fire-safety/:id rejected (own dept)",
       (await viewer("PUT", `/fire-safety/${fireAlphaId}`, { result: "fail" })).status,
     );
-    expectBlocked(
+    expectForbidden(
       "viewer: DELETE /fire-safety/:id rejected (own dept)",
       (await viewer("DELETE", `/fire-safety/${fireAlphaId}`)).status,
     );
   }
   if (legAlphaId) {
-    expectBlocked(
+    expectForbidden(
       "viewer: PUT /legionella/:id rejected (own dept)",
       (await viewer("PUT", `/legionella/${legAlphaId}`, { result: "fail" })).status,
     );
-    expectBlocked(
+    expectForbidden(
       "viewer: DELETE /legionella/:id rejected (own dept)",
       (await viewer("DELETE", `/legionella/${legAlphaId}`)).status,
     );
   }
   if (fireBetaId) {
-    expectBlocked(
+    expectForbidden(
       "viewer: PUT /fire-safety/:id rejected (other dept)",
       (await viewer("PUT", `/fire-safety/${fireBetaId}`, { result: "fail" })).status,
     );
   }
   if (legBetaId) {
-    expectBlocked(
+    expectForbidden(
       "viewer: PUT /legionella/:id rejected (other dept)",
       (await viewer("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
     );
@@ -507,12 +507,19 @@ async function main() {
     ["POST /swim-track/sessions", "POST", "/swim-track/sessions", { sessionDate: uniqueDate(0) }],
     ["POST /green-track/pre-use-checks", "POST", "/green-track/pre-use-checks", { checkDate: uniqueDate(0) }],
     ["POST /daily-track-am", "POST", "/daily-track-am", { recordDate: uniqueDate(0) }],
+    ["POST /daily-track-pm", "POST", "/daily-track-pm", { recordDate: uniqueDate(0) }],
+    ["POST /daily-checklists", "POST", `/daily-checklists/${siteAlphaId}/${uniqueDate(0)}/am`, {}],
+    ["POST /kitchen-weekly/weekly", "POST", "/kitchen-weekly/weekly", { weekCommencing: uniqueDate(0) }],
+    ["POST /premises-track", "POST", "/premises-track", { checkDate: uniqueDate(0) }],
+    ["POST /room-track/checks", "POST", "/room-track/checks", { checkDate: uniqueDate(0) }],
+    ["POST /safe-track/risk-assessments", "POST", "/safe-track/risk-assessments", { title: "Viewer write" }],
+    ["POST /track-actions", "POST", "/track-actions", { title: "Viewer write" }],
     ["POST /fix-track/issues", "POST", "/fix-track/issues", { title: "Leak" }],
     ["PATCH /compliance-items/:id/status", "PATCH", `/compliance-items/${alphaItem ? alphaItem.id : 0}/status`, { status: "compliant" }],
     ["POST /storage/uploads/request-url", "POST", "/storage/uploads/request-url", { fileName: "a.pdf" }],
   ];
   for (const [label, method, path, body] of viewerMutationAttempts) {
-    expectBlocked(`viewer: ${label} rejected`, (await viewer(method, path, body)).status);
+    expectForbidden(`viewer: ${label} rejected`, (await viewer(method, path, body)).status);
   }
 
   // ── 9. Admin bypasses all department filtering ────────────────────────────────
