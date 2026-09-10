@@ -52,6 +52,7 @@ import reportsRouter from "./reports";
 import dashboardSummaryRouter from "./dashboard-summary";
 import complianceHubRouter from "./compliance-hub";
 import trackActionsRouter from "./track-actions";
+import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
@@ -131,6 +132,7 @@ router.use(complianceHubRouter);
 router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
+router.use("/track-evidence", trackEvidenceRouter);
 // Public contractor self-service portal — no auth, token-protected
 router.use("/contractor-portal", publicLinkRateLimit, contractorPortalRouter);
 

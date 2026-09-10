@@ -37,6 +37,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/pat-track", moduleKey: "pat" },
   { prefix: "/pest-track", moduleKey: "pest" },
   { prefix: "/fix-track", moduleKey: "fix" },
+  { prefix: "/safe-track", moduleKey: "safe" },
   { prefix: "/premises-track", moduleKey: "premises" },
   { prefix: "/room-track", moduleKey: "room" },
   { prefix: "/doc-track", moduleKey: "doc" },

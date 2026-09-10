@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { TrackEvidencePanel } from "@/components/track-evidence-panel";
 import { cn } from "@/lib/utils";
 
 type Severity = "monitor" | "action_required" | "urgent";
@@ -262,6 +263,12 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
           {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <div key={action.id}><ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />{action.resolvedByName && <div className="-mt-3 border-x border-b bg-slate-50 px-4 pb-3 text-xs text-muted-foreground"><p>Signed off as complete by <strong className="text-foreground">{action.resolvedByName}</strong></p>{action.resolverSignature && <img src={action.resolverSignature} alt={`Signature of ${action.resolvedByName}`} className="mt-2 h-14 max-w-52 rounded-sm border bg-white object-contain" />}</div>}</div>)}</CollapsibleContent></Collapsible>}
         </CardContent>
       </Card>
+       <TrackEvidencePanel
+         moduleKey={moduleKey}
+         actions={actions.map(action => ({ id: action.id, title: action.title, status: action.status }))}
+         sites={sites}
+         canMutate={canMutate}
+       />
       <DrawnSignatureDialog open={!!pendingSignature} busy={submitting} onCancel={() => setPendingSignature(null)} onConfirm={async resolverSignature => {
         if (!pendingSignature) return;
         await updateAction(pendingSignature.action, { status: "resolved", ...pendingSignature.values, resolverSignature });
