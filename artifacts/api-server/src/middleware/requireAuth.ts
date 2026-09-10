@@ -2,7 +2,6 @@ import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { passkeysTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
@@ -124,7 +123,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
  * endpoints and logout remain available so an unenrolled account can finish
  * enrollment or leave the session.
  */
-export function enforceTwoFactorEnrollment(req: Request, res: Response, next: NextFunction) {
+export async function enforceTwoFactorEnrollment(req: Request, res: Response, next: NextFunction) {
   const user = req.currentUser;
   if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
     next();

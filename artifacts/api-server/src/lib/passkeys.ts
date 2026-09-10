@@ -49,14 +49,14 @@ export function registrationOptionsForUser(
     userName: user.email,
     userDisplayName: user.name,
     userID: new Uint8Array(Buffer.from(String(user.id))),
-    attestationType: "none",
+    attestationType: "none" as const,
     excludeCredentials: existing.map((credential) => ({
       id: credential.credentialId,
       transports: (credential.transports ?? []) as any,
     })),
     authenticatorSelection: {
-      residentKey: "preferred",
-      userVerification: "preferred",
+      residentKey: "preferred" as const,
+      userVerification: "preferred" as const,
     },
   };
   return generateRegistrationOptions(options);
@@ -67,7 +67,7 @@ export function authenticationOptionsForUser(
 ) {
   const options = {
     rpID: getPasskeyRpId(),
-    userVerification: "preferred",
+    userVerification: "preferred" as const,
     allowCredentials: credentials.map((credential) => ({
       id: credential.credentialId,
       transports: (credential.transports ?? []) as any,

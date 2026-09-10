@@ -194,7 +194,7 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
       expectedRPID: getPasskeyRpId(),
       credential: {
         id: credential.credentialId,
-        publicKey: decodePasskeyBytes(credential.publicKey),
+        publicKey: decodePasskeyBytes(credential.publicKey) as Uint8Array<ArrayBuffer>,
         counter: credential.counter,
         transports: (credential.transports ?? []) as any,
       },
@@ -217,7 +217,7 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
     delete (req.session as any).pending2faUserId;
     req.session.userId = user.id;
     const withClient = await getUserWithClientByEmail(user.email);
-    const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
+    const { totpSecret: _t, ...safeUser } = user;
     res.json({
       user: safeUser,
       client: withClient?.client ?? null,
