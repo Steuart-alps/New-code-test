@@ -2881,6 +2881,9 @@ components:
         food_default_sv_items:
           type: string
           nullable: true
+        food_probe_names:
+          type: string
+          nullable: true
         food_show_deliveries:
           type: string
           nullable: true

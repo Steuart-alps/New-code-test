@@ -11,6 +11,7 @@ export interface FoodSafetyConfig {
   food_default_hot_items?: string | null;
   food_default_holding_items?: string | null;
   food_default_sv_items?: string | null;
+  food_probe_names?: string | null;
   food_show_deliveries?: string | null;
   food_show_cold_food?: string | null;
   food_show_hot_temperature?: string | null;

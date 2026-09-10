@@ -79,6 +79,7 @@ const CONFIG_KEYS = [
   "food_default_hot_items",     // JSON: ["item1", "item2"]
   "food_default_holding_items", // JSON: ["item1", "item2"]
   "food_default_sv_items",      // JSON: ["item1", "item2"]
+  "food_probe_names",           // JSON: ["Probe 1", "Blue probe"]
   // Section visibility — "true"|"false", default true
   ...SECTION_SHOW_KEYS,
 ] as const;
@@ -94,6 +95,7 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_default_hot_items: "",
   food_default_holding_items: "",
   food_default_sv_items: "",
+  food_probe_names: "",
   food_show_deliveries: "true",
   food_show_cold_food: "true",
   food_show_hot_temperature: "true",
@@ -217,9 +219,16 @@ function validateConfigPatch(
       const r = cleanColdUnits(raw);
       if ("error" in r) return { error: r.error };
       out[key] = r.value;
-    } else if (key === "food_default_hot_items" || key === "food_default_holding_items" || key === "food_default_sv_items") {
+    } else if (
+      key === "food_default_hot_items"
+      || key === "food_default_holding_items"
+      || key === "food_default_sv_items"
+      || key === "food_probe_names"
+    ) {
       const label = key === "food_default_hot_items" ? "Hot items"
-        : key === "food_default_holding_items" ? "Holding items" : "Sous vide items";
+        : key === "food_default_holding_items" ? "Holding items"
+        : key === "food_default_sv_items" ? "Sous vide items"
+        : "Probe";
       const r = cleanNameList(raw, label);
       if ("error" in r) return { error: r.error };
       out[key] = r.value;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -121,7 +121,7 @@ function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"
   const c = config as any;
   if (c?.food_cold_units) return parseJsonArray<ColdUnit>(c.food_cold_units);
   const nf = Number(c?.food_num_fridges || "2");
-  const nz = Number(c?.food_num_freezers || "1");
+  const nz = Number(c?.food_num_freezers || "2");
   return [
     ...Array.from({ length: nf }, (_, i) => ({ name: `Fridge ${i + 1}`, type: "fridge" as const })),
     ...Array.from({ length: nz }, (_, i) => ({ name: `Freezer ${i + 1}`, type: "freezer" as const })),
@@ -136,15 +136,19 @@ function ConfigDialog() {
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
   const { data: sites } = useListSites();
   const configParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
-  const { data: config } = useGetFoodSafetyConfig(configParams, {
+  const { data: config, isLoading: configLoading } = useGetFoodSafetyConfig(configParams, {
     query: { queryKey: getGetFoodSafetyConfigQueryKey(configParams) },
   });
   // The pure client-level effective config (defaults ← client) — used as the
   // baseline to diff a site's edits against so we only persist genuine
   // overrides and clear reverted ones.
-  const { data: clientConfig } = useGetFoodSafetyConfig(undefined, {
+  const { data: clientConfig, isLoading: clientConfigLoading } = useGetFoodSafetyConfig(undefined, {
     query: { queryKey: getGetFoodSafetyConfigQueryKey() },
   });
+  const templateReady = !!config
+    && !!clientConfig
+    && !configLoading
+    && !clientConfigLoading;
   const siteOverrides: string[] = ((config as any)?._siteOverrides as string[] | undefined) ?? [];
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -173,6 +177,7 @@ function ConfigDialog() {
   const [defaultHotItems, setDefaultHotItems] = useState<string[]>([]);
   const [defaultHoldingItems, setDefaultHoldingItems] = useState<string[]>([]);
   const [defaultSvItems, setDefaultSvItems] = useState<string[]>([]);
+  const [probeNames, setProbeNames] = useState<string[]>([]);
 
   useEffect(() => {
     if (!config) return;
@@ -191,6 +196,7 @@ function ConfigDialog() {
     setDefaultHotItems(parseStringArray(config.food_default_hot_items));
     setDefaultHoldingItems(parseStringArray(config.food_default_holding_items));
     setDefaultSvItems(parseStringArray(config.food_default_sv_items));
+    setProbeNames(parseStringArray(config.food_probe_names));
   }, [config, open]);
 
   // Invalidate every food-safety config query (client-level + all sites) so both
@@ -216,6 +222,9 @@ function ConfigDialog() {
       food_default_hot_items: JSON.stringify(defaultHotItems.filter(Boolean)),
       food_default_holding_items: JSON.stringify(defaultHoldingItems.filter(Boolean)),
       food_default_sv_items: JSON.stringify(defaultSvItems.filter(Boolean)),
+      ...(selectedSiteId == null
+        ? { food_probe_names: JSON.stringify(probeNames.filter(Boolean)) }
+        : {}),
     };
 
     // For the client-level template we save every key as-is (unchanged
@@ -434,6 +443,16 @@ function ConfigDialog() {
               <p className="text-xs text-muted-foreground">Items you regularly cook sous vide</p>
               <StringListEditor items={defaultSvItems} onChange={setDefaultSvItems} placeholder="e.g. Duck Breast" />
             </div>
+
+            {selectedSiteId == null && (
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Calibration probes</Label>
+                <p className="text-xs text-muted-foreground">
+                  Name the thermometer probes that should appear on each new monthly calibration check. Probe names are shared across all sites.
+                </p>
+                <StringListEditor items={probeNames} onChange={setProbeNames} placeholder="e.g. Blue probe" />
+              </div>
+            )}
           </TabsContent>
 
           {/* ── Limits tab ── */}
@@ -470,15 +489,15 @@ function ConfigDialog() {
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2 sm:justify-between">
           <Button variant="ghost" className="text-destructive hover:text-destructive"
-            onClick={handleReset} disabled={resetConfig.isPending || updateConfig.isPending}>
+            onClick={handleReset} disabled={!templateReady || resetConfig.isPending || updateConfig.isPending}>
             {resetConfig.isPending
               ? (selectedSiteId != null ? "Clearing…" : "Resetting…")
               : (selectedSiteId != null ? "Clear site overrides" : "Reset to defaults")}
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={updateConfig.isPending}>
-              {updateConfig.isPending ? "Saving…" : "Save template"}
+            <Button onClick={handleSave} disabled={!templateReady || updateConfig.isPending}>
+              {!templateReady ? "Loading…" : updateConfig.isPending ? "Saving…" : "Save template"}
             </Button>
           </div>
         </DialogFooter>
@@ -640,7 +659,7 @@ function FoodSafetyCompletenessCalendar({ siteId, onPickDay }: FSCompletenessCal
 function DailyDiaryTab() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  // Which site's diary we're viewing/filling. null = "All sites" = the
+  // Which site's diary we're viewing/filling. null = the legacy client-wide
   // whole-organisation diary (records with no site), matching the original
   // single-diary behaviour.
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
@@ -651,7 +670,7 @@ function DailyDiaryTab() {
   // chosen, both fall back to the whole-organisation diary.
   const configParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
   const recordParams = selectedSiteId != null ? { siteId: selectedSiteId } : undefined;
-  const { data: config } = useGetFoodSafetyConfig(configParams, {
+  const { data: config, isLoading: configLoading } = useGetFoodSafetyConfig(configParams, {
     query: { queryKey: getGetFoodSafetyConfigQueryKey(configParams) },
   });
   const { data: records } = useListFoodSafetyRecords(recordParams, {
@@ -702,8 +721,13 @@ function DailyDiaryTab() {
   const [sousVide, setSousVide] = useState<SousVideRow[]>([]);
   const [correctives, setCorrectives] = useState("");
   const [managerSignature, setManagerSignature] = useState(user?.name ?? "");
+  const hydratedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (recordLoading || configLoading) return;
+    const hydrationKey = `${selectedSiteId ?? "all"}:${selectedDate}:${record?.id ?? "new"}`;
+    if (hydratedScopeRef.current === hydrationKey) return;
+
     if (record) {
       setDeliveries((record.deliveries || []) as DeliveryRow[]);
       setColdFood((record.coldFood || []) as ColdFoodRow[]);
@@ -749,8 +773,37 @@ function DailyDiaryTab() {
       setCorrectives("");
       setManagerSignature("");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record, selectedDate, selectedSiteId]);
+    hydratedScopeRef.current = hydrationKey;
+  }, [
+    config,
+    configLoading,
+    record,
+    recordLoading,
+    selectedDate,
+    selectedSiteId,
+    templateColdUnits,
+    templateHoldingItems,
+    templateHotItems,
+    templateSvItems,
+    user?.name,
+  ]);
+
+  // Historical records retain the limits that were filed with them. The
+  // current template applies only when starting a new diary day.
+  const entryCookingLimit = record?.cookingLimit || cookingLimit;
+  const entryCoolingLimit = record?.coolingLimit || coolingLimit;
+  const entryReheatingLimit = record?.reheatingLimit || reheatingLimit;
+  const entryHotHoldingLimit = record?.hotHoldingLimit || hotHoldingLimit;
+
+  // A later template change must not hide evidence already stored on an older
+  // record. Empty sections still follow the current template.
+  const displayDeliveries = showDeliveries || (!!record && deliveries.length > 0);
+  const displayColdFood = showColdFood || (!!record && coldFood.length > 0);
+  const displayHotTemp = showHotTemp || (!!record && cooking.length > 0);
+  const displayCooling = showCooling || (!!record && cooling.length > 0);
+  const displayReheating = showReheating || (!!record && reheating.length > 0);
+  const displayHotHolding = showHotHolding || (!!record && hotHolding.length > 0);
+  const displaySousVide = showSousVide || (!!record && sousVide.length > 0);
 
   // Invalidate the record queries for the current diary scope.
   const invalidateRecords = () => {
@@ -761,17 +814,17 @@ function DailyDiaryTab() {
 
   const buildData = (submittedAt?: string) => ({
     recordDate: selectedDate,
-    deliveries,
-    coldFood,
-    hotTemperature: cooking,
-    cooling,
-    reheating,
-    hotHolding,
-    sousVide,
-    cookingLimit,
-    coolingLimit,
-    reheatingLimit,
-    hotHoldingLimit,
+    deliveries: record || showDeliveries ? deliveries : [],
+    coldFood: record || showColdFood ? coldFood : [],
+    hotTemperature: record || showHotTemp ? cooking : [],
+    cooling: record || showCooling ? cooling : [],
+    reheating: record || showReheating ? reheating : [],
+    hotHolding: record || showHotHolding ? hotHolding : [],
+    sousVide: record || showSousVide ? sousVide : [],
+    cookingLimit: entryCookingLimit,
+    coolingLimit: entryCoolingLimit,
+    reheatingLimit: entryReheatingLimit,
+    hotHoldingLimit: entryHotHoldingLimit,
     correctives: correctives || undefined,
     managerSignature: managerSignature || undefined,
     submittedAt,
@@ -861,7 +914,7 @@ function DailyDiaryTab() {
                   onChange={(e) => setSelectedSiteId(e.target.value === "" ? null : Number(e.target.value))}
                   className="h-9 rounded-sm border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">All sites</option>
+                  <option value="">Organisation diary</option>
                   {sites.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -872,7 +925,7 @@ function DailyDiaryTab() {
         </CardContent>
       </Card>
 
-      {recordLoading ? (
+      {recordLoading || configLoading ? (
         <Card>
           <CardContent className="p-12 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -898,7 +951,7 @@ function DailyDiaryTab() {
           )}
 
           {/* Deliveries */}
-          {showDeliveries && <Card>
+          {displayDeliveries && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -999,7 +1052,7 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* Cold Food */}
-          {showColdFood && <Card>
+          {displayColdFood && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1063,12 +1116,12 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* ── Cooking ──────────────────────────────────────────────────── */}
-          {showHotTemp && <Card>
+          {displayHotTemp && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display">Cooking Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">Target: {cookingLimit}</CardDescription>
+                  <CardDescription className="text-xs mt-1">Target: {entryCookingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm" onClick={() => setCooking([...cooking, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
@@ -1109,12 +1162,12 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* ── Cooling ──────────────────────────────────────────────────── */}
-          {showCooling && <Card>
+          {displayCooling && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display">Cooling Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">Target: {coolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
+                  <CardDescription className="text-xs mt-1">Target: {entryCoolingLimit} · Rows exceeding 90 minutes are flagged red</CardDescription>
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm" onClick={() => setCooling([...cooling, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
@@ -1164,12 +1217,12 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* ── Reheating ────────────────────────────────────────────────── */}
-          {showReheating && <Card>
+          {displayReheating && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display">Reheating Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">Target: {reheatingLimit}</CardDescription>
+                  <CardDescription className="text-xs mt-1">Target: {entryReheatingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm" onClick={() => setReheating([...reheating, { item: "", timeStart: "", timeFinish: "", coreTemp: "" }])}>
@@ -1210,12 +1263,12 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* Hot Holding */}
-          {showHotHolding && <Card>
+          {displayHotHolding && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-display">Hot Holding / Off-Site Temperature Record</CardTitle>
-                  <CardDescription className="text-xs mt-1">Minimum: {hotHoldingLimit}</CardDescription>
+                  <CardDescription className="text-xs mt-1">Minimum: {entryHotHoldingLimit}</CardDescription>
                 </div>
                 {!isSubmitted && (
                   <Button variant="outline" size="sm"
@@ -1271,7 +1324,7 @@ function DailyDiaryTab() {
           </Card>}
 
           {/* Sous Vide */}
-          {showSousVide && <Card>
+          {displaySousVide && <Card>
             <CardHeader className="border-b border-border/50 pb-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1825,7 +1878,7 @@ export default function KitchenPage() {
   const canAdmin = useCanAdmin();
   const hasKitchentrack = hasService("kitchentrack");
 
-  const { error: configError } = useGetFoodSafetyConfig(undefined, {
+  const { data: foodSafetyConfig, error: configError } = useGetFoodSafetyConfig(undefined, {
     query: { enabled: hasKitchentrack, retry: (count: number, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFoodSafetyConfigQueryKey() },
   });
   const serverLocked = (configError as any)?.status === 403;
@@ -1950,7 +2003,7 @@ export default function KitchenPage() {
         {activeTab === "checks"   && <DailyChecksTab />}
         {activeTab === "diary"    && <DailyDiaryTab />}
         {activeTab === "weekly"   && <WeeklyReviewTab />}
-        {activeTab === "probe"    && <ProbeCheckTab />}
+        {activeTab === "probe"    && <ProbeCheckTab defaultProbeNamesJson={foodSafetyConfig?.food_probe_names} />}
         {activeTab === "cleaning" && <CleaningScheduleTab />}
       </div>
     </AppLayout>

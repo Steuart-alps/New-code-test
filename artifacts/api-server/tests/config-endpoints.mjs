@@ -451,6 +451,21 @@ async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
     (await admin("PUT", "/food-safety/config", { food_show_cooling: "maybe" })).status,
     400,
   );
+  expectStatus(
+    "food-config: PUT duplicate probe names → 400",
+    (await admin("PUT", "/food-safety/config", { food_probe_names: JSON.stringify(["Blue probe", " blue PROBE "]) })).status,
+    400,
+  );
+  expectOk(
+    "food-config: PUT custom probe names",
+    (await admin("PUT", "/food-safety/config", { food_probe_names: JSON.stringify([" Blue probe ", "Red probe"]) })).status,
+  );
+  const probeConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: custom probe names are trimmed and stored",
+    JSON.stringify(JSON.parse(probeConfig.data?.food_probe_names ?? "[]")) === JSON.stringify(["Blue probe", "Red probe"]),
+    `got ${probeConfig.data?.food_probe_names}`,
+  );
 
   // siteId belonging to another client → 400.
   // Create a site under client B; using it on client A's config must be rejected.
@@ -621,7 +636,41 @@ async function testSiteDiaries(admin, ts) {
   expectOk("site-diary: whole-org record same date allowed", orgRec.status, [201]);
   check("site-diary: whole-org record has null siteId", orgRec.data?.siteId == null, `got ${orgRec.data?.siteId}`);
 
-  // ── (e) Same site + same date → upsert semantics (409 conflict, no dup) ──
+  // ── (e) Monthly and missing-date views distinguish drafts, submissions and gaps ──
+  const calendarDraftDate = "2098-02-10";
+  const calendarSubmittedDate = "2098-02-11";
+  const calendarMissingDate = "2098-02-12";
+  const calendarDraft = await admin("POST", `/food-safety?siteId=${s1}`, { recordDate: calendarDraftDate });
+  expectOk("site-diary: create calendar draft", calendarDraft.status, [201]);
+  const calendarSubmitted = await admin("POST", `/food-safety?siteId=${s1}`, {
+    recordDate: calendarSubmittedDate,
+    submittedAt: "2098-02-11T12:00:00.000Z",
+  });
+  expectOk("site-diary: create submitted calendar record", calendarSubmitted.status, [201]);
+
+  const summary = await admin("GET", `/food-safety/summary?year=2098&month=2&siteId=${s1}`);
+  expectOk("site-diary: GET monthly summary", summary.status);
+  check("site-diary: February summary has 28 days", summary.data?.days?.length === 28, `got ${summary.data?.days?.length}`);
+  const draftSummary = summary.data?.days?.find((entry) => entry.date === calendarDraftDate);
+  const submittedSummary = summary.data?.days?.find((entry) => entry.date === calendarSubmittedDate);
+  const missingSummary = summary.data?.days?.find((entry) => entry.date === calendarMissingDate);
+  check("site-diary: summary marks draft as present but not submitted", draftSummary?.hasRecord === true && draftSummary?.submitted === false);
+  check("site-diary: summary marks submitted record complete", submittedSummary?.hasRecord === true && submittedSummary?.submitted === true);
+  check("site-diary: summary marks absent date missing", missingSummary?.hasRecord === false && missingSummary?.submitted === false);
+
+  const missingDates = await admin(
+    "GET",
+    `/food-safety/missing-dates?from=${calendarDraftDate}&to=${calendarMissingDate}&siteId=${s1}`,
+  );
+  expectOk("site-diary: GET missing dates", missingDates.status);
+  check(
+    "site-diary: missing dates excludes drafts and submissions",
+    JSON.stringify(missingDates.data?.missingDates) === JSON.stringify([calendarMissingDate])
+      && JSON.stringify(missingDates.data?.draftDates) === JSON.stringify([calendarDraftDate]),
+    `got ${JSON.stringify(missingDates.data)}`,
+  );
+
+  // ── (f) Same site + same date → upsert semantics (409 conflict, no dup) ──
   const s1Dup = await admin("POST", `/food-safety?siteId=${s1}`, { recordDate: day });
   expectStatus("site-diary: duplicate site1 record same date → 409", s1Dup.status, 409);
   check(
@@ -648,7 +697,7 @@ async function testSiteDiaries(admin, ts) {
     `ids=${JSON.stringify((listS1.data ?? []).map((r) => r.id))}`,
   );
 
-  // ── (f) Clearing a site override reverts that key to the client value ──
+  // ── (g) Clearing a site override reverts that key to the client value ──
   expectOk(
     "site-diary: clear site1 cooking override (null)",
     (await admin("PUT", `/food-safety/config?siteId=${s1}`, { food_cooking_limit: null })).status,

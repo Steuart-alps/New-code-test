@@ -1,7 +1,7 @@
 /**
  * KitchenTrack — Monthly Probe Calibration Check tab
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,11 @@ type HistoryItem = Pick<ProbeRecord, "id" | "check_date" | "overall_result" | "c
 
 function emptyProbe(): ProbeRow {
   return { name: "", serialNo: "", iceTemp: "", boilingTemp: "", accurateIce: undefined, accurateBoiling: undefined, notes: "" };
+}
+
+function defaultProbes(names: string[]): ProbeRow[] {
+  const rows = names.map((name) => ({ ...emptyProbe(), name }));
+  return rows.length > 0 ? rows : [emptyProbe()];
 }
 
 // ── Probe row component ───────────────────────────────────────────────────────
@@ -146,9 +151,18 @@ function ProbeRowFields({ row, idx, onChange, onRemove, disabled }: {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ProbeCheckTab() {
+export default function ProbeCheckTab({ defaultProbeNamesJson }: { defaultProbeNamesJson?: string | null }) {
   const { toast } = useToast();
   const today = format(new Date(), "yyyy-MM-dd");
+  const defaultProbeNames = useMemo(() => {
+    if (!defaultProbeNamesJson) return [];
+    try {
+      const parsed: unknown = JSON.parse(defaultProbeNamesJson);
+      return Array.isArray(parsed) ? parsed.filter((name): name is string => typeof name === "string" && !!name.trim()) : [];
+    } catch {
+      return [];
+    }
+  }, [defaultProbeNamesJson]);
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [record, setRecord] = useState<ProbeRecord | null>(null);
@@ -156,7 +170,7 @@ export default function ProbeCheckTab() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [probes, setProbes] = useState<ProbeRow[]>([emptyProbe()]);
+  const [probes, setProbes] = useState<ProbeRow[]>(() => defaultProbes(defaultProbeNames));
   const [overallResult, setOverallResult] = useState<"pass" | "fail" | "">("");
   const [checkedBy, setCheckedBy] = useState("");
   const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>(null);
@@ -175,14 +189,14 @@ export default function ProbeCheckTab() {
       if (res.ok) {
         const r: ProbeRecord = await res.json();
         setRecord(r);
-        setProbes(r.probes?.length ? r.probes : [emptyProbe()]);
+        setProbes(Array.isArray(r.probes) ? r.probes : defaultProbes(defaultProbeNames));
         setOverallResult((r.overall_result as any) ?? "");
         setCheckedBy(r.checked_by ?? "");
         setSignature(r.signature ?? "");
         setNotes(r.notes ?? "");
       } else {
         setRecord(null);
-        setProbes([emptyProbe()]);
+        setProbes(defaultProbes(defaultProbeNames));
         setOverallResult("");
         setCheckedBy("");
         setSignature("");
@@ -192,7 +206,7 @@ export default function ProbeCheckTab() {
   }
 
   useEffect(() => { loadHistory(); }, []);
-  useEffect(() => { loadByDate(selectedDate); }, [selectedDate]);
+  useEffect(() => { loadByDate(selectedDate); }, [selectedDate, defaultProbeNamesJson]);
 
   // Auto-compute overall result from probe answers
   useEffect(() => {
