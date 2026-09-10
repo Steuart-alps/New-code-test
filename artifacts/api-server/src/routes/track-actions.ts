@@ -4,6 +4,7 @@ import { departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, site
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
+import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 
 const router = Router();
 const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
@@ -277,6 +278,21 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }
+    if (nextStatus === "resolved") {
+      const missingEvidence = await missingEvidenceForAction(clientId, current);
+      if (missingEvidence.length) {
+        return {
+          status: 400 as const,
+          error: "Required inspection evidence is missing or not independently verified",
+          missingEvidence: missingEvidence.map(item => ({
+            requirementKey: item.requirementKey,
+            title: item.title,
+            evidenceType: item.evidenceType,
+            reviewRequired: item.reviewRequired,
+          })),
+        };
+      }
+    }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
     if (nextStatus === "resolved") {
       const resolverName = req.currentUser!.name?.trim();
@@ -289,7 +305,7 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     return { status: 200 as const, row };
   });
-  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  if ("error" in result) return res.status(result.status).json({ error: result.error, ...("missingEvidence" in result ? { missingEvidence: result.missingEvidence } : {}) });
   res.json(result.row);
 });
 export default router;

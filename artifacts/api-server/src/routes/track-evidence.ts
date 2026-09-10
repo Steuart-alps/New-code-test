@@ -2,9 +2,10 @@ import { Router } from "express";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { sitesTable, trackActionsTable, trackEvidenceTable } from "@workspace/db/schema";
+import { sitesTable, trackActionsTable, trackEvidenceRequirementsTable, trackEvidenceTable } from "@workspace/db/schema";
 import { appendAuditEvent } from "../lib/audit";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
+import { ensureDefaultTrackEvidenceRequirements } from "../lib/trackEvidenceRequirements";
 
 const router = Router();
 const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
@@ -18,6 +19,7 @@ const createSchema = z.object({
   sourceKind: z.string().trim().min(1).max(100).nullable().optional(),
   sourceRecordId: z.number().int().positive().nullable().optional(),
   actionId: z.number().int().positive().nullable().optional(),
+  requirementKey: z.string().trim().min(1).max(100).nullable().optional(),
   evidenceType: z.enum(evidenceTypes).default("observation"),
   title: z.string().trim().min(1).max(300),
   details: z.string().trim().min(1).max(20_000),
@@ -67,6 +69,44 @@ router.get("/", requireAuth, async (req, res) => {
   res.json(await db.select().from(trackEvidenceTable).where(and(...conditions)).orderBy(desc(trackEvidenceTable.createdAt)));
 });
 
+router.get("/requirements", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  const parsed = z.object({
+    module: moduleSchema,
+    siteId: z.coerce.number().int().positive().optional(),
+    actionId: z.coerce.number().int().positive().optional(),
+  }).safeParse(req.query);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  if (!await accessibleSite(parsed.data.siteId, clientId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Forbidden site" });
+  const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, parsed.data.module);
+  const evidenceConditions = [
+    eq(trackEvidenceTable.clientId, clientId),
+    eq(trackEvidenceTable.module, parsed.data.module),
+  ];
+  if (parsed.data.siteId != null) evidenceConditions.push(eq(trackEvidenceTable.siteId, parsed.data.siteId));
+  if (parsed.data.actionId != null) evidenceConditions.push(eq(trackEvidenceTable.actionId, parsed.data.actionId));
+  const evidence = await db.select({
+    requirementKey: trackEvidenceTable.requirementKey,
+    evidenceType: trackEvidenceTable.evidenceType,
+    reviewStatus: trackEvidenceTable.reviewStatus,
+  }).from(trackEvidenceTable).where(and(...evidenceConditions));
+  res.json(requirements.map(requirement => {
+    const matching = evidence.filter(item =>
+      item.requirementKey === requirement.requirementKey && item.evidenceType === requirement.evidenceType,
+    );
+    const verifiedCount = matching.filter(item => item.reviewStatus === "verified").length;
+    const recordedCount = matching.length;
+    const satisfiedCount = requirement.reviewRequired ? verifiedCount : recordedCount;
+    return {
+      ...requirement,
+      recordedCount,
+      verifiedCount,
+      satisfied: satisfiedCount >= requirement.minimumCount,
+    };
+  }));
+});
+
 router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   const parsed = createSchema.safeParse(req.body);
@@ -89,6 +129,12 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       if (siteId != null && siteId !== action.siteId) return { status: 400 as const, error: "Evidence site must match its action" };
       siteId = action.siteId;
     }
+    if (parsed.data.requirementKey != null) {
+      const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, parsed.data.module);
+      const requirement = requirements.find(item => item.requirementKey === parsed.data.requirementKey);
+      if (!requirement) return { status: 400 as const, error: "Unknown evidence requirement" };
+      if (requirement.evidenceType !== parsed.data.evidenceType) return { status: 400 as const, error: `This requirement expects ${requirement.evidenceType} evidence` };
+    }
     const [row] = await tx.insert(trackEvidenceTable).values({
       clientId,
       siteId,
@@ -96,6 +142,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       sourceKind: parsed.data.sourceKind ?? null,
       sourceRecordId: parsed.data.sourceRecordId ?? null,
       actionId: parsed.data.actionId ?? null,
+      requirementKey: parsed.data.requirementKey ?? null,
       evidenceType: parsed.data.evidenceType,
       title: parsed.data.title,
       details: parsed.data.details,

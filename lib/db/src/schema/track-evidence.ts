@@ -15,6 +15,7 @@ export const trackEvidenceTable = pgTable("track_evidence", {
   sourceKind: text("source_kind"),
   sourceRecordId: integer("source_record_id"),
   actionId: integer("action_id").references(() => trackActionsTable.id, { onDelete: "set null" }),
+  requirementKey: text("requirement_key"),
   evidenceType: text("evidence_type").notNull(),
   title: text("title").notNull(),
   details: text("details").notNull(),
