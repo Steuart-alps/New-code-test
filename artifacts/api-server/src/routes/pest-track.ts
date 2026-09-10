@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { pestVisitsTable, pestActivityTable, appSettingsTable } from "@workspace/db/schema";
+import { pestVisitsTable, pestActivityTable, appSettingsTable, clientsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, desc, gte, inArray, lte, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
 
 const router = Router();
@@ -18,6 +19,15 @@ const CONFIG_KEYS = [
   "pest_areas",
 ] as const;
 type ConfigKey = (typeof CONFIG_KEYS)[number];
+
+const PEST_TYPE_LABELS: Record<string, string> = {
+  rodent: "Rodent", insect: "Insect", bird: "Bird", other: "Other",
+};
+
+const EVIDENCE_LABELS: Record<string, string> = {
+  live_sighting: "Live sighting", droppings: "Droppings", damage: "Damage",
+  nest: "Nest / harbourage", tracks: "Tracks / smear marks", other: "Other",
+};
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +73,64 @@ router.get("/status", requireAuth, async (req, res) => {
     open_activity_count:  openActivity[0]?.count ?? 0,
     visits_this_year:     visitsThisYear[0]?.count ?? 0,
   });
+});
+
+router.get("/register.pdf", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const [visits, activity, clients, sites] = await Promise.all([
+    db.select().from(pestVisitsTable)
+      .where(eq(pestVisitsTable.clientId, clientId))
+      .orderBy(desc(pestVisitsTable.visitDate)),
+    db.select().from(pestActivityTable)
+      .where(eq(pestActivityTable.clientId, clientId))
+      .orderBy(desc(pestActivityTable.recordedDate)),
+    db.select({ name: clientsTable.name }).from(clientsTable)
+      .where(eq(clientsTable.id, clientId)).limit(1),
+    db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
+      .where(eq(sitesTable.clientId, clientId)),
+  ]);
+  const siteNames = new Map(sites.map((site) => [site.id, site.name]));
+  const siteName = (siteId: number | null) =>
+    siteId == null ? "All sites" : siteNames.get(siteId) ?? "Unknown site";
+  const pdf = await createPestControlRegisterPdf({
+    businessName: clients[0]?.name ?? "",
+    generatedAt: new Date().toLocaleDateString("en-GB"),
+    visits: visits.map((visit) => ({
+      date: visit.visitDate,
+      site: siteName(visit.siteId),
+      contractor: [visit.contractorName, visit.contractorCompany].filter(Boolean).join(", "),
+      areas: visit.areasInspected ?? "",
+      findings: visit.findings ?? "",
+      treatments: visit.treatmentsApplied ?? "",
+      recommendations: visit.recommendations ?? "",
+      nextVisit: visit.nextVisitDate ?? "",
+      signedOffBy: visit.signedOffBy ?? "",
+      notes: visit.notes ?? "",
+    })),
+    activity: activity.map((entry) => ({
+      date: entry.recordedDate,
+      site: siteName(entry.siteId),
+      type: [
+        PEST_TYPE_LABELS[entry.pestType] ?? entry.pestType,
+        EVIDENCE_LABELS[entry.evidenceType] ?? entry.evidenceType,
+      ].join(" - "),
+      location: entry.location ?? "",
+      severity: entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1),
+      actionTaken: entry.actionTaken ?? "",
+      recordedBy: entry.recordedBy ?? "",
+      resolvedStatus: entry.resolved
+        ? `Resolved${entry.resolvedAt ? ` ${entry.resolvedAt.toLocaleDateString("en-GB")}` : ""}`
+        : "Open",
+      notes: entry.notes ?? "",
+    })),
+  });
+  const filename = `pest-control-register-${new Date().toISOString().slice(0, 10)}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", pdf.length);
+  return res.send(pdf);
 });
 
 // ── Contractor visits ─────────────────────────────────────────────────────────
