@@ -5,7 +5,7 @@
 // and verifies:
 //   - insurance expiring within 30 days OR already expired is alerted
 //   - insurance expiring far in the future is NOT alerted
-//   - an expired DBS/PVG record is alerted; a current one is not
+//   - an expired DBS/PVG record and a check older than 3 years are alerted
 //   - only client_admin / maintenance-manager users are emailed
 //   - a second run sends nothing (dedupe by contractor+milestone)
 //   - renewing the insurance date produces a new milestone and re-alerts
@@ -120,6 +120,12 @@ async function main() {
     const insFar = await seedContractor("ins-far", { publicLiabilityExpiry: daysFromNow(200) });
     const dbsOld = await seedContractor("dbs-old", {});
     const dbsRecent = await seedContractor("dbs-recent", {});
+    const dbsStaleCheck = await seedContractor("dbs-stale-check", {
+      dbsCheckDate: daysFromNow(-(3 * 365 + 10)),
+    });
+    const dbsCurrentCheck = await seedContractor("dbs-current-check", {
+      dbsCheckDate: daysFromNow(-300),
+    });
     // dbs_expiry_date is a runtime-migrated column not yet represented by the
     // shared Drizzle schema, so seed it explicitly.
     await db.execute(sql`UPDATE contractors SET dbs_expiry_date = ${daysFromNow(-10)} WHERE id = ${dbsOld.id}`);
@@ -127,14 +133,19 @@ async function main() {
 
     // --- Run 1 ---
     const sent = [];
+    const pushes = [];
     const fakeSend = async ({ to, subject, html }) => { sent.push({ to, subject, html }); };
-    const r1 = await runContractorComplianceReminderJob(fakeSend);
+    const fakePush = async (userIds, payload) => {
+      pushes.push({ userIds, payload });
+      return userIds.length;
+    };
+    const r1 = await runContractorComplianceReminderJob(fakeSend, fakePush);
 
     check("run1: client alerted once", r1.clientsAlerted === 1, `clientsAlerted=${r1.clientsAlerted}`);
     check("run1: single digest email captured", sent.length === 1, `captured=${sent.length}`);
     check(
-      "run1: three reminders claimed (ins-soon, ins-expired, dbs-old)",
-      r1.remindersClaimed === 3,
+      "run1: four reminders claimed (insurance, explicit DBS expiry, stale DBS check)",
+      r1.remindersClaimed === 4,
       `remindersClaimed=${r1.remindersClaimed}`,
     );
 
@@ -142,8 +153,10 @@ async function main() {
     check("run1: ins-soon included", html.includes(insSoon.name), "missing ins-soon");
     check("run1: ins-expired included", html.includes(insExpired.name), "missing ins-expired");
     check("run1: dbs-old included", html.includes(dbsOld.name), "missing dbs-old");
+    check("run1: stale DBS check included", html.includes(dbsStaleCheck.name), "missing dbs-stale-check");
     check("run1: ins-far NOT included", !html.includes(insFar.name), "ins-far wrongly included");
     check("run1: dbs-recent NOT included", !html.includes(dbsRecent.name), "dbs-recent wrongly included");
+    check("run1: current DBS check NOT included", !html.includes(dbsCurrentCheck.name), "dbs-current-check wrongly included");
 
     const recipients = sent[0]?.to ?? [];
     check("run1: admin emailed", recipients.includes(admin.email), `recipients=${JSON.stringify(recipients)}`);
@@ -151,6 +164,14 @@ async function main() {
       "run1: viewer not emailed",
       !recipients.includes(`${tag}-viewer@test.local`),
       `recipients=${JSON.stringify(recipients)}`,
+    );
+    check(
+      "run1: manager receives one matching mobile push",
+      pushes.length === 1
+        && pushes[0].userIds.includes(admin.id)
+        && pushes[0].payload.data?.route === "/contractors"
+        && pushes[0].payload.body.includes("4 contractor compliance items"),
+      JSON.stringify(pushes),
     );
     const queuedResult = await db.execute(sql`
       SELECT status, email_type, to_email, body_html, body_text, email_preview_json,
@@ -161,7 +182,7 @@ async function main() {
     `);
     const queued = queuedResult.rows;
     check("run1: contractor reminders wait for manager approval",
-      queued.length === 3 && queued.every((row) => row.status === "pending" && row.email_type === "reminder"),
+      queued.length === 4 && queued.every((row) => row.status === "pending" && row.email_type === "reminder"),
       JSON.stringify(queued));
     check("run1: contractor reminders do not bypass the approval queue",
       queued.every((row) => !recipients.includes(row.to_email)),
@@ -284,15 +305,16 @@ async function main() {
 
     // --- Run 2: dedupe, nothing new ---
     sent.length = 0;
-    const r2 = await runContractorComplianceReminderJob(fakeSend);
-    check("run2: nothing re-sent", r2.remindersClaimed === 0 && sent.length === 0, `claimed=${r2.remindersClaimed}, captured=${sent.length}`);
+    pushes.length = 0;
+    const r2 = await runContractorComplianceReminderJob(fakeSend, fakePush);
+    check("run2: nothing re-sent", r2.remindersClaimed === 0 && sent.length === 0 && pushes.length === 0, `claimed=${r2.remindersClaimed}, captured=${sent.length}, pushes=${pushes.length}`);
 
     // --- Renew insurance → new milestone → re-alert ---
     await db.execute(sql`
       UPDATE contractors SET public_liability_expiry = ${daysFromNow(15)} WHERE id = ${insSoon.id}
     `);
     sent.length = 0;
-    const r3 = await runContractorComplianceReminderJob(fakeSend);
+    const r3 = await runContractorComplianceReminderJob(fakeSend, fakePush);
     check(
       "run3: renewed insurance re-alerts (new milestone)",
       r3.remindersClaimed === 1 && sent.length === 1,

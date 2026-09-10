@@ -58,6 +58,7 @@ interface ContractorRow {
   email: string;
   company: string | null;
   public_liability_expiry: string | null;
+  dbs_check_date: string | null;
   dbs_type: string | null;
   dbs_expiry_date: string | null;
 }
@@ -80,7 +81,7 @@ export async function getContractorComplianceAlerts(
   const contractorResult = await db.execute(sql`
     SELECT id, name, email, company,
            public_liability_expiry,
-           dbs_type, dbs_expiry_date
+           dbs_check_date, dbs_type, dbs_expiry_date
     FROM contractors
     WHERE client_id = ${clientId}
     ORDER BY name ASC
@@ -120,7 +121,8 @@ export async function getContractorComplianceAlerts(
       }
     }
 
-    // DBS / PVG expiry date (new field — replaces the old "3 years since check" heuristic).
+    // Prefer an explicit DBS/PVG expiry date. For older records without one,
+    // retain the original rule and alert once the check date reaches 3 years.
     if (c.dbs_expiry_date) {
       const expiry = new Date(c.dbs_expiry_date);
       if (!Number.isNaN(expiry.getTime()) && expiry <= insuranceThreshold) {
@@ -134,6 +136,21 @@ export async function getContractorComplianceAlerts(
             ? `${label} expired on ${fmtDate(expiry)}`
             : `${label} expires on ${fmtDate(expiry)}`,
         });
+      }
+    } else if (c.dbs_check_date) {
+      const checkDate = new Date(c.dbs_check_date);
+      if (!Number.isNaN(checkDate.getTime())) {
+        const staleAt = new Date(checkDate);
+        staleAt.setUTCFullYear(staleAt.getUTCFullYear() + DBS_MAX_AGE_YEARS);
+        if (staleAt <= now) {
+          const label = c.dbs_type ?? "DBS/PVG check";
+          alerts.push({
+            contractorId: c.id, contractorName: c.name, contractorEmail: c.email, company: c.company,
+            kind: "dbs",
+            milestone: `dbs-check:${checkDate.toISOString().slice(0, 10)}`,
+            detail: `${label} completed on ${fmtDate(checkDate)} is over ${DBS_MAX_AGE_YEARS} years old`,
+          });
+        }
       }
     }
   }
@@ -309,9 +326,11 @@ export interface ContractorComplianceJobResult {
 }
 
 type EmailSender = typeof sendEmail;
+type PushSender = typeof sendPushToUsers;
 
 export async function runContractorComplianceReminderJob(
   send: EmailSender = sendEmail,
+  sendPush: PushSender = sendPushToUsers,
 ): Promise<ContractorComplianceJobResult> {
   const result: ContractorComplianceJobResult = {
     clientsChecked: 0,
@@ -409,7 +428,7 @@ export async function runContractorComplianceReminderJob(
         }
 
         // Push managers a matching alert (best-effort; never blocks the job).
-        await sendPushToUsers(userIds, {
+        await sendPush(userIds, {
           title: "Contractor compliance expiring",
           body: `${claimed.length} contractor compliance item${claimed.length !== 1 ? "s" : ""} need attention.`,
           data: { route: "/contractors" },
