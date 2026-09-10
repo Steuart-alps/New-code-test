@@ -102,6 +102,14 @@ export const registrationRateLimit = makeLoginRateLimit({
   namespace: "register",
 });
 
+/** Public token links are intentionally usable without login, but are still
+ * bounded per source IP to slow token enumeration and abusive scraping. */
+export const publicLinkRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  namespace: "public-link",
+});
+
 /** Test-only helper: reset all counters. */
 export function _resetLoginRateLimit() {
   failures.clear();

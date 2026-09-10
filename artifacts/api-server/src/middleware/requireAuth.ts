@@ -143,7 +143,8 @@ export async function enforceTwoFactorEnrollment(req: Request, res: Response, ne
     || path === "/auth/2fa/setup"
     || path === "/auth/2fa/enable"
     || path === "/auth/passkeys/registration/options"
-    || path === "/auth/passkeys/registration/verify";
+    || path === "/auth/passkeys/registration/verify"
+    || path === "/auth/csrf-token";
   if (allowed) {
     next();
     return;

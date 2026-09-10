@@ -14,6 +14,7 @@ import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
 import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
+import { csrfProtection } from "./middleware/csrf";
 
 const app: Express = express();
 let applicationReady = false;
@@ -36,10 +37,15 @@ app.use(
     logger,
     serializers: {
       req(req) {
+        const requestPath = req.url?.split("?")[0] ?? "";
+        const redactedPath = requestPath.replace(
+          /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
+          "$1[redacted]",
+        );
         return {
           id: req.id,
           method: req.method,
-          url: req.url?.split("?")[0],
+          url: redactedPath,
         };
       },
       res(res) {
@@ -56,18 +62,34 @@ const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
   .map(d => d.trim())
   .filter(Boolean)
   .flatMap(d => [`https://${d}`, `http://${d}`]);
+const replitDevOrigins = process.env.REPLIT_DEV_DOMAIN
+  ? [`https://${process.env.REPLIT_DEV_DOMAIN}`, `http://${process.env.REPLIT_DEV_DOMAIN}`]
+  : [];
 
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...replitDeploymentOrigins,
+  ...replitDevOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
-];
+].flatMap((origin) => {
+  try {
+    return [new URL(origin.trim()).origin];
+  } catch {
+    return [];
+  }
+});
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some(o => origin.startsWith(o)) || process.env.NODE_ENV !== "production") {
+      let parsedOrigin: string | null = null;
+      try {
+        parsedOrigin = origin ? new URL(origin).origin : null;
+      } catch {
+        parsedOrigin = null;
+      }
+      if (!origin || (parsedOrigin !== null && allowedOrigins.includes(parsedOrigin))) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -145,6 +167,7 @@ app.post(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
+app.use(csrfProtection);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);

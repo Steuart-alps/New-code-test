@@ -14,10 +14,22 @@ import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { departmentsTable } from "@workspace/db/schema";
 
 const storage = new ObjectStorageService();
 
 const router: IRouter = Router();
+
+async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number): Promise<number | null | "invalid"> {
+  if (rawDepartmentId === undefined || rawDepartmentId === null || rawDepartmentId === "") return null;
+  const departmentId = Number(rawDepartmentId);
+  if (!Number.isInteger(departmentId) || departmentId <= 0) return "invalid";
+  const [department] = await db.select({ id: departmentsTable.id })
+    .from(departmentsTable)
+    .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)))
+    .limit(1);
+  return department ? departmentId : "invalid";
+}
 
 router.get("/sites", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
@@ -80,6 +92,11 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(400).json({ error: nameCheck.message });
     return;
   }
+  const departmentId = await validateDepartmentForClient(req.body?.departmentId, clientId);
+  if (departmentId === "invalid") {
+    res.status(400).json({ error: "Department does not belong to this client" });
+    return;
+  }
   // The site row and its billing charge intent are created atomically: a
   // crash can never produce an added site that was never billed.
   const site = await db.transaction(async (tx) => {
@@ -88,7 +105,7 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
       .values({
         clientId,
         name,
-        departmentId: req.body.departmentId ?? null,
+        departmentId,
         responsiblePerson: req.body.responsiblePerson ?? null,
         address: req.body.address ?? null,
         phone: req.body.phone ?? null,
@@ -122,12 +139,20 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
     res.status(403).json({ error: "Forbidden" });
     return;
   }
+  let departmentId: number | null | "invalid" = existing.departmentId;
+  if ("departmentId" in req.body) {
+    departmentId = await validateDepartmentForClient(req.body.departmentId, existing.clientId);
+    if (departmentId === "invalid") {
+      res.status(400).json({ error: "Department does not belong to this client" });
+      return;
+    }
+  }
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   for (const key of ["name", "responsiblePerson", "address", "phone"] as const) {
     if (key in req.body) updates[key] = req.body[key];
   }
   // Allow tagging / un-tagging a site to a department
-  if ("departmentId" in req.body) updates.departmentId = req.body.departmentId ?? null;
+  if ("departmentId" in req.body) updates.departmentId = departmentId;
 
   const [updated] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   res.json(updated);

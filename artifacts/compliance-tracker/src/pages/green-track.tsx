@@ -36,16 +36,24 @@ import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { getCsrfToken } from "@/lib/api";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const token = await getCsrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+  }
   const res = await fetch(`${baseUrl}/api${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

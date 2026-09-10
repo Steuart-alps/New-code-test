@@ -41,3 +41,4 @@
 - [Mobile draft hydration](mobile-draft-hydration.md) — server refreshes must never overwrite dirty mobile form state; reset abandoned edits before changing query scope.
 - [Custom form-option semantics](custom-form-option-semantics.md) — customize only business vocabularies; new records use active values, while edits preserve disabled legacy values.
 - [Daily entry cutoff](daily-entry-cutoff.md) — staff entries close at 23:59 and backdated writes stay closed; client admins and consultants can override.
+- [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.

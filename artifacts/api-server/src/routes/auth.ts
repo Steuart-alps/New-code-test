@@ -30,10 +30,15 @@ import {
   registrationOptionsForUser,
 } from "../lib/passkeys";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { getCsrfToken } from "../middleware/csrf";
 
 const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const router = Router();
+
+router.get("/auth/csrf-token", (req, res) => {
+  res.json({ token: getCsrfToken(req) });
+});
 
 // ── 2FA recovery codes ──────────────────────────────────────────────────────
 // Ten one-time recovery codes (format XXXX-XXXX-XXXX, no ambiguous chars) are

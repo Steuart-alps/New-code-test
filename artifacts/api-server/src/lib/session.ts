@@ -33,5 +33,6 @@ export const sessionMiddleware = session({
 declare module "express-session" {
   interface SessionData {
     userId: number;
+    csrfToken?: string;
   }
 }

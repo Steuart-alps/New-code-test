@@ -59,6 +59,7 @@ import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
 import dailyChecklistsRouter from "./daily-checklists";
 import feedbackRouter from "./feedback";
+import { publicLinkRateLimit } from "../lib/loginRateLimit";
 
 const router: IRouter = Router();
 
@@ -87,14 +88,14 @@ router.use("/legionella", requireAuth, requireService("legionellatrack"), legion
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
 // Public contractor token links must be mounted before the protected
 // /fix-track router, otherwise its auth middleware intercepts them.
-router.use("/fix-track/action", fixTrackPublicRouter);
-router.use("/fix-track/quotes/public", fixTrackQuoteRouter);
+router.use("/fix-track/action", publicLinkRateLimit, fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", publicLinkRateLimit, fixTrackQuoteRouter);
 router.use("/fix-track", requireAuth, (req, res, next) => {
   if (req.path.startsWith("/contractor-email-queue")) return next();
   return requireService("fixtrack")(req, res, next);
 }, fixTrackRouter);
 router.use(staffRosterRouter);
-router.use("/sign-off", signOffRouter); // public — no auth
+router.use("/sign-off", publicLinkRateLimit, signOffRouter); // public — no auth
 // safetrack and doctrack are now the same module; either key grants access.
 router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
@@ -131,6 +132,6 @@ router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
 // Public contractor self-service portal — no auth, token-protected
-router.use("/contractor-portal", contractorPortalRouter);
+router.use("/contractor-portal", publicLinkRateLimit, contractorPortalRouter);
 
 export default router;

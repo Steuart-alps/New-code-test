@@ -8,7 +8,9 @@ import { requireAuth, getClientId, canAccessClient } from "../middleware/require
 import {
   ObjectStorageService,
   ObjectNotFoundError,
+  ObjectOwnershipError,
 } from "../lib/objectStorage";
+import { ObjectPermission } from "../lib/objectAcl";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -64,19 +66,31 @@ router.post("/documents", requireAuth, async (req, res) => {
 
   const { name, description, objectPath, fileSize, mimeType } = parsed.data;
 
-  const [doc] = await db
-    .insert(clientDocumentsTable)
-    .values({
-      clientId,
-      name,
-      description: description ?? null,
-      objectPath,
-      fileSize: fileSize ?? null,
-      mimeType: mimeType ?? null,
-      uploadedById: user.id,
-      uploadedByName: user.name,
-    })
-    .returning();
+  try {
+    // Registration is the point at which a presigned upload becomes a tenant
+    // document. Finalize first so a caller cannot attach another tenant's
+    // object path to this client's database row.
+    await storage.finalizeTenantUpload(objectPath, clientId);
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: "Object does not belong to this client" });
+      return;
+    }
+    req.log.error({ err }, "Could not finalize document upload");
+    res.status(400).json({ error: "Uploaded file could not be verified" });
+    return;
+  }
+
+  const [doc] = await db.insert(clientDocumentsTable).values({
+    clientId,
+    name,
+    description: description ?? null,
+    objectPath,
+    fileSize: fileSize ?? null,
+    mimeType: mimeType ?? null,
+    uploadedById: user.id,
+    uploadedByName: user.name,
+  }).returning();
 
   res.status(201).json(doc);
 });
@@ -191,6 +205,15 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
 
   try {
     const file = await storage.getObjectEntityFile(doc.objectPath);
+    const canRead = await storage.canAccessObjectEntity({
+      userId: String(clientId),
+      objectFile: file,
+      requestedPermission: ObjectPermission.READ,
+    });
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     const response = await storage.downloadObject(file, 0 /* no cache for private docs */);
 
     // Force a download with the original filename
