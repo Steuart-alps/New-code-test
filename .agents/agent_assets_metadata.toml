@@ -29,3 +29,17 @@ mtime_ms = 1789054081100
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:b1c00cfa-ecaf-4a16-a178-69b15ffe6eb7/9355b1bf-5197-4ea2-8df4-858e33277e8c/ca2deff9-9a2d-4008-b6f3-8d2fe5978de9"
 storage_version_token = "1789054082284675"
 content_type = "image/png"
+
+[[outputs]]
+id = "kRpyOWI7-URCiU7CFlcyU"
+uri = "file://docs/compliance/uk-eu-compliance-review-2026-09-10.md"
+type = "text"
+title = "ComplyTrack UK and EU compliance review"
+description = "Full track-by-track legal and audit-readiness gap assessment dated 10 September 2026, with official UK/EU sources and a prioritized free-launch baseline."
+logical_id = "5d2c1d53-763c-45b5-8ad7-eecf90dea1c2"
+content_hash = "sha256:9916027452fbf03e7958b10eee6abc41301643538639fd6f27b8152d150c4aca"
+size = 24393
+mtime_ms = 1789066088878
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:b1c00cfa-ecaf-4a16-a178-69b15ffe6eb7/5d2c1d53-763c-45b5-8ad7-eecf90dea1c2/faf74031-3633-4ffe-859d-a08a060e182d"
+storage_version_token = "1789066105478096"
+content_type = "text/markdown"
