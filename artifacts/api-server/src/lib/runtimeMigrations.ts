@@ -1457,6 +1457,21 @@ async function migrateTwoFactor() {
       )
     ON CONFLICT ("code_hash") DO NOTHING
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "passkeys" (
+      "id" serial PRIMARY KEY,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "credential_id" text NOT NULL UNIQUE,
+      "public_key" text NOT NULL,
+      "counter" integer NOT NULL DEFAULT 0,
+      "transports" text[],
+      "device_type" text,
+      "backed_up" boolean NOT NULL DEFAULT false,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "last_used_at" timestamp
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_passkeys_user" ON "passkeys" ("user_id")`);
 }
 
 // ---- Staff roster ----

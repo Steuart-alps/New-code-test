@@ -7,6 +7,9 @@ export * from "./departments"
 export * from "./users"
 ;
 
+export * from "./passkeys"
+;
+
 export * from "./categories"
 ;
 

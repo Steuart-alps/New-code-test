@@ -1,6 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
+import { passkeysTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
@@ -128,7 +130,20 @@ export function enforceTwoFactorEnrollment(req: Request, res: Response, next: Ne
     next();
     return;
   }
-  if (!user || user.totpEnabled) {
+  if (!user) {
+    next();
+    return;
+  }
+  if (user.totpEnabled) {
+    next();
+    return;
+  }
+  const [passkey] = await db
+    .select({ id: passkeysTable.id })
+    .from(passkeysTable)
+    .where(eq(passkeysTable.userId, user.id))
+    .limit(1);
+  if (passkey) {
     next();
     return;
   }
@@ -137,7 +152,9 @@ export function enforceTwoFactorEnrollment(req: Request, res: Response, next: Ne
     || path === "/auth/me"
     || path === "/auth/logout"
     || path === "/auth/2fa/setup"
-    || path === "/auth/2fa/enable";
+    || path === "/auth/2fa/enable"
+    || path === "/auth/passkeys/registration/options"
+    || path === "/auth/passkeys/registration/verify";
   if (allowed) {
     next();
     return;
