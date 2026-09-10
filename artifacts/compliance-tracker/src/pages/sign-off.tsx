@@ -24,8 +24,10 @@ function pf(path: string, opts?: RequestInit) {
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface StaffMember { id: number; name: string; job_title: string | null; department: string | null; }
 interface SignOffDoc {
+  document_type: "doc" | "ra" | "sop" | "handbook";
   id: number; title: string; category: string; description: string | null;
-  file_name: string; department: string | null;
+  file_name: string | null; mime_type: string | null; department: string | null;
+  has_file: boolean;
   signed: boolean; acknowledged_at: string | null;
 }
 
@@ -164,10 +166,12 @@ function SignDialog({
   async function handleDownload() {
     setDownloading(true);
     try {
-      const res = await pf(`/sign-off/${token}/documents/${doc.id}/download`);
+      const res = await pf(
+        `/sign-off/${token}/documents/${doc.id}/download?documentType=${encodeURIComponent(doc.document_type)}&staffId=${staffMember.id}`,
+      );
       if (!res.ok) throw new Error("Failed");
       const { downloadUrl } = await res.json();
-      await downloadFile(downloadUrl, doc.file_name);
+      await downloadFile(downloadUrl, doc.file_name ?? doc.title);
     } catch {
       toast({ title: "Could not open document", variant: "destructive" });
     } finally {
@@ -183,8 +187,8 @@ function SignDialog({
         method: "POST",
         body: JSON.stringify({
           documentId: doc.id,
+          documentType: doc.document_type,
           staffRosterId: staffMember.id,
-          staffName: staffMember.name,
           signature: tab === "draw" ? drawnSig : null,
           typedName: tab === "type" ? typedName.trim() : null,
         }),
@@ -227,19 +231,23 @@ function SignDialog({
           </div>
 
           {doc.description && (
-            <p className="text-sm text-slate-600 bg-slate-50 rounded-lg p-3">{doc.description}</p>
+            <p className="text-sm text-slate-600 bg-slate-50 rounded-lg p-3 whitespace-pre-wrap max-h-64 overflow-y-auto">
+              {doc.description}
+            </p>
           )}
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full gap-2"
-            onClick={handleDownload}
-            disabled={downloading}
-          >
-            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            Open & read document before signing
-          </Button>
+          {doc.has_file && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleDownload}
+              disabled={downloading}
+            >
+              {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Open & read document before signing
+            </Button>
+          )}
 
           <hr />
 
@@ -567,10 +575,10 @@ export default function SignOffPage() {
 
                 <div className="space-y-3">
                   {docs.map(doc => {
-                    const Icon = fileIcon(doc.file_name);
+                    const Icon = fileIcon(doc.mime_type ?? doc.file_name ?? "");
                     return (
                       <div
-                        key={doc.id}
+                        key={`${doc.document_type}:${doc.id}`}
                         className={cn(
                           "bg-white rounded-xl border shadow-sm p-4 transition-all",
                           doc.signed ? "border-green-200 bg-green-50/30" : "border-slate-200",
