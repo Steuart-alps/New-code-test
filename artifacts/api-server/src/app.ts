@@ -9,6 +9,7 @@ import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
+import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
 import { sendCancellationWarningEmail } from "./lib/offboarding";
@@ -147,6 +148,7 @@ app.use(sessionMiddleware);
 app.use(loadUser);
 app.use(enforceTwoFactorEnrollment);
 app.use(enforceClientAccess);
+app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
