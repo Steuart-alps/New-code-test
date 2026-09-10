@@ -29,6 +29,7 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
+  Upload, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -161,6 +162,8 @@ function GreenConfigDialog() {
 const MACHINE_TYPE_LABELS: Record<string, string> = {
   ride_on_cylinder:  "Ride-on (cylinder)",
   ride_on_rotary:    "Ride-on (rotary)",
+  ride_on:           "Ride-on equipment",
+  pedestrian:        "Pedestrian equipment",
   fairway_mower:     "Fairway mower",
   walk_behind:       "Walk-behind mower",
   tractor:           "Tractor",
@@ -525,6 +528,252 @@ function MachineDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : isEdit ? "Save changes" : "Add machine"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type MachineImportRow = {
+  name: string;
+  type: string;
+  make: string | null;
+  model: string | null;
+  serialNo: string | null;
+  year: number | null;
+  regNo: string | null;
+  siteId: number | null;
+  notes: string | null;
+  active: boolean;
+};
+
+function parseCsvRows(text: string): string[][] {
+  const output: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const source = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '"') {
+      if (quoted && source[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && source[i + 1] === "\n") i += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) output.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length) {
+    row.push(cell.trim());
+    if (row.some(Boolean)) output.push(row);
+  }
+  return output;
+}
+
+function importHeaderKey(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function parseMachineRosterCsv(
+  text: string,
+  sites: { id: number; name: string }[],
+): { rows: MachineImportRow[]; errors: string[] } {
+  const table = parseCsvRows(text);
+  if (table.length < 2) return { rows: [], errors: ["Add a header row and at least one equipment row."] };
+
+  const aliases: Record<string, string[]> = {
+    name: ["name", "machine_name", "equipment", "equipment_name", "description"],
+    type: ["type", "machine_type", "equipment_type", "category", "class"],
+    make: ["make", "manufacturer"],
+    model: ["model"],
+    serialNo: ["serial_no", "serial_number", "serial", "serialno"],
+    regNo: ["reg_no", "registration", "fleet_no", "fleet_number", "asset_tag", "asset_no"],
+    year: ["year", "manufacture_year"],
+    site: ["site", "site_name", "location"],
+    notes: ["notes", "note"],
+    active: ["active", "status"],
+  };
+  const headers = table[0].map(importHeaderKey);
+  const indexes = Object.fromEntries(Object.entries(aliases).map(([key, names]) => [
+    key,
+    names.map(name => headers.indexOf(name)).find(index => index >= 0) ?? -1,
+  ])) as Record<string, number>;
+  const errors: string[] = [];
+  if (indexes.name < 0) errors.push("The CSV needs a name or equipment column.");
+  if (indexes.type < 0) errors.push("The CSV needs a type or category column.");
+  if (errors.length) return { rows: [], errors };
+
+  const siteByName = new Map(sites.map(site => [site.name.trim().toLowerCase(), site.id]));
+  const rows: MachineImportRow[] = [];
+  table.slice(1).forEach((values, index) => {
+    const rowNumber = index + 2;
+    const value = (key: string) => indexes[key] >= 0 ? values[indexes[key]]?.trim() ?? "" : "";
+    const siteName = value("site");
+    const yearText = value("year");
+    const activeText = value("active").toLowerCase();
+    const siteId = siteName ? siteByName.get(siteName.toLowerCase()) : null;
+    if (!value("name")) errors.push(`Row ${rowNumber}: name is required.`);
+    if (!value("type")) errors.push(`Row ${rowNumber}: type is required.`);
+    if (siteName && siteId === undefined) errors.push(`Row ${rowNumber}: site "${siteName}" was not found.`);
+    if (yearText && (!/^\d{4}$/.test(yearText) || Number(yearText) < 1900 || Number(yearText) > 2100)) {
+      errors.push(`Row ${rowNumber}: year must be between 1900 and 2100.`);
+    }
+    if (!value("name") || !value("type") || (siteName && siteId === undefined)) return;
+    rows.push({
+      name: value("name"),
+      type: value("type"),
+      make: value("make") || null,
+      model: value("model") || null,
+      serialNo: value("serialNo") || null,
+      year: yearText ? Number(yearText) : null,
+      regNo: value("regNo") || null,
+      siteId: siteId ?? null,
+      notes: value("notes") || null,
+      active: !["false", "no", "inactive", "0"].includes(activeText),
+    });
+  });
+  return { rows, errors };
+}
+
+function downloadMachineRosterTemplate() {
+  const csv = [
+    "name,type,make,model,serial_no,reg_no,year,site,notes,active",
+    'Greens mower 1,ride-on,Toro,Reelmaster 5010,RM-001,GT-01,2021,,Main cutting unit,true',
+    'Pedestrian mower 1,pedestrian,Honda,HRX 537,PM-001,GT-02,2022,,Walk-behind mower,true',
+  ].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "greentrack-equipment-template.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function MachineImportDialog({
+  open, onClose, sites, onImported,
+}: {
+  open: boolean;
+  onClose: () => void;
+  sites: { id: number; name: string }[];
+  onImported: () => void;
+}) {
+  const { toast } = useToast();
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<MachineImportRow[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  const reset = () => {
+    setFileName("");
+    setRows([]);
+    setErrors([]);
+  };
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    const parsed = parseMachineRosterCsv(await file.text(), sites);
+    setFileName(file.name);
+    setRows(parsed.rows);
+    setErrors(parsed.errors);
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      const result = await apiFetch<{ imported: number; skipped: Array<{ name: string; reason: string }> }>(
+        "/green-track/machines/import",
+        { method: "POST", body: JSON.stringify({ rows }) },
+      );
+      toast({
+        title: "Equipment roster imported",
+        description: `${result.imported} added${result.skipped.length ? `, ${result.skipped.length} already in the fleet` : ""}.`,
+      });
+      onImported();
+      onClose();
+      reset();
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={value => { if (!value && !importing) { onClose(); reset(); } }}>
+      <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Upload equipment roster</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            Import the account&apos;s equipment list once, then staff can select the active machines in GreenTrack.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-sm" onClick={downloadMachineRosterTemplate}>
+              <Download className="w-3.5 h-3.5" /> Download CSV template
+            </Button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border px-3 py-2 text-sm hover:bg-muted/40">
+              <Upload className="w-3.5 h-3.5" />
+              Choose CSV
+              <input type="file" accept=".csv,text/csv" className="sr-only" onChange={e => void handleFile(e.target.files?.[0])} />
+            </label>
+            {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
+            <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.
+            Optional columns include make, model, serial number, fleet number, year, site, notes, and active.
+          </p>
+          {errors.length > 0 && (
+            <div className="rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <p className="font-medium">Fix these rows before importing:</p>
+              <ul className="mt-1 list-disc pl-5 space-y-0.5">{errors.slice(0, 8).map(error => <li key={error}>{error}</li>)}</ul>
+              {errors.length > 8 && <p className="mt-1 text-xs">…and {errors.length - 8} more.</p>}
+            </div>
+          )}
+          {rows.length > 0 && (
+            <div className="overflow-hidden rounded-sm border border-border">
+              <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
+                Previewing {rows.length} equipment item{rows.length === 1 ? "" : "s"}
+              </div>
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="border-b border-border text-left text-muted-foreground">
+                    <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Identifier</th><th className="px-3 py-2">Site</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {rows.slice(0, 50).map(row => (
+                      <tr key={`${row.name}-${row.serialNo ?? row.regNo ?? row.type}`}>
+                        <td className="px-3 py-2 font-medium">{row.name}</td>
+                        <td className="px-3 py-2">{MACHINE_TYPE_LABELS[row.type.toLowerCase()] ?? row.type}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.serialNo ?? row.regNo ?? "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{sites.find(site => site.id === row.siteId)?.name ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length > 50 && <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Showing the first 50 rows.</p>}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { onClose(); reset(); }} disabled={importing}>Cancel</Button>
+          <Button onClick={handleImport} disabled={importing || rows.length === 0 || errors.length > 0}>
+            {importing ? "Importing…" : `Import ${rows.length || ""} equipment`}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

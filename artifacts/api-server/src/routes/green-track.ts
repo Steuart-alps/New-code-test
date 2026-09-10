@@ -11,6 +11,8 @@ const router = Router();
 export const MACHINE_TYPES = [
   "ride_on_cylinder",
   "ride_on_rotary",
+  "ride_on",
+  "pedestrian",
   "fairway_mower",
   "walk_behind",
   "tractor",
@@ -27,6 +29,37 @@ export const MACHINE_TYPES = [
   "edger_strimmer",
   "other",
 ] as const;
+
+const MACHINE_TYPE_ALIASES: Record<string, string> = {
+  "ride-on": "ride_on",
+  "ride on": "ride_on",
+  rideon: "ride_on",
+  ride_on_mower: "ride_on",
+  pedestrian: "pedestrian",
+  pedestrian_mower: "pedestrian",
+  "walk behind": "walk_behind",
+  "walk-behind": "walk_behind",
+  "walk behind mower": "walk_behind",
+  "ride-on cylinder": "ride_on_cylinder",
+  "ride-on rotary": "ride_on_rotary",
+  "fairway": "fairway_mower",
+  "utility": "utility_vehicle",
+  "sprayer": "sprayer_spreader",
+  "spreader": "sprayer_spreader",
+  "atv": "atv_quad",
+  "quad": "atv_quad",
+  "hedge trimmer": "hedge_trimmer",
+  "edger": "edger_strimmer",
+  "strimmer": "edger_strimmer",
+};
+
+function normalizeMachineType(value: unknown): string | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  const underscored = raw.replace(/&/g, "and").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const normalized = MACHINE_TYPE_ALIASES[raw] ?? MACHINE_TYPE_ALIASES[underscored] ?? underscored;
+  return (MACHINE_TYPES as readonly string[]).includes(normalized) ? normalized : null;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function rows<T = any>(result: any): T[] {
@@ -69,6 +102,121 @@ router.post("/machines", requireClientAdmin, async (req, res) => {
     res.status(201).json(rows(result)[0]);
   } catch (err) {
     res.status(500).json({ error: "Failed to create machine" });
+  }
+});
+
+router.post("/machines/import", requireClientAdmin, async (req, res) => {
+  try {
+    const clientId = getClientId(req);
+    const input = req.body?.rows;
+    if (!Array.isArray(input) || input.length === 0) {
+      return res.status(400).json({ error: "At least one equipment row is required" });
+    }
+    if (input.length > 500) {
+      return res.status(400).json({ error: "Import is limited to 500 equipment rows" });
+    }
+
+    const siteRows = rows<{ id: number }>(await db.execute(sql`
+      SELECT id FROM sites WHERE client_id = ${clientId}
+    `));
+    const siteIds = new Set(siteRows.map(site => Number(site.id)));
+    const errors: Array<{ row: number; error: string }> = [];
+    const normalizedRows: Array<{
+      name: string;
+      type: string;
+      make: string | null;
+      model: string | null;
+      serialNo: string | null;
+      year: number | null;
+      regNo: string | null;
+      siteId: number | null;
+      notes: string | null;
+      active: boolean;
+    }> = [];
+
+    input.forEach((rawRow: any, index: number) => {
+      const rowNumber = index + 2;
+      const name = String(rawRow?.name ?? "").trim();
+      const type = normalizeMachineType(rawRow?.type);
+      const yearValue = rawRow?.year === undefined || rawRow?.year === null || String(rawRow.year).trim() === ""
+        ? null
+        : Number(rawRow.year);
+      const siteId = rawRow?.siteId === undefined || rawRow?.siteId === null || String(rawRow.siteId).trim() === ""
+        ? null
+        : Number(rawRow.siteId);
+
+      if (!name) errors.push({ row: rowNumber, error: "Name is required" });
+      if (!type) errors.push({ row: rowNumber, error: "Type must be one of the approved GreenTrack types (ride-on and pedestrian are supported aliases)" });
+      if (yearValue !== null && (!Number.isInteger(yearValue) || yearValue < 1900 || yearValue > 2100)) {
+        errors.push({ row: rowNumber, error: "Year must be a whole number between 1900 and 2100" });
+      }
+      if (siteId !== null && (!Number.isInteger(siteId) || !siteIds.has(siteId))) {
+        errors.push({ row: rowNumber, error: "Site does not belong to this account" });
+      }
+      if (!name || !type || errors.some(error => error.row === rowNumber)) return;
+
+      normalizedRows.push({
+        name,
+        type,
+        make: String(rawRow?.make ?? "").trim() || null,
+        model: String(rawRow?.model ?? "").trim() || null,
+        serialNo: String(rawRow?.serialNo ?? "").trim() || null,
+        year: yearValue,
+        regNo: String(rawRow?.regNo ?? "").trim() || null,
+        siteId,
+        notes: String(rawRow?.notes ?? "").trim() || null,
+        active: rawRow?.active !== false,
+      });
+    });
+
+    if (errors.length) {
+      return res.status(400).json({ error: "Import contains invalid rows", errors });
+    }
+
+    const result = await db.transaction(async tx => {
+      const existing = rows<{ name: string; type: string; serial_no: string | null; reg_no: string | null }>(
+        await tx.execute(sql`
+          SELECT name, type, serial_no, reg_no
+          FROM green_machines
+          WHERE client_id = ${clientId}
+        `),
+      );
+      const existingKeys = new Set<string>();
+      for (const machine of existing) {
+        if (machine.serial_no) existingKeys.add(`serial:${machine.serial_no.trim().toLowerCase()}`);
+        if (machine.reg_no) existingKeys.add(`reg:${machine.reg_no.trim().toLowerCase()}`);
+        existingKeys.add(`name:${machine.name.trim().toLowerCase()}|${machine.type}`);
+      }
+
+      let imported = 0;
+      const skipped: Array<{ row: number; name: string; reason: string }> = [];
+      for (const [index, machine] of normalizedRows.entries()) {
+        const keys = [
+          machine.serialNo ? `serial:${machine.serialNo.toLowerCase()}` : null,
+          machine.regNo ? `reg:${machine.regNo.toLowerCase()}` : null,
+          `name:${machine.name.toLowerCase()}|${machine.type}`,
+        ].filter(Boolean) as string[];
+        if (keys.some(key => existingKeys.has(key))) {
+          skipped.push({ row: index + 2, name: machine.name, reason: "Already in fleet" });
+          continue;
+        }
+        await tx.execute(sql`
+          INSERT INTO green_machines
+            (client_id, site_id, name, type, make, model, serial_no, year, reg_no, active, notes)
+          VALUES
+            (${clientId}, ${machine.siteId}, ${machine.name}, ${machine.type}, ${machine.make},
+             ${machine.model}, ${machine.serialNo}, ${machine.year}, ${machine.regNo},
+             ${machine.active}, ${machine.notes})
+        `);
+        keys.forEach(key => existingKeys.add(key));
+        imported += 1;
+      }
+      return { imported, skipped };
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to import equipment roster" });
   }
 });
 
