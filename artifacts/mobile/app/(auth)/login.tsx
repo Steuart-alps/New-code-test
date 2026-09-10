@@ -9,6 +9,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -28,6 +29,7 @@ export default function LoginScreen() {
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [usingRecoveryCode, setUsingRecoveryCode] = useState(false);
+  const [setupUrl, setSetupUrl] = useState<string | null>(null);
   const passwordRef = useRef<TextInput>(null);
   const codeRef = useRef<TextInput>(null);
 
@@ -47,6 +49,11 @@ export default function LoginScreen() {
         setPendingToken(result.pendingToken);
         setLoading(false);
         setTimeout(() => codeRef.current?.focus(), 100);
+        return;
+      }
+      if (result.requires2faSetup) {
+        setSetupUrl(result.setupUrl ?? null);
+        setLoading(false);
         return;
       }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -116,16 +123,26 @@ export default function LoginScreen() {
               },
             ]}
           >
-            <Text style={[styles.cardTitle, { color: colors.foreground }]}>
-              Sign in
-            </Text>
-            <Text
+             <Text style={[styles.cardTitle, { color: colors.foreground }]}>
+               {setupUrl ? 'Set up two-factor authentication' : 'Sign in'}
+             </Text>
+             <Text
               style={[styles.cardSub, { color: colors.mutedForeground }]}
             >
-              Access your compliance dashboard
+               {setupUrl
+                 ? 'Your ComplyTrack account requires two-factor authentication. Set it up in the web dashboard, then return here to sign in.'
+                 : 'Access your compliance dashboard'}
             </Text>
+             {setupUrl && (
+               <TouchableOpacity
+                 style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                 onPress={() => Linking.openURL(setupUrl).catch(() => undefined)}
+               >
+                 <Text style={styles.primaryButtonText}>Open web setup</Text>
+               </TouchableOpacity>
+             )}
 
-            {/* Email */}
+             {!setupUrl && <>{/* Email */}
             <Text style={[styles.label, { color: colors.foreground }]}>
               Email address
             </Text>
@@ -193,8 +210,8 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* 2FA code */}
-            {pendingToken && (
+             {/* 2FA code */}
+             {pendingToken && (
               <>
                 <Text
                   style={[
@@ -219,7 +236,7 @@ export default function LoginScreen() {
                     usingRecoveryCode
                       ? value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 14)
                       : value.replace(/\D/g, '').slice(0, 6),
-                  )}
+              )}
                   placeholder={usingRecoveryCode ? 'XXXX-XXXX-XXXX' : '6-digit authenticator code'}
                   placeholderTextColor={colors.mutedForeground}
                   keyboardType={usingRecoveryCode ? 'default' : 'number-pad'}
@@ -306,6 +323,7 @@ export default function LoginScreen() {
             >
               ComplyTrack by ALPS Consulting
             </Text>
+             </>}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -384,6 +402,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
   eyeBtn: { paddingHorizontal: 14 },
+  primaryButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    marginBottom: 24,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+  },
   errorBox: {
     borderLeftWidth: 3,
     backgroundColor: '#fef2f2',

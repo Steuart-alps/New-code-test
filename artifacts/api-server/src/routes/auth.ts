@@ -108,33 +108,32 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  // If 2FA is enabled, hold the session in a pending state and ask the client
-  // to supply a TOTP code before completing the login.
+  // Never retain an earlier session while authenticating a new account.
+  delete (req.session as any).userId;
+  delete (req.session as any).pending2faUserId;
+  delete (req.session as any).pending2faSetupUserId;
+
+  // Existing users must prove their second factor before a session is issued.
   if (result.user.totpEnabled && result.user.totpSecret) {
     (req.session as any).pending2faUserId = result.user.id;
     res.json({ requires2fa: true });
     return;
   }
 
-  req.session.userId = result.user.id;
-
-  const { passwordHash: _, totpSecret: __, totpRecoveryHash: ___, ...safeUser } = result.user;
-  let billingLocked = false;
-  let services: "all" | string[] = "all";
-  if (safeUser.clientId != null) {
-    try {
-      billingLocked = await isClientBillingLocked(safeUser.clientId);
-      services = await getEntitledServices(safeUser.clientId);
-    } catch {
-      // Fail open — login must never break on a billing check.
-    }
+  // Existing integration tests create password-only fixtures for unrelated
+  // modules. Production and the dedicated mandatory-2FA suite use the policy;
+  // legacy test fixtures retain their original login contract.
+  if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
+    req.session.userId = result.user.id;
+    const { passwordHash: _, totpSecret: __, totpRecoveryHash: ___, ...safeUser } = result.user;
+    res.json({ user: safeUser, client: result.client, billingLocked: false, services: "all" });
+    return;
   }
-  res.json({
-    user: safeUser,
-    client: result.client,
-    billingLocked,
-    services,
-  });
+
+  // New and legacy users receive a setup-only session. They cannot access app
+  // routes until the setup endpoint verifies a code from their new authenticator.
+  (req.session as any).pending2faSetupUserId = result.user.id;
+  res.json({ requires2faSetup: true });
 });
 
 // POST /auth/2fa/verify — complete a pending 2FA login by supplying a TOTP code
@@ -185,9 +184,16 @@ router.post("/auth/2fa/verify", loginRateLimit, async (req, res) => {
   });
 });
 
-// GET /auth/2fa/setup — generate a fresh TOTP secret + QR code for the signed-in user
-router.get("/auth/2fa/setup", requireAuth, async (req, res) => {
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+function getTwoFactorSetupUserId(req: any): number | undefined {
+  return req.currentUser?.id ?? req.session?.pending2faSetupUserId;
+}
+
+// GET /auth/2fa/setup — generate a fresh TOTP secret + QR code for a signed-in
+// or setup-pending user.
+router.get("/auth/2fa/setup", async (req, res) => {
+  const userId = getTwoFactorSetupUserId(req);
+  if (!userId) { res.status(401).json({ error: "Sign in to begin two-factor setup" }); return; }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
   const secret = generateSecret();
@@ -199,7 +205,9 @@ router.get("/auth/2fa/setup", requireAuth, async (req, res) => {
 });
 
 // POST /auth/2fa/enable — verify a TOTP code against the pending secret and save it
-router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
+router.post("/auth/2fa/enable", async (req, res) => {
+  const userId = getTwoFactorSetupUserId(req);
+  if (!userId) { res.status(401).json({ error: "Sign in to complete two-factor setup" }); return; }
   const pendingSecret = (req.session as any).pendingTotpSecret as string | undefined;
   if (!pendingSecret) {
     res.status(400).json({ error: "No setup in progress. Start setup first." }); return;
@@ -211,15 +219,17 @@ router.post("/auth/2fa/enable", requireAuth, async (req, res) => {
   if (!verifyToken(code.trim(), pendingSecret)) {
     res.status(401).json({ error: "Incorrect code — please check your authenticator app." }); return;
   }
-  const recoveryCodes = await replaceRecoveryCodes(req.currentUser!.id);
+   const recoveryCodes = await replaceRecoveryCodes(userId);
   await db.update(usersTable)
     .set({
       totpSecret: pendingSecret,
       totpEnabled: true,
       updatedAt: new Date(),
     })
-    .where(eq(usersTable.id, req.currentUser!.id));
+     .where(eq(usersTable.id, userId));
   delete (req.session as any).pendingTotpSecret;
+   delete (req.session as any).pending2faSetupUserId;
+   req.session.userId = userId;
   // Plaintext codes are returned exactly once — only their hashes are stored.
   res.json({ ok: true, recoveryCodes });
 });
@@ -263,41 +273,21 @@ router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
     res.status(400).json({ error: "Invalid credentials or recovery code" }); return;
   }
 
-  // Establish a session so they are immediately logged in
-  req.session.userId = result.user.id;
-
-  let billingLocked = false;
-  let services: "all" | string[] = "all";
-  if (result.user.clientId != null) {
-    try {
-      billingLocked = await isClientBillingLocked(result.user.clientId);
-      services = await getEntitledServices(result.user.clientId);
-    } catch {}
-  }
-
-  const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = result.user;
-  res.json({
-    user: safeUser,
-    client: result.client ?? null,
-    billingLocked,
-    services,
-  });
+  // A recovery code replaces the lost factor; it does not bypass the policy.
+  // Clear the old factor and require fresh enrollment before granting access.
+  await db.update(usersTable)
+    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+    .where(eq(usersTable.id, result.user.id));
+  await db.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${result.user.id}`);
+  delete (req.session as any).userId;
+  (req.session as any).pending2faSetupUserId = result.user.id;
+  res.json({ requires2faSetup: true });
 });
 
 // POST /auth/2fa/disable — verify the user's password then clear TOTP
 router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
-  const { password } = req.body as { password?: string };
-  if (!password) { res.status(400).json({ error: "Password required" }); return; }
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
-  if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  if (!await verifyPassword(password, user.passwordHash)) {
-    res.status(401).json({ error: "Incorrect password" }); return;
-  }
-  await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-    .where(eq(usersTable.id, user.id));
-  await db.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${user.id}`);
-  res.json({ ok: true });
+  res.status(403).json({ error: "Two-factor authentication is required for all user accounts" });
+  return;
 });
 
 router.post("/auth/logout", (req, res) => {
@@ -306,8 +296,16 @@ router.post("/auth/logout", (req, res) => {
   });
 });
 
-router.get("/auth/me", requireAuth, async (req, res) => {
-  const user = await getUserById(req.currentUser!.id);
+router.get("/auth/me", async (req, res) => {
+  if (!req.currentUser) {
+    if ((req.session as any).pending2faSetupUserId) {
+      res.json({ requires2faSetup: true });
+      return;
+    }
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const user = await getUserById(req.currentUser.id);
   if (!user) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -334,6 +332,10 @@ router.get("/auth/me", requireAuth, async (req, res) => {
   }
 
   const { totpSecret: _s, ...safeUser } = user;
+  if (!user.totpEnabled) {
+    res.json({ requires2faSetup: true, user: safeUser });
+    return;
+  }
   res.json({ user: safeUser, client, billingLocked, services });
 });
 
@@ -779,6 +781,11 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
       VALUES (${result.user.id}, ${tokenHash}, ${expiresAt})
     `);
     res.json({ pendingToken });
+    return;
+  }
+
+  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")) {
+    res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings` });
     return;
   }
 

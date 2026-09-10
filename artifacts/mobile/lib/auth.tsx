@@ -32,6 +32,7 @@ export interface AuthUser {
 interface MeResponse {
   user: AuthUser;
   services?: 'all' | string[] | null;
+  requires2faSetup?: boolean;
 }
 
 interface MobileSessionResponse {
@@ -50,7 +51,7 @@ interface AuthContextType {
     password: string,
     pendingToken?: string,
     code?: string,
-  ) => Promise<{ pendingToken?: string }>;
+  ) => Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -125,6 +126,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // /api/auth/me returns { user, services } or just the user object
           if (me && typeof me === 'object' && 'user' in me) {
             const full = me as MeResponse;
+            if (full.requires2faSetup) {
+              await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+              await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
+              applyToken(null);
+              setUser(null);
+              setServices(null);
+              return;
+            }
             setUser(full.user);
             setServices(full.services ?? null);
           } else {
@@ -162,8 +171,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!user) {
             const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
             if (me && typeof me === 'object' && 'user' in me) {
-              setUser((me as MeResponse).user);
-              setServices((me as MeResponse).services ?? null);
+              const full = me as MeResponse;
+              if (full.requires2faSetup) {
+                await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+                await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
+                applyToken(null);
+                setUser(null);
+                setServices(null);
+                return;
+              }
+              setUser(full.user);
+              setServices(full.services ?? null);
             } else {
               setUser(me as AuthUser);
               setServices(null);
@@ -189,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password: string,
       pendingToken?: string,
       code?: string,
-    ): Promise<{ pendingToken?: string }> => {
+    ): Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }> => {
       authGeneration.current += 1;
       const res = pendingToken
         ? await apiFetch<{ token: string; expiresAt: string; user: AuthUser }>(
@@ -202,12 +220,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         : await apiFetch<
             | { token: string; expiresAt: string; user: AuthUser }
             | { pendingToken: string }
+            | { requires2faSetup: true; setupUrl?: string }
           >('/api/auth/mobile-login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
           });
       if ('pendingToken' in res) {
         return { pendingToken: res.pendingToken };
+      }
+      if ('requires2faSetup' in res && res.requires2faSetup) {
+        return { requires2faSetup: true, setupUrl: res.setupUrl };
       }
       const ok = res as { token: string; expiresAt: string; user: AuthUser };
       // A different account must never inherit another user's recoverable

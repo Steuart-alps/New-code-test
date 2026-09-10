@@ -31,12 +31,13 @@ interface AuthContextValue {
   client: AuthClient | null;
   billingLocked: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requiresEmailVerification?: boolean }>;
+  login: (email: string, password: string) => Promise<{ requires2fa: boolean; requires2faSetup?: boolean; requiresEmailVerification?: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   activeClientId: number | null;
   setActiveClientId: (id: number | null) => void;
   services: "all" | string[] | null;
+  needsTwoFactorSetup: boolean;
   hasService: (key: string) => boolean;
 }
 
@@ -46,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [client, setClient] = useState<AuthClient | null>(null);
   const [services, setServices] = useState<"all" | string[] | null>(null);
+  const [needsTwoFactorSetup, setNeedsTwoFactorSetup] = useState(false);
   const [billingLocked, setBillingLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
@@ -156,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
         setClient(data.client);
         setServices(data.services ?? null);
+        setNeedsTwoFactorSetup(Boolean(data.requires2faSetup));
         setBillingLocked(Boolean(data.billingLocked));
         if (data.client && !activeClientId) {
           setActiveClientId(data.client.id);
@@ -164,11 +167,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setClient(null);
         setServices(null);
+        setNeedsTwoFactorSetup(false);
       }
     } catch {
       setUser(null);
       setClient(null);
       setServices(null);
+      setNeedsTwoFactorSetup(false);
     }
   }
 
@@ -176,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh().finally(() => setIsLoading(false));
   }, []);
 
-  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requiresEmailVerification?: boolean }> {
+  async function login(email: string, password: string): Promise<{ requires2fa: boolean; requires2faSetup?: boolean; requiresEmailVerification?: boolean }> {
     const res = await apiFetch("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -189,11 +194,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const data = await res.json();
     if (data.requires2fa) return { requires2fa: true };
+    if (data.requires2faSetup) {
+      setNeedsTwoFactorSetup(true);
+      return { requires2fa: false, requires2faSetup: true };
+    }
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);
     setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
+    setNeedsTwoFactorSetup(false);
     return { requires2fa: false };
   }
 
@@ -204,10 +214,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setServices(null);
     setBillingLocked(false);
     setActiveClientId(null);
+    setNeedsTwoFactorSetup(false);
   }
 
   return (
-    <AuthContext.Provider value={{ user, client, services, hasService, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId }}>
+    <AuthContext.Provider value={{ user, client, services, hasService, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId, needsTwoFactorSetup }}>
       {children}
     </AuthContext.Provider>
   );

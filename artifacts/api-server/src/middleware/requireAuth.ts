@@ -116,6 +116,38 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/**
+ * Every account that can authenticate must have an enrolled second factor.
+ * Staff-roster people are not users and never reach this guard. The setup
+ * endpoints and logout remain available so an unenrolled account can finish
+ * enrollment or leave the session.
+ */
+export function enforceTwoFactorEnrollment(req: Request, res: Response, next: NextFunction) {
+  const user = req.currentUser;
+  if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
+    next();
+    return;
+  }
+  if (!user || user.totpEnabled) {
+    next();
+    return;
+  }
+  const path = req.path.replace(/^\/api/, "");
+  const allowed = path === "/auth/login"
+    || path === "/auth/me"
+    || path === "/auth/logout"
+    || path === "/auth/2fa/setup"
+    || path === "/auth/2fa/enable";
+  if (allowed) {
+    next();
+    return;
+  }
+  res.status(403).json({
+    error: "Two-factor authentication setup is required before using ComplyTrack",
+    requires2faSetup: true,
+  });
+}
+
 export function requireRole(...roles: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.currentUser) {

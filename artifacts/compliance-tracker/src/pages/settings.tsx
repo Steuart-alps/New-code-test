@@ -1988,12 +1988,11 @@ function TwoFactorCard() {
   const { user, refresh } = useAuth();
   const { toast } = useToast();
 
-  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "disabling" | "regenerating";
+  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating";
   const [step, setStep] = useState<SetupStep>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const [disablePassword, setDisablePassword] = useState("");
   const [error, setError] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [regeneratePassword, setRegeneratePassword] = useState("");
@@ -2061,22 +2060,6 @@ function TwoFactorCard() {
     URL.revokeObjectURL(url);
   }
 
-  async function handleDisable(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setStep("disabling");
-    try {
-      await apiFetch("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password: disablePassword }) });
-      await refresh();
-      toast({ title: "Two-factor authentication disabled" });
-      setStep("idle");
-      setDisablePassword("");
-    } catch (e: any) {
-      setError(e.message ?? "Failed to disable 2FA");
-      setStep("idle");
-    }
-  }
-
   return (
     <Card className="shadow-lg border-border/50 bg-card mb-6">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
@@ -2124,9 +2107,7 @@ function TwoFactorCard() {
                 <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }}>
                   <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
                 </Button>
-                <Button variant="outline" className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }}>
-                  <ShieldOff className="w-4 h-4" /> Disable two-factor authentication
-                </Button>
+                <p className="text-xs text-muted-foreground">Two-factor authentication is required for all ComplyTrack user accounts. Contact an administrator if you lose access to your authenticator.</p>
               </div>
             )}
             {step === "regenerating" && (
@@ -2140,30 +2121,12 @@ function TwoFactorCard() {
                 </div>
               </form>
             )}
-            {step === "disabling" && (
-              <form onSubmit={handleDisable} className="space-y-3 max-w-sm">
-                <p className="text-sm text-muted-foreground">Enter your password to confirm.</p>
-                <Input
-                  type="password"
-                  placeholder="Your password"
-                  value={disablePassword}
-                  onChange={e => setDisablePassword(e.target.value)}
-                  autoFocus
-                  className="rounded-sm"
-                />
-                {error && <p className="text-sm text-destructive">{error}</p>}
-                <div className="flex gap-2">
-                  <Button type="submit" variant="destructive" className="rounded-sm" disabled={!disablePassword}>Disable 2FA</Button>
-                  <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setError(""); setDisablePassword(""); }}>Cancel</Button>
-                </div>
-              </form>
-            )}
           </div>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-200 text-amber-800 text-sm">
               <ShieldOff className="w-4 h-4 flex-shrink-0" />
-              <span>Two-factor authentication is <strong>not enabled</strong>.</span>
+              <span>Two-factor authentication setup is required before using the application.</span>
             </div>
 
             {step === "idle" && (

@@ -21,6 +21,7 @@ import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import ResetPasswordPage from "@/pages/reset-password";
 import TwoFaRecoverPage from "@/pages/two-fa-recover";
+import MandatoryTwoFactorPage from "@/pages/mandatory-two-factor";
 import TrialEndedPage from "@/pages/trial-ended";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -83,7 +84,7 @@ function Redirect({ to }: { to: string }) {
 }
 
 function ProtectedRoutes() {
-  const { user, billingLocked, isLoading, activeClientId } = useAuth();
+  const { user, billingLocked, isLoading, activeClientId, needsTwoFactorSetup } = useAuth();
   const [location] = useLocation();
 
   useEffect(() => {
@@ -135,6 +136,8 @@ function ProtectedRoutes() {
       </div>
     );
   }
+
+  if (needsTwoFactorSetup) return <MandatoryTwoFactorPage />;
 
   // Not logged in
   if (!user) {
