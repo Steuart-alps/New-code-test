@@ -3,11 +3,17 @@ name: Mobile app plan
 description: Durable architecture constraints for the ComplyTrack Expo mobile app
 ---
 
-Use an Expo development client rather than Expo Go for ComplyTrack Mobile.
+ComplyTrack Mobile currently uses stock Expo Go with the Replit-managed Expo CLI session; do not reintroduce a development client without revisiting the product decision.
 
-**Why:** Phase-two Bluetooth probes and PAT testers require native modules that Expo Go cannot load. Keeping the development-client setup in the MVP avoids a runtime/tooling migration when BLE drivers are introduced.
+**Why:** The current launch path is deliberately Expo Go-only, with SDK 57 dependency alignment and no EAS or custom development build. Native hardware work is future scope, not a reason to change the current preview flow.
 
-**How to apply:** Preserve the static Expo configuration and development-client dependency. Add BLE drivers behind native-safe abstractions, keep manual entry available when hardware is unavailable, and verify both iOS and Android production bundles.
+**How to apply:** Keep the mobile workflow on `expo start --go`; use the Replit Preview on your phone flow for physical testing. Revisit the client choice only when native-only features are actually scheduled.
+
+Expo Go 57 physical-device testing requires the Replit-managed sign-in handoff.
+
+**Why:** A personal Expo Go account and the `replit-private-*` CLI session are rejected as mismatched accounts; manually signing into the private account is not supported.
+
+**How to apply:** Log out of Expo Go first, then start from Replit's Preview on your phone panel and follow its managed sign-in steps. A QR copied outside that panel may not complete the handoff.
 
 Mobile issue creation must treat the fault record and its photo uploads as separate recoverable stages.
 
