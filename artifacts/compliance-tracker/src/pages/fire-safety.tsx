@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -434,6 +435,7 @@ function RecordCheckDialog({
   const [location, setLocation] = useState("");
   const { user } = useAuth();
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
 
@@ -504,13 +506,14 @@ function RecordCheckDialog({
   }
 
   const handleSubmit = async () => {
-    const data: CreateFireSafetyCheckRequest = {
+    const data: CreateFireSafetyCheckRequest & { staffRosterId?: number | null } = {
       checkType: checkType as FireCheckType,
       checkDate,
       result: effectiveResult,
       siteId: selectedSite,
       location: location || undefined,
-      performedBy: performedBy || undefined,
+      performedBy: performedBy || null,
+      staffRosterId: staffRosterId,
       notes: buildNotes(),
     };
     createCheck.mutate(
@@ -565,8 +568,7 @@ function RecordCheckDialog({
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <Label>Performed By <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Name" className="rounded-sm" />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
             </div>
           </div>
 
@@ -694,6 +696,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
   const [result, setResult] = useState<"pass" | "fail">(check.result as "pass" | "fail");
   const [location, setLocation] = useState(check.location || "");
   const [performedBy, setPerformedBy] = useState(check.performedBy || "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>((check as any).staffRosterId ?? null);
   const [notes, setNotes] = useState(
     structured ? (structured as any).freeNotes ?? "" : check.notes || ""
   );
@@ -739,8 +742,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
         data: {
           checkDate, result: effectiveResult,
           siteId: selectedSite, location: location || undefined,
-          performedBy: performedBy || undefined, notes: buildNotes(),
-        },
+           performedBy: performedBy || null, staffRosterId: staffRosterId, notes: buildNotes(),
+        } as any,
       },
       {
         onSuccess: () => {
@@ -773,8 +776,7 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
               <Input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} className="rounded-sm" />
             </div>
             <div className="space-y-1.5">
-              <Label>Performed By</Label>
-              <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} className="rounded-sm" />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
             </div>
           </div>
 

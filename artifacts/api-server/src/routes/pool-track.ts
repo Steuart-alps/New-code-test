@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
+import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -34,6 +35,7 @@ const createSchema = z.object({
   turbidity: z.enum(["clear", "slightly_hazy", "hazy", "cloudy"]).optional().nullable(),
   poolOpen: z.boolean().default(true),
   performedBy: z.string().max(200).optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
   actionsTaken: z.string().max(2000).optional(),
   result: z.enum(["pass", "fail"]).default("pass"),
   notes: z.string().max(2000).optional(),
@@ -79,10 +81,12 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const body = createSchema.parse(req.body);
+  const performer = await resolveStaffPerformer(clientId, body.staffRosterId, body.performedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   const result = await db.execute(sql`
     INSERT INTO pool_checks (
-      client_id, site_id, check_date, check_time, check_type,
+       client_id, site_id, check_date, check_time, check_type, staff_roster_id,
       ph_level, free_chlorine, combined_chlorine,
       water_temp_c, air_temp_c, turbidity,
       pool_open, performed_by, actions_taken, result, notes
@@ -91,7 +95,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       ${body.siteId ?? null},
       ${body.checkDate},
       ${body.checkTime ?? null},
-      ${body.checkType},
+       ${body.checkType}, ${performer.staffRosterId},
       ${body.phLevel ?? null},
       ${body.freeChlorine ?? null},
       ${body.combinedChlorine ?? null},
@@ -99,7 +103,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       ${body.airTempC ?? null},
       ${body.turbidity ?? null},
       ${body.poolOpen},
-      ${body.performedBy ?? null},
+       ${performer.performedBy},
       ${body.actionsTaken ?? null},
       ${body.result},
       ${body.notes ?? null}
@@ -122,6 +126,9 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   const body = updateSchema.parse(req.body);
+  const performer = await resolveStaffPerformerUpdate(clientId, body.staffRosterId, body.performedBy,
+    existing.staff_roster_id ?? null, existing.performed_by ?? null);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   const result = await db.execute(sql`
     UPDATE pool_checks SET
@@ -135,7 +142,8 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       air_temp_c     = ${body.airTempC !== undefined ? body.airTempC : existing.air_temp_c},
       turbidity      = ${body.turbidity !== undefined ? body.turbidity : existing.turbidity},
       pool_open      = ${body.poolOpen !== undefined ? body.poolOpen : existing.pool_open},
-      performed_by   = ${body.performedBy !== undefined ? body.performedBy : existing.performed_by},
+       performed_by   = ${performer.performedBy},
+       staff_roster_id = ${performer.staffRosterId},
       actions_taken  = ${body.actionsTaken !== undefined ? body.actionsTaken : existing.actions_taken},
       result         = ${body.result ?? existing.result},
       notes          = ${body.notes !== undefined ? body.notes : existing.notes},

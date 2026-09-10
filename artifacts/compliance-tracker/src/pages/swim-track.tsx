@@ -21,6 +21,7 @@ import {
   HeartPulse, Waves, ChevronDown,
 } from "lucide-react";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
@@ -168,7 +169,7 @@ function SessionDialog({
   const { toast } = useToast();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-    siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "",
+     siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
     openTime: "", closeTime: "", maxBathers: "", batherCountPeak: "",
     preSessionResult: "pass", preSessionNotes: "", poolClosed: false,
     closureReason: "", notes: "",
@@ -182,7 +183,7 @@ function SessionDialog({
     setForm(session ? {
     siteId: session.siteId ? String(session.siteId) : "",
     sessionDate: session.sessionDate, sessionType: session.sessionType,
-    lifeguardName: session.lifeguardName ?? "", openTime: session.openTime ?? "",
+     lifeguardName: session.lifeguardName ?? "", lifeguardRosterId: (session as any).lifeguardRosterId ?? null, openTime: session.openTime ?? "",
     closeTime: session.closeTime ?? "",
     maxBathers: session.maxBathers != null ? String(session.maxBathers) : "",
     batherCountPeak: session.batherCountPeak != null ? String(session.batherCountPeak) : "",
@@ -201,6 +202,7 @@ function SessionDialog({
         siteId: form.siteId ? parseInt(form.siteId, 10) : null,
         sessionDate: form.sessionDate, sessionType: form.sessionType,
         lifeguardName: form.lifeguardName.trim() || null,
+         lifeguardRosterId: form.lifeguardRosterId,
         openTime: form.openTime || null, closeTime: form.closeTime || null,
         maxBathers: form.maxBathers ? parseInt(form.maxBathers, 10) : null,
         batherCountPeak: form.batherCountPeak ? parseInt(form.batherCountPeak, 10) : null,
@@ -261,8 +263,9 @@ function SessionDialog({
             )}
             <div>
               <Label>Lifeguard on duty <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.lifeguardName}
-                onChange={e => setForm(f => ({ ...f, lifeguardName: e.target.value }))} />
+              <StaffPerformerSelect label="Lifeguard" value={form.lifeguardName}
+                onChange={(value) => setForm(f => ({ ...f, lifeguardName: value }))}
+                onRosterIdChange={(value) => setForm(f => ({ ...f, lifeguardRosterId: value }))} />
             </div>
             <div>
               <Label>Pre-session check result</Label>
@@ -345,7 +348,7 @@ function SurveillanceDialog({
   const now = new Date().toTimeString().slice(0, 5);
   const blank = {
     siteId: "", checkDate: today, checkTime: now, batherCount: "",
-    scanCompleted: true, observations: "", checkedBy: "", result: "pass",
+    scanCompleted: true, observations: "", checkedBy: "", checkedByRosterId: null as number | null, result: "pass",
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -355,7 +358,7 @@ function SurveillanceDialog({
     checkDate: check.checkDate, checkTime: check.checkTime ?? "",
     batherCount: check.batherCount != null ? String(check.batherCount) : "",
     scanCompleted: check.scanCompleted, observations: check.observations ?? "",
-    checkedBy: check.checkedBy ?? "", result: check.result,
+    checkedBy: check.checkedBy ?? "", checkedByRosterId: (check as any).checkedByRosterId ?? (check as any).checked_by_roster_id ?? null, result: check.result,
   } : blank);
 
   const handleSave = async () => {
@@ -369,6 +372,7 @@ function SurveillanceDialog({
         scanCompleted: form.scanCompleted,
         observations: form.observations.trim() || null,
         checkedBy: form.checkedBy.trim() || null,
+        checkedByRosterId: form.checkedByRosterId,
         result: form.scanCompleted ? "pass" : "fail",
       };
       if (check) {
@@ -418,8 +422,9 @@ function SurveillanceDialog({
             </div>
             <div>
               <Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.checkedBy}
-                onChange={e => setForm(f => ({ ...f, checkedBy: e.target.value }))} placeholder="Staff name" />
+              <StaffPerformerSelect label="Checked by" value={form.checkedBy}
+                onChange={(value) => setForm(f => ({ ...f, checkedBy: value }))}
+                onRosterIdChange={(value) => setForm(f => ({ ...f, checkedByRosterId: value }))} />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -454,13 +459,13 @@ function FirstAidDialog({
   const { toast } = useToast();
   const today = new Date().toISOString().split("T")[0];
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
-  const blank = { siteId: "", checkDate: today, checkedBy: "", defectsFound: "", notes: "", ...blankItems };
+  const blank = { siteId: "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
   const [form, setForm] = useState<Record<string, any>>(blank);
   const [saving, setSaving] = useState(false);
 
   const reset = () => setForm(check ? {
     siteId: check.siteId ? String(check.siteId) : "",
-    checkDate: check.checkDate, checkedBy: check.checkedBy ?? "",
+    checkDate: check.checkDate, checkedBy: check.checkedBy ?? "", checkedByRosterId: (check as any).checkedByRosterId ?? (check as any).checked_by_roster_id ?? null,
     defectsFound: check.defectsFound ?? "", notes: check.notes ?? "",
     aedOk: check.aedOk, firstAidKitOk: check.firstAidKitOk,
     rescuePoleOk: check.rescuePoleOk, throwBagOk: check.throwBagOk,
@@ -473,7 +478,7 @@ function FirstAidDialog({
     try {
       const body = {
         siteId: form.siteId ? parseInt(form.siteId, 10) : null,
-        checkDate: form.checkDate, checkedBy: form.checkedBy.trim() || null,
+        checkDate: form.checkDate, checkedBy: form.checkedBy.trim() || null, checkedByRosterId: form.checkedByRosterId,
         defectsFound: form.defectsFound.trim() || null, notes: form.notes.trim() || null,
         ...Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, form[i.key]])),
       };
@@ -502,8 +507,9 @@ function FirstAidDialog({
             </div>
             <div>
               <Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.checkedBy}
-                onChange={e => setForm(f => ({ ...f, checkedBy: e.target.value }))} />
+              <StaffPerformerSelect label="Checked by" value={form.checkedBy}
+                onChange={(value) => setForm(f => ({ ...f, checkedBy: value }))}
+                onRosterIdChange={(value) => setForm(f => ({ ...f, checkedByRosterId: value }))} />
             </div>
             {sites.length > 0 && (
               <div className="col-span-2">

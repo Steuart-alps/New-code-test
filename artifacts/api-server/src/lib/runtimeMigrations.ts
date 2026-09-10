@@ -384,9 +384,35 @@ export async function runRuntimeMigrations() {
     await migratePATtrack();
     await migratePestTrack();
     await migratePremisesTrack();
+    // These tables are created by their owning migrations above. Keep the
+    // attribution migration after them so a fresh database does not attempt
+    // ALTER TABLE before pool_checks or premises_inspections exists.
+    await migrateStaffRosterAttribution();
     await migrateRoomTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
+    // Performer attribution is additive so existing records remain readable.
+    // The roster id is tenant-scoped and the accompanying display name remains
+    // an immutable snapshot on the record.
+    for (const [table, columns] of [
+      ["daily_checklists", ["staff_roster_id"]],
+      ["kitchen_probe_checks", ["checked_by_roster_id"]],
+      ["room_track_checks", ["checked_by_roster_id"]],
+      ["pest_visits", ["signed_off_by_roster_id"]],
+      ["pest_activity", ["recorded_by_roster_id"]],
+      ["swim_sessions", ["lifeguard_roster_id"]],
+      ["swim_surveillance_checks", ["checked_by_roster_id"]],
+      ["swim_first_aid_checks", ["checked_by_roster_id"]],
+      ["green_pre_use_checks", ["operator_roster_id"]],
+      ["green_service_records", ["serviced_by_roster_id"]],
+      ["green_defects", ["reported_by_roster_id"]],
+      ["green_puwer_inspections", ["inspector_roster_id"]],
+      ["green_fuel_logs", ["filled_by_roster_id"]],
+    ] as const) {
+      for (const column of columns) {
+        await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "${column}" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`));
+      }
+    }
 
     // ---- Push notification tokens (keep this LAST) ----
     // Placed at the very end of the migration function so other agents can add
@@ -1108,25 +1134,6 @@ async function migrateTrackActions() {
 
 // ---- 2026-08 audit fixes: schema drift between routes and migrations ----
 async function migrateAuditFixes2026_08() {
-  // StaffRoster: route reads/writes a single "name" field.
-  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT ''`);
-  // Some databases predate first_name/last_name (or never had them) — guard everything.
-  await db.execute(sql`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'staff_roster' AND column_name = 'first_name'
-      ) THEN
-        UPDATE "staff_roster"
-        SET "name" = trim(concat_ws(' ', "first_name", "last_name"))
-        WHERE "name" = '' AND (coalesce("first_name", '') <> '' OR coalesce("last_name", '') <> '');
-        ALTER TABLE "staff_roster" ALTER COLUMN "first_name" DROP NOT NULL;
-        ALTER TABLE "staff_roster" ALTER COLUMN "last_name" DROP NOT NULL;
-      END IF;
-    END $$;
-  `);
-
   // DocTrack: route stores files in object storage under "object_path".
   await db.execute(sql`ALTER TABLE "doc_track_documents" ADD COLUMN IF NOT EXISTS "object_path" text`);
 
@@ -1476,13 +1483,18 @@ async function migrateTwoFactor() {
 
 // ---- Staff roster ----
 async function migrateStaffRoster() {
+  // Random, per-tenant kiosk credential used for unauthenticated roster
+  // discovery and PIN verification. Only its digest is stored.
+  await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "staff_kiosk_token_hash" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_clients_staff_kiosk_token_hash" ON "clients" ("staff_kiosk_token_hash") WHERE "staff_kiosk_token_hash" IS NOT NULL`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "staff_roster" (
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
-      "first_name" text NOT NULL,
-      "last_name" text NOT NULL,
+      "name" text NOT NULL DEFAULT '',
+      "first_name" text,
+      "last_name" text,
       "job_title" text,
       "department" text,
       "email" text,
@@ -1494,12 +1506,90 @@ async function migrateStaffRoster() {
       "updated_at" timestamp NOT NULL DEFAULT now()
     )
   `);
+  // The roster has existed in two shapes: the original first_name/last_name
+  // layout and the PIN compatibility API's single name layout.  Normalize
+  // both shapes before any route can insert a name-only row.  In particular,
+  // dropping NOT NULL is essential for old databases whose first/last columns
+  // were created as mandatory.
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT ''`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "first_name" text`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "last_name" text`);
+  await db.execute(sql`
+    ALTER TABLE "staff_roster"
+      ALTER COLUMN "first_name" DROP NOT NULL,
+      ALTER COLUMN "last_name" DROP NOT NULL
+  `);
+  await db.execute(sql`
+    UPDATE "staff_roster"
+    SET "name" = trim(concat_ws(' ', "first_name", "last_name"))
+    WHERE coalesce("name", '') = ''
+      AND (coalesce("first_name", '') <> '' OR coalesce("last_name", '') <> '')
+  `);
+  // Keep the legacy representation useful to callers that still select it,
+  // while preserving a single-name value exactly as entered by the roster API.
+  await db.execute(sql`
+    UPDATE "staff_roster"
+    SET "first_name" = split_part(trim("name"), ' ', 1),
+        "last_name" = NULLIF(regexp_replace(trim("name"), '^[^ ]+ ?', ''), '')
+    WHERE coalesce(trim("name"), '') <> ''
+      AND (coalesce("first_name", '') = '' OR coalesce("last_name", '') = '')
+  `);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_staff_roster_client"
     ON "staff_roster" ("client_id")
   `);
   await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "external_payroll_id" text`);
   await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "last_reconciled_at" timestamp`);
+  // PIN-enabled roster compatibility fields.  These live on the established
+  // staff_roster table so existing acknowledgements and training records keep
+  // their foreign keys.
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "role" text`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "pin_hash" text`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "pin_attempts" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "pin_locked_until" timestamp`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "pin_setup_attempts" integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "pin_setup_locked_until" timestamp`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staff_pin_enrollment_tokens" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "staff_member_id" integer NOT NULL REFERENCES "staff_roster"("id") ON DELETE CASCADE,
+      "token_hash" text NOT NULL UNIQUE, "expires_at" timestamp NOT NULL,
+      "consumed_at" timestamp, "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staff_kiosk_capabilities" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "staff_member_id" integer NOT NULL REFERENCES "staff_roster"("id") ON DELETE CASCADE,
+      "token_hash" text NOT NULL UNIQUE,
+      "action_type" text NOT NULL DEFAULT 'start_shift',
+      "expires_at" timestamp NOT NULL,
+      "consumed_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "staff_kiosk_capabilities" ADD COLUMN IF NOT EXISTS "action_type" text NOT NULL DEFAULT 'start_shift'`);
+  await db.execute(sql`ALTER TABLE "staff_kiosk_capabilities" ADD COLUMN IF NOT EXISTS "target" text NOT NULL DEFAULT 'staff_shift_check_ins'`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_staff_kiosk_capabilities_active" ON "staff_kiosk_capabilities" ("token_hash", "expires_at") WHERE "consumed_at" IS NULL`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staff_kiosk_actions" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "staff_member_id" integer NOT NULL REFERENCES "staff_roster"("id") ON DELETE CASCADE,
+      "action_type" text NOT NULL,
+      "payload" jsonb NOT NULL DEFAULT '{}'::jsonb,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staff_shift_check_ins" (
+      "id" serial PRIMARY KEY, "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "staff_member_id" integer NOT NULL REFERENCES "staff_roster"("id") ON DELETE CASCADE,
+      "checked_in_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_staff_kiosk_actions_staff" ON "staff_kiosk_actions" ("client_id", "staff_member_id", "created_at")`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "UQ_staff_roster_client_payroll_id"
     ON "staff_roster" ("client_id", "external_payroll_id")
@@ -1512,7 +1602,21 @@ async function migrateStaffRoster() {
   `);
 }
 
-// ---- Document acknowledgements ----
+async function migrateStaffRosterAttribution() {
+  // Some legacy food-safety databases predate the performer snapshot column
+  // even though newer CREATE TABLE definitions include it.
+  await db.execute(sql`
+    ALTER TABLE "food_safety_records"
+    ADD COLUMN IF NOT EXISTS "performed_by" text
+  `);
+  for (const table of [
+    "fire_safety_checks", "food_safety_records", "legionella_checks",
+    "hot_tub_checks", "pool_checks", "bike_checks", "premises_inspections",
+  ]) {
+    await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`));
+    await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_staff_roster" ON "${table}" ("staff_roster_id")`));
+  }
+}
 async function migrateDocAcknowledgements() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "doc_acknowledgements" (

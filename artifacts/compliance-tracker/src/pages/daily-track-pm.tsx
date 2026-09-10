@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -189,6 +190,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
   const { user } = useAuth();
   const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
   const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
   const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
@@ -204,7 +206,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
 
   async function save(submit: boolean) {
     setSaving(true);
-    const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, managerNote: managerNote || null };
+    const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
     try {
       if (existing) { await apiFetch(`/daily-track-pm/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
@@ -272,7 +274,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1"><Label className="text-xs">Completed by</Label><Input value={completedBy} onChange={e => setCompletedBy(e.target.value)} placeholder="Name" className="h-8 text-sm" /></div>
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
               {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
             <div className="flex gap-2">

@@ -33,6 +33,7 @@ import {
   useUpdatePoolTrackConfig,
 } from "@workspace/api-client-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -295,6 +296,7 @@ function PoolRecordDialog({
   const [turbidity, setTurbidity] = useState<string>(existing?.turbidity ?? "clear");
   const [poolOpen, setPoolOpen] = useState(existing?.pool_open ?? true);
   const [performedBy, setPerformedBy] = useState(existing?.performed_by ?? user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staff_roster_id ?? null);
   const [actionsTaken, setActionsTaken] = useState(existing?.actions_taken ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [overrideResult, setOverrideResult] = useState<string | null>(null);
@@ -321,7 +323,7 @@ function PoolRecordDialog({
         checkType, checkDate, checkTime: checkTime || undefined, siteId: selectedSite,
         phLevel: parsedPh, freeChlorine: parsedFree, combinedChlorine: parsedComb,
         waterTempC: parsedWT, airTempC: airTemp ? parseFloat(airTemp) : null,
-        turbidity: turbidity || null, poolOpen, performedBy: performedBy || undefined,
+        turbidity: turbidity || null, poolOpen, performedBy: performedBy || null, staffRosterId: staffRosterId,
         actionsTaken: actionsTaken || undefined, result: effectiveResult, notes: notes || undefined,
       };
       if (isEdit) await apiFetch(`/pool-track/${existing!.id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -357,8 +359,7 @@ function PoolRecordDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Performed by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Name" className="rounded-sm" />
+              <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
             </div>
             {sites && sites.length > 0 && (
               <div className="space-y-1.5">

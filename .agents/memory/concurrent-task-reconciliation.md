@@ -7,4 +7,4 @@ Concurrent task reconciliation can remove untracked helper files created in the 
 
 **Why:** A task merge completed during a backlog batch and removed newly created untracked helper files without reverting the page import, producing a delayed typecheck failure.
 
-**How to apply:** After any task merge or reconciliation during main-workspace work, immediately inspect `git status` and run the combined typecheck before building further on the current diff. Prefer completing and validating coherent file sets before allowing another merge boundary.
+**How to apply:** After any task merge or rebase during isolated work, inspect `git status`, rebuild referenced TypeScript packages if declarations changed, run the combined typecheck, and rerun feature-level integration tests for both the task and newly merged auth/routing changes. Typecheck alone will not catch wrong API prefixes, wrong-table lookups, migration ordering, or partial-update data loss.

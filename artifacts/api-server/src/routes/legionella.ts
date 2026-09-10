@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { legionellaChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -55,6 +56,7 @@ const createSchema = z.object({
   location: z.string().max(500).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   performedBy: z.string().max(200).nullable().optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
   /** FK back to legionella_sentinel_outlets — links this check to a specific outlet. */
   outletId: z.number().int().nullable().optional(),
 });
@@ -195,6 +197,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   const deptId = getActiveDepartmentId(req);
   const siteAccess = await checkSiteAccess(data.siteId, clientId, deptId);
@@ -212,7 +216,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       siteId: data.siteId ?? null,
       location: data.location ?? null,
       notes: data.notes ?? null,
-      performedBy: data.performedBy ?? null,
+       performedBy: performer.performedBy,
+       staffRosterId: performer.staffRosterId,
       createdBy: (req.session as any).userId ?? null,
     })
     .returning();
@@ -405,9 +410,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
     if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
+  const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
+    existing.staffRosterId, existing.performedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   const { temperature, ...rest } = parsed.data;
-  const updateData: any = { ...rest, updatedAt: new Date() };
+  const updateData: any = { ...rest, ...(performer ?? {}), updatedAt: new Date() };
   if (temperature !== undefined) {
     updateData.temperature = temperature != null ? String(temperature) : null;
   }

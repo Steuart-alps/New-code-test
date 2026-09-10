@@ -2,6 +2,7 @@ import { pgTable, serial, integer, text, date, boolean, timestamp } from "drizzl
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { staffMembersTable } from "./staff-members";
 
 export const BIKE_TYPES = ["road", "mountain", "hybrid", "ebike", "kids", "cargo", "other"] as const;
 export const BIKE_STATUSES = ["available", "hired", "maintenance", "retired"] as const;
@@ -58,6 +59,7 @@ export const bikeChecksTable = pgTable("bike_checks", {
   checkType: text("check_type").notNull(), // pre_hire | post_return | routine
   checkDate: date("check_date").notNull(),
   performedBy: text("performed_by"),
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   overallResult: text("overall_result").notNull().default("pass"), // new writes: pass | fail; legacy action_required remains readable
   // Individual check items: pass | fail | na
   brakesFront: text("brakes_front"),

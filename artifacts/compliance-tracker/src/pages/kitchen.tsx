@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2 } from "lucide-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import WeeklyReviewTab from "./kitchen-weekly";
@@ -1593,6 +1594,7 @@ function KitchenChecklistCard({
   const effectiveDefault = templateItems ? templateItems.map(i => ({ ...i, checked: false })) : (KCL_DEFAULTS[type] ?? []);
   const [items, setItems] = useState<KCLItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
   const [managerNote, setManagerNote] = useState(existing?.managerNote ?? "");
   const [saving, setSaving] = useState(false);
   const submitted = !!existing?.submittedAt;
@@ -1600,6 +1602,7 @@ function KitchenChecklistCard({
   useEffect(() => {
     setItems(existing?.items ?? effectiveDefault);
     setCompletedBy(existing?.completedBy ?? user?.name ?? "");
+    setStaffRosterId((existing as any)?.staffRosterId ?? null);
     setManagerNote(existing?.managerNote ?? "");
   }, [existing, type, templateItems]);
 
@@ -1609,7 +1612,7 @@ function KitchenChecklistCard({
   async function save(submit: boolean) {
     setSaving(true);
     const endpoint = KCL_ENDPOINT[type];
-    const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, managerNote: managerNote || null };
+    const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId: staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
     try {
       if (existing) { await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
@@ -1675,7 +1678,7 @@ function KitchenChecklistCard({
         {!submitted && (
           <div className="space-y-3 border-t pt-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1"><Label className="text-xs">Completed by</Label><Input value={completedBy} onChange={e => setCompletedBy(e.target.value)} placeholder="Name" className="h-8 text-sm" /></div>
+              <StaffPerformerSelect label="Completed by" value={completedBy} onChange={setCompletedBy} onRosterIdChange={setStaffRosterId} />
               {canAdmin && <div className="space-y-1"><Label className="text-xs">Manager note</Label><Input value={managerNote} onChange={e => setManagerNote(e.target.value)} placeholder="Optional" className="h-8 text-sm" /></div>}
             </div>
             <div className="flex gap-2">

@@ -17,7 +17,7 @@
 - [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
-- [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP or a passkey before app access; staff-roster-only people are not auth accounts.
+- [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP before app access; passkeys are optional web sign-in; roster-only people are not auth accounts.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
 - [Food-safety site scoping](foodsafety-site-scoping.md) — site.<id>.* app_settings overrides + nullable site_id diary with partial unique indexes; site saves must diff, not dump.
@@ -37,3 +37,4 @@
 - [Queued bearer credentials](queued-bearer-credentials.md) — persist placeholders plus encrypted payloads; never store working contractor links in rendered queue fields.
 - [Contractor token key rotation](contractor-token-key-rotation.md) — version every key; drain old writers, migrate with the previous key retained, then retire it in a later deployment.
 - [Roster reconciliation identity](roster-reconciliation-identity.md) — payroll IDs are authoritative; preserve roster IDs, adopt legacy rows only by one unambiguous match, and deactivate rather than delete.
+- [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.

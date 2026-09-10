@@ -6,6 +6,7 @@ import { requireAuth, denyViewers, getClientId, requireClientAdmin } from "../mi
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { createPestControlRegisterPdf } from "../lib/pestControlRegisterPdf";
 import { z } from "zod";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -145,6 +146,7 @@ const VisitBody = z.object({
   recommendations:    z.string().optional().nullable(),
   nextVisitDate:      z.string().optional().nullable(),
   signedOffBy:        z.string().optional().nullable(),
+  signedOffByRosterId: z.number().int().positive().optional().nullable(),
   notes:              z.string().optional().nullable(),
   siteId:             z.number().int().optional().nullable(),
 });
@@ -165,8 +167,9 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
 
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
-  const d = body.data;
-
+   const d = body.data;
+   const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
+   if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const [row] = await db.insert(pestVisitsTable).values({
     clientId,
     siteId:            d.siteId ?? null,
@@ -178,7 +181,8 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
     treatmentsApplied: d.treatmentsApplied ?? null,
     recommendations:   d.recommendations ?? null,
     nextVisitDate:     d.nextVisitDate ?? null,
-    signedOffBy:       d.signedOffBy ?? null,
+     signedOffBy:       performer?.performedBy ?? null,
+     signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
     createdBy:         (req as any).user?.id ?? null,
   } as any).returning();
@@ -191,11 +195,15 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
 
   const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const [existingVisit] = await db.select({ signedOffBy: pestVisitsTable.signedOffBy, signedOffByRosterId: pestVisitsTable.signedOffByRosterId })
+    .from(pestVisitsTable).where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId))).limit(1);
+  if (!existingVisit) return res.status(404).json({ error: "Not found" });
 
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
-  const d = body.data;
-
+   const d = body.data;
+   const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
+   if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   await db.update(pestVisitsTable).set({
     siteId:            d.siteId ?? null,
     visitDate:         d.visitDate,
@@ -206,7 +214,8 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
     treatmentsApplied: d.treatmentsApplied ?? null,
     recommendations:   d.recommendations ?? null,
     nextVisitDate:     d.nextVisitDate ?? null,
-    signedOffBy:       d.signedOffBy ?? null,
+     signedOffBy:       performer?.performedBy ?? null,
+     signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
     updatedAt:         new Date(),
   } as any).where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId)));
@@ -218,6 +227,11 @@ router.delete("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const id = parseInt(req.params.id as string, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const [existingVisit] = await db.select({ id: pestVisitsTable.id })
+    .from(pestVisitsTable)
+    .where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId)))
+    .limit(1);
+  if (!existingVisit) return res.status(404).json({ error: "Not found" });
   await db.delete(pestVisitsTable)
     .where(and(eq(pestVisitsTable.id, id), eq(pestVisitsTable.clientId, clientId)));
   res.json({ ok: true });
@@ -233,6 +247,7 @@ const ActivityBody = z.object({
   severity:     z.string().default("low"),
   actionTaken:  z.string().optional().nullable(),
   recordedBy:   z.string().optional().nullable(),
+  recordedByRosterId: z.number().int().positive().optional().nullable(),
   resolved:     z.boolean().optional(),
   notes:        z.string().optional().nullable(),
   siteId:       z.number().int().optional().nullable(),
@@ -255,6 +270,8 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const body = ActivityBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+  const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
+  if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   // pestType/evidenceType are validated against the client's effective option
   // list at request time (custom or default) rather than a fixed enum.
@@ -274,7 +291,8 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
     location:     d.location ?? null,
     severity:     d.severity,
     actionTaken:  d.actionTaken ?? null,
-    recordedBy:   d.recordedBy ?? null,
+    recordedBy:   performer?.performedBy ?? null,
+    recordedByRosterId: performer?.staffRosterId ?? null,
     resolved:     d.resolved ?? false,
     notes:        d.notes ?? null,
     createdBy:    (req as any).user?.id ?? null,
@@ -291,15 +309,18 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
   const body = ActivityBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
-
   const [existing] = await db.select({
     id:           pestActivityTable.id,
     pestType:     pestActivityTable.pestType,
     evidenceType: pestActivityTable.evidenceType,
+    recordedBy: pestActivityTable.recordedBy,
+    recordedByRosterId: pestActivityTable.recordedByRosterId,
   }).from(pestActivityTable)
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  const performer = await resolveStaffPerformerUpdate(clientId, d.recordedByRosterId, d.recordedBy, existing.recordedByRosterId, existing.recordedBy);
+  if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   // Allow a value that is unchanged from the stored record even if it is no
   // longer in the client's effective list; reject only NEW values not in it.
@@ -320,7 +341,8 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
     location:     d.location ?? null,
     severity:     d.severity,
     actionTaken:  d.actionTaken ?? null,
-    recordedBy:   d.recordedBy ?? null,
+    recordedBy:   performer?.performedBy ?? null,
+    recordedByRosterId: performer?.staffRosterId ?? null,
     resolved:     d.resolved ?? false,
     resolvedAt:   d.resolved ? new Date() : null,
     notes:        d.notes ?? null,

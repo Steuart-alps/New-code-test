@@ -6,6 +6,7 @@ import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
+import { resolveStaffPerformer } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -49,6 +50,7 @@ const hireSchema = z.object({
   notes:              z.string().max(2000).nullable().optional(),
   preHireCheck:       checkItemsSchema.extend({
     performedBy:   z.string().max(200).nullable().optional(),
+     staffRosterId:  z.number().int().positive().nullable().optional(),
     overallResult: z.enum(["pass", "fail"]).optional(),
     checkDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     checkNotes:    z.string().max(2000).nullable().optional(),
@@ -61,6 +63,7 @@ const returnSchema = z.object({
   notes:            z.string().max(2000).nullable().optional(),
   postReturnCheck:  checkItemsSchema.extend({
     performedBy:   z.string().max(200).nullable().optional(),
+     staffRosterId:  z.number().int().positive().nullable().optional(),
     overallResult: z.enum(["pass", "fail"]).optional(),
     checkDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     checkNotes:    z.string().max(2000).nullable().optional(),
@@ -314,6 +317,8 @@ router.post("/hires", requireAuth, denyViewers, async (req, res) => {
   let preCheck = null;
   if (d.preHireCheck) {
     const c = d.preHireCheck;
+    const performer = await resolveStaffPerformer(clientId, c.staffRosterId, c.performedBy);
+    if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const overallResult = c.overallResult ?? "pass";
     const [check] = await db.insert(bikeChecksTable).values({
       clientId,
@@ -321,7 +326,8 @@ router.post("/hires", requireAuth, denyViewers, async (req, res) => {
       bikeId: d.bikeId,
       checkType: "pre_hire",
       checkDate: c.checkDate ?? d.hireDate,
-      performedBy: c.performedBy ?? null,
+       performedBy: performer.performedBy,
+       staffRosterId: performer.staffRosterId,
       overallResult,
       ...checkItemsToRow(c),
       notes: c.checkNotes ?? null,
@@ -373,6 +379,8 @@ router.post("/hires/:id/return", requireAuth, denyViewers, async (req, res) => {
   let newBikeStatus = "available";
   if (d.postReturnCheck) {
     const c = d.postReturnCheck;
+    const performer = await resolveStaffPerformer(clientId, c.staffRosterId, c.performedBy);
+    if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const overallResult = c.overallResult ?? "pass";
     if (overallResult === "fail") newBikeStatus = "maintenance";
     const [check] = await db.insert(bikeChecksTable).values({
@@ -381,7 +389,8 @@ router.post("/hires/:id/return", requireAuth, denyViewers, async (req, res) => {
       bikeId: hire.bikeId,
       checkType: "post_return",
       checkDate: c.checkDate ?? today,
-      performedBy: c.performedBy ?? null,
+       performedBy: performer.performedBy,
+       staffRosterId: performer.staffRosterId,
       overallResult,
       ...checkItemsToRow(c),
       notes: c.checkNotes ?? null,

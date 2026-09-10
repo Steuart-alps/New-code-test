@@ -24,7 +24,10 @@
     "test:config:ci": "bash tests/run-config-endpoints.sh",
     "test:training-expiry": "bash tests/run-db-workflow.sh tests/training-expiry-reminders.mjs",
     "test:staff-roster-reconciliation": "bash tests/run-staff-roster-reconciliation.sh",
+    "test:staff-pin": "bash tests/run-staff-pin.sh",
+    "test:staff-attribution": "bash tests/run-staff-attribution.sh",
     "test:mandatory-2fa": "bash tests/run-mandatory-2fa.sh",
+    "test:passkey-mandatory-2fa": "node tests/passkey-mandatory-2fa.mjs",
     "test:safe-track-ack-reminders": "bash tests/run-db-workflow.sh tests/safe-track-ack-reminders.mjs",
     "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",
     "test:discounts": "bash tests/run-db-workflow.sh tests/discount-codes.mjs",
@@ -63,6 +66,7 @@
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
     "@sentry/node": "^10.70.0",
+    "@simplewebauthn/server": "^14.0.1",
     "@swc/helpers": "^0.5.23",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",

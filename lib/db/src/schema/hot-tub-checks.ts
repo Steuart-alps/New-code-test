@@ -3,6 +3,7 @@ import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
 import { hotTubsTable } from "./hot-tubs";
+import { staffMembersTable } from "./staff-members";
 
 export const HOT_TUB_CHECK_TYPES = [
   "water_chemistry",
@@ -30,6 +31,7 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   session: text("session"),        // morning | midday | evening (3× daily checks)
   location: text("location"),      // specific area / supplementary name
   performedBy: text("performed_by"),
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -379,6 +380,7 @@ function NewHireDialog({
   const { user } = useAuth();
   const [checkItems, setCheckItems] = useState(emptyCheckItems());
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [checkNotes, setCheckNotes] = useState("");
   const [skipCheck, setSkipCheck] = useState(false);
 
@@ -425,7 +427,7 @@ function NewHireDialog({
       if (!skipCheck) {
         body.preHireCheck = {
           ...checkItems,
-          performedBy: performedBy.trim() || null,
+          performedBy: performedBy.trim() || null, staffRosterId: staffRosterId,
           checkDate: hireDate,
           overallResult: autoOverallResult(checkItems),
           checkNotes: checkNotes.trim() || null,
@@ -545,8 +547,7 @@ function NewHireDialog({
               {!skipCheck && (
                 <>
                   <div className="space-y-1.5">
-                    <Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label>
-                    <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Staff member name" className="rounded-sm" />
+                    <StaffPerformerSelect label="Checked by" value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
                   </div>
                   <div className="border rounded-sm p-3 space-y-2">
                     <CheckItemsEditor items={checkItems} onChange={setCheckItems} />
@@ -614,6 +615,7 @@ function ReturnDialog({
   const { user } = useAuth();
   const [checkItems, setCheckItems] = useState(emptyCheckItems());
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [checkNotes, setCheckNotes] = useState("");
   const [skipCheck, setSkipCheck] = useState(false);
   const [depositReturned, setDepositReturned] = useState(false);
@@ -633,7 +635,7 @@ function ReturnDialog({
       if (!skipCheck) {
         body.postReturnCheck = {
           ...checkItems,
-          performedBy: performedBy.trim() || null,
+          performedBy: performedBy.trim() || null, staffRosterId: staffRosterId,
           checkDate: returnDate,
           overallResult: autoOverallResult(checkItems),
           checkNotes: checkNotes.trim() || null,
@@ -708,8 +710,7 @@ function ReturnDialog({
             {!skipCheck && (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label>Checked by <span className="text-muted-foreground text-xs">optional</span></Label>
-                  <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Staff member name" className="rounded-sm" />
+                  <StaffPerformerSelect label="Checked by" value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} optional />
                 </div>
                 <div className="border rounded-sm p-3">
                   <CheckItemsEditor items={checkItems} onChange={setCheckItems} />

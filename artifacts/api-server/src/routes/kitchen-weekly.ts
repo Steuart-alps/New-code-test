@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { sitesTable } from "@workspace/db/schema";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers } from "../middleware/requireAuth";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -266,6 +267,7 @@ const probeBody = z.object({
   probes: z.array(probeRowSchema).optional(),
   overallResult: z.enum(["pass", "fail", ""]).nullable().optional(),
   checkedBy: z.string().max(300).nullable().optional(),
+  checkedByRosterId: z.number().int().positive().nullable().optional(),
   signature: z.string().max(300).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   submittedAt: z.string().nullable().optional(),
@@ -279,9 +281,11 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   const parsed = probeBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
-  const { checkDate, probes, overallResult, checkedBy, signature, notes, submittedAt, siteId } = parsed.data;
+  const { checkDate, probes, overallResult, checkedBy, checkedByRosterId, signature, notes, submittedAt, siteId } = parsed.data;
   const resolvedSiteId = await resolveSiteId(req, res, clientId, siteId);
   if (resolvedSiteId === undefined) return;
+  const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
+  if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const existing = await fetchProbe(clientId, checkDate, resolvedSiteId);
   if (existing) return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
   const userId = (req.session as any).userId ?? null;
@@ -290,11 +294,11 @@ router.post("/probe", requireAuth, denyViewers, async (req, res) => {
   try {
     const result = await db.execute(sql`
       INSERT INTO kitchen_probe_checks
-        (client_id, site_id, check_date, probes, overall_result, checked_by, signature, notes, submitted_at, created_by)
+        (client_id, site_id, check_date, probes, overall_result, checked_by, checked_by_roster_id, signature, notes, submitted_at, created_by)
       VALUES (
         ${clientId}, ${resolvedSiteId}, ${checkDate},
         ${probesJson}::jsonb,
-        ${overallResult || null}, ${checkedBy ?? null}, ${signature ?? null}, ${notes ?? null},
+        ${overallResult || null}, ${performer?.performedBy ?? null}, ${performer?.staffRosterId ?? null}, ${signature ?? null}, ${notes ?? null},
         ${submittedAt ? new Date(submittedAt) : null},
         ${userId}
       )
@@ -325,10 +329,12 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = probeBody.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
-  const { probes, overallResult, checkedBy, signature, notes, submittedAt, siteId } = parsed.data;
+  const { probes, overallResult, checkedBy, checkedByRosterId, signature, notes, submittedAt, siteId } = parsed.data;
   const requestedSiteId = siteId !== undefined ? siteId : existing.site_id;
   const resolvedSiteId = await resolveSiteId(req, res, clientId, requestedSiteId);
   if (resolvedSiteId === undefined) return;
+  const performer = await resolveStaffPerformerUpdate(clientId, checkedByRosterId, checkedBy, existing.checked_by_roster_id, existing.checked_by);
+  if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   if (existing.site_id !== null && await resolveSiteId(req, res, clientId, existing.site_id) === undefined) return;
 
   const probesJson = JSON.stringify(probes ?? existing.probes);
@@ -343,7 +349,8 @@ router.put("/probe/:id", requireAuth, denyViewers, async (req, res) => {
     UPDATE kitchen_probe_checks SET
       probes         = ${probesJson}::jsonb,
       overall_result = ${finalResult},
-      checked_by     = ${finalCheckedBy},
+      checked_by     = ${performer?.performedBy},
+      checked_by_roster_id = ${performer?.staffRosterId},
       signature      = ${finalSig},
       notes          = ${finalNotes},
       submitted_at   = ${finalSub},

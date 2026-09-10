@@ -4,6 +4,7 @@ import { premisesInspectionsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, gte, lte, lt, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { z } from "zod";
 
 const router = Router();
@@ -99,6 +100,7 @@ const InspectionBody = z.object({
   actionTaken:    z.string().optional().nullable(),
   status:         z.enum(["open", "actioned", "closed"]).default("open"),
   inspectedBy:    z.string().optional().nullable(),
+  staffRosterId:  z.number().int().positive().optional().nullable(),
   siteId:         z.number().int().optional().nullable(),
 });
 
@@ -154,7 +156,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const body = InspectionBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
-
+  const performer = await resolveStaffPerformer(clientId, d.staffRosterId, d.inspectedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const allowedTypes = await getEffectiveOptionList(clientId, "premises_inspection_types");
   if (!allowedTypes.includes(d.inspectionType))
     return res.status(400).json({ error: "Invalid inspection type" });
@@ -174,7 +177,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     actionRequired: d.actionRequired ?? null,
     actionTaken:    d.actionTaken ?? null,
     status:         d.status,
-    inspectedBy:    d.inspectedBy ?? null,
+    inspectedBy:    performer.performedBy,
+    staffRosterId:  performer.staffRosterId,
     createdBy:      (req as any).user?.id ?? null,
   } as any).returning();
   res.status(201).json(row);
@@ -190,16 +194,20 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const body = InspectionBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
-
   // Allow a value unchanged from the stored record even if it is no longer in
   // the client's effective list; reject only NEW values not in the list.
   const [current] = await db.select({
     inspectionType: premisesInspectionsTable.inspectionType,
     siteId: premisesInspectionsTable.siteId,
+    staffRosterId: premisesInspectionsTable.staffRosterId,
+    inspectedBy: premisesInspectionsTable.inspectedBy,
   })
     .from(premisesInspectionsTable)
     .where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId))).limit(1);
   if (!current) return res.status(404).json({ error: "Not found" });
+  const performer = await resolveStaffPerformerUpdate(clientId, d.staffRosterId, d.inspectedBy,
+    current.staffRosterId, current.inspectedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
   if (!(await siteIsAccessible(current.siteId, clientId, getActiveDepartmentId(req))))
     return res.status(403).json({ error: "Forbidden" });
   if (d.inspectionType !== current.inspectionType) {
@@ -222,7 +230,8 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     actionRequired: d.actionRequired ?? null,
     actionTaken:    d.actionTaken ?? null,
     status:         d.status,
-    inspectedBy:    d.inspectedBy ?? null,
+    inspectedBy:    performer.performedBy,
+    staffRosterId:  performer.staffRosterId,
     updatedAt:      new Date(),
   } as any).where(and(eq(premisesInspectionsTable.id, id), eq(premisesInspectionsTable.clientId, clientId)));
   res.json({ ok: true });

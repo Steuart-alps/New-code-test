@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { passkeysTable } from "@workspace/db/schema";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
@@ -134,15 +133,6 @@ export async function enforceTwoFactorEnrollment(req: Request, res: Response, ne
     return;
   }
   if (user.totpEnabled) {
-    next();
-    return;
-  }
-  const [passkey] = await db
-    .select({ id: passkeysTable.id })
-    .from(passkeysTable)
-    .where(eq(passkeysTable.userId, user.id))
-    .limit(1);
-  if (passkey) {
     next();
     return;
   }

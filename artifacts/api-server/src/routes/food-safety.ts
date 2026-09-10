@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -36,6 +37,8 @@ const recordFieldsSchema = z.object({
   hotHoldingLimit: z.string().max(200).optional(),
   correctives: z.string().max(5000).optional(),
   managerSignature: z.string().max(200).optional(),
+  performedBy: z.string().max(200).nullable().optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
   submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
 const updateRecordSchema = recordFieldsSchema.extend({
@@ -579,10 +582,17 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data;
+  const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
-    .select({ id: foodSafetyRecordsTable.id, siteId: foodSafetyRecordsTable.siteId })
+    .select({
+      id: foodSafetyRecordsTable.id,
+      siteId: foodSafetyRecordsTable.siteId,
+      staffRosterId: foodSafetyRecordsTable.staffRosterId,
+      performedBy: foodSafetyRecordsTable.performedBy,
+    })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
@@ -608,6 +618,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
       correctives: data.correctives,
       managerSignature: data.managerSignature,
+      performedBy: performer.performedBy,
+      staffRosterId: performer.staffRosterId,
       submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
       createdBy: (req.session as any).userId ?? null,
     })
@@ -729,7 +741,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
   const [existing] = await db
-    .select({ id: foodSafetyRecordsTable.id, siteId: foodSafetyRecordsTable.siteId })
+    .select({
+      id: foodSafetyRecordsTable.id,
+      siteId: foodSafetyRecordsTable.siteId,
+      staffRosterId: foodSafetyRecordsTable.staffRosterId,
+      performedBy: foodSafetyRecordsTable.performedBy,
+    })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
     .limit(1);
@@ -819,6 +836,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (submittedAt !== undefined) {
     updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
   }
+  const performer = await resolveStaffPerformerUpdate(clientId, parsedUpdate.data.staffRosterId, parsedUpdate.data.performedBy,
+    existing.staffRosterId, existing.performedBy);
+  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  updates.staffRosterId = performer.staffRosterId;
+  updates.performedBy = performer.performedBy;
 
   const [updated] = await db
     .update(foodSafetyRecordsTable)

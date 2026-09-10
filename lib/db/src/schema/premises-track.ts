@@ -1,4 +1,5 @@
 import { pgTable, serial, integer, text, timestamp, date } from "drizzle-orm/pg-core";
+import { staffMembersTable } from "./staff-members";
 
 export const premisesInspectionsTable = pgTable("premises_inspections", {
   id:              serial("id").primaryKey(),
@@ -14,6 +15,7 @@ export const premisesInspectionsTable = pgTable("premises_inspections", {
   actionTaken:     text("action_taken"),
   status:          text("status").notNull().default("open"),
   inspectedBy:     text("inspected_by"),
+  staffRosterId:   integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   createdBy:       integer("created_by"),
   createdAt:       timestamp("created_at").notNull().defaultNow(),
   updatedAt:       timestamp("updated_at").notNull().defaultNow(),

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { BedDouble, CheckCircle2, CheckSquare, ClipboardCheck, Loader2, Pencil, Plus, Archive, AlertCircle, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 type CheckValues = { clean: boolean; tidy: boolean; toStandard: boolean };
 
@@ -174,10 +175,10 @@ export default function RoomTrackPage() {
   useEffect(() => { load(); }, [load]);
 
   const activeRooms = rooms.filter(room => !room.archived && !room.isArchived && (siteId === "__all__" || roomSiteId(room) === Number(siteId)));
-  const saveCheck = async (room: Room, values: CheckValues, notes: string, checkedBy: string) => {
+  const saveCheck = async (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => {
     setSavingId(room.id);
     try {
-      const payload = { roomId: room.id, checkDate: date, siteId: roomSiteId(room), ...values, notes: notes.trim() || null, checkedBy: checkedBy.trim() || null };
+      const payload = { roomId: room.id, checkDate: date, siteId: roomSiteId(room), ...values, notes: notes.trim() || null, checkedBy: checkedBy.trim() || null, checkedByRosterId };
       const existing = checks.find(check => checkRoomId(check) === room.id);
       const response = await apiFetch(existing ? `/room-track/checks/${existing.id}` : "/room-track/checks", { method: existing ? "PUT" : "POST", body: JSON.stringify(payload) });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? "Unable to save check");
@@ -229,10 +230,11 @@ export default function RoomTrackPage() {
 
 function RoomCheckCard({ room, check, defaultCheckedBy, disabled, canAdmin, onSave, onEdit, onArchive }: {
   room: Room; check?: RoomCheck; defaultCheckedBy: string; disabled: boolean; canAdmin: boolean;
-  onSave: (room: Room, values: CheckValues, notes: string, checkedBy: string) => void; onEdit: () => void; onArchive: () => void;
+  onSave: (room: Room, values: CheckValues, notes: string, checkedBy: string, checkedByRosterId: number | null) => void; onEdit: () => void; onArchive: () => void;
 }) {
   const [values, setValues] = useState<CheckValues>(() => checkValues(check));
   const [notes, setNotes] = useState(check?.notes ?? "");
+  const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>((check as any)?.checkedByRosterId ?? null);
   const [checkedBy, setCheckedBy] = useState(check ? checkBy(check) ?? "" : defaultCheckedBy);
   useEffect(() => { setValues(checkValues(check)); setNotes(check?.notes ?? ""); setCheckedBy(check ? checkBy(check) ?? "" : defaultCheckedBy); }, [check, defaultCheckedBy]);
   const completeCount = Object.values(values).filter(Boolean).length;
@@ -240,7 +242,7 @@ function RoomCheckCard({ room, check, defaultCheckedBy, disabled, canAdmin, onSa
   return <Card className={cn("rounded-sm border-l-4 p-4", isComplete ? "border-l-emerald-500" : "border-l-amber-400 bg-amber-50/40")}>
     <div className="mb-3 flex items-start justify-between gap-3"><div><h2 className="font-semibold">{roomNumber(room) || room.name}</h2>{room.name && roomNumber(room) && <p className="text-xs text-muted-foreground">{room.name}</p>}<p className="mt-1 text-xs text-muted-foreground">{room.floor || "Floor not recorded"}{room.notes ? ` · ${room.notes}` : ""}</p></div>{isComplete ? <Badge variant="outline" className="rounded-sm border-emerald-300 bg-emerald-50 text-emerald-800"><CheckCircle2 className="mr-1 h-3 w-3" />Complete · 3/3</Badge> : <Badge variant="outline" className="rounded-sm border-amber-300 bg-amber-50 text-amber-800"><AlertCircle className="mr-1 h-3 w-3" />Requires attention · {completeCount}/3</Badge>}</div>
     <fieldset className="mb-3"><legend className="mb-1.5 text-xs font-medium">Housekeeping checks ({completeCount}/3)</legend><div className="grid gap-2 sm:grid-cols-3">{OUTCOMES.map(outcome => <button key={outcome.key} type="button" disabled={disabled} aria-pressed={values[outcome.key]} onClick={() => setValues(current => ({ ...current, [outcome.key]: !current[outcome.key] }))} className={cn("flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60", values[outcome.key] ? outcome.className : "border-border bg-background text-muted-foreground hover:bg-muted/40")}>{values[outcome.key] ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}{outcome.label}</button>)}</div></fieldset>
-    <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1"><Label htmlFor={`checked-by-${room.id}`} className="text-xs">Checked by</Label><Input id={`checked-by-${room.id}`} value={checkedBy} onChange={e => setCheckedBy(e.target.value)} placeholder="Name (optional)" className="h-8 text-xs" disabled={disabled} /></div><div className="space-y-1 sm:col-span-2"><Label htmlFor={`notes-${room.id}`} className="text-xs">Notes</Label><Textarea id={`notes-${room.id}`} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything needing attention (optional)" rows={2} className="text-xs" disabled={disabled} /></div></div>
-    <div className="mt-3 flex items-center gap-2"><Button size="sm" className="gap-1.5" onClick={() => onSave(room, values, notes, checkedBy)} disabled={disabled}>{disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}{check ? "Update check" : "Save check"}</Button>{canAdmin && <><Button variant="ghost" size="sm" onClick={onEdit}>Edit room</Button><Button variant="ghost" size="sm" onClick={onArchive} className="text-muted-foreground">Archive</Button></>}</div>
+    <div className="grid gap-3 sm:grid-cols-2"><StaffPerformerSelect label="Checked by" value={checkedBy} onChange={setCheckedBy} onRosterIdChange={setCheckedByRosterId} optional className={disabled ? "pointer-events-none opacity-60" : undefined} /><div className="space-y-1 sm:col-span-2"><Label htmlFor={`notes-${room.id}`} className="text-xs">Notes</Label><Textarea id={`notes-${room.id}`} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything needing attention (optional)" rows={2} className="text-xs" disabled={disabled} /></div></div>
+    <div className="mt-3 flex items-center gap-2"><Button size="sm" className="gap-1.5" onClick={() => onSave(room, values, notes, checkedBy, checkedByRosterId)} disabled={disabled}>{disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}{check ? "Update check" : "Save check"}</Button>{canAdmin && <><Button variant="ghost" size="sm" onClick={onEdit}>Edit room</Button><Button variant="ghost" size="sm" onClick={onArchive} className="text-muted-foreground">Archive</Button></>}</div>
   </Card>;
 }

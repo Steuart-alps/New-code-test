@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -143,7 +144,8 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
     actionRequired: inspection?.actionRequired ?? "",
     actionTaken:    inspection?.actionTaken ?? "",
     status:         inspection?.status ?? "open",
-    inspectedBy:    inspection?.inspectedBy ?? "",
+     inspectedBy:    inspection?.inspectedBy ?? "",
+     staffRosterId:  (inspection as any)?.staffRosterId ?? null,
     siteId:         inspection?.siteId == null ? "all" : String(inspection.siteId),
   }));
 
@@ -160,6 +162,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       actionTaken: inspection?.actionTaken ?? "",
       status: inspection?.status ?? "open",
       inspectedBy: inspection?.inspectedBy ?? "",
+      staffRosterId: (inspection as any)?.staffRosterId ?? null,
       siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
     });
   }, [open, inspection]);
@@ -182,6 +185,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
         actionTaken:    form.actionTaken || null,
         status:         form.status,
         inspectedBy:    form.inspectedBy || null,
+        staffRosterId:  form.staffRosterId,
         siteId:         form.siteId !== "all" ? parseInt(form.siteId, 10) : null,
       };
       if (isEdit) {
@@ -228,8 +232,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
             <Input value={form.area} onChange={set("area")} placeholder="e.g. Reception, stairwell, car park" className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
-            <Label>Inspected by</Label>
-            <Input value={form.inspectedBy} onChange={set("inspectedBy")} placeholder="Staff name" className="rounded-sm" />
+            <StaffPerformerSelect label="Inspected by" value={form.inspectedBy} onChange={(value) => setForm((current) => ({ ...current, inspectedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, staffRosterId: value }))} />
           </div>
           {sites.length > 0 && (
             <div className="space-y-1.5">

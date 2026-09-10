@@ -11,6 +11,7 @@ import {
   serviceForDailyChecklistType,
   type DailyChecklistType,
 } from "../lib/dailyChecklistEntitlements";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -49,6 +50,7 @@ const createSchema = z.object({
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   items: z.array(itemSchema).optional(),
   completedBy: z.string().max(200).nullable().optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
   managerNote: z.string().max(2000).nullable().optional(),
   submittedAt: z.string().datetime().nullable().optional(),
 });
@@ -182,17 +184,20 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     });
   }
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
+  const performer = await resolveStaffRoster(clientId, data.staffRosterId, data.completedBy);
+  if (data.staffRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const [row] = await db.insert(dailyChecklistsTable).values({
     clientId,
     siteId: data.siteId ?? null,
     checklistType: data.checklistType,
     checkDate: data.checkDate,
     items: (data.items ?? []) as any,
-    completedBy: data.completedBy ?? null,
+    completedBy: performer?.performedBy ?? null,
+    staffRosterId: performer?.staffRosterId ?? null,
     managerNote: data.managerNote ?? null,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
     createdBy: (req.session as any).userId ?? null,
-  }).returning();
+  } as any).returning();
   res.status(201).json(row);
 });
 
@@ -217,8 +222,10 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data as any;
+  const performer = await resolveStaffPerformerUpdate(clientId, data.staffRosterId, data.completedBy, (existing as any).staffRosterId, existing.completedBy);
+  if (data.staffRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const [row] = await db.update(dailyChecklistsTable)
-    .set({ ...data, items: data.items as any, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
+    .set({ ...data, completedBy: performer?.performedBy, staffRosterId: performer?.staffRosterId, items: data.items as any, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
     .where(and(eq(dailyChecklistsTable.id, id), eq(dailyChecklistsTable.clientId, clientId))).returning();
   res.json(row);
 });

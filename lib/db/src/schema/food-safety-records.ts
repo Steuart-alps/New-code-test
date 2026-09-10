@@ -2,6 +2,7 @@ import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
+import { staffMembersTable } from "./staff-members";
 
 export const foodSafetyRecordsTable = pgTable("food_safety_records", {
   id: serial("id").primaryKey(),
@@ -25,6 +26,8 @@ export const foodSafetyRecordsTable = pgTable("food_safety_records", {
   hotHoldingLimit: text("hot_holding_limit").notNull().default("Above 63°C"),
   correctives: text("correctives"),
   managerSignature: text("manager_signature"),
+  performedBy: text("performed_by"),
+  staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   submittedAt: timestamp("submitted_at"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),

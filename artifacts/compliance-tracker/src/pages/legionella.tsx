@@ -37,6 +37,7 @@ import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, 
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -367,6 +368,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
   const [result, setResult] = useState<"pass" | "fail">("pass");
   const [temperature, setTemperature] = useState("");
   const [performedBy, setPerformedBy] = useState("");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const { user } = useAuth();
@@ -393,7 +395,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
         result,
         temperature: isTemperature && temperature ? parseFloat(temperature) : undefined,
         location: locationStr,
-        performedBy: performedBy || undefined,
+        performedBy: performedBy || null, staffRosterId: staffRosterId,
         notes: notes || undefined,
         siteId: outlet.siteId ?? undefined,
         outletId: outlet.id,
@@ -451,8 +453,7 @@ function OutletTestDialog({ outlet, onClose, onSuccess }: {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label>Performed By</Label>
-            <Input value={performedBy} onChange={e => setPerformedBy(e.target.value)} placeholder="Name" />
+            <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
           </div>
           <div className="space-y-1.5">
             <Label>Notes</Label>
@@ -676,6 +677,7 @@ function RecordCheckDialog({
   const [location, setLocation] = useState("");
   const { user } = useAuth();
   const [performedBy, setPerformedBy] = useState(user?.name ?? "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(siteId);
 
@@ -694,14 +696,14 @@ function RecordCheckDialog({
   const isTemperatureCheck = TEMPERATURE_TYPES.has(checkType);
 
   const handleSubmit = async () => {
-    const data: CreateLegionellaCheckRequest = {
+    const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
       checkType,
       checkDate,
       result,
       temperature: isTemperatureCheck && temperature ? parseFloat(temperature) : undefined,
       siteId: selectedSite,
       location: location || undefined,
-      performedBy: performedBy || undefined,
+      performedBy: performedBy || null, staffRosterId: staffRosterId,
       notes: notes || undefined,
     };
 
@@ -812,8 +814,7 @@ function RecordCheckDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Performed By</Label>
-            <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} placeholder="Name" />
+            <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
           </div>
 
           <div className="space-y-1.5">
@@ -840,6 +841,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
   const [temperature, setTemperature] = useState(check.temperature || "");
   const [location, setLocation] = useState(check.location || "");
   const [performedBy, setPerformedBy] = useState(check.performedBy || "");
+  const [staffRosterId, setStaffRosterId] = useState<number | null>((check as any).staffRosterId ?? null);
   const [notes, setNotes] = useState(check.notes || "");
   const [selectedSite, setSelectedSite] = useState<number | undefined>(check.siteId || undefined);
 
@@ -860,9 +862,9 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           temperature: isTemperatureCheck && temperature ? parseFloat(String(temperature)) : undefined,
           siteId: selectedSite,
           location: location || undefined,
-          performedBy: performedBy || undefined,
+          performedBy: performedBy || null, staffRosterId: staffRosterId,
           notes: notes || undefined,
-        },
+        } as any,
       },
       {
         onSuccess: () => {
@@ -944,8 +946,7 @@ function EditCheckDialog({ check }: { check: LegionellaCheck }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Performed By</Label>
-            <Input value={performedBy} onChange={(e) => setPerformedBy(e.target.value)} />
+            <StaffPerformerSelect value={performedBy} onChange={setPerformedBy} onRosterIdChange={setStaffRosterId} />
           </div>
 
           <div className="space-y-1.5">

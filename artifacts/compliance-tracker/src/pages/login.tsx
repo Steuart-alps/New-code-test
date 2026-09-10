@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import type { PasskeyOptions } from "@/context/auth-context";
+import { apiFetch } from "@/lib/api";
 import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
@@ -59,15 +60,24 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const response = await startAuthentication({ optionsJSON: passkeyOptions as any });
-      const res = await fetch(`${baseUrl}/auth/passkeys/authenticate`, {
+      const res = await apiFetch("/auth/passkeys/authenticate", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(response),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Passkey verification failed");
-      await refresh();
+      if (data.requires2fa) {
+        setView("totp");
+        setPasskeyOptions(null);
+      } else if (data.requires2faSetup) {
+        // A passkey is optional web sign-in, not the mandatory TOTP setup.
+        // Refresh preserves the setup-only session and lets App route to the
+        // enrollment screen without treating the passkey as full auth.
+        setPasskeyOptions(null);
+        await refresh();
+      } else {
+        await refresh();
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Passkey verification failed");
     } finally {
@@ -255,9 +265,9 @@ export default function LoginPage() {
                     <Button type="submit" className="w-full h-12 font-medium bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" disabled={loading || totpCode.replace(/[\s-]/g, "").length < 6}>
                       {loading ? "Verifying..." : "Verify"}
                     </Button>
-                    {passkeyOptions && (
+                     {passkeyOptions && (
                       <Button type="button" variant="outline" className="w-full h-12 rounded-[2px]" onClick={handlePasskey} disabled={loading}>
-                        <KeyRound className="w-4 h-4 mr-2" /> Use a passkey instead
+                         <KeyRound className="w-4 h-4 mr-2" /> Use passkey to identify yourself
                       </Button>
                     )}
                     <button

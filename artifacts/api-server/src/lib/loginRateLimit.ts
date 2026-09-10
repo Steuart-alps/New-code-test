@@ -55,6 +55,7 @@ export function makeLoginRateLimit(opts?: {
   max?: number;
   namespace?: string;
   failureStatuses?: number[];
+  key?: (req: Request) => string;
 }) {
   const windowMs = opts?.windowMs ?? 15 * 60 * 1000;
   const max = opts?.max ?? 10;
@@ -63,7 +64,7 @@ export function makeLoginRateLimit(opts?: {
 
   return function loginRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
     const now = Date.now();
-    const key = `${namespace}:ip:${clientIp(req)}`;
+    const key = `${namespace}:${opts?.key ? opts.key(req) : `ip:${clientIp(req)}`}`;
 
     const retryAfter = blockedSeconds(key, max, now);
     if (retryAfter > 0) {

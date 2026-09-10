@@ -4,6 +4,7 @@ import { roomTrackChecksTable, roomTrackRoomsTable, sitesTable } from "@workspac
 import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
@@ -24,6 +25,7 @@ const CheckCreateBody = z.object({
   toStandard: z.boolean().optional().default(false),
   notes: z.string().max(5000).optional().nullable(),
   checkedBy: z.string().trim().max(200).optional().nullable(),
+  checkedByRosterId: z.number().int().positive().optional().nullable(),
 });
 const CheckUpdateBody = CheckCreateBody.partial().omit({ roomId: true, checkDate: true }).extend({
   roomId: z.number().int().positive().optional(),
@@ -160,8 +162,10 @@ router.post("/checks", requireAuth, denyViewers, async (req, res) => {
   const checkSiteId = body.data.siteId ?? room.siteId;
   if (room.siteId != null && checkSiteId !== room.siteId) return res.status(400).json({ error: "Check siteId must match the room site" });
   if (!(await validSite(checkSiteId, clientId, siteIds))) return res.status(403).json({ error: "Invalid siteId for this client or department" });
+  const performer = await resolveStaffRoster(clientId, body.data.checkedByRosterId, body.data.checkedBy);
+  if (body.data.checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   try {
-    const [check] = await db.insert(roomTrackChecksTable).values({ ...body.data, clientId, siteId: checkSiteId, notes: body.data.notes ?? null, checkedBy: body.data.checkedBy ?? null, createdBy: req.currentUser!.id, updatedBy: req.currentUser!.id }).returning();
+    const [check] = await db.insert(roomTrackChecksTable).values({ ...body.data, clientId, siteId: checkSiteId, notes: body.data.notes ?? null, checkedBy: performer?.performedBy ?? null, checkedByRosterId: performer?.staffRosterId ?? null, createdBy: req.currentUser!.id, updatedBy: req.currentUser!.id } as any).returning();
     res.status(201).json(check);
   } catch (error: any) {
     if (postgresErrorCode(error) === "23505") return res.status(409).json({ error: "A check already exists for this room and date" });
@@ -181,8 +185,10 @@ router.put("/checks/:id", requireAuth, denyViewers, async (req, res) => {
   const room = await getScopedRoom(roomId, clientId, siteIds); if (!room) return res.status(404).json({ error: "Room not found" });
   const checkSiteId = body.data.siteId === undefined ? existing.siteId : body.data.siteId ?? room.siteId; if (room.siteId != null && checkSiteId !== room.siteId) return res.status(400).json({ error: "Check siteId must match the room site" });
   if (!(await validSite(checkSiteId, clientId, siteIds))) return res.status(403).json({ error: "Invalid siteId for this client or department" });
+  const performer = await resolveStaffPerformerUpdate(clientId, body.data.checkedByRosterId, body.data.checkedBy, (existing as any).checkedByRosterId, existing.checkedBy);
+  if (body.data.checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   try {
-    const [check] = await db.update(roomTrackChecksTable).set({ ...body.data, roomId, checkDate: body.data.checkDate ?? existing.checkDate, siteId: checkSiteId, updatedBy: req.currentUser!.id, updatedAt: new Date() }).where(and(eq(roomTrackChecksTable.id, id), eq(roomTrackChecksTable.clientId, clientId))).returning();
+    const [check] = await db.update(roomTrackChecksTable).set({ ...body.data, checkedBy: performer?.performedBy, checkedByRosterId: performer?.staffRosterId, roomId, checkDate: body.data.checkDate ?? existing.checkDate, siteId: checkSiteId, updatedBy: req.currentUser!.id, updatedAt: new Date() } as any).where(and(eq(roomTrackChecksTable.id, id), eq(roomTrackChecksTable.clientId, clientId))).returning();
     res.json(check);
   } catch (error: any) {
     if (postgresErrorCode(error) === "23505") return res.status(409).json({ error: "A check already exists for this room and date" });

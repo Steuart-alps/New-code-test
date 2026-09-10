@@ -11,6 +11,7 @@ export const dailyChecklistsTable = pgTable("daily_checklists", {
   checkDate: date("check_date").notNull(),
   items: jsonb("items").notNull().default("[]"),
   completedBy: text("completed_by"),
+  staffRosterId: integer("staff_roster_id"),
   managerNote: text("manager_note"),
   submittedAt: timestamp("submitted_at"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),

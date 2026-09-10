@@ -59,6 +59,10 @@ const ownVisit = await request("POST", "/pest-track/visits", {
   areasInspected: "Wrong tenant area",
 });
 assert.equal(ownVisit.status, 201);
+const deletedOwnVisit = await request("DELETE", `/pest-track/visits/${ownVisit.data.id}`);
+assert.equal(deletedOwnVisit.status, 200);
+const deletedAgain = await request("DELETE", `/pest-track/visits/${ownVisit.data.id}`);
+assert.equal(deletedAgain.status, 404);
 
 const client = await request("POST", "/clients", {
   name: `Selected Café Business ${stamp}`,
@@ -66,6 +70,17 @@ const client = await request("POST", "/clients", {
 });
 assert.ok([200, 201].includes(client.status));
 const selectedClientId = client.data.id;
+
+const foreignVisit = await request("POST", `/pest-track/visits?clientId=${selectedClientId}`, {
+  visitDate: "2026-08-02",
+  contractorName: "Selected Tenant Contractor",
+});
+assert.equal(foreignVisit.status, 201);
+// Without the selected tenant context, a visit from another tenant must not
+// be discoverable or deletable by its globally unique ID.
+const crossTenantDelete = await request("DELETE", `/pest-track/visits/${foreignVisit.data.id}`);
+assert.equal(crossTenantDelete.status, 404);
+assert.equal((await request("DELETE", `/pest-track/visits/${foreignVisit.data.id}?clientId=${selectedClientId}`)).status, 200);
 
 const emptyPdf = await request("GET", `/pest-track/register.pdf?clientId=${selectedClientId}`);
 assert.equal(emptyPdf.status, 200);

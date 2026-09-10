@@ -37,7 +37,10 @@ export async function getOutstandingAckSummary(clientId: number): Promise<Outsta
   if (docs.length === 0) return [];
 
   const staffResult = await db.execute(sql`
-    SELECT id, (first_name || ' ' || last_name) AS name, department FROM staff_roster
+    SELECT id,
+      COALESCE(NULLIF(trim(name), ''), NULLIF(trim(concat_ws(' ', first_name, last_name)), '')) AS name,
+      department
+    FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
   `);
   const staff = (staffResult.rows ?? []) as any[];

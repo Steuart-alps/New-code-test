@@ -66,6 +66,7 @@ import DailyHistoryPage from "@/pages/daily-history";
 import StaffTrainingPage from "@/pages/staff-training";
 import { WaterSafetyPage } from "@/pages/safety-summary";
 import { trackModuleFirstUse } from "@/lib/analytics";
+import KioskPage, { StaffSetPinPage } from "@/pages/staff-kiosk";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -128,6 +129,8 @@ function ProtectedRoutes() {
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
   if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
+  if (location === "/kiosk") return <KioskPage />;
+  if (location === "/staff/set-pin") return <StaffSetPinPage />;
 
   if (isLoading) {
     return (

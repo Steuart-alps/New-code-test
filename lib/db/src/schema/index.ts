@@ -87,6 +87,10 @@ export * from "./audit-events"
 
 export * from "./staff-training"
 ;
+export * from "./staff-members"
+;
+export * from "./staff-kiosk"
+;
 export * from "./track-actions"
 ;
 

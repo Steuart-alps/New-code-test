@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ interface PestStatus {
 const EMPTY_VISIT = {
   visitDate: "", contractorName: "", contractorCompany: "",
   areasInspected: "", findings: "", treatmentsApplied: "",
-  recommendations: "", nextVisitDate: "", signedOffBy: "", notes: "",
+   recommendations: "", nextVisitDate: "", signedOffBy: "", signedOffByRosterId: null as number | null, notes: "",
   siteId: "",
 };
 
@@ -171,6 +172,7 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
     recommendations:    visit?.recommendations ?? "",
     nextVisitDate:      visit?.next_visit_date ?? "",
     signedOffBy:        visit?.signed_off_by ?? "",
+     signedOffByRosterId: (visit as any)?.signed_off_by_roster_id ?? null,
     notes:              visit?.notes ?? "",
     siteId:             String(visit?.site_id ?? ""),
   }));
@@ -192,6 +194,7 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
         recommendations:    form.recommendations || null,
         nextVisitDate:      form.nextVisitDate || null,
         signedOffBy:        form.signedOffBy || null,
+        signedOffByRosterId: form.signedOffByRosterId,
         notes:              form.notes || null,
         siteId:             form.siteId ? parseInt(form.siteId, 10) : null,
       };
@@ -246,8 +249,7 @@ function VisitDialog({ open, visit, onClose, onSaved, sites, config }: {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label>Signed off by</Label>
-            <Input value={form.signedOffBy} onChange={set("signedOffBy")} placeholder="e.g. Site manager name" className="rounded-sm" />
+            <StaffPerformerSelect label="Signed off by" value={form.signedOffBy} onChange={(value) => setForm((current) => ({ ...current, signedOffBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, signedOffByRosterId: value }))} />
           </div>
           <div className="col-span-full space-y-1.5">
             <Label>Areas inspected / treated</Label>
@@ -305,7 +307,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
     location:     activity?.location ?? "",
     severity:     activity?.severity ?? "low",
     actionTaken:  activity?.action_taken ?? "",
-    recordedBy:   activity?.recorded_by ?? "",
+    recordedBy:   activity?.recorded_by ?? "", recordedByRosterId: (activity as any)?.recorded_by_roster_id ?? null,
     resolved:     activity?.resolved ?? false,
     notes:        activity?.notes ?? "",
     siteId:       String(activity?.site_id ?? ""),
@@ -326,6 +328,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
         severity:     form.severity,
         actionTaken:  form.actionTaken || null,
         recordedBy:   form.recordedBy || null,
+        recordedByRosterId: form.recordedByRosterId,
         resolved:     form.resolved,
         notes:        form.notes || null,
         siteId:       form.siteId ? parseInt(form.siteId, 10) : null,
@@ -388,8 +391,7 @@ function ActivityDialog({ open, activity, onClose, onSaved, sites }: {
             <Input value={form.location} onChange={set("location")} placeholder="e.g. Kitchen, bin store" className="rounded-sm" />
           </div>
           <div className="space-y-1.5">
-            <Label>Recorded by</Label>
-            <Input value={form.recordedBy} onChange={set("recordedBy")} placeholder="Staff name" className="rounded-sm" />
+            <StaffPerformerSelect label="Recorded by" value={form.recordedBy} onChange={(value) => setForm((current) => ({ ...current, recordedBy: value }))} onRosterIdChange={(value) => setForm((current) => ({ ...current, recordedByRosterId: value }))} />
           </div>
           {sites.length > 0 && (
             <div className="space-y-1.5">

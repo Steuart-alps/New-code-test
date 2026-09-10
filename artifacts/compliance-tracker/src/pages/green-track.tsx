@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -257,6 +258,7 @@ interface ServiceRecord {
   nextServiceDate: string | null;
   workPerformed: string | null;
   servicedBy: string | null;
+  servicedByRosterId: number | null;
   costPence: number | null;
   notes: string | null;
 }
@@ -268,6 +270,7 @@ interface Defect {
   machineType: string;
   reportDate: string;
   reportedBy: string | null;
+  reportedByRosterId: number | null;
   description: string;
   severity: string;
   outOfService: boolean;
@@ -286,6 +289,7 @@ interface PuwerInspection {
   nextInspectionDate: string | null;
   inspectionType: string;
   inspectorName: string | null;
+  inspectorRosterId: number | null;
   inspectorCompany: string | null;
   certRef: string | null;
   safeToOperate: boolean;
@@ -305,6 +309,7 @@ interface FuelLog {
   engineHours: number | null;
   costPence: number | null;
   filledBy: string | null;
+  filledByRosterId: number | null;
   notes: string | null;
 }
 
@@ -538,7 +543,7 @@ function PreUseDialog({
   const { data: config } = useGetGreenTrackConfig();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-    machineId: "", checkDate: today, operator: "",
+    machineId: "", checkDate: today, operator: "", operatorRosterId: null as number | null,
     fluidLevelsOk: null as boolean | null, tyresOk: null as boolean | null,
     bladesOk: null as boolean | null, guardsOk: null as boolean | null,
     controlsOk: null as boolean | null, lightsOk: null as boolean | null,
@@ -549,7 +554,7 @@ function PreUseDialog({
 
   const reset = () => setForm(check ? {
     machineId: String(check.machineId), checkDate: check.checkDate,
-    operator: check.operator ?? "",
+    operator: check.operator ?? "", operatorRosterId: (check as any).operatorRosterId ?? (check as any).operator_roster_id ?? null,
     fluidLevelsOk: check.fluidLevelsOk, tyresOk: check.tyresOk,
     bladesOk: check.bladesOk, guardsOk: check.guardsOk,
     controlsOk: check.controlsOk, lightsOk: check.lightsOk,
@@ -573,6 +578,7 @@ function PreUseDialog({
       const body = {
         machineId: parseInt(form.machineId, 10), checkDate: form.checkDate,
         operator: form.operator.trim() || null,
+        operatorRosterId: form.operatorRosterId,
         ...vals,
         defectNoted: vals.guardsOk === false || vals.bladesOk === false || autoResult === "fail",
         result: autoResult, notes: form.notes.trim() || null,
@@ -618,14 +624,10 @@ function PreUseDialog({
             <div>
               <Label>Operator <span className="text-muted-foreground text-xs">optional</span></Label>
               {(() => {
-                const ops = parseJsonArray<string>(config?.green_default_operators);
                 return (
-                  <>
-                    {ops.length > 0 && <datalist id="green-operators-list">{ops.map(op => <option key={op} value={op} />)}</datalist>}
-                    <Input className="mt-1 rounded-sm" value={form.operator}
-                      list={ops.length > 0 ? "green-operators-list" : undefined}
-                      onChange={e => setForm(f => ({ ...f, operator: e.target.value }))} placeholder="Staff name" />
-                  </>
+                  <StaffPerformerSelect label="Operator" value={form.operator}
+                    onChange={(value) => setForm(f => ({ ...f, operator: value }))}
+                    onRosterIdChange={(value) => setForm(f => ({ ...f, operatorRosterId: value }))} />
                 );
               })()}
             </div>
@@ -681,9 +683,9 @@ function ServiceDialog({
   const blank = {
     machineId: "", serviceDate: today, serviceType: "scheduled",
     hoursAtService: "", nextServiceHours: "", nextServiceDate: "",
-    workPerformed: "", servicedBy: "", costPounds: "", notes: "",
+    workPerformed: "", servicedBy: "", servicedByRosterId: null, costPounds: "", notes: "",
   };
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState({ ...blank, servicedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
 
   const reset = () => setForm(record ? {
@@ -691,7 +693,7 @@ function ServiceDialog({
     serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
     nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
     nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
-    servicedBy: record.servicedBy ?? "",
+    servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
     costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
     notes: record.notes ?? "",
   } : blank);
@@ -707,7 +709,7 @@ function ServiceDialog({
         nextServiceHours: form.nextServiceHours ? parseInt(form.nextServiceHours, 10) : null,
         nextServiceDate: form.nextServiceDate || null,
         workPerformed: form.workPerformed.trim() || null,
-        servicedBy: form.servicedBy.trim() || null,
+        servicedBy: form.servicedBy.trim() || null, servicedByRosterId: form.servicedByRosterId,
         costPence: form.costPounds ? Math.round(parseFloat(form.costPounds) * 100) : null,
         notes: form.notes.trim() || null,
       };
@@ -775,8 +777,9 @@ function ServiceDialog({
             </div>
             <div>
               <Label>Serviced by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.servicedBy}
-                onChange={e => setForm(f => ({ ...f, servicedBy: e.target.value }))} placeholder="Technician / company" />
+              <StaffPerformerSelect label="Serviced by" value={form.servicedBy}
+                onChange={v => setForm(f => ({ ...f, servicedBy: v }))}
+                onRosterIdChange={v => setForm(f => ({ ...f, servicedByRosterId: v }))} optional />
             </div>
             <div>
               <Label>Cost (£) <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -818,16 +821,16 @@ function DefectDialog({
   const { toast } = useToast();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
-    machineId: "", reportDate: today, reportedBy: "",
+    machineId: "", reportDate: today, reportedBy: "", reportedByRosterId: null,
     description: "", severity: "minor", outOfService: false,
     status: "open", resolution: "", resolvedDate: "", notes: "",
   };
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState({ ...blank, reportedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
 
   const reset = () => setForm(defect ? {
     machineId: String(defect.machineId), reportDate: defect.reportDate,
-    reportedBy: defect.reportedBy ?? "", description: defect.description,
+    reportedBy: defect.reportedBy ?? "", reportedByRosterId: (defect as any).reportedByRosterId ?? (defect as any).reported_by_roster_id ?? null, description: defect.description,
     severity: defect.severity, outOfService: defect.outOfService,
     status: defect.status, resolution: defect.resolution ?? "",
     resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
@@ -840,7 +843,7 @@ function DefectDialog({
     try {
       const body = {
         machineId: parseInt(form.machineId, 10), reportDate: form.reportDate,
-        reportedBy: form.reportedBy.trim() || null, description: form.description.trim(),
+        reportedBy: form.reportedBy.trim() || null, reportedByRosterId: form.reportedByRosterId, description: form.description.trim(),
         severity: form.severity, outOfService: form.outOfService,
         status: form.status, resolution: form.resolution.trim() || null,
         resolvedDate: form.resolvedDate || null, notes: form.notes.trim() || null,
@@ -885,8 +888,9 @@ function DefectDialog({
             </div>
             <div>
               <Label>Reported by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.reportedBy}
-                onChange={e => setForm(f => ({ ...f, reportedBy: e.target.value }))} placeholder="Staff name" />
+              <StaffPerformerSelect label="Reported by" value={form.reportedBy}
+                onChange={v => setForm(f => ({ ...f, reportedBy: v }))}
+                onRosterIdChange={v => setForm(f => ({ ...f, reportedByRosterId: v }))} optional />
             </div>
             <div>
               <Label>Severity</Label>
@@ -978,16 +982,16 @@ function PuwerDialog({
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", inspectionDate: today, nextInspectionDate: "",
-    inspectionType: "thorough_examination", inspectorName: "", inspectorCompany: "",
+    inspectionType: "thorough_examination", inspectorName: "", inspectorRosterId: null, inspectorCompany: "",
     certRef: "", safeToOperate: true, defectsFound: "", result: "pass", notes: "",
   };
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState({ ...blank, inspectorRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
 
   const reset = () => setForm(inspection ? {
     machineId: String(inspection.machineId), inspectionDate: inspection.inspectionDate,
     nextInspectionDate: inspection.nextInspectionDate ?? "",
-    inspectionType: inspection.inspectionType, inspectorName: inspection.inspectorName ?? "",
+    inspectionType: inspection.inspectionType, inspectorName: inspection.inspectorName ?? "", inspectorRosterId: (inspection as any).inspectorRosterId ?? (inspection as any).inspector_roster_id ?? null,
     inspectorCompany: inspection.inspectorCompany ?? "", certRef: inspection.certRef ?? "",
     safeToOperate: inspection.safeToOperate, defectsFound: inspection.defectsFound ?? "",
     result: inspection.result, notes: inspection.notes ?? "",
@@ -1002,7 +1006,7 @@ function PuwerDialog({
         inspectionDate: form.inspectionDate,
         nextInspectionDate: form.nextInspectionDate || null,
         inspectionType: form.inspectionType,
-        inspectorName: form.inspectorName.trim() || null,
+        inspectorName: form.inspectorName.trim() || null, inspectorRosterId: form.inspectorRosterId,
         inspectorCompany: form.inspectorCompany.trim() || null,
         certRef: form.certRef.trim() || null,
         safeToOperate: form.safeToOperate,
@@ -1062,8 +1066,9 @@ function PuwerDialog({
             </div>
             <div>
               <Label>Inspector name <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.inspectorName}
-                onChange={e => setForm(f => ({ ...f, inspectorName: e.target.value }))} />
+              <StaffPerformerSelect label="Inspector" value={form.inspectorName}
+                onChange={v => setForm(f => ({ ...f, inspectorName: v }))}
+                onRosterIdChange={v => setForm(f => ({ ...f, inspectorRosterId: v }))} optional />
             </div>
             <div>
               <Label>Inspector company <span className="text-muted-foreground text-xs">optional</span></Label>
@@ -1119,9 +1124,9 @@ function FuelLogDialog({
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", logDate: today, fuelType: "diesel",
-    quantityLitres: "", engineHours: "", costPounds: "", filledBy: "", notes: "",
+    quantityLitres: "", engineHours: "", costPounds: "", filledBy: "", filledByRosterId: null, notes: "",
   };
-  const [form, setForm] = useState(blank);
+  const [form, setForm] = useState({ ...blank, filledByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
 
   const reset = () => setForm(log ? {
@@ -1129,7 +1134,7 @@ function FuelLogDialog({
     quantityLitres: log.quantityLitres != null ? String(log.quantityLitres) : "",
     engineHours: log.engineHours != null ? String(log.engineHours) : "",
     costPounds: log.costPence != null ? (log.costPence / 100).toFixed(2) : "",
-    filledBy: log.filledBy ?? "", notes: log.notes ?? "",
+    filledBy: log.filledBy ?? "", filledByRosterId: (log as any).filledByRosterId ?? (log as any).filled_by_roster_id ?? null, notes: log.notes ?? "",
   } : blank);
 
   const handleSave = async () => {
@@ -1142,7 +1147,7 @@ function FuelLogDialog({
         quantityLitres: form.quantityLitres ? parseFloat(form.quantityLitres) : null,
         engineHours: form.engineHours ? parseInt(form.engineHours, 10) : null,
         costPence: form.costPounds ? Math.round(parseFloat(form.costPounds) * 100) : null,
-        filledBy: form.filledBy.trim() || null, notes: form.notes.trim() || null,
+        filledBy: form.filledBy.trim() || null, filledByRosterId: form.filledByRosterId, notes: form.notes.trim() || null,
       };
       if (log) {
         await apiFetch(`/green-track/fuel-logs/${log.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -1206,8 +1211,9 @@ function FuelLogDialog({
             </div>
             <div>
               <Label>Filled by <span className="text-muted-foreground text-xs">optional</span></Label>
-              <Input className="mt-1 rounded-sm" value={form.filledBy}
-                onChange={e => setForm(f => ({ ...f, filledBy: e.target.value }))} placeholder="Staff name" />
+              <StaffPerformerSelect label="Filled by" value={form.filledBy}
+                onChange={v => setForm(f => ({ ...f, filledBy: v }))}
+                onRosterIdChange={v => setForm(f => ({ ...f, filledByRosterId: v }))} optional />
             </div>
           </div>
           <div>

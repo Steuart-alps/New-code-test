@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
 import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -128,7 +129,7 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
-      machineId, checkDate, operator,
+       machineId, checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
       defectNoted, notes,
     } = req.body;
@@ -140,6 +141,8 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const performer = await resolveStaffRoster(clientId, operatorRosterId, operator);
+    if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     // The checklist is the source of truth. Never persist caller-supplied
     // aliases such as "advisory" as a newly recorded observation.
@@ -147,11 +150,11 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
       .some((value) => value === false) ? "fail" : "pass";
     const result = await db.execute(sql`
       INSERT INTO green_pre_use_checks (
-        client_id, machine_id, check_date, operator,
+         client_id, machine_id, check_date, operator, operator_roster_id,
         fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
         defect_noted, result, notes
       ) VALUES (
-        ${clientId}, ${machineId}, ${checkDate}, ${operator?.trim() ?? null},
+         ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
         ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
         ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
         ${defectNoted ?? false}, ${canonicalResult}, ${notes?.trim() ?? null}
@@ -168,20 +171,28 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
-      checkDate, operator,
+       checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
       defectNoted, notes,
     } = req.body;
-    const canonicalResult = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+    const existing = (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Check not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, operatorRosterId, operator, existing.operator_roster_id, existing.operator);
+    if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const value = (input: any, stored: any) => input === undefined ? stored : input;
+    const merged = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+      .map((input, index) => value(input, [existing.fluid_levels_ok, existing.tyres_ok, existing.blades_ok, existing.guards_ok, existing.controls_ok, existing.lights_ok, existing.cleanliness_ok][index]));
+    const canonicalResult = merged
       .some((value) => value === false) ? "fail" : "pass";
     const result = await db.execute(sql`
       UPDATE green_pre_use_checks
-      SET check_date = ${checkDate}, operator = ${operator?.trim() ?? null},
-          fluid_levels_ok = ${fluidLevelsOk ?? null}, tyres_ok = ${tyresOk ?? null},
-          blades_ok = ${bladesOk ?? null}, guards_ok = ${guardsOk ?? null},
-          controls_ok = ${controlsOk ?? null}, lights_ok = ${lightsOk ?? null},
-          cleanliness_ok = ${cleanlinessOk ?? null}, defect_noted = ${defectNoted ?? false},
-          result = ${canonicalResult}, notes = ${notes?.trim() ?? null}
+       SET check_date = ${value(checkDate, existing.check_date)},
+           operator = ${performer?.performedBy ?? null}, operator_roster_id = ${performer?.staffRosterId ?? null},
+           fluid_levels_ok = ${merged[0]}, tyres_ok = ${merged[1]},
+          blades_ok = ${merged[2]}, guards_ok = ${merged[3]},
+          controls_ok = ${merged[4]}, lights_ok = ${merged[5]},
+          cleanliness_ok = ${merged[6]}, defect_noted = ${value(defectNoted, existing.defect_noted)},
+          result = ${canonicalResult}, notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -233,7 +244,7 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       machineId, serviceDate, serviceType, hoursAtService, nextServiceHours,
-      nextServiceDate, workPerformed, servicedBy, costPence, notes,
+      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!serviceDate) return res.status(400).json({ error: "serviceDate is required" });
@@ -242,15 +253,17 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const performer = await resolveStaffRoster(clientId, servicedByRosterId, servicedBy);
+    if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     const result = await db.execute(sql`
       INSERT INTO green_service_records (
         client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
-        next_service_date, work_performed, serviced_by, cost_pence, notes
+        next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
       ) VALUES (
         ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
         ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
-        ${workPerformed?.trim() ?? null}, ${servicedBy?.trim() ?? null},
+        ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
         ${costPence ?? null}, ${notes?.trim() ?? null}
       )
       RETURNING *
@@ -266,15 +279,20 @@ router.put("/service-records/:id", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       serviceDate, serviceType, hoursAtService, nextServiceHours,
-      nextServiceDate, workPerformed, servicedBy, costPence, notes,
+      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes,
     } = req.body;
+    const existing = (await db.execute(sql`SELECT * FROM green_service_records WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Service record not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, servicedByRosterId, servicedBy, existing.serviced_by_roster_id, existing.serviced_by);
+    if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const value = (input: any, stored: any) => input === undefined ? stored : input;
     const result = await db.execute(sql`
       UPDATE green_service_records
-      SET service_date = ${serviceDate}, service_type = ${serviceType ?? "scheduled"},
-          hours_at_service = ${hoursAtService ?? null}, next_service_hours = ${nextServiceHours ?? null},
-          next_service_date = ${nextServiceDate ?? null}, work_performed = ${workPerformed?.trim() ?? null},
-          serviced_by = ${servicedBy?.trim() ?? null}, cost_pence = ${costPence ?? null},
-          notes = ${notes?.trim() ?? null}, updated_at = now()
+      SET service_date = ${value(serviceDate, existing.service_date)}, service_type = ${value(serviceType, existing.service_type)},
+          hours_at_service = ${value(hoursAtService, existing.hours_at_service)}, next_service_hours = ${value(nextServiceHours, existing.next_service_hours)},
+          next_service_date = ${value(nextServiceDate, existing.next_service_date)}, work_performed = ${workPerformed === undefined ? existing.work_performed : workPerformed?.trim() ?? null},
+          serviced_by = ${performer?.performedBy ?? null}, serviced_by_roster_id = ${performer?.staffRosterId ?? null}, cost_pence = ${value(costPence, existing.cost_pence)},
+          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}, updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -328,7 +346,7 @@ router.get("/defects", async (req, res) => {
 router.post("/defects", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { machineId, reportDate, reportedBy, description, severity, outOfService, notes } = req.body;
+    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
@@ -336,13 +354,15 @@ router.post("/defects", denyViewers, async (req, res) => {
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const performer = await resolveStaffRoster(clientId, reportedByRosterId, reportedBy);
+    if (reportedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     const result = await db.execute(sql`
       INSERT INTO green_defects (
-        client_id, machine_id, report_date, reported_by, description, severity, out_of_service, notes
+        client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
       ) VALUES (
         ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
-        ${reportedBy?.trim() ?? null}, ${description.trim()},
+        ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
         ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
       )
       RETURNING *
@@ -356,14 +376,19 @@ router.post("/defects", denyViewers, async (req, res) => {
 router.put("/defects/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { reportDate, reportedBy, description, severity, outOfService, status, resolution, resolvedDate, notes } = req.body;
+    const { reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, status, resolution, resolvedDate, notes } = req.body;
+    const existing = (await db.execute(sql`SELECT * FROM green_defects WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Defect not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, reportedByRosterId, reportedBy, existing.reported_by_roster_id, existing.reported_by);
+    if (reportedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const value = (input: any, stored: any) => input === undefined ? stored : input;
     const result = await db.execute(sql`
       UPDATE green_defects
-      SET report_date = ${reportDate}, reported_by = ${reportedBy?.trim() ?? null},
-          description = ${description?.trim()}, severity = ${severity ?? "minor"},
-          out_of_service = ${outOfService ?? false}, status = ${status ?? "open"},
-          resolution = ${resolution?.trim() ?? null}, resolved_date = ${resolvedDate ?? null},
-          notes = ${notes?.trim() ?? null}, updated_at = now()
+      SET report_date = ${value(reportDate, existing.report_date)}, reported_by = ${performer?.performedBy ?? null}, reported_by_roster_id = ${performer?.staffRosterId ?? null},
+          description = ${description === undefined ? existing.description : description?.trim() ?? null}, severity = ${value(severity, existing.severity)},
+          out_of_service = ${value(outOfService, existing.out_of_service)}, status = ${value(status, existing.status)},
+          resolution = ${resolution === undefined ? existing.resolution : resolution?.trim() ?? null}, resolved_date = ${value(resolvedDate, existing.resolved_date)},
+          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}, updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -415,7 +440,7 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       machineId, inspectionDate, nextInspectionDate, inspectionType,
-      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
+      inspectorName, inspectorRosterId, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!inspectionDate) return res.status(400).json({ error: "inspectionDate is required" });
@@ -424,16 +449,18 @@ router.post("/puwer-inspections", requireClientAdmin, async (req, res) => {
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const performer = await resolveStaffRoster(clientId, inspectorRosterId, inspectorName);
+    if (inspectorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     const canonicalResult = safeToOperate === false ? "fail" : "pass";
     const result = await db.execute(sql`
       INSERT INTO green_puwer_inspections (
         client_id, machine_id, inspection_date, next_inspection_date, inspection_type,
-        inspector_name, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes
+        inspector_name, inspector_roster_id, inspector_company, cert_ref, safe_to_operate, defects_found, result, notes
       ) VALUES (
         ${clientId}, ${machineId}, ${inspectionDate}, ${nextInspectionDate ?? null},
         ${inspectionType ?? "thorough_examination"},
-        ${inspectorName?.trim() ?? null}, ${inspectorCompany?.trim() ?? null},
+        ${performer?.performedBy ?? inspectorName?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${inspectorCompany?.trim() ?? null},
         ${certRef?.trim() ?? null}, ${safeToOperate ?? true},
         ${defectsFound?.trim() ?? null}, ${canonicalResult}, ${notes?.trim() ?? null}
       )
@@ -450,17 +477,23 @@ router.put("/puwer-inspections/:id", requireClientAdmin, async (req, res) => {
     const clientId = getClientId(req);
     const {
       inspectionDate, nextInspectionDate, inspectionType,
-      inspectorName, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
+      inspectorName, inspectorRosterId, inspectorCompany, certRef, safeToOperate, defectsFound, notes,
     } = req.body;
-    const canonicalResult = safeToOperate === false ? "fail" : "pass";
+    const existing = (await db.execute(sql`SELECT * FROM green_puwer_inspections WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Inspection not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, inspectorRosterId, inspectorName, existing.inspector_roster_id, existing.inspector_name);
+    if (inspectorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const mergedSafeToOperate = safeToOperate === undefined ? existing.safe_to_operate : safeToOperate;
+    const canonicalResult = mergedSafeToOperate === false ? "fail" : "pass";
+    const value = (input: any, stored: any) => input === undefined ? stored : input;
     const result = await db.execute(sql`
       UPDATE green_puwer_inspections
-      SET inspection_date = ${inspectionDate}, next_inspection_date = ${nextInspectionDate ?? null},
-          inspection_type = ${inspectionType ?? "thorough_examination"},
-          inspector_name = ${inspectorName?.trim() ?? null}, inspector_company = ${inspectorCompany?.trim() ?? null},
-          cert_ref = ${certRef?.trim() ?? null}, safe_to_operate = ${safeToOperate ?? true},
-          defects_found = ${defectsFound?.trim() ?? null}, result = ${canonicalResult},
-          notes = ${notes?.trim() ?? null}, updated_at = now()
+      SET inspection_date = ${value(inspectionDate, existing.inspection_date)}, next_inspection_date = ${value(nextInspectionDate, existing.next_inspection_date)},
+          inspection_type = ${value(inspectionType, existing.inspection_type)},
+          inspector_name = ${performer?.performedBy ?? null}, inspector_roster_id = ${performer?.staffRosterId ?? null}, inspector_company = ${inspectorCompany === undefined ? existing.inspector_company : inspectorCompany?.trim() ?? null},
+          cert_ref = ${certRef === undefined ? existing.cert_ref : certRef?.trim() ?? null}, safe_to_operate = ${mergedSafeToOperate},
+          defects_found = ${defectsFound === undefined ? existing.defects_found : defectsFound?.trim() ?? null}, result = ${canonicalResult},
+          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}, updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -510,21 +543,23 @@ router.get("/fuel-logs", async (req, res) => {
 router.post("/fuel-logs", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { machineId, logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, notes } = req.body;
+    const { machineId, logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, filledByRosterId, notes } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
 
     const machineCheck = await db.execute(sql`
       SELECT id FROM green_machines WHERE id = ${machineId} AND client_id = ${clientId}
     `);
     if (!rows(machineCheck).length) return res.status(404).json({ error: "Machine not found" });
+    const performer = await resolveStaffRoster(clientId, filledByRosterId, filledBy);
+    if (filledByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
     const result = await db.execute(sql`
       INSERT INTO green_fuel_logs (
-        client_id, machine_id, log_date, fuel_type, quantity_litres, engine_hours, cost_pence, filled_by, notes
+        client_id, machine_id, log_date, fuel_type, quantity_litres, engine_hours, cost_pence, filled_by, filled_by_roster_id, notes
       ) VALUES (
         ${clientId}, ${machineId}, ${logDate ?? new Date().toISOString().split("T")[0]},
         ${fuelType ?? "diesel"}, ${quantityLitres ?? null}, ${engineHours ?? null},
-        ${costPence ?? null}, ${filledBy?.trim() ?? null}, ${notes?.trim() ?? null}
+        ${costPence ?? null}, ${performer?.performedBy ?? filledBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${notes?.trim() ?? null}
       )
       RETURNING *
     `);
@@ -537,13 +572,18 @@ router.post("/fuel-logs", denyViewers, async (req, res) => {
 router.put("/fuel-logs/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, notes } = req.body;
+    const { logDate, fuelType, quantityLitres, engineHours, costPence, filledBy, filledByRosterId, notes } = req.body;
+    const existing = (await db.execute(sql`SELECT * FROM green_fuel_logs WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Fuel log not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, filledByRosterId, filledBy, existing.filled_by_roster_id, existing.filled_by);
+    if (filledByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    const value = (input: any, stored: any) => input === undefined ? stored : input;
     const result = await db.execute(sql`
       UPDATE green_fuel_logs
-      SET log_date = ${logDate}, fuel_type = ${fuelType ?? "diesel"},
-          quantity_litres = ${quantityLitres ?? null}, engine_hours = ${engineHours ?? null},
-          cost_pence = ${costPence ?? null}, filled_by = ${filledBy?.trim() ?? null},
-          notes = ${notes?.trim() ?? null}
+      SET log_date = ${value(logDate, existing.log_date)}, fuel_type = ${value(fuelType, existing.fuel_type)},
+          quantity_litres = ${value(quantityLitres, existing.quantity_litres)}, engine_hours = ${value(engineHours, existing.engine_hours)},
+          cost_pence = ${value(costPence, existing.cost_pence)}, filled_by = ${performer?.performedBy ?? null}, filled_by_roster_id = ${performer?.staffRosterId ?? null},
+          notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);

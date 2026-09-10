@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
+import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
 
@@ -40,22 +41,24 @@ router.post("/sessions", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
-      siteId, sessionDate, sessionType, lifeguardName, openTime, closeTime,
+       siteId, sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
       poolClosed, closureReason, notes,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
 
+    const performer = await resolveStaffRoster(clientId, lifeguardRosterId, lifeguardName);
+    if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
     const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
     const dbResult = await db.execute(sql`
       INSERT INTO swim_sessions (
-        client_id, site_id, session_date, session_type, lifeguard_name,
+        client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
         open_time, close_time, max_bathers, bather_count_peak,
         pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result
       ) VALUES (
         ${clientId}, ${siteId ?? null}, ${sessionDate},
-        ${sessionType ?? "public_swim"}, ${lifeguardName?.trim() ?? null},
+         ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
         ${openTime ?? null}, ${closeTime ?? null},
         ${maxBathers ?? null}, ${batherCountPeak ?? null},
         ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
@@ -74,10 +77,14 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
     const {
-      siteId, sessionDate, sessionType, lifeguardName, openTime, closeTime,
+       siteId, sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
       poolClosed, closureReason, notes,
     } = req.body;
+    const existing = (await db.execute(sql`SELECT lifeguard_roster_id, lifeguard_name FROM swim_sessions WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+    if (!existing) return res.status(404).json({ error: "Session not found" });
+    const performer = await resolveStaffPerformerUpdate(clientId, lifeguardRosterId, lifeguardName, existing.lifeguard_roster_id, existing.lifeguard_name);
+    if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const resultWasProvided = Object.prototype.hasOwnProperty.call(req.body, "result");
     const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
     const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
@@ -85,7 +92,8 @@ router.put("/sessions/:id", denyViewers, async (req, res) => {
       UPDATE swim_sessions SET
         site_id = ${siteId ?? null}, session_date = ${sessionDate},
         session_type = ${sessionType ?? "public_swim"},
-        lifeguard_name = ${lifeguardName?.trim() ?? null},
+         lifeguard_name = ${performer?.performedBy},
+         lifeguard_roster_id = ${performer?.staffRosterId ?? null},
         open_time = ${openTime ?? null}, close_time = ${closeTime ?? null},
         max_bathers = ${maxBathers ?? null}, bather_count_peak = ${batherCountPeak ?? null},
         pre_session_result = ${canonicalPreSessionResult},
@@ -143,18 +151,20 @@ router.get("/surveillance", async (req, res) => {
 router.post("/surveillance", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy } = req.body;
+     const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId } = req.body;
+     const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
+     if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
 
     const canonicalResult = scanCompleted === false ? "fail" : "pass";
     const dbResult = await db.execute(sql`
       INSERT INTO swim_surveillance_checks (
         client_id, session_id, site_id, check_date, check_time,
-        bather_count, scan_completed, observations, checked_by, result
+         bather_count, scan_completed, observations, checked_by, checked_by_roster_id, result
       ) VALUES (
         ${clientId}, ${sessionId ?? null}, ${siteId ?? null}, ${checkDate},
         ${checkTime ?? null}, ${batherCount ?? null}, ${scanCompleted ?? true},
-        ${observations?.trim() ?? null}, ${checkedBy?.trim() ?? null}, ${canonicalResult}
+         ${observations?.trim() ?? null}, ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${canonicalResult}
       )
       RETURNING *
     `);
@@ -167,7 +177,11 @@ router.post("/surveillance", denyViewers, async (req, res) => {
 router.put("/surveillance/:id", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy } = req.body;
+     const { siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId } = req.body;
+     const existing = (await db.execute(sql`SELECT checked_by_roster_id, checked_by FROM swim_surveillance_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
+     if (!existing) return res.status(404).json({ error: "Check not found" });
+     const performer = await resolveStaffPerformerUpdate(clientId, checkedByRosterId, checkedBy, existing.checked_by_roster_id, existing.checked_by);
+     if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const resultWasProvided = Object.prototype.hasOwnProperty.call(req.body, "result");
     const canonicalResult = scanCompleted === false ? "fail" : "pass";
     const dbResult = await db.execute(sql`
@@ -176,7 +190,8 @@ router.put("/surveillance/:id", denyViewers, async (req, res) => {
         check_time = ${checkTime ?? null}, bather_count = ${batherCount ?? null},
         scan_completed = ${scanCompleted ?? true},
         observations = ${observations?.trim() ?? null},
-        checked_by = ${checkedBy?.trim() ?? null},
+         checked_by = ${performer?.performedBy},
+         checked_by_roster_id = ${performer?.staffRosterId ?? null},
         result = ${resultWasProvided ? canonicalResult : sql`result`}
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
@@ -228,8 +243,10 @@ router.post("/first-aid", denyViewers, async (req, res) => {
     const {
       siteId, checkDate, aedOk, firstAidKitOk, rescuePoleOk,
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
-      checkedBy, defectsFound, notes,
+       checkedBy, checkedByRosterId, defectsFound, notes,
     } = req.body;
+     const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
+     if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
 
     const allOk = [aedOk, firstAidKitOk, rescuePoleOk, throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk]
@@ -240,13 +257,13 @@ router.post("/first-aid", denyViewers, async (req, res) => {
       INSERT INTO swim_first_aid_checks (
         client_id, site_id, check_date, aed_ok, first_aid_kit_ok,
         rescue_pole_ok, throw_bag_ok, spine_board_ok, ring_buoy_ok, oxygen_kit_ok,
-        checked_by, defects_found, notes, result
+         checked_by, checked_by_roster_id, defects_found, notes, result
       ) VALUES (
         ${clientId}, ${siteId ?? null}, ${checkDate},
         ${aedOk ?? true}, ${firstAidKitOk ?? true},
         ${rescuePoleOk ?? true}, ${throwBagOk ?? true}, ${spineBoardOk ?? true},
         ${ringBuoyOk ?? true}, ${oxygenKitOk ?? true},
-        ${checkedBy?.trim() ?? null}, ${defectsFound?.trim() ?? null},
+         ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${defectsFound?.trim() ?? null},
         ${notes?.trim() ?? null}, ${result}
       )
       RETURNING *
@@ -263,22 +280,53 @@ router.put("/first-aid/:id", denyViewers, async (req, res) => {
     const {
       siteId, checkDate, aedOk, firstAidKitOk, rescuePoleOk,
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
-      checkedBy, defectsFound, notes,
+       checkedBy, checkedByRosterId, defectsFound, notes,
     } = req.body;
-    const allOk = [aedOk, firstAidKitOk, rescuePoleOk, throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk]
+     const existing = (await db.execute(sql`
+       SELECT *
+       FROM swim_first_aid_checks
+       WHERE id = ${req.params.id} AND client_id = ${clientId}
+     `)).rows[0] as any;
+     if (!existing) return res.status(404).json({ error: "Check not found" });
+     const performer = await resolveStaffPerformerUpdate(
+       clientId,
+       checkedByRosterId,
+       checkedBy,
+       existing.checked_by_roster_id,
+       existing.checked_by,
+     );
+     if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+
+     const has = (key: string) => Object.prototype.hasOwnProperty.call(req.body, key);
+     const mergedSiteId = has("siteId") ? siteId : existing.site_id;
+     const mergedCheckDate = has("checkDate") ? checkDate : existing.check_date;
+     const mergedAedOk = has("aedOk") ? (aedOk ?? true) : existing.aed_ok;
+     const mergedFirstAidKitOk = has("firstAidKitOk") ? (firstAidKitOk ?? true) : existing.first_aid_kit_ok;
+     const mergedRescuePoleOk = has("rescuePoleOk") ? (rescuePoleOk ?? true) : existing.rescue_pole_ok;
+     const mergedThrowBagOk = has("throwBagOk") ? (throwBagOk ?? true) : existing.throw_bag_ok;
+     const mergedSpineBoardOk = has("spineBoardOk") ? (spineBoardOk ?? true) : existing.spine_board_ok;
+     const mergedRingBuoyOk = has("ringBuoyOk") ? (ringBuoyOk ?? true) : existing.ring_buoy_ok;
+     const mergedOxygenKitOk = has("oxygenKitOk") ? (oxygenKitOk ?? true) : existing.oxygen_kit_ok;
+     const mergedDefectsFound = has("defectsFound") ? (defectsFound?.trim() ?? null) : existing.defects_found;
+     const mergedNotes = has("notes") ? (notes?.trim() ?? null) : existing.notes;
+     const allOk = [
+       mergedAedOk, mergedFirstAidKitOk, mergedRescuePoleOk, mergedThrowBagOk,
+       mergedSpineBoardOk, mergedRingBuoyOk, mergedOxygenKitOk,
+     ]
       .every(v => v !== false);
     const result = allOk ? "pass" : "fail";
 
     const dbResult = await db.execute(sql`
       UPDATE swim_first_aid_checks SET
-        site_id = ${siteId ?? null}, check_date = ${checkDate},
-        aed_ok = ${aedOk ?? true}, first_aid_kit_ok = ${firstAidKitOk ?? true},
-        rescue_pole_ok = ${rescuePoleOk ?? true}, throw_bag_ok = ${throwBagOk ?? true},
-        spine_board_ok = ${spineBoardOk ?? true}, ring_buoy_ok = ${ringBuoyOk ?? true},
-        oxygen_kit_ok = ${oxygenKitOk ?? true},
-        checked_by = ${checkedBy?.trim() ?? null},
-        defects_found = ${defectsFound?.trim() ?? null},
-        notes = ${notes?.trim() ?? null}, result = ${result}, updated_at = now()
+         site_id = ${mergedSiteId ?? null}, check_date = ${mergedCheckDate},
+         aed_ok = ${mergedAedOk}, first_aid_kit_ok = ${mergedFirstAidKitOk},
+         rescue_pole_ok = ${mergedRescuePoleOk}, throw_bag_ok = ${mergedThrowBagOk},
+         spine_board_ok = ${mergedSpineBoardOk}, ring_buoy_ok = ${mergedRingBuoyOk},
+         oxygen_kit_ok = ${mergedOxygenKitOk},
+        checked_by = ${performer?.performedBy ?? null},
+        checked_by_roster_id = ${performer?.staffRosterId ?? null},
+         defects_found = ${mergedDefectsFound},
+         notes = ${mergedNotes}, result = ${result}, updated_at = now()
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);

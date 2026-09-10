@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { CheckCircle2, XCircle, Save, Plus, Trash2, Thermometer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,7 @@ export default function ProbeCheckTab() {
   const [probes, setProbes] = useState<ProbeRow[]>([emptyProbe()]);
   const [overallResult, setOverallResult] = useState<"pass" | "fail" | "">("");
   const [checkedBy, setCheckedBy] = useState("");
+  const [checkedByRosterId, setCheckedByRosterId] = useState<number | null>(null);
   const [signature, setSignature] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -211,7 +213,7 @@ export default function ProbeCheckTab() {
         checkDate: selectedDate,
         probes,
         overallResult: overallResult || null,
-        checkedBy: checkedBy || null,
+        checkedBy: checkedBy || null, checkedByRosterId,
         signature: signature || null,
         notes: notes || null,
         submittedAt: submit ? new Date().toISOString() : record?.submitted_at ?? null,
@@ -386,8 +388,7 @@ export default function ProbeCheckTab() {
             <CardContent className="p-4 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label>Checked By</Label>
-                  <Input value={checkedBy} onChange={e => setCheckedBy(e.target.value)} placeholder="Staff name" disabled={isSubmitted} />
+                  <StaffPerformerSelect label="Checked by" value={checkedBy} onChange={setCheckedBy} onRosterIdChange={setCheckedByRosterId} className={isSubmitted ? "pointer-events-none opacity-60" : undefined} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Signature (type name)</Label>

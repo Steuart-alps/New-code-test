@@ -26,6 +26,8 @@ interface StaffMember {
   active: boolean;
   site_name: string | null;
   created_at: string;
+  has_pin?: boolean;
+  pin_set?: boolean;
 }
 
 interface Site { id: number; name: string; }
@@ -435,12 +437,29 @@ export default function StaffRosterPage() {
   const [editing, setEditing] = useState<StaffMember | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pinStatus, setPinStatus] = useState<Record<number, boolean>>({});
+  const [generatingKioskToken, setGeneratingKioskToken] = useState(false);
+  const [kioskToken, setKioskToken] = useState<string | null>(null);
+  const [enrollmentLinks, setEnrollmentLinks] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiFetch(`/staff-roster${showInactive ? "?includeInactive=true" : ""}`);
-      if (res.ok) setStaff(await res.json());
+      if (res.ok) {
+        const rows = await res.json();
+        setStaff(rows);
+        // The lightweight /staff endpoint intentionally exposes only PIN presence,
+        // never the PIN itself. Keep this separate so the existing roster endpoint
+        // (including inactive and reconciliation fields) remains unchanged.
+        const pinResponse = await apiFetch("/staff");
+        if (pinResponse.ok) {
+          const activeRows = await pinResponse.json();
+          setPinStatus(Object.fromEntries((activeRows as StaffMember[]).map(member => [
+            member.id, member.has_pin === true || member.pin_set === true,
+          ])));
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -451,6 +470,40 @@ export default function StaffRosterPage() {
     load();
     apiFetch("/sites").then(r => r.ok ? r.json() : []).then(setSites);
   }, [activeClientId, load]);
+
+  async function generateKioskLink() {
+    setGeneratingKioskToken(true);
+    try {
+      const response = await apiFetch("/staff/kiosk-token", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.kiosk_token !== "string") throw new Error(data.error || "Could not generate kiosk link");
+      setKioskToken(data.kiosk_token);
+      const base = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/?$/, "/");
+      // Keep the reusable bearer token out of URLs sent in referrers, server logs,
+      // and browser history. The kiosk consumes it from the fragment and then
+      // removes the fragment before making any API request.
+      window.open(`${base}kiosk#kiosk_token=${encodeURIComponent(data.kiosk_token)}`, "_blank", "noopener,noreferrer");
+      toast({ title: "Kiosk link opened", description: "Rotating the token invalidates any older kiosk links." });
+    } catch (error) {
+      toast({ title: "Could not generate kiosk link", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally { setGeneratingKioskToken(false); }
+  }
+
+  async function issuePinLink(member: StaffMember, reset: boolean) {
+    if (reset && !window.confirm(`Reset ${member.name}'s PIN? Their current PIN will stop working immediately.`)) return;
+    try {
+      const response = await apiFetch(`/staff/${member.id}/${reset ? "reset-pin" : "pin-enrollment"}`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.enrollment_token !== "string") throw new Error(data.error || "Could not create setup link");
+      const url = `${window.location.origin}${import.meta.env.BASE_URL}`.replace(/\/?$/, "/") +
+        `staff/set-pin#staff_id=${member.id}&enrollment_token=${encodeURIComponent(data.enrollment_token)}`;
+      setEnrollmentLinks(prev => ({ ...prev, [member.id]: url }));
+      await navigator.clipboard?.writeText(url);
+      toast({ title: reset ? "PIN reset; setup link created" : "PIN setup link created", description: "The one-time link expires in 15 minutes and was copied when supported." });
+    } catch (error) {
+      toast({ title: "Could not create setup link", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    }
+  }
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -540,11 +593,19 @@ ${rows.map(s => `<tr>
           <Button variant="outline" onClick={() => setBulkOpen(true)} className="gap-1.5">
             <Upload className="w-4 h-4" /> Bulk Import
           </Button>
+          <Button variant="outline" onClick={generateKioskLink} disabled={generatingKioskToken} className="gap-1.5">
+            {generatingKioskToken && <Loader2 className="w-4 h-4 animate-spin" />} Open kiosk
+          </Button>
           <Button onClick={() => { setEditing(null); setDialogOpen(true); }} className="gap-1.5">
             <Plus className="w-4 h-4" /> Add Staff
           </Button>
         </div>
       </div>
+      {kioskToken && (
+        <p className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Kiosk token generated. This link is now active; generating another token will invalidate older kiosk links.
+        </p>
+      )}
 
       {/* Stats */}
       <div className="flex items-center gap-4 mb-5 text-sm text-muted-foreground">
@@ -606,7 +667,8 @@ ${rows.map(s => `<tr>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Job Title</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Department</th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Site</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Status</th>
+                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Status</th>
+                 <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Kiosk PIN</th>
                 <th className="px-4 py-3 w-20" />
               </tr>
             </thead>
@@ -623,6 +685,14 @@ ${rows.map(s => `<tr>
                       {s.active ? "Active" : "Inactive"}
                     </span>
                   </td>
+                   <td className="px-4 py-3 hidden md:table-cell">
+                     {(pinStatus[s.id] ?? s.has_pin ?? s.pin_set) ? (
+                       <span className="text-xs text-green-700">Set <button className="underline ml-1" onClick={() => issuePinLink(s, true)}>Reset PIN</button></span>
+                     ) : (
+                       <span className="text-xs text-muted-foreground">Not set <button className="underline ml-1 text-foreground" onClick={() => issuePinLink(s, false)}>Create setup link</button></span>
+                     )}
+                     {enrollmentLinks[s.id] && <div className="text-[10px] text-muted-foreground mt-1 max-w-[180px] break-all">{enrollmentLinks[s.id]}</div>}
+                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
                       <button onClick={() => { setEditing(s); setDialogOpen(true); }}

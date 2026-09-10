@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Download, KeyRound, ShieldCheck } from "lucide-react";
-import { startRegistration } from "@simplewebauthn/browser";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ export default function MandatoryTwoFactorPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [passkeySaving, setPasskeySaving] = useState(false);
 
   useEffect(() => {
     apiFetch("/auth/2fa/setup")
@@ -50,29 +48,6 @@ export default function MandatoryTwoFactorPage() {
       setCode("");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function registerPasskey() {
-    setError("");
-    setPasskeySaving(true);
-    try {
-      const optionsRes = await apiFetch("/auth/passkeys/registration/options", { method: "POST", body: "{}" });
-      const options = await optionsRes.json();
-      if (!optionsRes.ok) throw new Error(options.error ?? "Could not start passkey setup");
-      const response = await startRegistration({ optionsJSON: options });
-      const verifyRes = await apiFetch("/auth/passkeys/registration/verify", {
-        method: "POST",
-        body: JSON.stringify(response),
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyRes.ok || !verifyData.setupComplete) throw new Error(verifyData.error ?? "Passkey setup did not complete");
-      await refresh();
-      navigate("/dashboard");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Passkey setup failed");
-    } finally {
-      setPasskeySaving(false);
     }
   }
 
@@ -131,17 +106,12 @@ export default function MandatoryTwoFactorPage() {
               <li>Scan the QR code, or enter the manual key if you are using the same device.</li>
               <li>Enter the six-digit code shown by the authenticator.</li>
             </ol>
-            <div className="rounded-sm border border-primary/20 bg-primary/5 p-4 space-y-3">
-              <div className="flex items-start gap-3">
-                <KeyRound className="w-5 h-5 text-primary mt-0.5" />
-                <div>
-                  <p className="font-semibold text-[#162D42]">Use a passkey instead</p>
-                  <p className="text-sm text-muted-foreground">Passkeys use your device screen lock, fingerprint, or security key. You can add an authenticator app later.</p>
-                </div>
-              </div>
-              <Button type="button" variant="outline" className="w-full" onClick={registerPasskey} disabled={passkeySaving}>
-                {passkeySaving ? "Waiting for passkey…" : "Set up a passkey"}
-              </Button>
+            <div className="rounded-sm border border-primary/20 bg-primary/5 p-4 flex items-start gap-3">
+              <KeyRound className="w-5 h-5 text-primary mt-0.5" />
+              <p className="text-sm text-muted-foreground">
+                Passkeys can be used for optional web sign-in, but they do not replace
+                the authenticator code required here. Mobile sign-in supports TOTP only.
+              </p>
             </div>
             {qrDataUrl && <div className="flex justify-center border p-4"><img src={qrDataUrl} alt="Authenticator setup QR code" className="w-48 h-48" /></div>}
             {secret && <p className="text-xs text-muted-foreground break-all">Manual key: <code className="font-mono text-foreground">{secret}</code></p>}

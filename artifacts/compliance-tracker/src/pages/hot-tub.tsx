@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { StaffPerformerSelect } from "@/components/staff-performer-select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,6 +239,7 @@ export default function HotTubPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -414,6 +416,7 @@ ${rows.map(r => `<tr>
         hotTubId: form.hotTubId ? Number(form.hotTubId) : null,
         location: form.location.trim() || null,
         performedBy: form.performedBy.trim() || null,
+        staffRosterId: staffRosterId,
         notes: form.notes.trim() || null,
       };
       if (editItem) {
@@ -960,13 +963,7 @@ ${rows.map(r => `<tr>
             </div>
 
             {/* Performed by */}
-            <div>
-              <Label htmlFor="performedBy">Performed By</Label>
-              <Input id="performedBy" placeholder="Name of staff member"
-                value={form.performedBy}
-                onChange={e => setForm(f => ({ ...f, performedBy: e.target.value }))}
-                className="mt-1 rounded-sm" />
-            </div>
+            <StaffPerformerSelect value={form.performedBy} onChange={(value) => setForm(f => ({ ...f, performedBy: value }))} onRosterIdChange={setStaffRosterId} />
 
             {/* Notes */}
             <div>

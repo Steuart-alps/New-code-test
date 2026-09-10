@@ -223,16 +223,19 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
     delete (req.session as any).pendingPasskeyUserId;
     delete (req.session as any).pendingPasskeyChallenge;
     delete (req.session as any).pendingPasskeyChallengeCreatedAt;
-    delete (req.session as any).pending2faUserId;
-    req.session.userId = user.id;
-    const withClient = await getUserWithClientByEmail(user.email);
     const { totpSecret: _t, ...safeUser } = user;
-    res.json({
-      user: safeUser,
-      client: withClient?.client ?? null,
-      billingLocked: false,
-      services: "all",
-    });
+    // A passkey is an optional web sign-in method, not the second factor used
+    // by the mandatory policy. Keep the pending TOTP challenge in place so
+    // passkey users must either verify TOTP or enrol it before getting a
+    // session. This also keeps web and mobile login requirements identical.
+    if (user.totpEnabled && user.totpSecret) {
+      (req.session as any).pending2faUserId = user.id;
+      res.json({ requires2fa: true, user: safeUser });
+    } else {
+      delete (req.session as any).pending2faUserId;
+      (req.session as any).pending2faSetupUserId = user.id;
+      res.json({ requires2faSetup: true });
+    }
   } catch {
     res.status(401).json({ error: "Passkey verification failed" });
   }
@@ -347,10 +350,13 @@ router.post("/auth/passkeys/registration/verify", async (req, res) => {
     delete (req.session as any).pendingPasskeyRegistrationCreatedAt;
     const setupPending = (req.session as any).pending2faSetupUserId === userId;
     if (setupPending) {
-      delete (req.session as any).pending2faSetupUserId;
-      req.session.userId = userId;
+      // Registering a passkey does not satisfy the mandatory TOTP policy.
+      // Keep the setup-only session intact so the user can continue to the
+      // authenticator enrollment flow; never issue a full session here.
+      res.json({ ok: true, requires2faSetup: true });
+      return;
     }
-    res.json({ ok: true, setupComplete: setupPending });
+    res.json({ ok: true });
   } catch (error: any) {
     if (error?.code === "23505") {
       res.status(409).json({ error: "That passkey is already registered" });
@@ -533,7 +539,7 @@ router.get("/auth/me", async (req, res) => {
 
   const { totpSecret: _s, ...safeUser } = user;
   const passkeys = await getUserPasskeys(user.id);
-  if (!user.totpEnabled && passkeys.length === 0) {
+  if (!user.totpEnabled) {
     res.json({ requires2faSetup: true, user: safeUser });
     return;
   }

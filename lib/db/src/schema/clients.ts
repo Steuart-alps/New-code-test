@@ -30,6 +30,7 @@ export const clientsTable = pgTable("clients", {
   dataDeletedAt: timestamp("data_deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  staffKioskTokenHash: text("staff_kiosk_token_hash"),
 });
 
 export const insertClientSchema = createInsertSchema(clientsTable).omit({

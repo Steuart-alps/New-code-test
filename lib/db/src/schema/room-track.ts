@@ -29,6 +29,7 @@ export const roomTrackChecksTable = pgTable("room_track_checks", {
   toStandard: boolean("to_standard").notNull().default(false),
   notes: text("notes"),
   checkedBy: text("checked_by"),
+  checkedByRosterId: integer("checked_by_roster_id"),
   createdBy: integer("created_by"),
   updatedBy: integer("updated_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
