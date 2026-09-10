@@ -37,7 +37,8 @@
           "photosPermission": "Allow ComplyTrack to access photos for issue reports.",
           "cameraPermission": "Allow ComplyTrack to take photos for issue reports."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
