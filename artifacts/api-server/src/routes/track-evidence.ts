@@ -130,6 +130,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       siteId = action.siteId;
     }
     if (parsed.data.requirementKey != null) {
+      if (parsed.data.actionId == null) return { status: 400 as const, error: "Required evidence must be linked to the corrective action being signed off" };
       const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, parsed.data.module);
       const requirement = requirements.find(item => item.requirementKey === parsed.data.requirementKey);
       if (!requirement) return { status: 400 as const, error: "Unknown evidence requirement" };

@@ -4,6 +4,7 @@ const BASE = process.env.API_BASE || "http://localhost:8080/api";
 const SIGNATURE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const date = new Date().toISOString().slice(0, 10);
 let cookie = "";
+let staffCookie = "";
 let failures = 0;
 
 function assert(name, value) {
@@ -20,6 +21,17 @@ async function request(method, path, body) {
   });
   const setCookie = response.headers.get("set-cookie");
   if (setCookie) cookie = setCookie.split(";")[0];
+  return { status: response.status, data: await response.json().catch(() => null) };
+}
+
+async function staffRequest(method, path, body) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(staffCookie ? { cookie: staffCookie } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const setCookie = response.headers.get("set-cookie");
+  if (setCookie) staffCookie = setCookie.split(";")[0];
   return { status: response.status, data: await response.json().catch(() => null) };
 }
 
@@ -48,6 +60,21 @@ async function main() {
   const site = await request("POST", "/sites", { name: "Track action site" });
   assert("create site", site.status === 201);
   const siteId = site.data?.id;
+  const me = await request("GET", "/auth/me");
+  const clientId = me.data?.user?.clientId ?? me.data?.clientId;
+  const staffEmail = `track-action-reviewer-${Date.now()}@test.local`;
+  const staffCreated = await request("POST", "/users", {
+    name: "Independent reviewer",
+    email: staffEmail,
+    password: "password-456",
+    role: "client_staff",
+    clientId,
+  });
+  assert("create independent reviewer", [200, 201].includes(staffCreated.status));
+  assert("independent reviewer login", (await staffRequest("POST", "/auth/login", {
+    email: staffEmail,
+    password: "password-456",
+  })).status === 200);
 
   const pass = await request("POST", "/legionella", {
     checkType: "cold_tank_temp", checkDate: date, result: "pass", siteId,
@@ -75,6 +102,26 @@ async function main() {
   assert("open action fields are immutable", JSON.stringify({
     title: legActions[0]?.title, severity: legActions[0]?.severity, dueDate: legActions[0]?.dueDate,
   }) === JSON.stringify(initialActionFields));
+  const requirements = await request("GET", `/track-evidence/requirements?module=legionella&actionId=${action?.id}`);
+  assert("load Legionella evidence requirements", requirements.status === 200 && requirements.data?.length === 8);
+  for (const requirement of requirements.data ?? []) {
+    const evidence = await request("POST", "/track-evidence", {
+      module: "legionella",
+      siteId,
+      actionId: action?.id,
+      requirementKey: requirement.requirementKey,
+      evidenceType: requirement.evidenceType,
+      title: requirement.title,
+      details: `Evidence recorded for ${requirement.title}.`,
+    });
+    assert(`record ${requirement.requirementKey}`, evidence.status === 201);
+    if (requirement.reviewRequired) {
+      assert(`review ${requirement.requirementKey}`, (await staffRequest("POST", `/track-evidence/${evidence.data?.id}/review`, {
+        status: "verified",
+        reviewNotes: "Independently checked against the source record.",
+      })).status === 200);
+    }
+  }
   assert("resolve action", (await request("PATCH", `/track-actions/${action?.id}`, {
     status: "resolved", remedialAction: "Fixed", evidenceReference: "Test evidence", resolutionNotes: "Closed", resolverSignature: SIGNATURE,
   })).status === 200);

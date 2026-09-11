@@ -27,6 +27,17 @@ interface Evidence {
   reviewedAt?: string | null;
   reviewNotes?: string | null;
 }
+interface EvidenceRequirement {
+  requirementKey: string;
+  title: string;
+  description: string;
+  evidenceType: EvidenceType;
+  minimumCount: number;
+  reviewRequired: boolean;
+  recordedCount: number;
+  verifiedCount: number;
+  satisfied: boolean;
+}
 interface ActionOption { id: number | string; title: string; status: string; }
 interface SiteOption { id: number; name: string; }
 
@@ -37,6 +48,7 @@ const initialDraft = {
   reference: "",
   siteId: "",
   actionId: "",
+  requirementKey: "",
 };
 
 function errorMessage(data: unknown, fallback: string) {
@@ -51,6 +63,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
 }) {
   const { toast } = useToast();
   const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [requirements, setRequirements] = useState<EvidenceRequirement[]>([]);
   const [draft, setDraft] = useState(initialDraft);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -74,6 +87,21 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
 
   useEffect(() => { void loadEvidence(); }, [loadEvidence]);
 
+  const loadRequirements = useCallback(async () => {
+    try {
+      const action = draft.actionId ? `&actionId=${encodeURIComponent(draft.actionId)}` : "";
+      const response = await apiFetch(`/track-evidence/requirements?module=${encodeURIComponent(moduleKey)}${action}`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(errorMessage(data, "Unable to load evidence requirements"));
+      setRequirements(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setRequirements([]);
+      toast({ title: "Couldn't load evidence requirements", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    }
+  }, [draft.actionId, moduleKey, toast]);
+
+  useEffect(() => { void loadRequirements(); }, [loadRequirements]);
+
   async function createEvidence() {
     if (!draft.title.trim() || !draft.details.trim()) return;
     setSaving(true);
@@ -83,6 +111,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
         body: JSON.stringify({
           module: moduleKey,
           evidenceType: draft.evidenceType,
+          requirementKey: draft.requirementKey || null,
           title: draft.title.trim(),
           details: draft.details.trim(),
           reference: draft.reference.trim() || null,
@@ -96,6 +125,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
       setShowCreate(false);
       toast({ title: "Inspection evidence recorded" });
       await loadEvidence();
+      await loadRequirements();
     } catch (error) {
       toast({ title: "Couldn't record evidence", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
@@ -134,15 +164,20 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
         {canMutate && <Button type="button" size="sm" className="rounded-sm self-start" onClick={() => setShowCreate(value => !value)}><Plus className="mr-1.5 h-4 w-4" />Record evidence</Button>}
       </CardHeader>
       <CardContent className="space-y-4">
+        {requirements.length > 0 && <div className="rounded-sm border bg-slate-50 p-4">
+          <div className="mb-3"><p className="font-medium text-[#162D42]">Required evidence profile</p><p className="text-xs text-muted-foreground">Structured requirements apply to source-linked FireTrack and LegionellaTrack actions. Evidence marked for independent review must be verified before sign-off.</p></div>
+          <div className="grid gap-2 sm:grid-cols-2">{requirements.map(requirement => <div key={requirement.requirementKey} className="rounded-sm border bg-white p-3"><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium">{requirement.title}</p><Badge variant={requirement.satisfied ? "default" : "outline"}>{requirement.satisfied ? "Complete" : `${requirement.reviewRequired ? requirement.verifiedCount : requirement.recordedCount}/${requirement.minimumCount}`}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{requirement.description}</p><p className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">{requirement.evidenceType.replace("_", " ")}{requirement.reviewRequired ? " · independent review required" : ""}</p></div>)}</div>
+        </div>}
         {showCreate && canMutate && (
           <div className="grid gap-3 rounded-sm border bg-muted/30 p-4 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label>Evidence type</Label><Select value={draft.evidenceType} onValueChange={value => setDraft({ ...draft, evidenceType: value as EvidenceType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["observation", "photo", "document", "certificate", "test_result", "verification", "other"] as EvidenceType[]).map(type => <SelectItem key={type} value={type}>{type.replace("_", " ")}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Requirement <span className="text-muted-foreground">(optional for general evidence)</span></Label><Select value={draft.requirementKey || "general"} onValueChange={value => { const requirement = requirements.find(item => item.requirementKey === value); setDraft({ ...draft, requirementKey: value === "general" ? "" : value, evidenceType: requirement?.evidenceType ?? draft.evidenceType }); }}><SelectTrigger><SelectValue placeholder="General evidence" /></SelectTrigger><SelectContent><SelectItem value="general">General evidence</SelectItem>{requirements.map(requirement => <SelectItem key={requirement.requirementKey} value={requirement.requirementKey}>{requirement.title}</SelectItem>)}</SelectContent></Select>{draft.requirementKey && !draft.actionId && <p className="text-xs text-amber-700">Select a related action before saving required evidence.</p>}</div>
+            <div className="space-y-1.5"><Label>Evidence type</Label><Select disabled={!!draft.requirementKey} value={draft.evidenceType} onValueChange={value => setDraft({ ...draft, evidenceType: value as EvidenceType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(["observation", "photo", "document", "certificate", "test_result", "verification", "other"] as EvidenceType[]).map(type => <SelectItem key={type} value={type}>{type.replace("_", " ")}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-1.5"><Label>Site <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.siteId || "none"} onValueChange={value => setDraft({ ...draft, siteId: value === "none" ? "" : value, actionId: "" })}><SelectTrigger><SelectValue placeholder="No site" /></SelectTrigger><SelectContent><SelectItem value="none">No site</SelectItem>{sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-1.5 sm:col-span-2"><Label>Evidence title</Label><Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder="What was observed or verified?" /></div>
             <div className="space-y-1.5 sm:col-span-2"><Label>Details</Label><Textarea value={draft.details} onChange={event => setDraft({ ...draft, details: event.target.value })} placeholder="Record the condition, measurement, location, decision or action taken." /></div>
             <div className="space-y-1.5"><Label>Reference <span className="text-muted-foreground">(optional)</span></Label><Input value={draft.reference} onChange={event => setDraft({ ...draft, reference: event.target.value })} placeholder="Photo, certificate or document reference" /></div>
-            <div className="space-y-1.5"><Label>Related action <span className="text-muted-foreground">(optional)</span></Label><Select value={draft.actionId || "none"} onValueChange={value => setDraft({ ...draft, actionId: value === "none" ? "" : value })}><SelectTrigger><SelectValue placeholder="No corrective action" /></SelectTrigger><SelectContent><SelectItem value="none">No corrective action</SelectItem>{actions.filter(action => !draft.siteId || sites.some(site => site.id === Number(draft.siteId))).map(action => <SelectItem key={action.id} value={String(action.id)}>#{action.id} — {action.title}</SelectItem>)}</SelectContent></Select></div>
-            <div className="flex gap-2 sm:col-span-2"><Button type="button" disabled={saving || !draft.title.trim() || !draft.details.trim()} onClick={() => void createEvidence()}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save evidence</Button><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button></div>
+            <div className="space-y-1.5"><Label>Related action <span className="text-muted-foreground">(optional unless a requirement is selected)</span></Label><Select value={draft.actionId || "none"} onValueChange={value => setDraft({ ...draft, actionId: value === "none" ? "" : value, requirementKey: value === "none" ? "" : draft.requirementKey })}><SelectTrigger><SelectValue placeholder="No corrective action" /></SelectTrigger><SelectContent><SelectItem value="none">No corrective action</SelectItem>{actions.map(action => <SelectItem key={action.id} value={String(action.id)}>#{action.id} — {action.title}</SelectItem>)}</SelectContent></Select></div>
+            <div className="flex gap-2 sm:col-span-2"><Button type="button" disabled={saving || !draft.title.trim() || !draft.details.trim() || (!!draft.requirementKey && !draft.actionId)} onClick={() => void createEvidence()}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save evidence</Button><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button></div>
           </div>
         )}
         {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading evidence…</div> : evidence.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No inspection evidence recorded for this track.</p> : <div className="space-y-3">{evidence.map(item => (

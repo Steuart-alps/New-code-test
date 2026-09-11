@@ -41,6 +41,22 @@ async function main() {
     check(`${module} evidence is listed`, (listed.data || []).some(item => item.id === created.data?.id));
     status(`${module} rejects self-review`, await admin("POST", `/track-evidence/${created.data?.id}/review`, { status: "verified", reviewNotes: "Reviewed" }), [400]);
   }
+  const fireRequirements = await admin("GET", "/track-evidence/requirements?module=fire");
+  const legionellaRequirements = await admin("GET", "/track-evidence/requirements?module=legionella");
+  status("load FireTrack evidence profile", fireRequirements, [200]);
+  status("load LegionellaTrack evidence profile", legionellaRequirements, [200]);
+  check("FireTrack profile has five requirements", fireRequirements.data?.length === 5);
+  check("LegionellaTrack profile has eight requirements", legionellaRequirements.data?.length === 8);
+  const fireAction = await admin("POST", "/track-actions", { module: "fire", title: "Evidence test action", severity: "action_required" });
+  status("create evidence test action", fireAction, [201]);
+  const required = fireRequirements.data?.[0];
+  status("required evidence must link an action", await admin("POST", "/track-evidence", {
+    module: "fire",
+    requirementKey: required?.requirementKey,
+    evidenceType: required?.evidenceType,
+    title: "Unlinked required evidence",
+    details: "This should not satisfy action sign-off.",
+  }), [400]);
   const other = session();
   await register(other, "other");
   const fire = await admin("GET", "/track-evidence?module=fire");
