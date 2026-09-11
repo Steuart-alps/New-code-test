@@ -213,6 +213,16 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
 
+  // Reminder-email checkout may arrive without a plan payload. In that case,
+  // preserve the services selected during signup instead of silently falling
+  // back to the core-only plan.
+  const checkoutBundle = typeof bundle === "boolean"
+    ? bundle
+    : client.selectedServices?.includes(BUNDLE_KEY) === true;
+  const checkoutServices = Array.isArray(requestedServices)
+    ? requestedServices
+    : (client.selectedServices ?? []).filter((service) => service !== BUNDLE_KEY);
+
   // Discount codes are manager-issued per client; the entered code must match
   // the code issued to THIS client (server-derived context) exactly.
   const discountCode = normaliseAlpsDiscountCode(rawDiscountCode);
@@ -236,7 +246,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     // client's current number of sites (never below 1).
     const quantity = quantityForSiteCount(await countClientSites(clientId));
     const lineItems: { price: string; quantity: number }[] = [];
-    if (bundle) {
+    if (checkoutBundle) {
       const bundlePrice = await getServicePrice(BUNDLE_KEY);
       if (!bundlePrice) return res.status(400).json({ error: "Bundle price not configured" });
       lineItems.push({ price: bundlePrice.priceId, quantity });
@@ -244,7 +254,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       const corePrice = await getPerSitePrice();
       if (!corePrice) return res.status(400).json({ error: "No per-site price configured" });
       lineItems.push({ price: corePrice.priceId, quantity });
-      const requested = Array.from(new Set(requestedServices ?? []));
+      const requested = Array.from(new Set(checkoutServices));
       const unknown = requested.filter((s) => !(ADDON_KEYS as readonly string[]).includes(s));
       if (unknown.length > 0) {
         return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });

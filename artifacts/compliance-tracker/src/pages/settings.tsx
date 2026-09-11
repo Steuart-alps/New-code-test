@@ -1082,6 +1082,7 @@ function BillingCard() {
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const fetchConfig = () => {
@@ -1104,6 +1105,21 @@ function BillingCard() {
       toast({ title: "Couldn't open billing portal", description: err.message, variant: "destructive" });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const startCheckout = async () => {
+    setCheckoutBusy(true);
+    try {
+      const data = await apiFetch<{ url: string }>("/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (!data.url) throw new Error("Could not start checkout");
+      window.location.href = data.url;
+    } catch (err: any) {
+      toast({ title: "Couldn't start checkout", description: err.message, variant: "destructive" });
+      setCheckoutBusy(false);
     }
   };
 
@@ -1158,7 +1174,7 @@ function BillingCard() {
 
   return (
     <>
-      <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <Card id="billing" className="shadow-lg border-border/50 bg-card mb-6">
         <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-primary" />
@@ -1197,9 +1213,15 @@ function BillingCard() {
                 <div className="text-sm text-muted-foreground">
                   Status: <span className="font-medium text-foreground capitalize">{status}</span>
                 </div>
-                <Button variant="outline" onClick={openPortal} disabled={busy}>
-                  <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
-                </Button>
+                {hasSubscription ? (
+                  <Button variant="outline" onClick={openPortal} disabled={busy}>
+                    <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
+                  </Button>
+                ) : canAdmin ? (
+                  <Button onClick={startCheckout} disabled={checkoutBusy}>
+                    <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Set up billing"}
+                  </Button>
+                ) : null}
               </div>
 
               {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (

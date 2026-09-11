@@ -157,7 +157,7 @@ export async function runTrialReminderJob(
           trialEndsAt: client.trialEndsAt!,
           siteCount,
           monthlyTotal,
-          billingUrl: `${getPublicAppUrl()}/billing`,
+          billingUrl: `${getPublicAppUrl()}/settings#billing`,
         });
         await sendEmail({
           to: consultant.email,
