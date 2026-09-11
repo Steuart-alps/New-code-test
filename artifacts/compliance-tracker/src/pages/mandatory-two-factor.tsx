@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { Download, KeyRound, ShieldCheck } from "lucide-react";
+import { Check, Copy, Download, KeyRound, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ export default function MandatoryTwoFactorPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     apiFetch("/auth/2fa/setup")
@@ -67,6 +68,17 @@ export default function MandatoryTwoFactorPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function copySecret() {
+    if (!secret) return;
+    try {
+      await navigator.clipboard.writeText(secret);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Could not copy the setup key. Press and hold the key to copy it manually.");
+    }
+  }
+
   if (recoveryCodes.length > 0) {
     return (
       <div className="min-h-screen bg-[#F7F2E4] flex items-center justify-center p-4">
@@ -103,18 +115,37 @@ export default function MandatoryTwoFactorPage() {
           <>
             <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
               <li>Open Google Authenticator, Authy, 1Password, or another TOTP authenticator.</li>
-              <li>Scan the QR code, or enter the manual key if you are using the same device.</li>
+              <li>Use the QR code from another screen, or copy the manual key below when setting up on this phone.</li>
               <li>Enter the six-digit code shown by the authenticator.</li>
             </ol>
             <div className="rounded-sm border border-primary/20 bg-primary/5 p-4 flex items-start gap-3">
               <KeyRound className="w-5 h-5 text-primary mt-0.5" />
               <p className="text-sm text-muted-foreground">
-                Passkeys can be used for optional web sign-in, but they do not replace
-                the authenticator code required here. Mobile sign-in supports TOTP only.
+                On the same phone, choose <strong>Enter setup key</strong> in your authenticator app,
+                copy the key below, then return here for the six-digit code. No SMS is needed for this
+                setup path.
               </p>
             </div>
-            {qrDataUrl && <div className="flex justify-center border p-4"><img src={qrDataUrl} alt="Authenticator setup QR code" className="w-48 h-48" /></div>}
-            {secret && <p className="text-xs text-muted-foreground break-all">Manual key: <code className="font-mono text-foreground">{secret}</code></p>}
+            {qrDataUrl && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[#162D42]">Option 1: scan from another screen</p>
+                <div className="flex justify-center border p-4">
+                  <img src={qrDataUrl} alt="Authenticator setup QR code" className="w-48 h-48" />
+                </div>
+              </div>
+            )}
+            {secret && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[#162D42]">Option 2: enter the key on this phone</p>
+                <div className="flex items-start gap-2 rounded-sm border bg-muted/20 p-3">
+                  <code className="min-w-0 flex-1 break-all font-mono text-sm text-foreground">{secret}</code>
+                  <Button type="button" variant="outline" size="sm" onClick={copySecret} className="shrink-0">
+                    {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
+                    {copied ? "Copied" : "Copy key"}
+                  </Button>
+                </div>
+              </div>
+            )}
             <form onSubmit={enable} className="space-y-3">
               <Label htmlFor="mandatory-totp-code">Authentication code</Label>
               <Input id="mandatory-totp-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000 000" autoFocus />
