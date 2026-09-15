@@ -11,25 +11,51 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+function createObjectStorageClient(): Storage {
+  const options: ConstructorParameters<typeof Storage>[0] = {};
+  const projectId = process.env.GCS_PROJECT_ID?.trim();
+  const credentialsJson = process.env.GCS_CREDENTIALS_JSON?.trim();
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+  if (projectId) {
+    options.projectId = projectId;
+  }
+
+  if (credentialsJson) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(credentialsJson);
+    } catch {
+      throw new Error("GCS_CREDENTIALS_JSON must contain valid service-account JSON");
+    }
+
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as { client_email?: unknown }).client_email !== "string" ||
+      typeof (parsed as { private_key?: unknown }).private_key !== "string"
+    ) {
+      throw new Error(
+        "GCS_CREDENTIALS_JSON must contain a service account client_email and private_key",
+      );
+    }
+
+    options.credentials = {
+      client_email: (parsed as { client_email: string }).client_email,
+      private_key: (parsed as { private_key: string }).private_key,
+    };
+
+    if (!options.projectId && typeof (parsed as { project_id?: unknown }).project_id === "string") {
+      options.projectId = (parsed as { project_id: string }).project_id;
+    }
+  }
+
+  // With no inline credentials, the Google SDK uses its normal ADC chain.
+  // This supports workload identity and GOOGLE_APPLICATION_CREDENTIALS without
+  // putting provider credentials in the repository.
+  return new Storage(options);
+}
+
+export const objectStorageClient = createObjectStorageClient();
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -76,33 +102,22 @@ export class ObjectStorageService {
   constructor() {}
 
   getPublicObjectSearchPaths(): Array<string> {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
-    const paths = Array.from(
-      new Set(
-        pathsStr
-          .split(",")
-          .map((path) => path.trim())
-          .filter((path) => path.length > 0)
-      )
-    );
+    const bucket = getConfiguredBucket("public");
+    const prefixes = (process.env.GCS_PUBLIC_PREFIXES || "public")
+      .split(",")
+      .map(normalizePrefix)
+      .filter((prefix) => prefix.length > 0);
+    const paths = Array.from(new Set(prefixes.map((prefix) => `/${bucket}/${prefix}`)));
     if (paths.length === 0) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
-      );
+      throw new Error("GCS_PUBLIC_PREFIXES must contain at least one non-empty prefix");
     }
     return paths;
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
-    }
-    return dir;
+    const bucket = getConfiguredBucket("private");
+    const prefix = normalizePrefix(process.env.GCS_PRIVATE_PREFIX || "private");
+    return prefix ? `/${bucket}/${prefix}` : `/${bucket}`;
   }
 
   async searchPublicObject(filePath: string): Promise<File | null> {
@@ -143,12 +158,6 @@ export class ObjectStorageService {
 
   async getObjectEntityUploadURL(tenantId?: number | string, contentType?: string): Promise<string> {
     const privateObjectDir = this.getPrivateObjectDir();
-    if (!privateObjectDir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
-    }
 
     const objectId = randomUUID();
     const tenantSegment = tenantId === undefined ? "" : `/tenant-${tenantId}`;
@@ -470,36 +479,36 @@ async function signObjectURL({
   objectName: string;
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
-  /** Bound into PUT signature by the storage sidecar when provided. */
+  /** Bound into a GCS V4 PUT signature when provided. */
   contentType?: string;
 }): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-    ...(contentType ? { content_type: contentType } : {}),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
-    }
-  );
-  if (!response.ok) {
+  const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+  const [signedUrl] = await objectStorageClient
+    .bucket(bucketName)
+    .file(objectName)
+    .getSignedUrl({
+      version: "v4",
+      action,
+      expires: Date.now() + ttlSec * 1000,
+      ...(method === "PUT" && contentType ? { contentType } : {}),
+    });
+  return signedUrl;
+}
+
+function getConfiguredBucket(kind: "private" | "public"): string {
+  const bucket = (
+    kind === "private" ? process.env.GCS_PRIVATE_BUCKET : process.env.GCS_PUBLIC_BUCKET
+  )?.trim() || process.env.GCS_BUCKET_NAME?.trim();
+  if (!bucket) {
     throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `GCS_${kind === "private" ? "PRIVATE" : "PUBLIC"}_BUCKET or GCS_BUCKET_NAME must be configured`,
     );
   }
+  return bucket;
+}
 
-  const json = await response.json() as { signed_url: string };
-  return json.signed_url;
+function normalizePrefix(prefix: string): string {
+  return prefix.trim().replace(/^\/+|\/+$/g, "");
 }
 
 export type AllowedUploadType = "application/pdf" | "image/jpeg" | "image/png";

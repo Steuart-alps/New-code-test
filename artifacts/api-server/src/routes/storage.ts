@@ -52,7 +52,7 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
 /**
  * GET /storage/public-objects/*
  *
- * Serve public assets from PUBLIC_OBJECT_SEARCH_PATHS.
+ * Serve public assets from GCS_PUBLIC_PREFIXES.
  * These are unconditionally public — no authentication or ACL checks.
  * IMPORTANT: Always provide this endpoint when object storage is set up.
  */
@@ -86,7 +86,7 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 /**
  * GET /storage/objects/*
  *
- * Serve object entities from PRIVATE_OBJECT_DIR.
+ * Serve object entities from the configured private GCS bucket and prefix.
  * These are served from a separate path from /public-objects and can optionally
  * be protected with authentication or ACL checks based on the use case.
  */
