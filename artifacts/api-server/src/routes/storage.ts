@@ -9,24 +9,90 @@ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage"
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
-import { appSettingsTable } from "@workspace/db/schema";
+import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
-import { createDownloadMeter } from "../lib/downloadUsage";
-import { getMonthlyDownloadBytes, utcMonth } from "../lib/downloadUsage";
+import { findLiveSubscription } from "../lib/billing";
+import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
 
+function requestRange(raw: string | undefined, size: number): { start: number; end: number } | "invalid" | undefined {
+  if (!raw) return undefined;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(raw.trim());
+  if (!match || (!match[1] && !match[2])) return "invalid";
+  let start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  let end = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) return "invalid";
+  end = Math.min(end, size - 1);
+  return { start, end };
+}
+
+router.get("/storage/download/:token", async (req: Request, res: Response) => {
+  try {
+    const rawToken = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
+    const resolved = await resolveDownloadToken(rawToken);
+    if (!resolved) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
+    const file = await objectStorageService.getObjectEntityFile(resolved.objectPath);
+    const acl = await objectStorageService.canAccessObjectEntity({ userId: String(resolved.clientId), objectFile: file, requestedPermission: ObjectPermission.READ });
+    if (!acl) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
+    const [metadata] = await file.getMetadata();
+    const size = Number(metadata.size);
+    const range = requestRange(req.header("range"), size);
+    if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
+    const response = await objectStorageService.downloadObject(file, 0, range);
+    res.status(response.status);
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    if (!response.body) { res.end(); return; }
+    const stream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+    const meter = createDownloadMeter(resolved.clientId);
+    stream.on("data", (chunk) => meter.add(chunk));
+    const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
+    stream.once("end", commit); stream.once("close", commit);
+    stream.pipe(res);
+  } catch (error) {
+    if (error instanceof ObjectNotFoundError) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
+    req.log.error({ err: error }, "Error serving token download");
+    if (!res.headersSent) res.status(500).json({ error: "Failed to serve download" });
+  }
+});
+
 function rateMinor(name: string): number | null {
   const raw = process.env[name]?.trim();
   if (!raw || !/^(?:\d+)(?:\.\d+)?$/.test(raw)) return null;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) return null;
-  return Math.round(value * 100);
+  const minor = Math.round(value * 100);
+  return Number.isSafeInteger(minor) ? minor : null;
+}
+
+async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
+  const rate = rateMinor("STORAGE_EXCESS_GBP_PER_GIB_MONTH");
+  const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
+  if (rate === null || !rawAllowances) return null;
+  let allowanceMap: Record<string, unknown>;
+  try { allowanceMap = JSON.parse(rawAllowances); } catch { return null; }
+  if (!allowanceMap || typeof allowanceMap !== "object" || Array.isArray(allowanceMap)) return null;
+  const configuredValues = Object.values(allowanceMap);
+  if (!configuredValues.length || configuredValues.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER / GIB)) return null;
+  const [client] = await db.select({ stripeCustomerId: clientsTable.stripeCustomerId })
+    .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) return null;
+  const subscription = await findLiveSubscription(client.stripeCustomerId).catch(() => null);
+  if (!subscription) return null;
+  const allowances = subscription.items.data
+    .map((item) => String(item.price?.metadata?.service_key ?? ""))
+    .map((key) => Number(allowanceMap[key]))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  if (!allowances.length) return null;
+  const includedBytes = Math.max(...allowances) * GIB;
+  const excess = Math.max(0, usedBytes - includedBytes);
+  const storageMinorUnits = Math.round(rate * excess / GIB);
+  return { currency: "GBP" as const, storageMinorUnits, downloadMinorUnits: 0, totalMinorUnits: storageMinorUnits };
 }
 
 router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {
@@ -49,14 +115,7 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
     const { usedBytes, objectCount } = await objectStorageService.getTenantStorageUsage(clientId, referencedPaths);
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
-    const storageRate = rateMinor("STORAGE_PRICE_GBP_PER_GIB_MONTH");
-    const downloadRate = rateMinor("DOWNLOAD_PRICE_GBP_PER_GIB");
-    const estimatedCost = storageRate !== null && downloadRate !== null ? {
-      currency: "GBP" as const,
-      storageMinorUnits: Math.round(storageRate * usedBytes / GIB),
-      downloadMinorUnits: Math.round(downloadRate * monthlyDownloadBytes / GIB),
-      totalMinorUnits: Math.round(storageRate * usedBytes / GIB) + Math.round(downloadRate * monthlyDownloadBytes / GIB),
-    } : null;
+    const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
     const configuredThreshold = Number(thresholdSetting?.value);
     const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
       ? configuredThreshold
@@ -183,7 +242,10 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
       return;
     }
 
-    const response = await objectStorageService.downloadObject(objectFile);
+    const [metadata] = await objectFile.getMetadata();
+    const range = requestRange(req.header("range"), Number(metadata.size));
+    if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${metadata.size}`).end(); return; }
+    const response = await objectStorageService.downloadObject(objectFile, 3600, range);
 
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));

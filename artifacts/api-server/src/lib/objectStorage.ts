@@ -10,6 +10,7 @@ import {
   getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
+import { createDownloadToken } from "./downloadUsage";
 
 function createObjectStorageClient(): Storage {
   const options: ConstructorParameters<typeof Storage>[0] = {};
@@ -150,12 +151,12 @@ export class ObjectStorageService {
     return null;
   }
 
-  async downloadObject(file: File, cacheTtlSec: number = 3600): Promise<Response> {
+  async downloadObject(file: File, cacheTtlSec: number = 3600, byteRange?: { start: number; end: number }): Promise<Response> {
     const [metadata] = await file.getMetadata();
     const aclPolicy = await getObjectAclPolicy(file);
     const isPublic = aclPolicy?.visibility === "public";
 
-    const nodeStream = file.createReadStream();
+    const nodeStream = file.createReadStream(byteRange ? { start: byteRange.start, end: byteRange.end } : undefined);
     const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
     const headers: Record<string, string> = {
@@ -163,10 +164,14 @@ export class ObjectStorageService {
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
     };
     if (metadata.size) {
-      headers["Content-Length"] = String(metadata.size);
+      const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);
+      headers["Content-Length"] = String(length);
+      if (byteRange) {
+        headers["Content-Range"] = `bytes ${byteRange.start}-${byteRange.end}/${metadata.size}`;
+      }
     }
 
-    return new Response(webStream, { headers });
+    return new Response(webStream, { status: byteRange ? 206 : 200, headers });
   }
 
   /**
@@ -483,12 +488,12 @@ export class ObjectStorageService {
       const [bytes] = await objectFile.download({ validation: "crc32c" });
       await validateUploadContent(bytes, allowedTypes);
     }
-    return signObjectURL({
-      bucketName: objectFile.bucket.name,
-      objectName: objectFile.name,
-      method: "GET",
-      ttlSec,
-    });
+    const acl = await getObjectAclPolicy(objectFile);
+    const clientId = Number(acl?.owner);
+    if (acl?.visibility !== "private" || !Number.isSafeInteger(clientId) || clientId <= 0) {
+      throw new ObjectOwnershipError("Private object has no tenant owner");
+    }
+    return createDownloadToken(objectPath, clientId, ttlSec);
   }
 
   async canAccessObjectEntity({

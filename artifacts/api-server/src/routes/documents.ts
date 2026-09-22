@@ -215,7 +215,21 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
-    const response = await storage.downloadObject(file, 0 /* no cache for private docs */);
+    const [metadata] = await file.getMetadata();
+    const rawRange = req.header("range");
+    let range: { start: number; end: number } | undefined;
+    if (rawRange) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rawRange.trim());
+      const size = Number(metadata.size);
+      if (!match || (!match[1] && !match[2])) { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = Math.min(match[2] ? Number(match[2]) : size - 1, size - 1);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return;
+      }
+      range = { start, end };
+    }
+    const response = await storage.downloadObject(file, 0 /* no cache for private docs */, range);
 
     // Force a download with the original filename
     const safeName = doc.name.replace(/[^a-zA-Z0-9._\- ]/g, "_");

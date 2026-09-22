@@ -258,6 +258,23 @@ export interface AppSettings {
   storageWarningThresholdBytes?: string | null;
 }
 
+export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCostCurrency[keyof typeof StorageUsageEstimatedCostCurrency];
+
+
+export const StorageUsageEstimatedCostCurrency = {
+  GBP: 'GBP',
+} as const;
+
+export type StorageUsageEstimatedCost = {
+  currency: StorageUsageEstimatedCostCurrency;
+  /** @minimum 0 */
+  storageMinorUnits: number;
+  /** @minimum 0 */
+  downloadMinorUnits: number;
+  /** @minimum 0 */
+  totalMinorUnits: number;
+} | null;
+
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
@@ -272,13 +289,9 @@ export interface StorageUsage {
      */
   monthlyDownloadBytes: number | null;
   monthlyDownloadTrackingAvailable: boolean;
+  /** @pattern ^[0-9]{4}-[0-9]{2}$ */
   month: string;
-  estimatedCost: {
-    currency: "GBP";
-    storageMinorUnits: number;
-    downloadMinorUnits: number;
-    totalMinorUnits: number;
-  } | null;
+  estimatedCost: StorageUsageEstimatedCost;
 }
 
 export type SendRemindersResponseDetailsItemStatus = typeof SendRemindersResponseDetailsItemStatus[keyof typeof SendRemindersResponseDetailsItemStatus];

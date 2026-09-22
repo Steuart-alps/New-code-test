@@ -25,3 +25,15 @@ export const storageDownloadMonthsTable = pgTable("storage_download_months", {
   tenantMonthUnique: uniqueIndex("uq_storage_download_months_tenant_month").on(table.clientId, table.month),
   tenantMonth: index("idx_storage_download_months_tenant_month").on(table.clientId, table.month),
 }));
+
+export const storageDownloadTokensTable = pgTable("storage_download_tokens", {
+  id: serial("id").primaryKey(),
+  tokenDigest: text("token_digest").notNull(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  objectPath: text("object_path").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  digestUnique: uniqueIndex("uq_storage_download_tokens_digest").on(table.tokenDigest),
+  expiry: index("idx_storage_download_tokens_expiry").on(table.expiresAt),
+}));

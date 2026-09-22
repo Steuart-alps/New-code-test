@@ -81,6 +81,20 @@ export async function runRuntimeMigrations() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_months_tenant_month" ON "storage_download_months" ("client_id", "month")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_download_tokens" (
+        "id" serial PRIMARY KEY,
+        "token_digest" text NOT NULL UNIQUE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "object_path" text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_tokens_expiry" ON "storage_download_tokens" ("expires_at")`);
+    // Bound the immutable response ledger and remove spent opaque credentials.
+    await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
+    await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
 
     // ---- Billing discount redemptions ----
     // A client can reserve a code while Stripe Checkout is open, then it is

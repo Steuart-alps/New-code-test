@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { StorageUsageEstimatedCost } from './storageUsageEstimatedCost';
 
 export interface StorageUsage {
   /** @minimum 0 */
@@ -20,11 +21,7 @@ export interface StorageUsage {
      */
   monthlyDownloadBytes: number | null;
   monthlyDownloadTrackingAvailable: boolean;
+  /** @pattern ^[0-9]{4}-[0-9]{2}$ */
   month: string;
-  estimatedCost: {
-    currency: "GBP";
-    storageMinorUnits: number;
-    downloadMinorUnits: number;
-    totalMinorUnits: number;
-  } | null;
+  estimatedCost: StorageUsageEstimatedCost;
 }

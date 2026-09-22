@@ -778,6 +778,13 @@ export const getStorageUsageResponseObjectCountMin = 0;
 
 export const getStorageUsageResponseMonthlyDownloadBytesMin = 0;
 
+export const getStorageUsageResponseMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+export const getStorageUsageResponseEstimatedCostStorageMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostTotalMinorUnitsMin = 0;
+
 
 
 export const GetStorageUsageResponse = zod.object({
@@ -787,13 +794,13 @@ export const GetStorageUsageResponse = zod.object({
   "warning": zod.boolean(),
   "monthlyDownloadBytes": zod.number().min(getStorageUsageResponseMonthlyDownloadBytesMin).nullable(),
   "monthlyDownloadTrackingAvailable": zod.boolean(),
-  "month": zod.string().regex(/^[0-9]{4}-[0-9]{2}$/),
+  "month": zod.string().regex(getStorageUsageResponseMonthRegExp),
   "estimatedCost": zod.object({
-    "currency": zod.literal("GBP"),
-    "storageMinorUnits": zod.number().int().min(0),
-    "downloadMinorUnits": zod.number().int().min(0),
-    "totalMinorUnits": zod.number().int().min(0)
-  }).nullable()
+  "currency": zod.enum(['GBP']),
+  "storageMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageMinorUnitsMin),
+  "downloadMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin),
+  "totalMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostTotalMinorUnitsMin)
+}).nullable()
 })
 
 
