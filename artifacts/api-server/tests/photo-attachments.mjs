@@ -1,13 +1,15 @@
 // Focused self-contained storage/route-guard coverage for GreenTrack and
 // SwimTrack photo attachments. The compiled entry is placed beneath this API
 // package so Node resolves @google-cloud/storage from the workspace instead of
-// a temporary directory outside its node_modules tree.
+// a temporary directory outside its node_modules tree. This suite stubs every
+// storage operation and does not require live object storage.
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { deflateSync } from "node:zlib";
+import { getStorageUnavailableSkipReason } from "./storage-test-availability.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = await mkdtemp(path.join(dir, ".build-photo-attachments-"));
@@ -25,6 +27,31 @@ try {
     hasTenantAttachmentReference, isSupportedPhotoEntityType, isTenantReservedObjectPath,
     photosRouter, TENANT_ATTACHMENT_REFERENCE_SOURCES, validateUploadContent,
   } = await import(outfile);
+
+  assert.match(
+    getStorageUnavailableSkipReason(
+      { status: 500, data: { error: "Could not generate upload URL", detail: "bucket unavailable" } },
+      "fixture",
+    ) ?? "",
+    /requires object storage/,
+    "recognized upload-signing outages can be skipped explicitly",
+  );
+  assert.equal(
+    getStorageUnavailableSkipReason(
+      { status: 500, data: { error: "Unexpected database failure" } },
+      "fixture",
+    ),
+    null,
+    "unrelated server failures remain test failures",
+  );
+  assert.equal(
+    getStorageUnavailableSkipReason(
+      { status: 400, data: { error: "Could not generate upload URL" } },
+      "fixture",
+    ),
+    null,
+    "request contract failures remain test failures",
+  );
 
   // Both modules' record types are explicitly bound to their real tenant tables.
   assert.equal(PHOTO_ENTITY_TABLES.green_pre_use_check, "green_pre_use_checks");

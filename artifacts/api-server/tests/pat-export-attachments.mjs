@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 const stamp = Date.now();
@@ -60,7 +61,9 @@ async function createDocument(request, siteId, title) {
   const requested = await request("POST", "/doc-track/documents/request-upload", {
     name: `${title}.txt`, contentType: "text/plain",
   });
-  if ([500, 502, 503].includes(requested.status)) return { unavailable: requested };
+  if (skipWhenStorageUnavailable(requested, "PAT attachment export integration")) {
+    return { unavailable: requested };
+  }
   expectStatus(`request upload for ${title}`, requested, [200]);
   assert(`upload URL returned for ${title}`, typeof requested.data?.uploadUrl === "string");
   assert(`object path returned for ${title}`, typeof requested.data?.objectPath === "string");
@@ -90,10 +93,7 @@ async function main() {
   const betaSite = await createSite(owner, `PAT attachment beta ${stamp}`);
 
   const alpha = await createDocument(owner, alphaSite.id, `PAT alpha evidence ${stamp}`);
-  if (alpha.unavailable) {
-    console.log(`SKIP: PAT attachment export integration requires object storage; upload reservation returned HTTP ${alpha.unavailable.status}`);
-    return;
-  }
+  if (alpha.unavailable) return;
   const beta = await createDocument(owner, betaSite.id, `PAT beta evidence ${stamp}`);
   assert("storage remains available for second fixture", !beta.unavailable);
 

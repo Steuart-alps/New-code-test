@@ -2,6 +2,7 @@
 // This is deliberately separate from DocTrack because the customer Documents
 // page uses /storage/uploads/request-url and /documents directly.
 import assert from "node:assert/strict";
+import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -61,6 +62,7 @@ let response = await owner("POST", "/storage/uploads/request-url", {
   size: 37,
   contentType: "application/pdf",
 });
+if (skipWhenStorageUnavailable(response, "Generic document object ACL integration")) process.exit(0);
 assert.equal(response.status, 200, "owner receives a presigned upload URL");
 const { uploadURL, objectPath } = response.data;
 assert.equal(typeof uploadURL, "string", "upload URL returned");

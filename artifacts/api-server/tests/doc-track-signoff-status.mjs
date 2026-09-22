@@ -1,5 +1,7 @@
 // End-to-end coverage for DocTrack's current acknowledgement status and the
 // Pest Control PAT preset's tenant-scoped template API.
+import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 let cookie = "";
 let failures = 0;
@@ -100,7 +102,13 @@ async function main() {
     name: "annual-safety-policy.pdf",
     contentType: "application/pdf",
   });
+  if (skipWhenStorageUnavailable(uploadRequest, "DocTrack sign-off integration")) return;
   requireSuccess("request document upload", uploadRequest, 200);
+  check("document upload URL is returned", typeof uploadRequest.data?.uploadUrl === "string");
+  check("document object path is returned", typeof uploadRequest.data?.objectPath === "string");
+  if (typeof uploadRequest.data?.uploadUrl !== "string" || typeof uploadRequest.data?.objectPath !== "string") {
+    throw new Error("request document upload returned an invalid payload");
+  }
   const uploaded = await fetch(uploadRequest.data.uploadUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/pdf" },
