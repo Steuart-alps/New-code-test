@@ -106,6 +106,7 @@ export * from './sendRemindersResponse';
 export * from './sendRemindersResponseDetailsItem';
 export * from './sendRemindersResponseDetailsItemStatus';
 export * from './site';
+export * from './storageUsage';
 export * from './testEmailRequest';
 export * from './testEmailResponse';
 export * from './updateCategoryRequest';

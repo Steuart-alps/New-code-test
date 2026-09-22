@@ -785,6 +785,82 @@ async function testPushToken(admin, other, ts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 5. /api/storage/usage and storage warning settings
+// ─────────────────────────────────────────────────────────────────────────────
+async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
+  console.log("\n── storage usage ──");
+
+  const anon = makeSession();
+  expectStatus(
+    "storage usage: anonymous request → 401",
+    (await anon("GET", "/storage/usage", undefined, { noCookie: true })).status,
+    401,
+  );
+  expectStatus("storage usage: viewer → 403", (await viewer("GET", "/storage/usage")).status, 403);
+  expectStatus("storage usage: staff → 403", (await staff("GET", "/storage/usage")).status, 403);
+
+  const thresholdA = 2 * 1024 * 1024;
+  const thresholdB = 3 * 1024 * 1024;
+  expectOk(
+    "storage usage: save client A warning threshold",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: String(thresholdA),
+    })).status,
+  );
+  expectOk(
+    "storage usage: save selected client B warning threshold",
+    (await admin("PUT", `/settings?clientId=${clientBId}`, {
+      storageWarningThresholdBytes: String(thresholdB),
+    })).status,
+  );
+
+  const usageA = await admin("GET", `/storage/usage?clientId=${clientAId}`);
+  const usageB = await admin("GET", `/storage/usage?clientId=${clientBId}`);
+  expectOk("storage usage: client A response", usageA.status);
+  expectOk("storage usage: selected client B response", usageB.status);
+  check(
+    "storage usage: client A keeps its threshold",
+    usageA.data?.warningThresholdBytes === thresholdA,
+    `got ${usageA.data?.warningThresholdBytes}`,
+  );
+  check(
+    "storage usage: selected client B keeps its threshold",
+    usageB.data?.warningThresholdBytes === thresholdB,
+    `got ${usageB.data?.warningThresholdBytes}`,
+  );
+  check(
+    "storage usage: selected accounts use distinct tenant contexts",
+    usageA.data?.usedBytes === clientAId && usageB.data?.usedBytes === clientBId,
+    `A=${usageA.data?.usedBytes}, B=${usageB.data?.usedBytes}`,
+  );
+  for (const [name, response] of [["A", usageA], ["B", usageB]]) {
+    check(`storage usage: client ${name} bytes are non-negative`, Number.isSafeInteger(response.data?.usedBytes) && response.data.usedBytes >= 0);
+    check(`storage usage: client ${name} object count is non-negative`, Number.isSafeInteger(response.data?.objectCount) && response.data.objectCount >= 0);
+    check(`storage usage: client ${name} download traffic is explicitly unavailable`, response.data?.monthlyDownloadBytes === null && response.data?.monthlyDownloadTrackingAvailable === false);
+  }
+
+  expectStatus(
+    "storage usage: threshold below 1 MB → 400",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: String(1024 * 1024 - 1),
+    })).status,
+    400,
+  );
+  expectOk(
+    "storage usage: null threshold resets to default",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: null,
+    })).status,
+  );
+  const reset = await admin("GET", `/storage/usage?clientId=${clientAId}`);
+  check(
+    "storage usage: reset uses 5 GB default",
+    reset.data?.warningThresholdBytes === 5 * 1024 * 1024 * 1024,
+    `got ${reset.data?.warningThresholdBytes}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 async function main() {
@@ -804,6 +880,7 @@ async function main() {
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);
+  await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

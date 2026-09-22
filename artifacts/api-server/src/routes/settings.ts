@@ -33,6 +33,8 @@ const SETTING_KEYS = [
   // JSON map of operational module keys to the active manager user IDs who
   // should receive that track's daily action summary.
   "trackSummaryRouting",
+  // Account-level warning only; reaching it never blocks or deletes uploads.
+  "storageWarningThresholdBytes",
 ] as const;
 
 async function validateTrackSummaryRouting(
@@ -140,6 +142,20 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     rawBody.fixTrackStaleDays = String(parsed);
+  }
+  if (rawBody.storageWarningThresholdBytes !== undefined) {
+    if (rawBody.storageWarningThresholdBytes === null) {
+      rawBody.storageWarningThresholdBytes = null;
+    } else {
+    const threshold = Number(rawBody.storageWarningThresholdBytes);
+    const min = 1024 * 1024;
+    const max = 10 * 1024 * 1024 * 1024 * 1024;
+    if (!Number.isSafeInteger(threshold) || threshold < min || threshold > max) {
+      res.status(400).json({ error: "Storage warning threshold must be between 1 MB and 10 TB" });
+      return;
+    }
+    rawBody.storageWarningThresholdBytes = String(threshold);
+    }
   }
 
   for (const key of SETTING_KEYS) {

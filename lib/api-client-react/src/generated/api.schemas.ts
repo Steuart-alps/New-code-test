@@ -254,6 +254,24 @@ export interface AppSettings {
   smtpFromName?: string | null;
   defaultLeadTimeDays?: string | null;
   companyName?: string | null;
+  /** @pattern ^[0-9]+$ */
+  storageWarningThresholdBytes?: string | null;
+}
+
+export interface StorageUsage {
+  /** @minimum 0 */
+  usedBytes: number;
+  /** @minimum 0 */
+  objectCount: number;
+  /** @minimum 1 */
+  warningThresholdBytes: number;
+  warning: boolean;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  monthlyDownloadBytes: number | null;
+  monthlyDownloadTrackingAvailable: boolean;
 }
 
 export type SendRemindersResponseDetailsItemStatus = typeof SendRemindersResponseDetailsItemStatus[keyof typeof SendRemindersResponseDetailsItemStatus];

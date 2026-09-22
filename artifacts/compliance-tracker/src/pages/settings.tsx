@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings } from "@workspace/api-client-react";
+import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { apiFetch as authenticatedApiFetch } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation } from "@/lib/analytics";
@@ -66,6 +67,145 @@ function StatusBadge({ status }: { status: string | null }) {
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
       <RefreshCw className="w-3.5 h-3.5" /> Pending verification
     </span>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit += 1;
+  } while (value >= 1024 && unit < units.length - 1);
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unit]}`;
+}
+
+function StorageUsageCard() {
+  const { toast } = useToast();
+  const { activeClientId } = useAuth();
+  const [thresholdGb, setThresholdGb] = useState("5");
+  const [saving, setSaving] = useState(false);
+  const usageQuery = useGetStorageUsage({
+    query: {
+      queryKey: ["/api/storage/usage", activeClientId],
+      enabled: activeClientId !== null,
+      retry: false,
+    },
+  });
+  const usage = usageQuery.data;
+
+  useEffect(() => {
+    if (usage) {
+      setThresholdGb(String(Number((usage.warningThresholdBytes / (1024 ** 3)).toFixed(3))));
+    }
+  }, [usage]);
+
+  const saveThreshold = async () => {
+    const gigabytes = Number(thresholdGb);
+    const bytes = Math.round(gigabytes * 1024 ** 3);
+    if (!Number.isFinite(gigabytes) || gigabytes <= 0 || bytes < 1024 ** 2) {
+      toast({ title: "Enter a warning threshold of at least 0.001 GB", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await authenticatedApiFetch(`/settings?clientId=${activeClientId}`, {
+        method: "PUT",
+        body: JSON.stringify({ storageWarningThresholdBytes: String(bytes) }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Request failed (${response.status})`);
+      }
+      await usageQuery.refetch();
+      toast({ title: "Storage warning threshold saved" });
+    } catch (err: any) {
+      toast({ title: "Couldn't save storage warning", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const percent = usage
+    ? Math.min(100, Math.round((usage.usedBytes / usage.warningThresholdBytes) * 100))
+    : 0;
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <HardDrive className="w-5 h-5 text-sky-600" />
+          <CardTitle className="font-display">File Storage</CardTitle>
+        </div>
+        <CardDescription>
+          Monitor retained documents and evidence for this account. The warning is informational and never blocks or deletes files.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-5">
+        {usageQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <RefreshCw className="h-4 w-4 animate-spin" /> Calculating current usage…
+          </div>
+        ) : usage ? (
+          <>
+            {usage.warning && (
+              <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-medium">Storage warning threshold reached</p>
+                  <p className="text-sm">Review retained files or raise the warning level. Uploads will continue normally.</p>
+                </div>
+              </div>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Retained storage</p>
+                <p className="mt-1 text-2xl font-semibold">{formatBytes(usage.usedBytes)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{usage.objectCount.toLocaleString()} stored {usage.objectCount === 1 ? "file" : "files"}</p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Downloads this month</p>
+                <p className="mt-1 text-lg font-semibold">Not available</p>
+                <p className="mt-1 text-xs text-muted-foreground">Download traffic is not currently measured, so no estimate is shown.</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>{percent}% of warning level</span>
+                <span className="text-muted-foreground">{formatBytes(usage.warningThresholdBytes)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className={`h-full rounded-full ${usage.warning ? "bg-amber-500" : "bg-sky-600"}`} style={{ width: `${percent}%` }} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Storage usage is temporarily unavailable.</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => usageQuery.refetch()}>Try again</Button>
+          </div>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="storage-warning-gb">Warn me at (GB)</Label>
+            <Input
+              id="storage-warning-gb"
+              type="number"
+              min="0.001"
+              max="10240"
+              step="0.1"
+              value={thresholdGb}
+              onChange={(event) => setThresholdGb(event.target.value)}
+            />
+          </div>
+          <Button type="button" variant="outline" disabled={saving || usageQuery.isLoading || activeClientId === null} onClick={saveThreshold}>
+            {saving ? "Saving…" : "Save warning level"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1814,6 +1954,7 @@ export default function SettingsPage() {
       <div className="max-w-4xl space-y-6">
         <BillingCard />
         <InvoicesCard />
+        {canAdmin && <StorageUsageCard />}
         <DataExportCard />
         <DepartmentsCard />
         {canAdmin && <RequiredActionTemplatesCard />}

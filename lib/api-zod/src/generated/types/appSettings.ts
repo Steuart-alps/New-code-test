@@ -15,4 +15,6 @@ export interface AppSettings {
   smtpFromName?: string | null;
   defaultLeadTimeDays?: string | null;
   companyName?: string | null;
+  /** @pattern ^[0-9]+$ */
+  storageWarningThresholdBytes?: string | null;
 }

@@ -7,6 +7,7 @@ export * from './generated/types';
 // add the name here, preferring the ./generated/api copy.
 export {
   GetFoodSafetyRecordByDateParams,
+  GetStorageUsageResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SavePATPresetTemplateBody,

@@ -706,6 +706,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppSettings"
 
+  /storage/usage:
+    get:
+      operationId: getStorageUsage
+      tags: [storage]
+      summary: Get storage usage for the current account
+      responses:
+        "200":
+          description: Current retained storage usage and warning configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageUsage"
+
   /notifications/send-reminders:
     post:
       operationId: sendReminders
@@ -2284,6 +2297,37 @@ components:
         companyName:
           type: string
           nullable: true
+        storageWarningThresholdBytes:
+          type: string
+          pattern: "^[0-9]+$"
+          nullable: true
+
+    StorageUsage:
+      type: object
+      required:
+        - usedBytes
+        - objectCount
+        - warningThresholdBytes
+        - warning
+        - monthlyDownloadBytes
+        - monthlyDownloadTrackingAvailable
+      properties:
+        usedBytes:
+          type: integer
+          minimum: 0
+        objectCount:
+          type: integer
+          minimum: 0
+        warningThresholdBytes:
+          type: integer
+          minimum: 1
+        warning:
+          type: boolean
+        monthlyDownloadBytes:
+          type: ["integer", "null"]
+          minimum: 0
+        monthlyDownloadTrackingAvailable:
+          type: boolean
 
     SendRemindersResponse:
       type: object

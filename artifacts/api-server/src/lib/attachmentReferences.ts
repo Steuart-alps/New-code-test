@@ -25,6 +25,42 @@ type SqlExecutor = {
   execute(query: unknown): Promise<{ rows?: unknown[] }>;
 };
 
+/** Return every persisted private-object path belonging to one tenant. */
+export async function listTenantAttachmentObjectPaths(
+  executor: SqlExecutor,
+  tenantId: number,
+): Promise<string[]> {
+  const result = await executor.execute(sql`
+    SELECT DISTINCT object_path
+    FROM (
+      SELECT object_path FROM doc_track_documents WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM safe_risk_assessments WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM safe_sops WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM safe_handbook WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM site_documents WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM client_documents WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM contractor_certificates WHERE client_id = ${tenantId}
+      UNION ALL
+        SELECT cert.file_url AS object_path
+        FROM certificates cert
+        JOIN contractors contractor ON contractor.id = cert.contractor_id
+        WHERE contractor.client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM check_photos WHERE client_id = ${tenantId}
+      UNION ALL
+        SELECT media.object_path
+        FROM fix_track_issues issue
+        CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(issue.media_urls, '[]'::jsonb)) media(object_path)
+        WHERE issue.client_id = ${tenantId}
+      UNION ALL SELECT completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${tenantId}
+      UNION ALL SELECT completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${tenantId}
+    ) attachments
+    WHERE object_path LIKE '/objects/%'
+  `);
+  return (result.rows ?? [])
+    .map((row) => (row as { object_path?: unknown }).object_path)
+    .filter((value): value is string => typeof value === "string" && value.startsWith("/objects/"));
+}
+
 /**
  * Check all attachment stores for a reference owned by the same tenant.
  *

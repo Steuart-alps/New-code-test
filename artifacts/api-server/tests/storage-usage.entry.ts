@@ -1,0 +1,1 @@
+export { sumOwnedObjectMetadata } from "../src/lib/objectStorage";

@@ -718,6 +718,9 @@ export const GetDashboardStatsResponse = zod.object({
 /**
  * @summary Get all app settings
  */
+export const getSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
+
 export const GetSettingsResponse = zod.object({
   "smtpHost": zod.string().nullish(),
   "smtpPort": zod.string().nullish(),
@@ -726,13 +729,17 @@ export const GetSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "companyName": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
 })
 
 
 /**
  * @summary Update app settings
  */
+export const updateSettingsBodyStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
+
 export const UpdateSettingsBody = zod.object({
   "smtpHost": zod.string().nullish(),
   "smtpPort": zod.string().nullish(),
@@ -741,8 +748,12 @@ export const UpdateSettingsBody = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "companyName": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish()
 })
+
+export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
 
 export const UpdateSettingsResponse = zod.object({
   "smtpHost": zod.string().nullish(),
@@ -752,7 +763,30 @@ export const UpdateSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "companyName": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+})
+
+
+/**
+ * @summary Get storage usage for the current account
+ */
+export const getStorageUsageResponseUsedBytesMin = 0;
+
+export const getStorageUsageResponseObjectCountMin = 0;
+
+
+export const getStorageUsageResponseMonthlyDownloadBytesMin = 0;
+
+
+
+export const GetStorageUsageResponse = zod.object({
+  "usedBytes": zod.number().min(getStorageUsageResponseUsedBytesMin),
+  "objectCount": zod.number().min(getStorageUsageResponseObjectCountMin),
+  "warningThresholdBytes": zod.number().min(1),
+  "warning": zod.boolean(),
+  "monthlyDownloadBytes": zod.number().min(getStorageUsageResponseMonthlyDownloadBytesMin).nullable(),
+  "monthlyDownloadTrackingAvailable": zod.boolean()
 })
 
 

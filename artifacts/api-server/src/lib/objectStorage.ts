@@ -68,6 +68,49 @@ export function isTenantReservedObjectPath(objectPath: string, tenantId: number 
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
 }
 
+type UsageMetadataFile = Pick<File, "name" | "getMetadata">;
+
+export async function sumOwnedObjectMetadata(
+  files: UsageMetadataFile[],
+  tenantId: number | string,
+): Promise<{ usedBytes: number; objectCount: number }> {
+  const owner = String(tenantId);
+  const uniqueFiles = [...new Map(files.map((file) => [file.name, file])).values()];
+  let usedBytes = 0;
+  let objectCount = 0;
+
+  for (let offset = 0; offset < uniqueFiles.length; offset += 10) {
+    const batch = uniqueFiles.slice(offset, offset + 10);
+    const ownedSizes = await Promise.all(batch.map(async (file) => {
+      const [metadata] = await file.getMetadata();
+      const rawPolicy = metadata.metadata?.["custom:aclPolicy"];
+      if (!rawPolicy) return null;
+
+      let policy: ObjectAclPolicy;
+      try {
+        policy = JSON.parse(String(rawPolicy)) as ObjectAclPolicy;
+      } catch {
+        return null;
+      }
+      if (policy.owner !== owner || policy.visibility !== "private") return null;
+
+      const size = Number(metadata.size);
+      return Number.isSafeInteger(size) && size >= 0 ? size : null;
+    }));
+
+    for (const size of ownedSizes) {
+      if (size === null) continue;
+      if (!Number.isSafeInteger(usedBytes + size)) {
+        throw new Error("Tenant storage usage exceeds the supported range");
+      }
+      usedBytes += size;
+      objectCount += 1;
+    }
+  }
+
+  return { usedBytes, objectCount };
+}
+
 export class ObjectStorageService {
   constructor() {}
 
@@ -124,6 +167,51 @@ export class ObjectStorageService {
     }
 
     return new Response(webStream, { headers });
+  }
+
+  /**
+   * Sum authoritative provider-reported sizes for finalised private objects
+   * owned by one tenant. ACL metadata is the ownership source of truth: request
+   * sizes and attachment-table metadata can be missing or client supplied.
+   */
+  async getTenantStorageUsage(tenantId: number | string, referencedPaths: string[] = []): Promise<{
+    usedBytes: number;
+    objectCount: number;
+  }> {
+    if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_FAKE_USAGE === "1") {
+      const syntheticBytes = Number(tenantId);
+      if (!Number.isSafeInteger(syntheticBytes) || syntheticBytes < 0) {
+        throw new Error("Test tenant ID cannot be represented as storage usage");
+      }
+      return { usedBytes: syntheticBytes, objectCount: 1 };
+    }
+    const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
+    const root = privatePrefix.replace(/\/$/, "");
+    const bucket = objectStorageClient.bucket(bucketName);
+    const tenantPrefixes = [
+      `${root}/uploads/tenant-${tenantId}/`,
+      `${root}/finalized/tenant-${tenantId}/`,
+    ];
+    const listings = await Promise.all(
+      tenantPrefixes.map((prefix) => bucket.getFiles({ prefix })),
+    );
+    const tenantFiles = listings.flatMap(([files]) => files);
+    const tenantPrefixSet = tenantPrefixes.map((prefix) => `/objects/${prefix.slice(root.length + 1)}`);
+    const legacyFiles = await Promise.all(referencedPaths
+      .filter((objectPath) => !tenantPrefixSet.some((prefix) => objectPath.startsWith(prefix)))
+      .map(async (objectPath) => {
+        try {
+          return await this.getObjectEntityFile(objectPath);
+        } catch (error) {
+          if (error instanceof ObjectNotFoundError) return null;
+          throw error;
+        }
+      }));
+
+    return sumOwnedObjectMetadata(
+      [...tenantFiles, ...legacyFiles.filter((file): file is File => file !== null)],
+      tenantId,
+    );
   }
 
   async getObjectEntityUploadURL(tenantId?: number | string, contentType?: string): Promise<string> {

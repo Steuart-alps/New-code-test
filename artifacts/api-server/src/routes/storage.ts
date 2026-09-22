@@ -3,14 +3,60 @@ import { Readable } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  GetStorageUsageResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { db } from "@workspace/db";
+import { appSettingsTable } from "@workspace/db/schema";
+import { and, eq } from "drizzle-orm";
+import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
+import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
+
+router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+
+  try {
+    const [referencedPaths, thresholdSetting] = await Promise.all([
+      listTenantAttachmentObjectPaths(db, clientId),
+      db.query.appSettingsTable.findFirst({
+        where: and(
+          eq(appSettingsTable.clientId, clientId),
+          eq(appSettingsTable.key, "storageWarningThresholdBytes"),
+        ),
+      }),
+    ]);
+    const { usedBytes, objectCount } = await objectStorageService.getTenantStorageUsage(clientId, referencedPaths);
+    const configuredThreshold = Number(thresholdSetting?.value);
+    const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
+      ? configuredThreshold
+      : DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES;
+
+    res.json(GetStorageUsageResponse.parse({
+      usedBytes,
+      objectCount,
+      warningThresholdBytes,
+      warning: usedBytes >= warningThresholdBytes,
+      monthlyDownloadBytes: null,
+      monthlyDownloadTrackingAvailable: false,
+    }));
+  } catch (error) {
+    req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
+    res.status(503).json({
+      error: "Storage usage is temporarily unavailable. Please try again later.",
+      code: "OBJECT_STORAGE_UNAVAILABLE",
+    });
+  }
+});
 
 /**
  * POST /storage/uploads/request-url
