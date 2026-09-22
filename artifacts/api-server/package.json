@@ -39,6 +39,7 @@
     "test:track-actions-trigger": "bash tests/run-track-actions-trigger.sh",
     "test:track-action-templates": "bash tests/run-track-action-templates.sh",
     "test:track-evidence": "bash tests/run-track-evidence.sh",
+    "test:track-export-isolation": "bash tests/run-track-export-isolation.sh",
     "test:room-track": "bash tests/run-room-track-routes.sh",
     "test:guidance-register": "bash tests/run-db-workflow.sh tests/guidance-register.mjs",
     "test:daily-checklist-entitlements": "bash tests/run-db-workflow.sh tests/daily-checklist-entitlements.mjs",
