@@ -136,7 +136,7 @@ function StorageUsageCard() {
     try {
       const response = await authenticatedApiFetch("/billing/storage", {
         method: "POST",
-        body: JSON.stringify({ gib }),
+        body: JSON.stringify({ gib, requestId: crypto.randomUUID() }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);

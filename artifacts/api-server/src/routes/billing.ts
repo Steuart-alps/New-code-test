@@ -521,8 +521,9 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
   const parsed = z.object({
     gib: z.number().int().min(1).max(100_000),
+    requestId: z.string().uuid(),
   }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "gib must be a whole number between 1 and 100000" });
+  if (!parsed.success) return res.status(400).json({ error: "gib must be a whole number between 1 and 100000 and requestId must be a UUID" });
 
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "clientId required" });
@@ -558,7 +559,7 @@ router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), 
     const oldQuantity = existingItem?.quantity ?? 0;
     const desiredQuantity = oldQuantity + parsed.data.gib;
     const periodStart = subscription.items.data[0]?.current_period_start ?? subscription.created;
-    const idempotencyPrefix = `storage-add-${subscription.id}-${periodStart}-${desiredQuantity}`;
+    const idempotencyPrefix = `storage-add-${subscription.id}-${parsed.data.requestId}`;
 
     await stripe.subscriptions.update(
       subscription.id,
