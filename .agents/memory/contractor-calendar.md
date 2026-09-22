@@ -7,4 +7,4 @@ Treat FixTrack target dates as all-day calendar entries, not invented visit time
 
 **Why:** Target dates do not specify a confirmed time, and replacing the UID creates duplicate calendar entries instead of updates.
 
-**How to apply:** Reuse the event UID and advance its sequence for revisions. Resends must go through the current manager approval queue; the older task wording about force-send must not be interpreted as permission to bypass approval.
+**How to apply:** Reuse the event UID and advance its sequence for revisions. Emit CRLF-terminated RFC 5545 data and fold every physical line at 75 UTF-8 octets without splitting a character. Resends must go through the current manager approval queue; the older task wording about force-send must not be interpreted as permission to bypass approval.

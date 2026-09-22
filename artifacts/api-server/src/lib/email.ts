@@ -162,6 +162,25 @@ function sanitizeIcsAddress(str: string): string {
   return str.replace(/[\r\n]/g, "").trim();
 }
 
+function foldIcsLine(line: string): string {
+  if (Buffer.byteLength(line, "utf8") <= 75) return line;
+  const parts: string[] = [];
+  let current = "";
+  let limit = 75;
+  for (const char of line) {
+    if (current && Buffer.byteLength(current + char, "utf8") > limit) {
+      parts.push(current);
+      current = char;
+      // A continuation line begins with one folding-space octet.
+      limit = 74;
+    } else {
+      current += char;
+    }
+  }
+  if (current) parts.push(current);
+  return parts.map((part, index) => index === 0 ? part : ` ${part}`).join("\r\n");
+}
+
 export function buildCalendarInvite(opts: {
   itemTitle: string;
   dueDate: Date;
@@ -178,9 +197,11 @@ export function buildCalendarInvite(opts: {
   sequence?: number;
   /** Date-only work is represented as an all-day event, ending the next day. */
   allDay?: boolean;
+  /** Override generation time for deterministic compatibility fixtures. */
+  generatedAt?: Date;
 }): string {
   const uid = opts.uid ?? randomUUID();
-  const now = new Date();
+  const now = opts.generatedAt ?? new Date();
   const endDate = new Date(opts.dueDate.getTime() + (opts.allDay ? 24 : 1) * 60 * 60 * 1000);
   const toIcsDay = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, "");
 
@@ -194,10 +215,11 @@ export function buildCalendarInvite(opts: {
     .map((part) => escapeIcs(part.replace(/\r/g, "")))
     .join("\\n");
 
-  return [
+  const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     `PRODID:-//ComplyTrack//EN`,
+    "CALSCALE:GREGORIAN",
     "METHOD:REQUEST",
     "BEGIN:VEVENT",
     `UID:${uid}`,
@@ -220,7 +242,8 @@ export function buildCalendarInvite(opts: {
     "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
-  ].join("\r\n");
+  ];
+  return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
 
 export function getPublicAppUrl(): string {
