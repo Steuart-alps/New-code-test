@@ -46,6 +46,7 @@
     "test:export-attachment-acl": "bash tests/run-db-workflow.sh tests/export-attachment-acl.mjs",
     "test:pat-export-attachments": "bash tests/run-pat-export-attachments.sh",
     "test:photo-attachments": "bash tests/run-db-workflow.sh tests/photo-attachments.mjs",
+    "test:storage-outage-routes": "bash tests/run-storage-outage-routes.sh",
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:service-price-preflight": "node tests/service-price-preflight.mjs",

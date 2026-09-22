@@ -127,6 +127,9 @@ export class ObjectStorageService {
   }
 
   async getObjectEntityUploadURL(tenantId?: number | string, contentType?: string): Promise<string> {
+    if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_SIGNING_FAILURE === "1") {
+      throw new Error("TEST_ONLY_PROVIDER_CREDENTIAL_SECRET bucket-internal-name");
+    }
     const privateObjectDir = this.getPrivateObjectDir();
 
     const objectId = randomUUID();
