@@ -14,44 +14,14 @@ import {
 function createObjectStorageClient(): Storage {
   const options: ConstructorParameters<typeof Storage>[0] = {};
   const projectId = process.env.GCS_PROJECT_ID?.trim();
-  const credentialsJson = process.env.GCS_CREDENTIALS_JSON?.trim();
 
   if (projectId) {
     options.projectId = projectId;
   }
 
-  if (credentialsJson) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(credentialsJson);
-    } catch {
-      throw new Error("GCS_CREDENTIALS_JSON must contain valid service-account JSON");
-    }
-
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof (parsed as { client_email?: unknown }).client_email !== "string" ||
-      typeof (parsed as { private_key?: unknown }).private_key !== "string"
-    ) {
-      throw new Error(
-        "GCS_CREDENTIALS_JSON must contain a service account client_email and private_key",
-      );
-    }
-
-    options.credentials = {
-      client_email: (parsed as { client_email: string }).client_email,
-      private_key: (parsed as { private_key: string }).private_key,
-    };
-
-    if (!options.projectId && typeof (parsed as { project_id?: unknown }).project_id === "string") {
-      options.projectId = (parsed as { project_id: string }).project_id;
-    }
-  }
-
-  // With no inline credentials, the Google SDK uses its normal ADC chain.
-  // This supports workload identity and GOOGLE_APPLICATION_CREDENTIALS without
-  // putting provider credentials in the repository.
+  // The Google SDK uses its normal Application Default Credentials chain:
+  // GOOGLE_APPLICATION_CREDENTIALS, workload identity, or local gcloud ADC.
+  // Credentials are intentionally never parsed or stored by the application.
   return new Storage(options);
 }
 
