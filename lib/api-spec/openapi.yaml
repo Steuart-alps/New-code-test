@@ -2336,7 +2336,7 @@ components:
         estimatedCost:
           type: object
           nullable: true
-          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits, includedStorageBytes, excessStorageBytes, storageAddonBlocks, storageAddonUnitGib, storageAddonUnitMinorUnits]
+          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits, includedStorageBytes, excessStorageBytes, providerMinorUnits, markupMinorUnits, markupPercent]
           properties:
             currency:
               type: string

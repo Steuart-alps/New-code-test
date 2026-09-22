@@ -262,7 +262,7 @@ export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCost
 
 
 export const StorageUsageEstimatedCostCurrency = {
-  GBP: 'GBP',
+  USD: 'USD',
 } as const;
 
 export type StorageUsageEstimatedCost = {
@@ -278,11 +278,11 @@ export type StorageUsageEstimatedCost = {
   /** @minimum 0 */
   excessStorageBytes: number;
   /** @minimum 0 */
-  storageAddonBlocks: number;
-  /** @minimum 1 */
-  storageAddonUnitGib: number;
+  providerMinorUnits: number;
   /** @minimum 0 */
-  storageAddonUnitMinorUnits: number;
+  markupMinorUnits: number;
+  /** @minimum 0 */
+  markupPercent: number;
 } | null;
 
 export interface StorageUsage {

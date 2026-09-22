@@ -789,10 +789,11 @@ export const getStorageUsageResponseEstimatedCostIncludedStorageBytesMin = 0;
 
 export const getStorageUsageResponseEstimatedCostExcessStorageBytesMin = 0;
 
-export const getStorageUsageResponseEstimatedCostStorageAddonBlocksMin = 0;
+export const getStorageUsageResponseEstimatedCostProviderMinorUnitsMin = 0;
 
+export const getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin = 0;
 
-export const getStorageUsageResponseEstimatedCostStorageAddonUnitMinorUnitsMin = 0;
+export const getStorageUsageResponseEstimatedCostMarkupPercentMin = 0;
 
 
 
@@ -805,15 +806,15 @@ export const GetStorageUsageResponse = zod.object({
   "monthlyDownloadTrackingAvailable": zod.boolean(),
   "month": zod.string().regex(getStorageUsageResponseMonthRegExp),
   "estimatedCost": zod.object({
-  "currency": zod.enum(['GBP']),
+  "currency": zod.enum(['USD']),
   "storageMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageMinorUnitsMin),
   "downloadMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin),
   "totalMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostTotalMinorUnitsMin),
   "includedStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostIncludedStorageBytesMin),
   "excessStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostExcessStorageBytesMin),
-  "storageAddonBlocks": zod.number().min(getStorageUsageResponseEstimatedCostStorageAddonBlocksMin),
-  "storageAddonUnitGib": zod.number().min(1),
-  "storageAddonUnitMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageAddonUnitMinorUnitsMin)
+  "providerMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostProviderMinorUnitsMin),
+  "markupMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin),
+  "markupPercent": zod.number().min(getStorageUsageResponseEstimatedCostMarkupPercentMin)
 }).nullable()
 })
 

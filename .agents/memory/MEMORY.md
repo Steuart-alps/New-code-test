@@ -45,3 +45,4 @@
 - [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
+- [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from Replit storage cost plus a 20% ALPS margin.

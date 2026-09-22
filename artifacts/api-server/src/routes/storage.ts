@@ -67,17 +67,8 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
   }
 });
 
-function rateMinor(name: string): number | null {
-  const raw = process.env[name]?.trim();
-  if (!raw || !/^(?:\d+)(?:\.\d+)?$/.test(raw)) return null;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return null;
-  const minor = Math.round(value * 100);
-  return Number.isSafeInteger(minor) ? minor : null;
-}
-
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rawRate = process.env.STORAGE_REPLIT_USD_PER_GIB_MONTH;
+  const rawRate = process.env.STORAGE_REPLIT_USD_PER_GIB_MONTH?.trim();
   const providerRate = rawRate ? Number(rawRate) : DEFAULT_REPLIT_STORAGE_USD_PER_GIB_MONTH;
   const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT;
   const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
@@ -105,8 +96,10 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
   const includedBytes = Math.max(...allowances) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
   const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
-  const markupMinorUnits = Math.round(providerMinorUnits * markupPercent / 100);
-  const storageMinorUnits = providerMinorUnits + markupMinorUnits;
+  const storageMinorUnits = Math.round(
+    providerRate * 100 * (1 + markupPercent / 100) * excess / GIB,
+  );
+  const markupMinorUnits = storageMinorUnits - providerMinorUnits;
   return {
     currency: "USD" as const,
     storageMinorUnits,

@@ -10,5 +10,5 @@ export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCost
 
 
 export const StorageUsageEstimatedCostCurrency = {
-  GBP: 'GBP',
+  USD: 'USD',
 } as const;
