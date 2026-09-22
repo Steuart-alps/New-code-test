@@ -30,7 +30,13 @@ try {
 
   assert.match(
     getStorageUnavailableSkipReason(
-      { status: 500, data: { error: "Could not generate upload URL", detail: "bucket unavailable" } },
+      {
+        status: 503,
+        data: {
+          error: "File uploads are temporarily unavailable. Please try again later.",
+          code: "OBJECT_STORAGE_UNAVAILABLE",
+        },
+      },
       "fixture",
     ) ?? "",
     /requires object storage/,
@@ -46,11 +52,14 @@ try {
   );
   assert.equal(
     getStorageUnavailableSkipReason(
-      { status: 400, data: { error: "Could not generate upload URL" } },
+      {
+        status: 503,
+        data: { error: "File uploads are temporarily unavailable. Please try again later." },
+      },
       "fixture",
     ),
     null,
-    "request contract failures remain test failures",
+    "responses without the stable storage error code remain test failures",
   );
 
   // Both modules' record types are explicitly bound to their real tenant tables.

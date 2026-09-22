@@ -158,7 +158,10 @@ export default function ContractorPortalPage() {
         const allowedTypes = ["application/pdf", "image/jpeg", "image/png"];
         if (!allowedTypes.includes(certFile.type.toLowerCase())) throw new Error("Certificate files must be PDF, JPEG, or PNG");
         const urlRes = await fetch(apiUrl(`${token}/upload-url`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contentType: certFile.type }) });
-        if (!urlRes.ok) throw new Error("Could not get upload URL");
+        if (!urlRes.ok) {
+          const failure = await urlRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(failure?.error ?? "Could not get upload URL");
+        }
         const { uploadUrl, objectPath: op } = await urlRes.json();
         // Step 2: upload directly to GCS
         const putRes = await fetch(uploadUrl, { method: "PUT", body: certFile, headers: { "Content-Type": certFile.type || "application/octet-stream" } });

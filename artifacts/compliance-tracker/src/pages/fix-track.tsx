@@ -20,6 +20,7 @@ import {
   Play, MapPin, User, Calendar, FileText, Paperclip, Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -226,7 +227,9 @@ function IssueForm({ form, setForm, issueId, isNew }: {
           method: "POST",
           body: JSON.stringify({ name: file.name, contentType: file.type }),
         });
-        if (!res.ok) throw new Error("Could not get upload URL");
+        if (!res.ok) {
+          throw new Error(await getApiErrorMessage(res, "Could not get upload URL"));
+        }
         const { uploadUrl, objectPath } = await res.json();
         const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
         if (!up.ok) throw new Error("Upload failed");

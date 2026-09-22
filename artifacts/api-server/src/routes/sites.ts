@@ -14,6 +14,7 @@ import { seedSiteStarterChecks } from "../lib/seedStarterContent";
 import { syncClientSubscriptionQuantity, queueSiteAddedCharge } from "../lib/billing";
 import { filterName } from "../lib/contentFilter";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { departmentsTable } from "@workspace/db/schema";
 
 const storage = new ObjectStorageService();
@@ -226,8 +227,8 @@ router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdm
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "site document upload");
   }
 });
 

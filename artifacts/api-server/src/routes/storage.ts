@@ -5,6 +5,7 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
 import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
 
@@ -44,8 +45,7 @@ router.post("/storage/uploads/request-url", requireAuth, denyViewers, async (req
       }),
     );
   } catch (error) {
-    req.log.error({ err: error }, "Error generating upload URL");
-    res.status(500).json({ error: "Failed to generate upload URL" });
+    respondObjectStorageUnavailable(req, res, error, "generic document upload");
   }
 });
 

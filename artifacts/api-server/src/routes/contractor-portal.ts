@@ -9,6 +9,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
@@ -162,24 +163,24 @@ router.put("/:token", async (req, res) => {
 // ── POST /:token/upload-url — presigned URL for a certificate document ─────
 
 router.post("/:token/upload-url", async (req, res) => {
-  try {
-    const row = await validateToken(req.params.token);
-    if (!row) return res.status(404).json({ error: "Link expired or invalid" });
-    const body = z.object({
-      contentType: z.string().max(100),
-    }).parse(req.body);
-    if (!ALLOWED_CERTIFICATE_TYPES.has(body.contentType.toLowerCase() as AllowedUploadType)) {
-      return res.status(400).json({ error: "Certificate files must be PDF, JPEG, or PNG" });
-    }
+  const row = await validateToken(req.params.token);
+  if (!row) return res.status(404).json({ error: "Link expired or invalid" });
+  const parsed = z.object({
+    contentType: z.string().max(100),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid upload details" });
+  if (!ALLOWED_CERTIFICATE_TYPES.has(parsed.data.contentType.toLowerCase() as AllowedUploadType)) {
+    return res.status(400).json({ error: "Certificate files must be PDF, JPEG, or PNG" });
+  }
 
-    const contentType = body.contentType.toLowerCase() as AllowedUploadType;
+  try {
+    const contentType = parsed.data.contentType.toLowerCase() as AllowedUploadType;
     const uploadUrl  = await objectStorageService.getObjectEntityUploadURL(row.client_id, contentType);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadUrl);
 
     return res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    req.log?.error({ err }, "contractor-portal upload-url error");
-    return res.status(500).json({ error: "Could not generate upload URL" });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "contractor certificate upload");
   }
 });
 

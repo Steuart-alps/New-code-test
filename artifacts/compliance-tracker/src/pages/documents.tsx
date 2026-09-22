@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -117,7 +117,9 @@ function UploadDialog({
           contentType: file.type || "application/octet-stream",
         }),
       });
-      if (!presignRes.ok) throw new Error("Failed to get upload URL");
+      if (!presignRes.ok) {
+        throw new Error(await getApiErrorMessage(presignRes, "Failed to get upload URL"));
+      }
       const { uploadURL, objectPath } = await presignRes.json();
 
       // 2. PUT directly to object storage

@@ -43,3 +43,8 @@ export async function apiFetch(path: string, init?: RequestInit) {
   }
   return res;
 }
+
+export async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  const body = await response.clone().json().catch(() => null) as { error?: unknown } | null;
+  return typeof body?.error === "string" && body.error.length > 0 ? body.error : fallback;
+}

@@ -8,6 +8,7 @@ import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, de
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload } from "../lib/bearerTokens";
@@ -760,8 +761,8 @@ router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, 
     const uploadUrl  = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "FixTrack issue upload");
   }
 });
 

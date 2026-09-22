@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadFile, printHtmlDocument } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -580,7 +580,9 @@ function UploadDialog({
         method: "POST",
         body: JSON.stringify({ name: file.name, contentType: file.type || "application/octet-stream" }),
       });
-      if (!urlRes.ok) throw new Error("Could not get upload URL");
+      if (!urlRes.ok) {
+        throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));
+      }
       const { uploadUrl, objectPath } = await urlRes.json();
 
       // 2. PUT file directly to GCS

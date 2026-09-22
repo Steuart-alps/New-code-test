@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { sendEmail } from "../lib/email";
 import { getPublicAppUrl } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { digestBearerToken } from "../lib/bearerTokens";
 
 const router = Router();
@@ -434,8 +435,8 @@ router.post("/:token/upload-url", async (req, res) => {
     const uploadUrl  = await storage.getObjectEntityUploadURL(t.client_id);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL" });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "public FixTrack completion upload");
   }
 });
 

@@ -12,6 +12,7 @@ import {
   ObjectOwnershipError,
   isTenantReservedObjectPath,
 } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
 
 const router = Router();
@@ -114,8 +115,8 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "photo upload");
   }
 });
 

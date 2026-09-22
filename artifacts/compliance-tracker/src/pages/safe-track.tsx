@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadFile, printHtmlDocument } from "@/lib/download";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -377,7 +377,9 @@ function FileUploadField({ form, setForm }: { form: any; setForm: (f: any) => vo
     setUploading(true);
     try {
       const urlRes = await apiFetch("/safe-track/request-upload", { method: "POST" });
-      if (!urlRes.ok) throw new Error("Could not get upload URL");
+      if (!urlRes.ok) {
+        throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));
+      }
       const { uploadUrl, objectPath } = await urlRes.json();
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
