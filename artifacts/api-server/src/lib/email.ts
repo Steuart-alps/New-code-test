@@ -151,7 +151,15 @@ function toIcsDate(date: Date): string {
 }
 
 function escapeIcs(str: string): string {
-  return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+}
+
+function escapeIcsParameter(str: string): string {
+  return str.replace(/[\r\n]/g, "").replace(/\^/g, "^^").replace(/"/g, "^'");
+}
+
+function sanitizeIcsAddress(str: string): string {
+  return str.replace(/[\r\n]/g, "").trim();
 }
 
 export function buildCalendarInvite(opts: {
@@ -162,14 +170,22 @@ export function buildCalendarInvite(opts: {
   companyName: string;
   fromEmail: string;
   notes?: string | null;
+  descriptionLabel?: string;
   extraAttendees?: { name?: string; email: string }[];
+  /** Supply a stable UID when later invitations should update the same event. */
+  uid?: string;
+  /** Increment when updating an invitation with the same UID. */
+  sequence?: number;
+  /** Date-only work is represented as an all-day event, ending the next day. */
+  allDay?: boolean;
 }): string {
-  const uid = randomUUID();
+  const uid = opts.uid ?? randomUUID();
   const now = new Date();
-  const endDate = new Date(opts.dueDate.getTime() + 60 * 60 * 1000);
+  const endDate = new Date(opts.dueDate.getTime() + (opts.allDay ? 24 : 1) * 60 * 60 * 1000);
+  const toIcsDay = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, "");
 
   const description = [
-    `Compliance check due: ${opts.itemTitle}`,
+    `${opts.descriptionLabel ?? "Compliance check due"}: ${opts.itemTitle}`,
     opts.notes ? opts.notes : "",
     ``,
     `Scheduled by ${opts.companyName}`,
@@ -185,15 +201,16 @@ export function buildCalendarInvite(opts: {
     "METHOD:REQUEST",
     "BEGIN:VEVENT",
     `UID:${uid}`,
+    `SEQUENCE:${Math.max(0, Math.trunc(opts.sequence ?? 0))}`,
     `DTSTAMP:${toIcsDate(now)}`,
-    `DTSTART:${toIcsDate(opts.dueDate)}`,
-    `DTEND:${toIcsDate(endDate)}`,
+    opts.allDay ? `DTSTART;VALUE=DATE:${toIcsDay(opts.dueDate)}` : `DTSTART:${toIcsDate(opts.dueDate)}`,
+    opts.allDay ? `DTEND;VALUE=DATE:${toIcsDay(endDate)}` : `DTEND:${toIcsDate(endDate)}`,
     `SUMMARY:${escapeIcs(opts.itemTitle)}`,
     `DESCRIPTION:${description}`,
-    `ORGANIZER;CN=${escapeIcs(opts.companyName)}:MAILTO:${opts.fromEmail}`,
-    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(opts.contractorName)}:MAILTO:${opts.contractorEmail}`,
+    `ORGANIZER;CN="${escapeIcsParameter(opts.companyName)}":MAILTO:${sanitizeIcsAddress(opts.fromEmail)}`,
+    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${escapeIcsParameter(opts.contractorName)}":MAILTO:${sanitizeIcsAddress(opts.contractorEmail)}`,
     ...(opts.extraAttendees ?? []).map(
-      (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(a.name ?? a.email)}:MAILTO:${a.email}`,
+      (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${escapeIcsParameter(a.name ?? a.email)}":MAILTO:${sanitizeIcsAddress(a.email)}`,
     ),
     "STATUS:CONFIRMED",
     "BEGIN:VALARM",

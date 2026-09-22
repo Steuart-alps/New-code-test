@@ -49,7 +49,7 @@ async function tenant(label) {
   return request;
 }
 
-async function contractorIssue(request, suffix) {
+async function contractorIssue(request, suffix, targetDate) {
   const contractor = await request("POST", "/contractors", {
     name: `Email contractor ${suffix}`, email: `contractor-${suffix}@test.local`,
   });
@@ -61,6 +61,7 @@ async function contractorIssue(request, suffix) {
     reportedBy: "Facilities",
     reportedDate: today,
     contractorId: contractor.data?.id,
+    ...(targetDate ? { targetDate } : {}),
   });
   check(`${suffix}: create issue`, issue.status === 201, String(issue.status));
   return issue.data?.id;
@@ -218,6 +219,9 @@ async function main() {
   const retryOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
     .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const bookedMatch = retryOutbox[0]?.html?.match(/\/api\/fix-track\/action\/([a-f0-9]{64})/);
+  check("assignment without a target date has no calendar attachment",
+    retryOutbox[0]?.icsAttachment == null && retryOutbox[0]?.icsFilename == null,
+    JSON.stringify(retryOutbox[0]));
   check("assignment email contains a high-entropy contractor action link", !!bookedMatch);
   if (bookedMatch) {
     const firstAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
@@ -226,6 +230,78 @@ async function main() {
     check("contractor action token remains one-time", repeatedAction.status === 200 &&
       (await repeatedAction.text()).includes("Already recorded"));
   }
+
+  const calendarId = await contractorIssue(owner, "calendar", "2030-02-10");
+  check("dated assignment request enters approval queue",
+    (await owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign" })).status === 200);
+  check("manager approves dated assignment",
+    (await owner("POST", `/fix-track/issues/${calendarId}/approve-send`)).status === 200);
+  check("approved dated assignment dispatches",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 200);
+  let calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const firstCalendarMessage = calendarOutbox.at(-1);
+  const firstCalendarToken = firstCalendarMessage?.html?.match(/\/api\/fix-track\/action\/([a-f0-9]{64})/)?.[1];
+  check("dated assignment delivers an all-day ICS attachment",
+    firstCalendarMessage?.icsFilename?.endsWith(".ics") &&
+      firstCalendarMessage?.icsAttachment?.includes("METHOD:REQUEST") &&
+      firstCalendarMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300210") &&
+      firstCalendarMessage?.icsAttachment?.includes("DTEND;VALUE=DATE:20300211"),
+    JSON.stringify(firstCalendarMessage));
+  check("calendar attachment has stable non-secret event identity",
+    firstCalendarMessage?.icsAttachment?.includes(`UID:fix-track-${ownerClientId}-${calendarId}@complytrack`) &&
+      firstCalendarMessage?.icsAttachment?.includes("SEQUENCE:0") &&
+      !firstCalendarMessage?.icsAttachment?.includes("/api/fix-track/action/"),
+    firstCalendarMessage?.icsAttachment);
+
+  check("changing a sent assignment target date succeeds",
+    (await owner("PUT", `/fix-track/issues/${calendarId}`, { targetDate: "2030-02-12" })).status === 200);
+  check("resend still requires explicit force",
+    (await owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign" })).status === 409);
+  const legacyForcedSend = await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor?force=true`);
+  check("legacy forced send cannot bypass renewed manager approval",
+    legacyForcedSend.status === 409 && legacyForcedSend.data?.requiresApproval === true,
+    JSON.stringify(legacyForcedSend));
+  check("force queues the updated assignment for fresh approval",
+    (await owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true })).status === 200);
+  if (firstCalendarToken) {
+    const invalidated = await fetch(`${BASE}/fix-track/action/${firstCalendarToken}`);
+    check("forced resend invalidates old contractor action links", invalidated.status === 410, String(invalidated.status));
+  } else {
+    check("forced resend fixture contains original action token", false);
+  }
+  check("updated invite still requires manager approval before delivery",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 403);
+  check("manager approves updated invite",
+    (await owner("POST", `/fix-track/issues/${calendarId}/approve-send`)).status === 200);
+  check("approved updated invite dispatches",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 200);
+  calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const updatedCalendarMessage = calendarOutbox.at(-1);
+  check("changed-date resend updates the same calendar event",
+    updatedCalendarMessage?.icsAttachment?.includes(`UID:fix-track-${ownerClientId}-${calendarId}@complytrack`) &&
+      updatedCalendarMessage?.icsAttachment?.includes("SEQUENCE:1") &&
+      updatedCalendarMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300212") &&
+      !updatedCalendarMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300210"),
+    updatedCalendarMessage?.icsAttachment);
+
+  const concurrentForcedRequests = await Promise.all([
+    owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true }),
+    owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true }),
+  ]);
+  check("concurrent forced resends serialize into review",
+    concurrentForcedRequests.every((result) => result.status === 200),
+    JSON.stringify(concurrentForcedRequests));
+  check("manager approves surviving concurrent resend",
+    (await owner("POST", `/fix-track/issues/${calendarId}/approve-send`)).status === 200);
+  check("surviving concurrent resend dispatches",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 200);
+  calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const concurrentToken = calendarOutbox.at(-1)?.html?.match(/\/api\/fix-track\/action\/([a-f0-9]{64})/)?.[1];
+  check("surviving concurrent resend keeps its own action tokens active",
+    !!concurrentToken && (await fetch(`${BASE}/fix-track/action/${concurrentToken}`)).status === 200);
 
   const expiredQuoteId = await contractorIssue(owner, "expired-quote");
   check("expired quote test request queues",
@@ -294,7 +370,8 @@ async function main() {
     route.includes("if (siteId == null) return [];"));
   check("assignment drafts receive signed site documents",
     route.includes("siteDocumentsForContractorEmail(draft.site_id, clientId)") &&
-    route.includes("baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true"));
+    route.includes("baseUrl: getPublicAppUrl(), clientId, siteDocuments") &&
+    route.includes("previewOnly: true"));
   check("assignment template renders site documents as clickable links",
     templates.includes("📎 Site Documents") &&
     templates.includes('href="${escapeHtml(d.url)}"') &&

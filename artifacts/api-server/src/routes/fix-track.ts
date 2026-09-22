@@ -100,6 +100,42 @@ function dateOnly(value: unknown): string | null {
   return String(value).slice(0, 10);
 }
 
+function fixTrackCalendarInvite(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+  const targetDate = dateOnly(draft.target_date);
+  if (!targetDate) return null;
+  const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
+  if (Number.isNaN(dueDate.getTime())) return null;
+  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
+  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
+  return buildCalendarInvite({
+    itemTitle: draft.title,
+    dueDate,
+    contractorName: draft.contractor_name,
+    contractorEmail: draft.contractor_email,
+    companyName: draft.company_name,
+    fromEmail,
+    descriptionLabel: "Maintenance job",
+    notes: [
+      draft.site_name ? `Site: ${draft.site_name}` : null,
+      draft.location ? `Location: ${draft.location}` : null,
+      draft.description || null,
+    ].filter(Boolean).join("\n"),
+    uid: `fix-track-${clientId}-${issueId}@complytrack`,
+    sequence,
+    allDay: true,
+  });
+}
+
+function nextCalendarSequence(existingIcs: unknown): number {
+  const match = typeof existingIcs === "string" ? existingIcs.match(/^SEQUENCE:(\d+)$/m) : null;
+  return match ? Number(match[1]) + 1 : 0;
+}
+
+function calendarFilename(title: string): string {
+  const safe = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+  return `${safe || "fix-track-job"}.ics`;
+}
+
 async function latestQuoteForIssue(clientId: number, issueId: number) {
   const result = await db.execute(sql`
     SELECT qs.id, qs.price_pence, qs.notes, qs.status, qs.submitted_at
@@ -565,7 +601,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     if (approvalInvalidated) {
         const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
          c.email AS contractor_email,cl.name AS company_name,q.mode,q.quote_token,q.body_html,q.body_text,
-         q.email_preview_json,q.encrypted_token_payload
+          q.email_preview_json,q.encrypted_token_payload,q.ics_content,
+          (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email
         FROM fix_track_issues i
         LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
         JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
@@ -598,6 +635,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
           const replacement = await generateActionTokens(id, clientId, draft.contractor_id);
           tokenPayload = { booked: replacement.bookedToken, completed: replacement.completedToken };
         }
+        const icsContent = draft.mode === "quote"
+          ? null
+          : fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.ics_content));
         const rendered = draft.mode === "quote"
           ? await sendContractorQuoteEmail({
               contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
@@ -613,7 +653,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
               issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
               companyName: draft.company_name,
                bookedToken: tokenPayload.booked, completedToken: tokenPayload.completed,
-              baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
+               baseUrl: getPublicAppUrl(), clientId, siteDocuments,
+               icsAttachment: icsContent ?? undefined, previewOnly: true,
             });
         const text = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         const persisted = placeholderizeQueuedDraft(rendered.subject, rendered.html, text, tokenPayload);
@@ -622,7 +663,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
           contractor_id=${draft.contractor_id},to_email=${draft.contractor_email},subject=${persisted.subject},
           body_html=${persisted.html},body_text=${persisted.text},
           email_preview_json=${JSON.stringify(persisted.preview)}::jsonb,
-          encrypted_token_payload=${encryptedPayload},quote_token=NULL,
+           encrypted_token_payload=${encryptedPayload},quote_token=NULL,
+           ics_content=${icsContent},ics_filename=${icsContent ? calendarFilename(draft.title) : null},
           approved_by=NULL,approved_at=NULL,updated_at=now()
           WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
             AND status IN ('pending','approved')`);
@@ -824,8 +866,9 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const parsed = z.object({ mode: z.enum(["assign", "quote"]) }).safeParse(req.body);
+  const parsed = z.object({ mode: z.enum(["assign", "quote"]), force: z.boolean().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const force = parsed.data.force === true || req.query.force === "true";
 
   const requestConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const requestDeptId = getActiveDepartmentId(req);
@@ -841,16 +884,26 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   }).from(fixTrackIssuesTable).where(and(...requestConditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!existing.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
-  if (existing.emailRequestStatus === "sent" || existing.emailRequestStatus === "sending") {
+  if (existing.emailRequestStatus === "sending") {
     return res.status(409).json({ error: "A contractor email has already been sent for this issue" });
+  }
+  if (existing.emailRequestStatus === "sent" && !force) {
+    return res.status(409).json({
+      error: "A contractor email has already been sent for this issue",
+      alreadySent: true,
+    });
   }
 
   // Persist the exact draft that will cross the email boundary. Approval is
   // for these stored bytes, not for a later re-render of a changed issue.
   const draftResult = await db.execute(sql`
-    SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id,
+     SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id, i.target_date,
            s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
-           cl.name AS company_name
+            cl.name AS company_name,
+            (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
+            (SELECT ics_content FROM contractor_email_queue
+              WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+              ORDER BY created_at DESC LIMIT 1) AS previous_ics
     FROM fix_track_issues i
     LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
     JOIN contractors c ON c.id = i.contractor_id AND c.client_id = i.client_id
@@ -885,6 +938,8 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   ].filter(Boolean).join("\n");
   let encryptedTokenPayload: string | null = null;
   let tokenPayload: Record<string, string> = {};
+  let icsContent: string | null = null;
+  let icsFilename: string | null = null;
   let previewHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
     <p>Dear ${escapeHtml(draft.contractor_name)},</p>
     ${parsed.data.mode === "quote" ? "<h2>Quotation Requested</h2>" : ""}
@@ -901,12 +956,15 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   </div>`;
   if (parsed.data.mode === "assign") {
     const tokens = await generateActionTokens(id, clientId, existing.contractorId);
+    icsContent = fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    icsFilename = icsContent ? calendarFilename(draft.title) : null;
     const rendered = await sendContractorAssignmentEmail({
       contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
       issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
       issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
       companyName: draft.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
-      baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments,
+      icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
     });
     previewSubject = rendered.subject;
     previewHtml = rendered.html;
@@ -931,11 +989,45 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   previewSubject = persistedDraft.subject;
   previewHtml = persistedDraft.html;
   previewText = persistedDraft.text ?? "";
-  await db.transaction(async (tx) => {
+  const requestQueued = await db.transaction(async (tx) => {
+    // Serialize replacement requests for this issue. In particular, two
+    // simultaneous forced resends must not invalidate the tokens belonging to
+    // whichever queue row ultimately survives.
+    const locked = await tx.execute(sql`SELECT id,email_request_status FROM fix_track_issues
+      WHERE id=${id} AND client_id=${clientId} FOR UPDATE`);
+    if ((locked.rows as any[])[0]?.email_request_status === "sending") {
+      if (parsed.data.mode === "assign") {
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now()
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+            AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
+      }
+      return false;
+    }
     await tx.execute(sql`UPDATE contractor_email_queue SET status='cancelled',
       last_error='Replaced by a newer request', updated_at=now()
       WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
         AND status IN ('pending','sending')`);
+    if (parsed.data.mode === "assign") {
+      if (force) {
+        // Tokens are minted before this transaction so rendering remains
+        // outside the row lock. Re-activate this request's own hashes in case a
+        // concurrent forced request acquired the lock and expired them first.
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=CASE
+            WHEN token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})
+              THEN now() + interval '30 days'
+            ELSE now()
+          END
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+        `);
+      } else {
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now() + interval '30 days'
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+            AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
+      }
+    } else if (force) {
+      await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now()
+        WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL`);
+    }
     await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: parsed.data.mode, emailRequestStatus: "pending",
       emailRequestedBy: (req.session as any).userId ?? null, emailRequestedAt: new Date(),
@@ -948,11 +1040,11 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     await tx.execute(sql`
     INSERT INTO contractor_email_queue
       (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type, to_email,
-       subject, body_html, body_text, email_preview_json, quote_token, quote_token_hash, quote_token_expires_at, encrypted_token_payload,
+        subject, body_html, body_text, ics_content, ics_filename, email_preview_json, quote_token, quote_token_hash, quote_token_expires_at, encrypted_token_payload,
        requested_by, idempotency_key)
     SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, ${parsed.data.mode},
       ${parsed.data.mode === "quote" ? "quote_request" : "assignment"},
-      c.email, ${previewSubject}, ${previewHtml}, ${previewText},
+       c.email, ${previewSubject}, ${previewHtml}, ${previewText}, ${icsContent}, ${icsFilename},
        ${JSON.stringify({ subject: previewSubject, text: previewText, html: previewHtml })}::jsonb,
        ${null}, ${quoteToken ? digestBearerToken(quoteToken) : null}, ${quoteToken ? sql`now() + interval '30 days'` : null},
        ${encryptedTokenPayload},
@@ -963,7 +1055,11 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     WHERE i.id = ${id} AND i.client_id = ${clientId}
     ON CONFLICT DO NOTHING
   `);
+    return true;
   });
+  if (!requestQueued) {
+    return res.status(409).json({ error: "This issue cannot be re-requested while its approved contractor email is sending" });
+  }
   res.json({ ok: true, message: "Approval requested" });
 });
 
@@ -1365,6 +1461,14 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
 
   if (issue.email_request_status !== "approved" || !["assign", "quote"].includes(issue.email_request_mode)) {
+    if (issue.email_request_status === "sent" && req.query.force === "true") {
+      return res.status(409).json({
+        error: "A resend must be submitted as a new approval request",
+        alreadySent: true,
+        requiresApproval: true,
+        requestEndpoint: `/api/fix-track/issues/${id}/request-send?force=true`,
+      });
+    }
     return res.status(403).json({ error: "An approved contractor email request is required before sending" });
   }
   const mode = issue.email_request_mode as "assign" | "quote";
@@ -1387,6 +1491,8 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
     await dispatchStoredContractorEmail({
       to: queueRow.to_email, subject: queueRow.subject, html: hydrated.html,
       text: hydrated.text ?? undefined, clientId, idempotencyKey: queueRow.idempotency_key,
+      icsAttachment: queueRow.ics_content ?? undefined,
+      icsFilename: queueRow.ics_filename ?? undefined,
     });
     await db.execute(sql`UPDATE contractor_email_queue SET status='sent',sent_at=now(),updated_at=now()
       WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);
