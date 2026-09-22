@@ -565,6 +565,7 @@ export async function runRuntimeMigrations() {
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
     await migrateTrackActions();
+    await migrateTrackControlProfiles();
 
     // FixTrack contractor email approval queue.  Keep the rendered message in
     // the queue: an approval is an approval of the exact bytes the manager saw,
@@ -3282,6 +3283,30 @@ async function migrateLegionellaOutlets() {
       }
     } catch { /* invalid JSON, skip */ }
   }
+}
+
+// ---- Site-specific FireTrack/LegionellaTrack control profiles ----
+// The profile is intentionally JSONB: the two tracks have different named
+// evidence fields, while the row remains tenant/site/module scoped and
+// versionable without introducing a second table for every discipline.
+async function migrateTrackControlProfiles() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS track_control_profiles (
+      id serial PRIMARY KEY,
+      client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      site_id integer NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+      module text NOT NULL,
+      profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now(),
+      CONSTRAINT "UQ_track_control_profiles_client_site_module"
+        UNIQUE (client_id, site_id, module)
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_track_control_profiles_client_site"
+    ON track_control_profiles (client_id, site_id)
+  `);
 }
 
 // ---- SafeTrack → DocTrack data migration ----

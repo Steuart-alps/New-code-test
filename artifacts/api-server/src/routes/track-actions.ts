@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
+import { departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable, trackEvidenceTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
@@ -291,6 +291,22 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
             reviewRequired: item.reviewRequired,
           })),
         };
+      }
+      if (current.severity === "urgent") {
+        const [reviewedEvidence] = await tx.select({ id: trackEvidenceTable.id })
+          .from(trackEvidenceTable)
+          .where(and(
+            eq(trackEvidenceTable.clientId, clientId),
+            eq(trackEvidenceTable.actionId, current.id),
+            eq(trackEvidenceTable.reviewStatus, "verified"),
+          ))
+          .limit(1);
+        if (!reviewedEvidence) {
+          return {
+            status: 400 as const,
+            error: "Urgent actions require at least one independently reviewed evidence record before resolution",
+          };
+        }
       }
     }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };

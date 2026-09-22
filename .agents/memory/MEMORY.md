@@ -43,3 +43,4 @@
 - [Daily entry cutoff](daily-entry-cutoff.md) — staff entries close at 23:59 and backdated writes stay closed; client admins and consultants can override.
 - [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.
 - [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
+- [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.

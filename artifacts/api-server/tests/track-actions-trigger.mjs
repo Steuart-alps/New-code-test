@@ -132,6 +132,28 @@ async function main() {
     title: resolved[0]?.title, severity: resolved[0]?.severity, dueDate: resolved[0]?.dueDate,
   }) === JSON.stringify(initialActionFields));
 
+  const urgent = await request("POST", "/track-actions", {
+    module: "fire", title: "Urgent evidence gate", severity: "urgent", siteId,
+  });
+  assert("create urgent action", urgent.status === 201);
+  const urgentEvidence = await request("POST", "/track-evidence", {
+    module: "fire", siteId, actionId: urgent.data?.id,
+    evidenceType: "verification", title: "Urgent closure evidence",
+    details: "Independent closure evidence for the urgent action.",
+  });
+  assert("record urgent evidence", urgentEvidence.status === 201);
+  assert("urgent action rejects unsigned evidence", (await request("PATCH", `/track-actions/${urgent.data?.id}`, {
+    status: "resolved", remedialAction: "Fixed", evidenceReference: "Urgent evidence",
+    resolutionNotes: "Closed", resolverSignature: SIGNATURE,
+  })).status === 400);
+  assert("review urgent evidence independently", (await staffRequest("POST", `/track-evidence/${urgentEvidence.data?.id}/review`, {
+    status: "verified", reviewNotes: "Independently checked.",
+  })).status === 200);
+  assert("urgent action resolves after evidence review", (await request("PATCH", `/track-actions/${urgent.data?.id}`, {
+    status: "resolved", remedialAction: "Fixed", evidenceReference: "Urgent evidence",
+    resolutionNotes: "Closed", resolverSignature: SIGNATURE,
+  })).status === 200);
+
   const appliance = await request("POST", "/pat-track/appliances", { name: "PAT appliance", siteId });
   const pat = await request("POST", "/pat-track/tests", { applianceId: appliance.data?.id, testDate: date, result: "fail" });
   const patAction = sourceAction(await actions("pat"), "pat_tests", pat.data?.id);

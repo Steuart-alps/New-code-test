@@ -396,18 +396,76 @@ export interface FireSafetyStatus {
   status: FireSafetyStatusStatus;
 }
 
+export type FireControlProfileUkNation = typeof FireControlProfileUkNation[keyof typeof FireControlProfileUkNation] | null;
+
+
+export const FireControlProfileUkNation = {
+  england: 'england',
+  scotland: 'scotland',
+  wales: 'wales',
+  northern_ireland: 'northern_ireland',
+} as const;
+
+export type FireControlProfileFrequencyDays = {[key: string]: number};
+
+export interface FireControlProfile {
+  riskAssessmentReference?: string | null;
+  riskAssessmentDate?: string | null;
+  nextReviewDate?: string | null;
+  responsiblePerson?: string | null;
+  ukNation?: FireControlProfileUkNation;
+  evacuationPeepArrangements?: string | null;
+  maintenanceEvidenceReference?: string | null;
+  defectClosureVerification?: string | null;
+  frequencyDays?: FireControlProfileFrequencyDays;
+}
+
 export interface FireSafetyConfig {
   fire_alarm_zones?: string;
   fire_extinguisher_points?: string;
   fire_show_drill?: string;
   fire_default_performer?: string;
   fire_escape_routes?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  fire_frequency_days?: string;
+  siteId?: number | null;
+  controlProfile?: FireControlProfile;
+}
+
+export type LegionellaControlProfileUkNation = typeof LegionellaControlProfileUkNation[keyof typeof LegionellaControlProfileUkNation] | null;
+
+
+export const LegionellaControlProfileUkNation = {
+  england: 'england',
+  scotland: 'scotland',
+  wales: 'wales',
+  northern_ireland: 'northern_ireland',
+} as const;
+
+export type LegionellaControlProfileFrequencyDays = {[key: string]: number};
+
+export interface LegionellaControlProfile {
+  systemInventoryReference?: string | null;
+  writtenControlSchemeReference?: string | null;
+  riskAssessmentReference?: string | null;
+  riskAssessmentReviewDate?: string | null;
+  competentPerson?: string | null;
+  samplingLabRecordReference?: string | null;
+  controlLimitsRationale?: string | null;
+  remedialVerificationReference?: string | null;
+  schemeReviewDate?: string | null;
+  ukNation?: LegionellaControlProfileUkNation;
+  frequencyDays?: LegionellaControlProfileFrequencyDays;
 }
 
 export interface LegionellaConfig {
   water_non_sentinel_outlets?: string;
   water_default_performer?: string;
   water_sentinel_outlets?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  water_frequency_days?: string;
+  siteId?: number | null;
+  controlProfile?: LegionellaControlProfile;
 }
 
 export interface BikeTrackConfig {
@@ -904,6 +962,34 @@ export type UpdateFoodSafetyConfig200 = {
 export type ResetFoodSafetyConfigParams = {
 /**
  * When provided, clears only that site's overrides. Without it, resets the client-level template to defaults.
+ */
+siteId?: number;
+};
+
+export type GetFireSafetyConfigParams = {
+/**
+ * Return the site-specific FireTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateFireSafetyConfigParams = {
+/**
+ * Save the site-specific FireTrack control profile.
+ */
+siteId?: number;
+};
+
+export type GetLegionellaConfigParams = {
+/**
+ * Return the site-specific LegionellaTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateLegionellaConfigParams = {
+/**
+ * Save the site-specific LegionellaTrack control profile.
  */
 siteId?: number;
 };

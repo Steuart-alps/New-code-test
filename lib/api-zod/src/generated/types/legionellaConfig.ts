@@ -5,9 +5,14 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { LegionellaControlProfile } from './legionellaControlProfile';
 
 export interface LegionellaConfig {
   water_non_sentinel_outlets?: string;
   water_default_performer?: string;
   water_sentinel_outlets?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  water_frequency_days?: string;
+  siteId?: number | null;
+  controlProfile?: LegionellaControlProfile;
 }

@@ -27,6 +27,10 @@ import {
   fireSafetyChecksTable,
   foodSafetyRecordsTable,
   legionellaChecksTable,
+  trackControlProfilesTable,
+  trackEvidenceRequirementsTable,
+  trackEvidenceTable,
+  trackActionsTable,
   fixTrackIssuesTable,
   hotTubsTable,
   hotTubChecksTable,
@@ -165,8 +169,16 @@ food-safety/
   records.csv                    — daily food safety diary entries
 fire-safety/
   checks.csv                     — fire safety checks
+  control-profiles.csv           — site-specific risk controls and frequencies
+  evidence-requirements.csv      — required FireTrack evidence profile
+  evidence.csv                   — recorded and independently reviewed evidence
+  actions.csv                    — corrective actions and signed closures
 legionella/
   checks.csv                     — legionella / water hygiene checks
+  control-profiles.csv           — site-specific risk controls and frequencies
+  evidence-requirements.csv      — required LegionellaTrack evidence profile
+  evidence.csv                   — recorded and independently reviewed evidence
+  actions.csv                    — corrective actions and signed closures
 kitchen/
   daily-checklists.csv           — AM/PM kitchen opening/closing checklists
   manager-signoffs.csv           — daily manager sign-offs
@@ -300,10 +312,50 @@ router.get(
       // ── Fire safety ────────────────────────────────────────────────────────
       const fireChecks = await db.select().from(fireSafetyChecksTable).where(eq(fireSafetyChecksTable.clientId, cid));
       archive.append(rowsToCsv(fireChecks), { name: "fire-safety/checks.csv" });
+      const fireProfiles = await db.select().from(trackControlProfilesTable).where(and(
+        eq(trackControlProfilesTable.clientId, cid),
+        eq(trackControlProfilesTable.module, "fire"),
+      ));
+      archive.append(rowsToCsv(fireProfiles), { name: "fire-safety/control-profiles.csv" });
+      const fireRequirements = await db.select().from(trackEvidenceRequirementsTable).where(and(
+        eq(trackEvidenceRequirementsTable.clientId, cid),
+        eq(trackEvidenceRequirementsTable.module, "fire"),
+      ));
+      archive.append(rowsToCsv(fireRequirements), { name: "fire-safety/evidence-requirements.csv" });
+      const fireEvidence = await db.select().from(trackEvidenceTable).where(and(
+        eq(trackEvidenceTable.clientId, cid),
+        eq(trackEvidenceTable.module, "fire"),
+      ));
+      archive.append(rowsToCsv(fireEvidence), { name: "fire-safety/evidence.csv" });
+      const fireActions = await db.select().from(trackActionsTable).where(and(
+        eq(trackActionsTable.clientId, cid),
+        eq(trackActionsTable.module, "fire"),
+      ));
+      archive.append(rowsToCsv(fireActions), { name: "fire-safety/actions.csv" });
 
       // ── Legionella ────────────────────────────────────────────────────────
       const legChecks = await db.select().from(legionellaChecksTable).where(eq(legionellaChecksTable.clientId, cid));
       archive.append(rowsToCsv(legChecks), { name: "legionella/checks.csv" });
+      const legionellaProfiles = await db.select().from(trackControlProfilesTable).where(and(
+        eq(trackControlProfilesTable.clientId, cid),
+        eq(trackControlProfilesTable.module, "legionella"),
+      ));
+      archive.append(rowsToCsv(legionellaProfiles), { name: "legionella/control-profiles.csv" });
+      const legionellaRequirements = await db.select().from(trackEvidenceRequirementsTable).where(and(
+        eq(trackEvidenceRequirementsTable.clientId, cid),
+        eq(trackEvidenceRequirementsTable.module, "legionella"),
+      ));
+      archive.append(rowsToCsv(legionellaRequirements), { name: "legionella/evidence-requirements.csv" });
+      const legionellaEvidence = await db.select().from(trackEvidenceTable).where(and(
+        eq(trackEvidenceTable.clientId, cid),
+        eq(trackEvidenceTable.module, "legionella"),
+      ));
+      archive.append(rowsToCsv(legionellaEvidence), { name: "legionella/evidence.csv" });
+      const legionellaActions = await db.select().from(trackActionsTable).where(and(
+        eq(trackActionsTable.clientId, cid),
+        eq(trackActionsTable.module, "legionella"),
+      ));
+      archive.append(rowsToCsv(legionellaActions), { name: "legionella/actions.csv" });
 
       // ── Kitchen ───────────────────────────────────────────────────────────
       const dailyChecklists = await db.select().from(dailyChecklistsTable).where(eq(dailyChecklistsTable.clientId, cid));

@@ -99,6 +99,8 @@ export * from "./track-evidence"
 
 export * from "./track-evidence-requirements"
 ;
+export * from "./track-control-profiles"
+;
 
 export * from "./documents"
 ;

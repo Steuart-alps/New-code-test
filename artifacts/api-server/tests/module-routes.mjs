@@ -62,7 +62,7 @@ function isoDate(daysOffset = 0) {
 // Check types: alarm, emergency_lights, extinguishers, fire_doors, fire_drill
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function testFireSafety(req) {
+async function testFireSafety(req, siteId) {
   console.log("\n── FireTrack ──");
 
   const TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill"];
@@ -149,7 +149,25 @@ async function testFireSafety(req) {
   check("fire-safety: alarm check yesterday is not overdue", alarmStatus?.status !== "overdue", `status=${alarmStatus?.status}`);
   check("fire-safety: latest failed alarm result is surfaced", alarmStatus?.lastResult === "fail", `lastResult=${alarmStatus?.lastResult}`);
 
-  // 7. DELETE
+  // 7. Site-specific control profile and risk-assessed cadence
+  const profilePut = await req("PUT", `/fire-safety/config?siteId=${siteId}`, {
+    controlProfile: {
+      ukNation: "england",
+      responsiblePerson: "Site Fire Marshal",
+      riskAssessmentReference: "FRA-TEST-01",
+      frequencyDays: { alarm: 14 },
+    },
+  });
+  expectOk("fire-safety: save site control profile", profilePut.status);
+  check("fire-safety: profile is site scoped", profilePut.data?.siteId === siteId && profilePut.data?.controlProfile?.riskAssessmentReference === "FRA-TEST-01");
+  const profileGet = await req("GET", `/fire-safety/config?siteId=${siteId}`);
+  expectOk("fire-safety: read site control profile", profileGet.status);
+  check("fire-safety: site frequency overrides default", profileGet.data?.controlProfile?.frequencyDays?.alarm === 14);
+  const siteStatus = await req("GET", `/fire-safety/status?siteId=${siteId}`);
+  const siteAlarm = (siteStatus.data ?? []).find((s) => s.checkType === "alarm");
+  check("fire-safety: status uses site frequency", siteAlarm?.frequencyDays === 14);
+
+  // 8. DELETE
   const delId = createdIds["fire_drill"];
   const delRes = await req("DELETE", `/fire-safety/${delId}`);
   check("fire-safety: DELETE /:id → 204", delRes.status === 204, `got ${delRes.status}`);
@@ -181,7 +199,7 @@ async function testFireSafety(req) {
 //              tank_inspection, risk_assessment
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function testLegionella(req) {
+async function testLegionella(req, siteId) {
   console.log("\n── LegionellaTrack ──");
 
   // Actual HSG274 check types from the route
@@ -297,7 +315,26 @@ async function testLegionella(req) {
   const annualStatus = (statusRes.data ?? []).find((s) => s.checkType === "calorifier_clean");
   check("legionella: annual calorifier_clean not overdue after recent check", annualStatus?.status === "ok", `status=${annualStatus?.status}`);
 
-  // 7. DELETE
+  // 7. Site-specific written scheme profile and risk-assessed cadence
+  const profilePut = await req("PUT", `/legionella/config?siteId=${siteId}`, {
+    controlProfile: {
+      ukNation: "england",
+      systemInventoryReference: "WSI-TEST-01",
+      writtenControlSchemeReference: "WCS-TEST-01",
+      competentPerson: "Water Hygiene Lead",
+      frequencyDays: { hot_sentinel_temp: 45 },
+    },
+  });
+  expectOk("legionella: save site control profile", profilePut.status);
+  check("legionella: profile is site scoped", profilePut.data?.siteId === siteId && profilePut.data?.controlProfile?.writtenControlSchemeReference === "WCS-TEST-01");
+  const profileGet = await req("GET", `/legionella/config?siteId=${siteId}`);
+  expectOk("legionella: read site control profile", profileGet.status);
+  check("legionella: site frequency overrides default", profileGet.data?.controlProfile?.frequencyDays?.hot_sentinel_temp === 45);
+  const siteStatus = await req("GET", `/legionella/status?siteId=${siteId}`);
+  const siteSentinel = (siteStatus.data ?? []).find((s) => s.checkType === "hot_sentinel_temp");
+  check("legionella: status uses site frequency", siteSentinel?.frequencyDays === 45);
+
+  // 8. DELETE
   const delId = createdIds["shower_clean"];
   const delRes = await req("DELETE", `/legionella/${delId}`);
   check("legionella: DELETE /:id → 204", delRes.status === 204, `got ${delRes.status}`);
@@ -634,8 +671,8 @@ async function main() {
   const siteId = siteRes.data?.id;
   check("setup: site created", typeof siteId === "number", `siteId=${siteId}`);
 
-  await testFireSafety(req);
-  await testLegionella(req);
+  await testFireSafety(req, siteId);
+  await testLegionella(req, siteId);
   await testFoodSafety(req);
   await testSiteFiltering(req, siteId);
 

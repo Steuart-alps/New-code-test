@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { fireSafetyChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
+import { fireSafetyChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
@@ -21,6 +21,35 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   fire_walk: 7,
   alarm_panel: 7,
 };
+
+const FIRE_PROFILE_MODULE = "fire";
+const fireProfileSchema = z.object({
+  riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
+  riskAssessmentDate: z.string().date().nullable().optional(),
+  nextReviewDate: z.string().date().nullable().optional(),
+  responsiblePerson: z.string().trim().max(500).nullable().optional(),
+  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  evacuationPeepArrangements: z.string().trim().max(10000).nullable().optional(),
+  maintenanceEvidenceReference: z.string().trim().max(2000).nullable().optional(),
+  defectClosureVerification: z.string().trim().max(10000).nullable().optional(),
+  frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
+}).strict();
+
+function effectiveFireFrequencies(raw: unknown, profile: unknown = null) {
+  const result = { ...FREQUENCY_DAYS };
+  const apply = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    for (const key of CHECK_TYPES) {
+      const days = (value as Record<string, unknown>)[key];
+      if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3650) result[key] = days;
+    }
+  };
+  if (typeof raw === "string") {
+    try { apply(JSON.parse(raw)); } catch { /* use defaults */ }
+  }
+  if (profile && typeof profile === "object") apply((profile as Record<string, unknown>).frequencyDays);
+  return result;
+}
 
 const createSchema = z.object({
   checkType: z.enum(CHECK_TYPES),
@@ -146,8 +175,23 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const todayDays = toUtcDays(todayIso);
 
+  const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
+    .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const frequencySetting = settings.find(row => row.key === "fire_frequency_days")?.value;
+  let siteProfile: unknown = null;
+  if (siteId && !isNaN(parseInt(siteId))) {
+    const [profile] = await db.select({ profile: trackControlProfilesTable.profile })
+      .from(trackControlProfilesTable)
+      .where(and(
+        eq(trackControlProfilesTable.clientId, clientId),
+        eq(trackControlProfilesTable.siteId, parseInt(siteId)),
+        eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
+      )).limit(1);
+    siteProfile = profile?.profile ?? null;
+  }
+  const frequencies = effectiveFireFrequencies(frequencySetting, siteProfile);
   const statuses = CHECK_TYPES.map((checkType) => {
-    const frequencyDays = FREQUENCY_DAYS[checkType];
+    const frequencyDays = frequencies[checkType];
     const last = lastByType.get(checkType) ?? null;
     if (!last) {
       return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
@@ -200,7 +244,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 });
 
 // PUT /api/fire-safety/:id
-router.put("/:id", requireAuth, denyViewers, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
+  // Keep the config route below the CRUD block without treating "config" as
+  // a numeric check id.
+  if (req.params.id === "config") return next();
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -277,6 +324,7 @@ const FIRE_CONFIG_KEYS = [
   "fire_extinguisher_points", // JSON: string[]
   "fire_show_drill",          // "true"|"false"
   "fire_default_performer",
+  "fire_frequency_days",     // JSON: check type -> risk-assessed interval in days
 ] as const;
 
 const FIRE_DEFAULT_CONFIG = {
@@ -285,11 +333,36 @@ const FIRE_DEFAULT_CONFIG = {
   fire_extinguisher_points: "",
   fire_show_drill: "true",
   fire_default_performer: "",
+  fire_frequency_days: JSON.stringify(FREQUENCY_DAYS),
 };
+
+function parseSiteId(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function getFireProfile(clientId: number, siteId: number) {
+  const [row] = await db.select({ profile: trackControlProfilesTable.profile })
+    .from(trackControlProfilesTable)
+    .where(and(
+      eq(trackControlProfilesTable.clientId, clientId),
+      eq(trackControlProfilesTable.siteId, siteId),
+      eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
+    )).limit(1);
+  return row?.profile ?? null;
+}
 
 router.get("/config", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
   const config: Record<string, string> = { ...FIRE_DEFAULT_CONFIG };
   for (const row of settingRows) {
@@ -297,26 +370,50 @@ router.get("/config", requireAuth, async (req, res) => {
       config[row.key] = row.value;
     }
   }
-  res.json(config);
+  const profile = siteId == null ? null : await getFireProfile(clientId, siteId);
+  res.json({ ...config, controlProfile: profile, siteId });
 });
 
 router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const updates = req.body as Record<string, string>;
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
+  const updates = req.body as Record<string, unknown>;
+  if (updates.controlProfile !== undefined) {
+    if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
+    const profile = fireProfileSchema.safeParse(updates.controlProfile);
+    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    await db.insert(trackControlProfilesTable).values({
+      clientId, siteId, module: FIRE_PROFILE_MODULE, profile: profile.data,
+    }).onConflictDoUpdate({
+      target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
+      set: { profile: profile.data, updatedAt: new Date() },
+    });
+  }
   for (const key of FIRE_CONFIG_KEYS) {
-    if (key in updates) {
+    if (key in updates && typeof updates[key] === "string") {
       const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
         .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
       if (existing.length > 0) {
-        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+        await db.update(appSettingsTable).set({ value: updates[key] as string, updatedAt: new Date() })
           .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
       } else {
-        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] as string });
       }
     }
   }
-  res.json({ ok: true });
+  const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const config: Record<string, string> = { ...FIRE_DEFAULT_CONFIG };
+  for (const row of settingRows) {
+    if (FIRE_CONFIG_KEYS.includes(row.key as (typeof FIRE_CONFIG_KEYS)[number]) && row.value != null) config[row.key] = row.value;
+  }
+  res.json({ ...config, controlProfile: siteId == null ? null : await getFireProfile(clientId, siteId), siteId });
 });
 
 export default router;

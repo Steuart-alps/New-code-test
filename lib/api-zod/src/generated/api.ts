@@ -1023,58 +1023,182 @@ export const ResetFoodSafetyConfigResponse = zod.object({
 /**
  * @summary Get Fire safety configuration
  */
+export const GetFireSafetyConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific FireTrack control profile.')
+})
+
+export const getFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const GetFireSafetyConfigResponse = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 
 /**
  * @summary Update Fire safety configuration
  */
+export const UpdateFireSafetyConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Save the site-specific FireTrack control profile.')
+})
+
+export const updateFireSafetyConfigBodyControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const UpdateFireSafetyConfigBody = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateFireSafetyConfigBodyControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
+
+export const updateFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
 
 export const UpdateFireSafetyConfigResponse = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 
 /**
  * @summary Get Water safety configuration
  */
+export const GetLegionellaConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific LegionellaTrack control profile.')
+})
+
+export const getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const GetLegionellaConfigResponse = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 
 /**
  * @summary Update Water safety configuration
  */
+export const UpdateLegionellaConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Save the site-specific LegionellaTrack control profile.')
+})
+
+export const updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const UpdateLegionellaConfigBody = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
+
+export const updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
 
 export const UpdateLegionellaConfigResponse = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 

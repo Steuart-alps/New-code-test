@@ -48,11 +48,13 @@ import type {
   FoodSafetyMonthlySummary,
   FoodSafetyRecord,
   FoodSafetyRecordSummary,
+  GetFireSafetyConfigParams,
   GetFireSafetyStatusParams,
   GetFoodSafetyConfigParams,
   GetFoodSafetyMissingDatesParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
+  GetLegionellaConfigParams,
   GetLegionellaStatusParams,
   GetPATPresetTemplates200,
   GreenTrackConfig,
@@ -86,10 +88,12 @@ import type {
   UpdateCategoryRequest,
   UpdateComplianceItemRequest,
   UpdateFireSafetyCheckRequest,
+  UpdateFireSafetyConfigParams,
   UpdateFoodSafetyConfig200,
   UpdateFoodSafetyConfigParams,
   UpdateFoodSafetyRecordRequest,
   UpdateLegionellaCheckRequest,
+  UpdateLegionellaConfigParams,
   UpdateSiteRequest,
   UpdateStatusRequest
 } from './api.schemas';
@@ -3474,20 +3478,27 @@ export const useResetFoodSafetyConfig = <TError = ErrorType<unknown>,
       return useMutation(getResetFoodSafetyConfigMutationOptions(options));
     }
 
-export const getGetFireSafetyConfigUrl = () => {
+export const getGetFireSafetyConfigUrl = (params?: GetFireSafetyConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/fire-safety/config`
+  return stringifiedParams.length > 0 ? `/api/fire-safety/config?${stringifiedParams}` : `/api/fire-safety/config`
 }
 
 /**
  * @summary Get Fire safety configuration
  */
-export const getFireSafetyConfig = async ( options?: RequestInit): Promise<FireSafetyConfig> => {
+export const getFireSafetyConfig = async (params?: GetFireSafetyConfigParams, options?: RequestInit): Promise<FireSafetyConfig> => {
 
-  return customFetch<FireSafetyConfig>(getGetFireSafetyConfigUrl(),
+  return customFetch<FireSafetyConfig>(getGetFireSafetyConfigUrl(params),
   {
     ...options,
     method: 'GET'
@@ -3500,23 +3511,23 @@ export const getFireSafetyConfig = async ( options?: RequestInit): Promise<FireS
 
 
 
-export const getGetFireSafetyConfigQueryKey = () => {
+export const getGetFireSafetyConfigQueryKey = (params?: GetFireSafetyConfigParams,) => {
     return [
-    `/api/fire-safety/config`
+    `/api/fire-safety/config`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetFireSafetyConfigQueryOptions = <TData = Awaited<ReturnType<typeof getFireSafetyConfig>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetFireSafetyConfigQueryOptions = <TData = Awaited<ReturnType<typeof getFireSafetyConfig>>, TError = ErrorType<unknown>>(params?: GetFireSafetyConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetFireSafetyConfigQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetFireSafetyConfigQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireSafetyConfig>>> = ({ signal }) => getFireSafetyConfig({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFireSafetyConfig>>> = ({ signal }) => getFireSafetyConfig(params, { signal, ...requestOptions });
 
 
 
@@ -3534,11 +3545,11 @@ export type GetFireSafetyConfigQueryError = ErrorType<unknown>
  */
 
 export function useGetFireSafetyConfig<TData = Awaited<ReturnType<typeof getFireSafetyConfig>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetFireSafetyConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetFireSafetyConfigQueryOptions(options)
+  const queryOptions = getGetFireSafetyConfigQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -3551,20 +3562,28 @@ export function useGetFireSafetyConfig<TData = Awaited<ReturnType<typeof getFire
 
 
 
-export const getUpdateFireSafetyConfigUrl = () => {
+export const getUpdateFireSafetyConfigUrl = (params?: UpdateFireSafetyConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/fire-safety/config`
+  return stringifiedParams.length > 0 ? `/api/fire-safety/config?${stringifiedParams}` : `/api/fire-safety/config`
 }
 
 /**
  * @summary Update Fire safety configuration
  */
-export const updateFireSafetyConfig = async (fireSafetyConfig: FireSafetyConfig, options?: RequestInit): Promise<FireSafetyConfig> => {
+export const updateFireSafetyConfig = async (fireSafetyConfig: FireSafetyConfig,
+    params?: UpdateFireSafetyConfigParams, options?: RequestInit): Promise<FireSafetyConfig> => {
 
-  return customFetch<FireSafetyConfig>(getUpdateFireSafetyConfigUrl(),
+  return customFetch<FireSafetyConfig>(getUpdateFireSafetyConfigUrl(params),
   {
     ...options,
     method: 'PUT',
@@ -3578,8 +3597,8 @@ export const updateFireSafetyConfig = async (fireSafetyConfig: FireSafetyConfig,
 
 
 export const getUpdateFireSafetyConfigMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>;params?: UpdateFireSafetyConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>;params?: UpdateFireSafetyConfigParams}, TContext> => {
 
 const mutationKey = ['updateFireSafetyConfig'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -3591,10 +3610,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFireSafetyConfig>>, {data: BodyType<FireSafetyConfig>}> = (props) => {
-          const {data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFireSafetyConfig>>, {data: BodyType<FireSafetyConfig>;params?: UpdateFireSafetyConfigParams}> = (props) => {
+          const {data,params} = props ?? {};
 
-          return  updateFireSafetyConfig(data,requestOptions)
+          return  updateFireSafetyConfig(data,params,requestOptions)
         }
 
 
@@ -3612,30 +3631,37 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Update Fire safety configuration
  */
 export const useUpdateFireSafetyConfig = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFireSafetyConfig>>, TError,{data: BodyType<FireSafetyConfig>;params?: UpdateFireSafetyConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateFireSafetyConfig>>,
         TError,
-        {data: BodyType<FireSafetyConfig>},
+        {data: BodyType<FireSafetyConfig>;params?: UpdateFireSafetyConfigParams},
         TContext
       > => {
       return useMutation(getUpdateFireSafetyConfigMutationOptions(options));
     }
 
-export const getGetLegionellaConfigUrl = () => {
+export const getGetLegionellaConfigUrl = (params?: GetLegionellaConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/legionella/config`
+  return stringifiedParams.length > 0 ? `/api/legionella/config?${stringifiedParams}` : `/api/legionella/config`
 }
 
 /**
  * @summary Get Water safety configuration
  */
-export const getLegionellaConfig = async ( options?: RequestInit): Promise<LegionellaConfig> => {
+export const getLegionellaConfig = async (params?: GetLegionellaConfigParams, options?: RequestInit): Promise<LegionellaConfig> => {
 
-  return customFetch<LegionellaConfig>(getGetLegionellaConfigUrl(),
+  return customFetch<LegionellaConfig>(getGetLegionellaConfigUrl(params),
   {
     ...options,
     method: 'GET'
@@ -3648,23 +3674,23 @@ export const getLegionellaConfig = async ( options?: RequestInit): Promise<Legio
 
 
 
-export const getGetLegionellaConfigQueryKey = () => {
+export const getGetLegionellaConfigQueryKey = (params?: GetLegionellaConfigParams,) => {
     return [
-    `/api/legionella/config`
+    `/api/legionella/config`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetLegionellaConfigQueryOptions = <TData = Awaited<ReturnType<typeof getLegionellaConfig>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetLegionellaConfigQueryOptions = <TData = Awaited<ReturnType<typeof getLegionellaConfig>>, TError = ErrorType<unknown>>(params?: GetLegionellaConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetLegionellaConfigQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetLegionellaConfigQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaConfig>>> = ({ signal }) => getLegionellaConfig({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaConfig>>> = ({ signal }) => getLegionellaConfig(params, { signal, ...requestOptions });
 
 
 
@@ -3682,11 +3708,11 @@ export type GetLegionellaConfigQueryError = ErrorType<unknown>
  */
 
 export function useGetLegionellaConfig<TData = Awaited<ReturnType<typeof getLegionellaConfig>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetLegionellaConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetLegionellaConfigQueryOptions(options)
+  const queryOptions = getGetLegionellaConfigQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -3699,20 +3725,28 @@ export function useGetLegionellaConfig<TData = Awaited<ReturnType<typeof getLegi
 
 
 
-export const getUpdateLegionellaConfigUrl = () => {
+export const getUpdateLegionellaConfigUrl = (params?: UpdateLegionellaConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/legionella/config`
+  return stringifiedParams.length > 0 ? `/api/legionella/config?${stringifiedParams}` : `/api/legionella/config`
 }
 
 /**
  * @summary Update Water safety configuration
  */
-export const updateLegionellaConfig = async (legionellaConfig: LegionellaConfig, options?: RequestInit): Promise<LegionellaConfig> => {
+export const updateLegionellaConfig = async (legionellaConfig: LegionellaConfig,
+    params?: UpdateLegionellaConfigParams, options?: RequestInit): Promise<LegionellaConfig> => {
 
-  return customFetch<LegionellaConfig>(getUpdateLegionellaConfigUrl(),
+  return customFetch<LegionellaConfig>(getUpdateLegionellaConfigUrl(params),
   {
     ...options,
     method: 'PUT',
@@ -3726,8 +3760,8 @@ export const updateLegionellaConfig = async (legionellaConfig: LegionellaConfig,
 
 
 export const getUpdateLegionellaConfigMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>;params?: UpdateLegionellaConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>;params?: UpdateLegionellaConfigParams}, TContext> => {
 
 const mutationKey = ['updateLegionellaConfig'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -3739,10 +3773,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLegionellaConfig>>, {data: BodyType<LegionellaConfig>}> = (props) => {
-          const {data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLegionellaConfig>>, {data: BodyType<LegionellaConfig>;params?: UpdateLegionellaConfigParams}> = (props) => {
+          const {data,params} = props ?? {};
 
-          return  updateLegionellaConfig(data,requestOptions)
+          return  updateLegionellaConfig(data,params,requestOptions)
         }
 
 
@@ -3760,11 +3794,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * @summary Update Water safety configuration
  */
 export const useUpdateLegionellaConfig = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaConfig>>, TError,{data: BodyType<LegionellaConfig>;params?: UpdateLegionellaConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateLegionellaConfig>>,
         TError,
-        {data: BodyType<LegionellaConfig>},
+        {data: BodyType<LegionellaConfig>;params?: UpdateLegionellaConfigParams},
         TContext
       > => {
       return useMutation(getUpdateLegionellaConfigMutationOptions(options));

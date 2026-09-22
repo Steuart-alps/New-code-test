@@ -159,29 +159,83 @@ function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): 
   try { return JSON.parse(raw) as T[]; } catch { return fallback; }
 }
 
-function LegionellaConfigDialog() {
+function parseJsonRecord(raw: string | undefined | null, fallback: Record<string, number>): Record<string, number> {
+  if (!raw) return fallback;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, number> : fallback;
+  } catch { return fallback; }
+}
+
+const DEFAULT_LEGIONELLA_FREQUENCIES: Record<string, number> = {
+  calorifier_temp: 7, hot_sentinel_temp: 30, hot_nonsent_temp: 90,
+  cold_tank_temp: 30, cold_sentinel_temp: 30, cold_nonsent_temp: 90,
+  cold_tank_inspection: 183, cold_tank_clean: 365, calorifier_inspection: 365,
+  calorifier_clean: 365, shower_clean: 90, tmv_service: 365, outlet_flush: 7,
+};
+
+type LegionellaProfileState = {
+  systemInventoryReference: string;
+  writtenControlSchemeReference: string;
+  riskAssessmentReference: string;
+  riskAssessmentReviewDate: string;
+  competentPerson: string;
+  samplingLabRecordReference: string;
+  controlLimitsRationale: string;
+  remedialVerificationReference: string;
+  schemeReviewDate: string;
+  ukNation: string;
+};
+
+function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
   const [open, setOpen] = useState(false);
-  const { data: config } = useGetLegionellaConfig();
+  const { data: config } = useGetLegionellaConfig(siteId ? { siteId } : undefined);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateConfig = useUpdateLegionellaConfig();
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
+  const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, value]) => [key, String(value)])),
+  );
+  const [profile, setProfile] = useState<LegionellaProfileState>({
+    systemInventoryReference: "", writtenControlSchemeReference: "", riskAssessmentReference: "",
+    riskAssessmentReviewDate: "", competentPerson: "", samplingLabRecordReference: "",
+    controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
+  });
 
   useEffect(() => {
     if (!config || !open) return;
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
+    const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
+    const savedProfile = config.controlProfile ?? {};
+    setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
+    setProfile({
+      systemInventoryReference: savedProfile.systemInventoryReference ?? "",
+      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? "",
+      riskAssessmentReference: savedProfile.riskAssessmentReference ?? "",
+      riskAssessmentReviewDate: savedProfile.riskAssessmentReviewDate ?? "",
+      competentPerson: savedProfile.competentPerson ?? "",
+      samplingLabRecordReference: savedProfile.samplingLabRecordReference ?? "",
+      controlLimitsRationale: savedProfile.controlLimitsRationale ?? "",
+      remedialVerificationReference: savedProfile.remedialVerificationReference ?? "",
+      schemeReviewDate: savedProfile.schemeReviewDate ?? "",
+      ukNation: savedProfile.ukNation ?? "",
+    });
   }, [config, open]);
 
   const handleSave = () => {
+    const numericFrequencies = Object.fromEntries(Object.entries(frequencyDays).map(([key, value]) => [key, Math.max(1, Number(value) || DEFAULT_LEGIONELLA_FREQUENCIES[key])]));
     updateConfig.mutate(
       {
         data: {
           water_default_performer: defaultPerformer,
           water_non_sentinel_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
-        },
+          ...(siteId ? { controlProfile: { ...profile, frequencyDays: numericFrequencies } } : { water_frequency_days: JSON.stringify(numericFrequencies) }),
+        } as any,
+        params: siteId ? { siteId } : undefined,
       },
       {
         onSuccess: () => {
@@ -209,9 +263,10 @@ function LegionellaConfigDialog() {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="shrink-0 w-full grid grid-cols-2">
+           <TabsList className="shrink-0 w-full grid grid-cols-4">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
             <TabsTrigger value="nonsent">Non-sentinel</TabsTrigger>
+             <TabsTrigger value="controls">Controls</TabsTrigger>
           </TabsList>
 
           <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
@@ -221,6 +276,19 @@ function LegionellaConfigDialog() {
                 placeholder="e.g. Responsible person" className="rounded-sm" />
               <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
             </div>
+             <div className="space-y-2">
+               <Label>Risk-assessed check frequencies (days)</Label>
+               <p className="text-xs text-muted-foreground">HSG274/L8 values are benchmarks; the written scheme and risk assessment control the local interval.</p>
+               <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
+                 {Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, fallback]) => (
+                   <div key={key} className="space-y-1">
+                     <Label className="text-xs">{CHECK_TYPE_LABELS[key as LegionellaCheckType]}</Label>
+                     <Input type="number" min={1} max={3650} value={frequencyDays[key] ?? fallback}
+                       onChange={e => setFrequencyDays(current => ({ ...current, [key]: e.target.value }))} className="h-8 rounded-sm" />
+                   </div>
+                 ))}
+               </div>
+             </div>
           </TabsContent>
 
           <TabsContent value="nonsent" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
@@ -244,6 +312,38 @@ function LegionellaConfigDialog() {
               </Button>
             </div>
           </TabsContent>
+           <TabsContent value="controls" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+             {!siteId && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm p-2">Choose a site in the history filter to save a site-specific control profile.</p>}
+             <p className="text-xs text-muted-foreground">Record the site water-system controls and evidence references used during inspection.</p>
+             {([
+               ["systemInventoryReference", "Water-system inventory reference"],
+               ["writtenControlSchemeReference", "Written control scheme reference"],
+               ["riskAssessmentReference", "Legionella risk assessment reference"],
+               ["riskAssessmentReviewDate", "Risk assessment review date"],
+               ["competentPerson", "Responsible / competent person"],
+               ["samplingLabRecordReference", "Sampling and laboratory record reference"],
+               ["controlLimitsRationale", "Control limits and rationale"],
+               ["remedialVerificationReference", "Remedial verification reference"],
+               ["schemeReviewDate", "Scheme applicability review date"],
+             ] as const).map(([key, label]) => (
+               <div key={key} className="space-y-1">
+                 <Label>{label}</Label>
+                 {key.toLowerCase().includes("date") ? (
+                   <Input type="date" value={profile[key]} disabled={!siteId} onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 ) : (
+                   <Textarea rows={key === "controlLimitsRationale" ? 3 : 1} value={profile[key]} disabled={!siteId}
+                     onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 )}
+               </div>
+             ))}
+             <div className="space-y-1">
+               <Label>UK nation</Label>
+               <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
+                 <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+               </Select>
+             </div>
+           </TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
@@ -1063,7 +1163,7 @@ export default function LegionellaPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {canAdmin && <LegionellaConfigDialog />}
+            {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
             <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
           </div>
         </div>

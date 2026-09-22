@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { legionellaChecksTable, sitesTable, appSettingsTable } from "@workspace/db/schema";
+import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
@@ -44,6 +44,37 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   tmv_service:           365,  // Annually
   outlet_flush:          7,    // Weekly
 };
+
+const LEGIONELLA_PROFILE_MODULE = "legionella";
+const legionellaProfileSchema = z.object({
+  systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
+  writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
+  riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
+  riskAssessmentReviewDate: z.string().date().nullable().optional(),
+  competentPerson: z.string().trim().max(500).nullable().optional(),
+  samplingLabRecordReference: z.string().trim().max(2000).nullable().optional(),
+  controlLimitsRationale: z.string().trim().max(10000).nullable().optional(),
+  remedialVerificationReference: z.string().trim().max(2000).nullable().optional(),
+  schemeReviewDate: z.string().date().nullable().optional(),
+  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
+}).strict();
+
+function effectiveLegionellaFrequencies(raw: unknown, profile: unknown = null) {
+  const result = { ...FREQUENCY_DAYS };
+  const apply = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    for (const key of CHECK_TYPES) {
+      const days = (value as Record<string, unknown>)[key];
+      if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3650) result[key] = days;
+    }
+  };
+  if (typeof raw === "string") {
+    try { apply(JSON.parse(raw)); } catch { /* use defaults */ }
+  }
+  if (profile && typeof profile === "object") apply((profile as Record<string, unknown>).frequencyDays);
+  return result;
+}
 
 const createSchema = z.object({
   checkType: z.enum(CHECK_TYPES),
@@ -172,8 +203,23 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const todayDays = toUtcDays(todayIso);
 
+  const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
+    .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const frequencySetting = settings.find(row => row.key === "water_frequency_days")?.value;
+  let siteProfile: unknown = null;
+  if (siteId && !isNaN(parseInt(siteId))) {
+    const [profile] = await db.select({ profile: trackControlProfilesTable.profile })
+      .from(trackControlProfilesTable)
+      .where(and(
+        eq(trackControlProfilesTable.clientId, clientId),
+        eq(trackControlProfilesTable.siteId, parseInt(siteId)),
+        eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE),
+      )).limit(1);
+    siteProfile = profile?.profile ?? null;
+  }
+  const frequencies = effectiveLegionellaFrequencies(frequencySetting, siteProfile);
   const statuses = CHECK_TYPES.map((checkType) => {
-    const frequencyDays = FREQUENCY_DAYS[checkType];
+    const frequencyDays = frequencies[checkType];
     const last = lastByType.get(checkType) ?? null;
     if (!last) {
       return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
@@ -382,7 +428,10 @@ router.delete("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 // PUT /api/legionella/:id
-router.put("/:id", requireAuth, denyViewers, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
+  // Keep the config route below the CRUD block without treating "config" as
+  // a numeric check id.
+  if (req.params.id === "config") return next();
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -461,17 +510,43 @@ const WATER_CONFIG_KEYS = [
   "water_sentinel_outlets",     // JSON: [{name:string, type:"hot"|"cold", location?:string}]
   "water_non_sentinel_outlets", // JSON: string[]
   "water_default_performer",
+  "water_frequency_days",     // JSON: check type -> risk-assessed interval in days
 ] as const;
 
 const WATER_DEFAULT_CONFIG = {
   water_sentinel_outlets: "",
   water_non_sentinel_outlets: "",
   water_default_performer: "",
+  water_frequency_days: JSON.stringify(FREQUENCY_DAYS),
 };
+
+function parseSiteId(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function getLegionellaProfile(clientId: number, siteId: number) {
+  const [row] = await db.select({ profile: trackControlProfilesTable.profile })
+    .from(trackControlProfilesTable)
+    .where(and(
+      eq(trackControlProfilesTable.clientId, clientId),
+      eq(trackControlProfilesTable.siteId, siteId),
+      eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE),
+    )).limit(1);
+  return row?.profile ?? null;
+}
 
 router.get("/config", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
   const config: Record<string, string> = { ...WATER_DEFAULT_CONFIG };
   for (const row of settingRows) {
@@ -479,26 +554,50 @@ router.get("/config", requireAuth, async (req, res) => {
       config[row.key] = row.value;
     }
   }
-  res.json(config);
+  const profile = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
+  res.json({ ...config, controlProfile: profile, siteId });
 });
 
 router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const updates = req.body as Record<string, string>;
+  const siteId = parseSiteId(req.query.siteId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  if (siteId != null) {
+    const access = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (access === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (access === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
+  const updates = req.body as Record<string, unknown>;
+  if (updates.controlProfile !== undefined) {
+    if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
+    const profile = legionellaProfileSchema.safeParse(updates.controlProfile);
+    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    await db.insert(trackControlProfilesTable).values({
+      clientId, siteId, module: LEGIONELLA_PROFILE_MODULE, profile: profile.data,
+    }).onConflictDoUpdate({
+      target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
+      set: { profile: profile.data, updatedAt: new Date() },
+    });
+  }
   for (const key of WATER_CONFIG_KEYS) {
-    if (key in updates) {
+    if (key in updates && typeof updates[key] === "string") {
       const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
         .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
       if (existing.length > 0) {
-        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+        await db.update(appSettingsTable).set({ value: updates[key] as string, updatedAt: new Date() })
           .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
       } else {
-        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] as string });
       }
     }
   }
-  res.json({ ok: true });
+  const settingRows = await db.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+  const config: Record<string, string> = { ...WATER_DEFAULT_CONFIG };
+  for (const row of settingRows) {
+    if (WATER_CONFIG_KEYS.includes(row.key as (typeof WATER_CONFIG_KEYS)[number]) && row.value != null) config[row.key] = row.value;
+  }
+  res.json({ ...config, controlProfile: siteId == null ? null : await getLegionellaProfile(clientId, siteId), siteId });
 });
 
 export default router;

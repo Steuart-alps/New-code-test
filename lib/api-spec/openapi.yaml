@@ -954,6 +954,12 @@ paths:
       operationId: getFireSafetyConfig
       tags: [fire-safety]
       summary: Get Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific FireTrack control profile.
+          schema:
+            type: integer
       responses:
         "200":
           description: Fire safety configuration
@@ -965,6 +971,12 @@ paths:
       operationId: updateFireSafetyConfig
       tags: [fire-safety]
       summary: Update Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific FireTrack control profile.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -984,6 +996,12 @@ paths:
       operationId: getLegionellaConfig
       tags: [legionella]
       summary: Get Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
       responses:
         "200":
           description: Water safety configuration
@@ -995,6 +1013,12 @@ paths:
       operationId: updateLegionellaConfig
       tags: [legionella]
       summary: Update Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -2474,6 +2498,29 @@ components:
           type: string
         fire_escape_routes:
           type: string
+        fire_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        controlProfile:
+          $ref: "#/components/schemas/FireControlProfile"
+
+    FireControlProfile:
+      type: object
+      properties:
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentDate: { type: string, format: date, nullable: true }
+        nextReviewDate: { type: string, format: date, nullable: true }
+        responsiblePerson: { type: string, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        evacuationPeepArrangements: { type: string, nullable: true }
+        maintenanceEvidenceReference: { type: string, nullable: true }
+        defectClosureVerification: { type: string, nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
 
     LegionellaConfig:
       type: object
@@ -2484,6 +2531,31 @@ components:
           type: string
         water_sentinel_outlets:
           type: string
+        water_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        controlProfile:
+          $ref: "#/components/schemas/LegionellaControlProfile"
+
+    LegionellaControlProfile:
+      type: object
+      properties:
+        systemInventoryReference: { type: string, nullable: true }
+        writtenControlSchemeReference: { type: string, nullable: true }
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentReviewDate: { type: string, format: date, nullable: true }
+        competentPerson: { type: string, nullable: true }
+        samplingLabRecordReference: { type: string, nullable: true }
+        controlLimitsRationale: { type: string, nullable: true }
+        remedialVerificationReference: { type: string, nullable: true }
+        schemeReviewDate: { type: string, format: date, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
 
     BikeTrackConfig:
       type: object
