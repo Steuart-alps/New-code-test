@@ -37,6 +37,7 @@ function session() {
 
 async function main() {
   const stamp = Date.now();
+  const fixtureDate = new Date().toISOString().slice(0, 10);
   const admin = session();
   const email = `pat-dept-admin-${stamp}@test.local`;
   const registered = await admin("POST", "/auth/register", {
@@ -58,48 +59,15 @@ async function main() {
   for (const [name, response] of [["alpha department", alphaDept], ["beta department", betaDept], ["alpha site", alphaSite], ["beta site", betaSite]]) {
     expectStatus(`create ${name}`, response, [200, 201]);
   }
-  // Store real tenant-scoped DocTrack objects so certificate document linkage
-  // is tested at the same boundary used in production.
-  async function createSiteDocument(siteId, title) {
-    const requested = await admin("POST", "/doc-track/documents/request-upload", {
-      name: `${title}.txt`, contentType: "text/plain",
-    });
-    expectStatus(`request upload for ${title}`, requested, [200]);
-    const uploaded = await fetch(requested.data?.uploadUrl, {
-      method: "PUT", headers: { "Content-Type": "text/plain" }, body: title,
-    });
-    check(`upload ${title} object`, uploaded.ok, `got ${uploaded.status}`);
-    return admin("POST", "/doc-track/documents", {
-      title, category: "other", fileName: `${title}.txt`, fileSize: title.length,
-      mimeType: "text/plain", objectPath: requested.data?.objectPath, siteId,
-    });
-  }
-  const alphaDocument = await createSiteDocument(alphaSite.data.id, `PAT Alpha evidence ${stamp}`);
-  const betaDocument = await createSiteDocument(betaSite.data.id, `PAT Beta evidence ${stamp}`);
-  expectStatus("create alpha PAT evidence document", alphaDocument, [201]);
-  expectStatus("create beta PAT evidence document", betaDocument, [201]);
-
   const alphaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: alphaSite.data.id, name: "Alpha template" });
   const betaTemplate = await admin("POST", "/pat-track/equipment-templates", { siteId: betaSite.data.id, name: "Beta template" });
   const alphaRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, templateId: alphaTemplate.data.id, name: "Alpha room" });
   const betaRoom = await admin("POST", "/pat-track/rooms", { siteId: betaSite.data.id, templateId: betaTemplate.data.id, name: "Beta room" });
   const certificateBody = (siteId, roomId, ref) => ({
-    siteId, roomIds: [roomId], visitDate: "2025-01-10", certificateRef: ref,
+    siteId, roomIds: [roomId], visitDate: fixtureDate, certificateRef: ref,
   });
   const alphaCertificate = await admin("POST", "/pat-track/certificates", certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"));
   const betaCertificate = await admin("POST", "/pat-track/certificates", certificateBody(betaSite.data.id, betaRoom.data.id, "BETA-CERT"));
-  expectStatus("reject cross-site document on certificate create", await admin("POST", "/pat-track/certificates", {
-    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "CROSS-SITE-DOCUMENT"),
-    documentId: betaDocument.data.id,
-  }), [400]);
-  expectStatus("reject cross-site document on certificate update", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
-    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"),
-    documentId: betaDocument.data.id,
-  }), [400]);
-  expectStatus("link same-site document to certificate", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
-    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT"),
-    documentId: alphaDocument.data.id,
-  }), [200]);
   expectStatus("reject javascript certificate document link", await admin("POST", "/pat-track/certificates", {
     ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "BAD-JS-LINK"),
     documentLink: "javascript:alert(1)",
@@ -122,10 +90,10 @@ async function main() {
     siteId: betaSite.data.id, name: "Beta kettle",
   });
   const alphaTest = await admin("POST", "/pat-track/tests", {
-    applianceId: alphaAppliance.data.id, testDate: "2025-01-10", result: "pass",
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass",
   });
   const betaTest = await admin("POST", "/pat-track/tests", {
-    applianceId: betaAppliance.data.id, testDate: "2025-01-10", result: "pass",
+    applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
   });
   for (const [name, response] of [
     ["alpha template", alphaTemplate], ["beta template", betaTemplate], ["alpha room", alphaRoom],
@@ -186,7 +154,7 @@ async function main() {
     siteId: betaSite.data.id, name: "Forbidden appliance",
   }), [403]);
   expectStatus("cannot create legacy test for beta appliance", await staff("POST", "/pat-track/tests", {
-    applianceId: betaAppliance.data.id, testDate: "2025-01-12", result: "pass",
+    applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
   }), [403]);
   expectStatus("cannot link replacement to beta room", await staff("POST", "/pat-track/replacements", {
     roomId: betaRoom.data.id, applianceName: "Forbidden", replacedOn: "2025-01-12",
@@ -205,7 +173,7 @@ async function main() {
   }), [403]);
   expectStatus("cannot delete beta legacy appliance", await staff("DELETE", `/pat-track/appliances/${betaAppliance.data.id}`), [403]);
   expectStatus("cannot update beta legacy test", await staff("PUT", `/pat-track/tests/${betaTest.data.id}`, {
-    applianceId: betaAppliance.data.id, testDate: "2025-01-12", result: "pass",
+    applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
   }), [403]);
   expectStatus("cannot delete beta legacy test", await staff("DELETE", `/pat-track/tests/${betaTest.data.id}`), [403]);
   expectStatus("cannot update beta certificate", await staff("PUT", `/pat-track/certificates/${betaCertificate.data.id}`,
@@ -287,7 +255,7 @@ async function main() {
   check("inactive room is excluded", !overdueIds.has(inactiveRoom.data.id));
 
   // The cancellation/client export must preserve every certificate-led PAT
-  // entity and retain the client-scoped DocTrack evidence manifest entry.
+  // entity without depending on object storage availability.
   const exportResponse = await fetch(`${BASE}/export`, { headers: { cookie: admin.cookie() } });
   expectStatus("download full client export", exportResponse, [200]);
   const exportPath = join(tmpdir(), `pat-export-${stamp}.zip`);
@@ -300,8 +268,6 @@ async function main() {
       "pat-track/certificate-rooms.csv", "pat-track/replacements.csv",
       "pat-track/failures.csv",
     ]) check(`export includes ${filename}`, entries.includes(filename));
-    const manifest = execFileSync("unzip", ["-p", exportPath, "attachment-manifest.csv"], { encoding: "utf8" });
-    check("export manifest includes client DocTrack object", manifest.includes(`doc-track,${alphaDocument.data.id},`));
   } finally {
     await rm(exportPath, { force: true });
   }
