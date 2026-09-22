@@ -87,6 +87,7 @@ function StorageUsageCard() {
   const { activeClientId } = useAuth();
   const [thresholdGb, setThresholdGb] = useState("5");
   const [saving, setSaving] = useState(false);
+  const [storagePurchaseBusy, setStoragePurchaseBusy] = useState(false);
   const usageQuery = useGetStorageUsage({
     query: {
       queryKey: ["/api/storage/usage", activeClientId],
@@ -125,6 +126,29 @@ function StorageUsageCard() {
       toast({ title: "Couldn't save storage warning", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const buyAdditionalStorage = async () => {
+    const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
+    const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
+    setStoragePurchaseBusy(true);
+    try {
+      const response = await authenticatedApiFetch("/billing/storage", {
+        method: "POST",
+        body: JSON.stringify({ gib }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+      toast({
+        title: "Additional storage added",
+        description: `${gib} GiB has been added to your monthly Stripe subscription.`,
+      });
+      await usageQuery.refetch();
+    } catch (err: any) {
+      toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
+    } finally {
+      setStoragePurchaseBusy(false);
     }
   };
 
@@ -190,6 +214,17 @@ function StorageUsageCard() {
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={buyAdditionalStorage}
+                  disabled={storagePurchaseBusy}
+                >
+                  {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
+                  {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                </Button>
               </div>
             </div>
             <div className="space-y-2">

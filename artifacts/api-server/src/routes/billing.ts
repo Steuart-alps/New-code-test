@@ -515,6 +515,121 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
   }
 });
 
+// POST /api/billing/storage — add recurring storage capacity to the client's
+// existing subscription. The Stripe price is server-configured; the browser
+// may only request a validated quantity of GiB.
+router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const parsed = z.object({
+    gib: z.number().int().min(1).max(100_000),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "gib must be a whole number between 1 and 100000" });
+
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  const priceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
+  if (!priceId) return res.status(503).json({ error: "Storage add-on billing is not configured" });
+
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
+
+  try {
+    const stripe = await getUncachableStripeClient();
+    const subscription = await findLiveSubscription(client.stripeCustomerId);
+    if (!subscription) return res.status(400).json({ error: "No active subscription — subscribe first" });
+
+    const price = await stripe.prices.retrieve(priceId);
+    const unitAmount = Number(price.unit_amount);
+    const subscriptionCurrency = subscription.items.data.find((item) => item.price?.currency)?.price?.currency;
+    if (
+      !price.active
+      || price.type !== "recurring"
+      || price.recurring?.interval !== "month"
+      || !subscriptionCurrency
+      || price.currency !== subscriptionCurrency
+      || !Number.isSafeInteger(unitAmount)
+      || unitAmount < 1
+    ) {
+      return res.status(503).json({ error: "Storage add-on price must be an active monthly price in the subscription currency" });
+    }
+
+    const existingItem = subscription.items.data.find(
+      (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
+    );
+    const oldQuantity = existingItem?.quantity ?? 0;
+    const desiredQuantity = oldQuantity + parsed.data.gib;
+    const periodStart = subscription.items.data[0]?.current_period_start ?? subscription.created;
+    const idempotencyPrefix = `storage-add-${subscription.id}-${periodStart}-${desiredQuantity}`;
+
+    await stripe.subscriptions.update(
+      subscription.id,
+      {
+        items: [existingItem
+          ? { id: existingItem.id, price: priceId, quantity: desiredQuantity }
+          : { price: priceId, quantity: desiredQuantity }],
+        proration_behavior: "none",
+      },
+      { idempotencyKey: `${idempotencyPrefix}-subscription` },
+    );
+
+    try {
+      const payment = await collectAddonFirstMonthInvoice(stripe, {
+        customerId: client.stripeCustomerId,
+        amount: unitAmount * parsed.data.gib,
+        currency: price.currency,
+        description: `Additional storage — ${parsed.data.gib} GiB per month`,
+        metadata: {
+          addon_service: "storage",
+          client_id: String(clientId),
+          gib_added: String(parsed.data.gib),
+          period_start: String(periodStart),
+        },
+        idempotencyPrefix,
+      });
+      if (payment === "unknown") {
+        invalidateEntitlements(clientId);
+        return res.status(502).json({
+          error: "We couldn't confirm the payment outcome. Storage access was kept while Stripe confirms it; please contact support before retrying.",
+        });
+      }
+      if (payment !== "paid") throw new Error("Storage add-on invoice was not collected");
+    } catch (error) {
+      try {
+        const fresh = await findLiveSubscription(client.stripeCustomerId);
+        const added = fresh?.items.data.find(
+          (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
+        );
+        if (added) {
+          if (oldQuantity > 0 && existingItem?.price?.id) {
+            await stripe.subscriptionItems.update(added.id, {
+              price: existingItem.price.id,
+              quantity: oldQuantity,
+              proration_behavior: "none",
+            });
+          } else {
+            await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
+          }
+        }
+      } catch (rollbackError) {
+        req.log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
+      }
+      invalidateEntitlements(clientId);
+      req.log.error({ err: error, clientId }, "Storage add-on payment failed");
+      return res.status(502).json({ error: "We couldn't complete the storage charge, so the add-on was not enabled. Please try again." });
+    }
+
+    invalidateEntitlements(clientId);
+    res.status(201).json({
+      gibAdded: parsed.data.gib,
+      monthlyGib: desiredQuantity,
+      unitAmount,
+      currency: price.currency,
+    });
+  } catch (err: any) {
+    req.log.error({ err, clientId }, "Storage add-on failed");
+    res.status(500).json({ error: err?.message ?? "Could not add storage" });
+  }
+});
+
 // GET /api/billing/invoices — list the client's Stripe invoices (scoped to
 // the authenticated client's own Stripe customer; customer id is always
 // resolved server-side, never taken from the request).
