@@ -20,4 +20,11 @@ export interface StorageUsage {
      */
   monthlyDownloadBytes: number | null;
   monthlyDownloadTrackingAvailable: boolean;
+  month: string;
+  estimatedCost: {
+    currency: "GBP";
+    storageMinorUnits: number;
+    downloadMinorUnits: number;
+    totalMinorUnits: number;
+  } | null;
 }

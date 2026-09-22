@@ -2311,6 +2311,8 @@ components:
         - warning
         - monthlyDownloadBytes
         - monthlyDownloadTrackingAvailable
+        - month
+        - estimatedCost
       properties:
         usedBytes:
           type: integer
@@ -2328,6 +2330,26 @@ components:
           minimum: 0
         monthlyDownloadTrackingAvailable:
           type: boolean
+        month:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        estimatedCost:
+          type: object
+          nullable: true
+          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits]
+          properties:
+            currency:
+              type: string
+              enum: [GBP]
+            storageMinorUnits:
+              type: integer
+              minimum: 0
+            downloadMinorUnits:
+              type: integer
+              minimum: 0
+            totalMinorUnits:
+              type: integer
+              minimum: 0
 
     SendRemindersResponse:
       type: object

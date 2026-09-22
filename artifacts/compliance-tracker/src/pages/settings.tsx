@@ -167,8 +167,21 @@ function StorageUsageCard() {
               </div>
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">Downloads this month</p>
-                <p className="mt-1 text-lg font-semibold">Not available</p>
-                <p className="mt-1 text-xs text-muted-foreground">Download traffic is not currently measured, so no estimate is shown.</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {usage.monthlyDownloadTrackingAvailable && usage.monthlyDownloadBytes !== null
+                    ? formatBytes(usage.monthlyDownloadBytes)
+                    : "Not available"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {usage.monthlyDownloadTrackingAvailable
+                    ? `Authoritative streamed traffic for ${usage.month}. Retries and partial downloads count separately.`
+                    : "Download traffic is not currently measured."}
+                </p>
+                <p className="mt-2 text-sm font-medium">
+                  {usage.estimatedCost
+                    ? `Estimated current cost: £${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)}`
+                    : "Pricing unavailable — configure validated GBP/GiB rates to show an estimate."}
+                </p>
               </div>
             </div>
             <div className="space-y-2">

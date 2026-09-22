@@ -13,10 +13,21 @@ import { appSettingsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
+import { createDownloadMeter } from "../lib/downloadUsage";
+import { getMonthlyDownloadBytes, utcMonth } from "../lib/downloadUsage";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
+const GIB = 1024 ** 3;
+
+function rateMinor(name: string): number | null {
+  const raw = process.env[name]?.trim();
+  if (!raw || !/^(?:\d+)(?:\.\d+)?$/.test(raw)) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * 100);
+}
 
 router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {
   const clientId = getClientId(req);
@@ -36,6 +47,16 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       }),
     ]);
     const { usedBytes, objectCount } = await objectStorageService.getTenantStorageUsage(clientId, referencedPaths);
+    const month = utcMonth();
+    const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
+    const storageRate = rateMinor("STORAGE_PRICE_GBP_PER_GIB_MONTH");
+    const downloadRate = rateMinor("DOWNLOAD_PRICE_GBP_PER_GIB");
+    const estimatedCost = storageRate !== null && downloadRate !== null ? {
+      currency: "GBP" as const,
+      storageMinorUnits: Math.round(storageRate * usedBytes / GIB),
+      downloadMinorUnits: Math.round(downloadRate * monthlyDownloadBytes / GIB),
+      totalMinorUnits: Math.round(storageRate * usedBytes / GIB) + Math.round(downloadRate * monthlyDownloadBytes / GIB),
+    } : null;
     const configuredThreshold = Number(thresholdSetting?.value);
     const warningThresholdBytes = Number.isSafeInteger(configuredThreshold) && configuredThreshold > 0
       ? configuredThreshold
@@ -46,8 +67,10 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       objectCount,
       warningThresholdBytes,
       warning: usedBytes >= warningThresholdBytes,
-      monthlyDownloadBytes: null,
-      monthlyDownloadTrackingAvailable: false,
+      monthlyDownloadBytes,
+      monthlyDownloadTrackingAvailable: true,
+      month,
+      estimatedCost,
     }));
   } catch (error) {
     req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
@@ -167,6 +190,11 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+      const meter = createDownloadMeter(clientId!);
+      nodeStream.on("data", (chunk) => meter.add(chunk));
+      const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
+      nodeStream.once("end", commit);
+      nodeStream.once("close", commit);
       nodeStream.pipe(res);
     } else {
       res.end();

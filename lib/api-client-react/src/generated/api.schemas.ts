@@ -272,6 +272,13 @@ export interface StorageUsage {
      */
   monthlyDownloadBytes: number | null;
   monthlyDownloadTrackingAvailable: boolean;
+  month: string;
+  estimatedCost: {
+    currency: "GBP";
+    storageMinorUnits: number;
+    downloadMinorUnits: number;
+    totalMinorUnits: number;
+  } | null;
 }
 
 export type SendRemindersResponseDetailsItemStatus = typeof SendRemindersResponseDetailsItemStatus[keyof typeof SendRemindersResponseDetailsItemStatus];

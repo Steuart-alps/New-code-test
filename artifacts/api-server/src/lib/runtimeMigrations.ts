@@ -57,6 +57,31 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
 
+    // Authoritative streamed download accounting. Raw events are retained for
+    // idempotent completion/reconciliation; the month table serves dashboard reads.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_download_events" (
+        "id" serial PRIMARY KEY,
+        "event_id" text NOT NULL UNIQUE,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "month" text NOT NULL,
+        "bytes" bigint NOT NULL,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_events_tenant_month" ON "storage_download_events" ("client_id", "month")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_download_months" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "month" text NOT NULL,
+        "bytes" bigint NOT NULL DEFAULT 0,
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        UNIQUE ("client_id", "month")
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_months_tenant_month" ON "storage_download_months" ("client_id", "month")`);
+
     // ---- Billing discount redemptions ----
     // A client can reserve a code while Stripe Checkout is open, then it is
     // permanently redeemed once the Checkout completion webhook arrives.

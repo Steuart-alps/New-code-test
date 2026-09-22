@@ -786,7 +786,14 @@ export const GetStorageUsageResponse = zod.object({
   "warningThresholdBytes": zod.number().min(1),
   "warning": zod.boolean(),
   "monthlyDownloadBytes": zod.number().min(getStorageUsageResponseMonthlyDownloadBytesMin).nullable(),
-  "monthlyDownloadTrackingAvailable": zod.boolean()
+  "monthlyDownloadTrackingAvailable": zod.boolean(),
+  "month": zod.string().regex(/^[0-9]{4}-[0-9]{2}$/),
+  "estimatedCost": zod.object({
+    "currency": zod.literal("GBP"),
+    "storageMinorUnits": zod.number().int().min(0),
+    "downloadMinorUnits": zod.number().int().min(0),
+    "totalMinorUnits": zod.number().int().min(0)
+  }).nullable()
 })
 
 

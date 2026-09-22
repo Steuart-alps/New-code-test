@@ -11,6 +11,7 @@ import {
   ObjectOwnershipError,
 } from "../lib/objectStorage";
 import { ObjectPermission } from "../lib/objectAcl";
+import { createDownloadMeter } from "../lib/downloadUsage";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -227,6 +228,11 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+      const meter = createDownloadMeter(clientId);
+      nodeStream.on("data", (chunk) => meter.add(chunk));
+      const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
+      nodeStream.once("end", commit);
+      nodeStream.once("close", commit);
       nodeStream.pipe(res);
     } else {
       res.end();
