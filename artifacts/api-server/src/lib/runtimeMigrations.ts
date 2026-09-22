@@ -620,7 +620,7 @@ export async function runRuntimeMigrations() {
         "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL,
         "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
         "mode" text NOT NULL CHECK ("mode" IN ('assign','quote')),
-        "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request')),
+        "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation')),
         "status" text NOT NULL DEFAULT 'pending'
           CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed')),
         "to_email" text NOT NULL CHECK (length(trim("to_email")) > 3),
@@ -657,6 +657,11 @@ export async function runRuntimeMigrations() {
       ADD COLUMN IF NOT EXISTS "quote_token_expires_at" timestamp,
       ADD COLUMN IF NOT EXISTS "quote_token_hash" text,
       ADD COLUMN IF NOT EXISTS "encrypted_token_payload" text`);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      DROP CONSTRAINT IF EXISTS "contractor_email_queue_email_type_check"`);
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD CONSTRAINT "contractor_email_queue_email_type_check"
+      CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment

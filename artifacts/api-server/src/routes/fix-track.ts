@@ -126,6 +126,29 @@ function fixTrackCalendarInvite(draft: any, clientId: number, issueId: number, s
   });
 }
 
+function fixTrackCalendarCancellation(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+  const targetDate = dateOnly(draft.target_date);
+  if (!targetDate || !draft.previous_ics) return null;
+  const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
+  if (Number.isNaN(dueDate.getTime())) return null;
+  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
+  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
+  return buildCalendarInvite({
+    itemTitle: draft.title,
+    dueDate,
+    contractorName: draft.contractor_name,
+    contractorEmail: draft.contractor_email,
+    companyName: draft.company_name,
+    fromEmail,
+    descriptionLabel: "Cancelled maintenance job",
+    notes: "This FixTrack assignment has been cancelled.",
+    uid: `fix-track-${clientId}-${issueId}@complytrack`,
+    sequence,
+    allDay: true,
+    method: "CANCEL",
+    eventStatus: "CANCELLED",
+  });
+}
 function nextCalendarSequence(existingIcs: unknown): number {
   const match = typeof existingIcs === "string" ? existingIcs.match(/^SEQUENCE:(\d+)$/m) : null;
   return match ? Number(match[1]) + 1 : 0;
@@ -601,7 +624,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     if (approvalInvalidated) {
         const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
          c.email AS contractor_email,cl.name AS company_name,q.mode,q.quote_token,q.body_html,q.body_text,
-          q.email_preview_json,q.encrypted_token_payload,q.ics_content,
+          q.email_preview_json,q.encrypted_token_payload,q.ics_content,q.email_type,
           (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email
         FROM fix_track_issues i
         LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
@@ -612,6 +635,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         WHERE i.id=${id} AND i.client_id=${clientId} ORDER BY q.created_at DESC LIMIT 1`);
       const draft = (draftResult.rows as any[])[0];
       if (draft?.contractor_email) {
+        if (draft.email_type === "cancellation") {
+          return { kind: "cancellation_content_locked" as const };
+        }
         const siteDocuments = await siteDocumentsForContractorEmail(draft.site_id, clientId);
         let tokenPayload: Record<string, string> = draft.encrypted_token_payload
           ? decryptTokenPayload(draft.encrypted_token_payload)
@@ -705,6 +731,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   if (transitionResult.kind === "linked_site_forbidden") {
     return res.status(403).json({ error: "The originating module action is outside your active department" });
   }
+  if (transitionResult.kind === "cancellation_content_locked") {
+    return res.status(409).json({ error: "This issue cannot change while its calendar cancellation awaits manager approval" });
+  }
   res.json(transitionResult.row);
 });
 
@@ -769,9 +798,34 @@ router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null) conditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any);
-  const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
+  const [existing] = await db.select({
+    id: fixTrackIssuesTable.id,
+    emailRequestStatus: fixTrackIssuesTable.emailRequestStatus,
+    targetDate: fixTrackIssuesTable.targetDate,
+  }).from(fixTrackIssuesTable)
     .where(and(...conditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  const [latestEmail] = await db.execute(sql`
+    SELECT email_type, status
+    FROM contractor_email_queue
+    WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).then(result => (result.rows as any[]));
+  if (latestEmail?.email_type === "cancellation" && ["pending", "sending"].includes(latestEmail.status)) {
+    return res.status(409).json({
+      error: "This issue has a calendar cancellation awaiting manager approval or delivery.",
+      cancellationPending: true,
+    });
+  }
+  if (existing.emailRequestStatus === "sent" && existing.targetDate) {
+    if (latestEmail?.email_type !== "cancellation" || latestEmail.status !== "sent") {
+      return res.status(409).json({
+        error: "This assigned job has a calendar invitation. Request a cancellation before deleting it.",
+        cancellationRequired: true,
+      });
+    }
+  }
 
   await db.delete(fixTrackIssuesTable)
     .where(and(...conditions));
@@ -1061,6 +1115,127 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     return res.status(409).json({ error: "This issue cannot be re-requested while its approved contractor email is sending" });
   }
   res.json({ ok: true, message: "Approval requested" });
+});
+
+// Staff: request a calendar cancellation for an assignment that was already
+// delivered. The resulting draft goes through the same manager approval and
+// provider idempotency boundary as ordinary contractor mail.
+router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+
+  const queued = await db.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT i.*, s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
+        cl.name AS company_name,
+        (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
+        (SELECT ics_content FROM contractor_email_queue
+          WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+            AND email_type='assignment' AND status='sent'
+          ORDER BY created_at DESC LIMIT 1) AS previous_ics,
+        (SELECT email_type FROM contractor_email_queue
+          WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+            AND status IN ('pending','sending','sent')
+          ORDER BY created_at DESC LIMIT 1) AS latest_email_type
+      FROM fix_track_issues i
+      LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
+      JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
+      JOIN clients cl ON cl.id=i.client_id
+      WHERE i.id=${id} AND i.client_id=${clientId}
+      FOR UPDATE OF i
+    `);
+    const draft = (locked.rows as any[])[0];
+    if (!draft) return { kind: "not_found" as const };
+    if (deptId !== null && draft.site_id != null && !(await canAccessSite(draft.site_id, clientId, deptId))) {
+      return { kind: "not_found" as const };
+    }
+    if (draft.email_request_status === "sending") return { kind: "sending" as const };
+    if (draft.email_request_status !== "sent" || !draft.target_date || !draft.previous_ics) {
+      return { kind: "not_cancellable" as const };
+    }
+    if (draft.latest_email_type === "cancellation") return { kind: "already_requested" as const };
+
+    const icsContent = fixTrackCalendarCancellation(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    if (!icsContent) return { kind: "not_cancellable" as const };
+    const subject = `Cancelled: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`;
+    const text = [
+      `Dear ${draft.contractor_name},`,
+      "",
+      `${draft.company_name} has cancelled the following assigned work.`,
+      "",
+      draft.title,
+      `Site: ${draft.site_name ?? "Not specified"}`,
+      `Location: ${draft.location}`,
+      "",
+      "The attached calendar cancellation removes the previously sent assignment.",
+    ].join("\n");
+    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
+      <p>Dear ${escapeHtml(draft.contractor_name)},</p>
+      <p><strong>${escapeHtml(draft.company_name)}</strong> has cancelled the following assigned work.</p>
+      <h2>${escapeHtml(draft.title)}</h2>
+      <p><strong>Site:</strong> ${escapeHtml(draft.site_name ?? "Not specified")}<br>
+      <strong>Location:</strong> ${escapeHtml(draft.location)}</p>
+      <p>The attached calendar cancellation removes the previously sent assignment.</p>
+    </div>`;
+    const persisted = placeholderizeQueuedDraft(subject, html, text, {});
+    const updated = await tx.update(fixTrackIssuesTable).set({
+      emailRequestMode: "assign",
+      emailRequestStatus: "pending",
+      emailRequestedBy: (req.session as any).userId ?? null,
+      emailRequestedAt: new Date(),
+      emailApprovedBy: null,
+      emailApprovedAt: null,
+      emailSentBy: null,
+      emailSentAt: null,
+      updatedAt: new Date(),
+    }).where(and(...conditions, eq(fixTrackIssuesTable.emailRequestStatus, "sent"))).returning();
+    if (!updated[0]) return { kind: "conflict" as const };
+
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId,
+      issueId: id,
+      eventType: "email_requested",
+      note: "cancellation",
+      createdBy: (req.session as any).userId ?? null,
+    });
+    await tx.execute(sql`
+      INSERT INTO contractor_email_queue
+        (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type,
+         to_email, subject, body_html, body_text, ics_content, ics_filename, email_preview_json,
+         requested_by, idempotency_key)
+      SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, 'assign', 'cancellation',
+        c.email, ${persisted.subject}, ${persisted.html}, ${persisted.text}, ${icsContent},
+        ${calendarFilename(draft.title)}, ${JSON.stringify(persisted.preview)}::jsonb,
+        ${(req.session as any).userId ?? null},
+        ${`fix-track-cancellation-${clientId}-${id}-${nextCalendarSequence(draft.previous_ics)}`}
+      FROM fix_track_issues i
+      LEFT JOIN sites s ON s.id=i.site_id
+      JOIN contractors c ON c.id=i.contractor_id
+      WHERE i.id=${id} AND i.client_id=${clientId}
+      ON CONFLICT DO NOTHING
+    `);
+    return { kind: "queued" as const };
+  });
+
+  if (queued.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (queued.kind === "sending") return res.status(409).json({ error: "A contractor email is currently sending" });
+  if (queued.kind === "already_requested") return res.status(409).json({ error: "A cancellation is already queued or sent" });
+  if (queued.kind === "conflict") return res.status(409).json({ error: "The assignment changed; refresh and try again" });
+  if (queued.kind === "not_cancellable") return res.status(409).json({ error: "Only a dated assignment that was already sent can be cancelled" });
+  res.status(202).json({ ok: true, message: "Calendar cancellation queued for manager approval" });
 });
 
 // Manager queue endpoints. All mutations include tenant and department scope

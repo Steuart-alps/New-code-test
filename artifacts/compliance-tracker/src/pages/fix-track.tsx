@@ -862,7 +862,23 @@ export default function FixTrackPage() {
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this issue report?")) return;
-    await clientApiFetch(`/fix-track/issues/${id}`, { method: "DELETE" });
+    const issue = issues.find((item) => item.id === id);
+    if (issue?.emailRequestStatus === "sent" && issue.targetDate) {
+      const cancellation = await clientApiFetch(`/fix-track/issues/${id}/request-cancellation`, { method: "POST" });
+      const body = await cancellation.json().catch(() => null);
+      if (!cancellation.ok) {
+        toast({ title: "Could not cancel the calendar booking", description: body?.error ?? "Request failed", variant: "destructive" });
+        return;
+      }
+      await load();
+      toast({ title: "Calendar cancellation queued", description: "A manager must approve it before it is sent." });
+      return;
+    }
+    const deleted = await clientApiFetch(`/fix-track/issues/${id}`, { method: "DELETE" });
+    if (!deleted.ok) {
+      const body = await deleted.json().catch(() => null);
+      throw new Error(body?.error ?? "Delete failed");
+    }
     await load();
     toast({ title: "Issue deleted" });
   }

@@ -197,6 +197,8 @@ export function buildCalendarInvite(opts: {
   sequence?: number;
   /** Date-only work is represented as an all-day event, ending the next day. */
   allDay?: boolean;
+  method?: "REQUEST" | "CANCEL";
+  eventStatus?: "CONFIRMED" | "CANCELLED";
   /** Override generation time for deterministic compatibility fixtures. */
   generatedAt?: Date;
 }): string {
@@ -220,7 +222,7 @@ export function buildCalendarInvite(opts: {
     "VERSION:2.0",
     `PRODID:-//ComplyTrack//EN`,
     "CALSCALE:GREGORIAN",
-    "METHOD:REQUEST",
+    `METHOD:${opts.method ?? "REQUEST"}`,
     "BEGIN:VEVENT",
     `UID:${uid}`,
     `SEQUENCE:${Math.max(0, Math.trunc(opts.sequence ?? 0))}`,
@@ -234,7 +236,7 @@ export function buildCalendarInvite(opts: {
     ...(opts.extraAttendees ?? []).map(
       (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${escapeIcsParameter(a.name ?? a.email)}":MAILTO:${sanitizeIcsAddress(a.email)}`,
     ),
-    "STATUS:CONFIRMED",
+    `STATUS:${opts.eventStatus ?? "CONFIRMED"}`,
     "BEGIN:VALARM",
     "TRIGGER:-P1D",
     "ACTION:DISPLAY",

@@ -46,3 +46,4 @@
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from Replit storage cost plus a 20% ALPS margin.
+- [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.

@@ -286,6 +286,36 @@ async function main() {
       !updatedCalendarMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300210"),
     updatedCalendarMessage?.icsAttachment);
 
+  check("calendar cancellation enters the manager approval queue",
+    (await owner("POST", `/fix-track/issues/${calendarId}/request-cancellation`)).status === 202);
+  check("queued calendar cancellation cannot be deleted before delivery",
+    (await owner("DELETE", `/fix-track/issues/${calendarId}`)).status === 409);
+  const repeatedCancellation = await owner("POST", `/fix-track/issues/${calendarId}/request-cancellation`);
+  check("repeated cancellation requests are idempotent",
+    repeatedCancellation.status === 409, JSON.stringify(repeatedCancellation));
+  check("calendar cancellation cannot bypass manager approval",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 403);
+  check("manager approves calendar cancellation",
+    (await owner("POST", `/fix-track/issues/${calendarId}/approve-send`)).status === 200);
+  check("approved calendar cancellation dispatches",
+    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 200);
+  calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const cancellationMessage = calendarOutbox.at(-1);
+  check("calendar cancellation reuses UID and increments sequence",
+    cancellationMessage?.icsAttachment?.includes(`UID:fix-track-${ownerClientId}-${calendarId}@complytrack`) &&
+      cancellationMessage?.icsAttachment?.includes("METHOD:CANCEL") &&
+      cancellationMessage?.icsAttachment?.includes("STATUS:CANCELLED") &&
+      cancellationMessage?.icsAttachment?.includes("SEQUENCE:2") &&
+      cancellationMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300212"),
+    cancellationMessage?.icsAttachment);
+  check("calendar cancellation does not contain contractor action links",
+    !cancellationMessage?.html?.includes("/api/fix-track/action/") &&
+      !cancellationMessage?.icsAttachment?.includes("/api/fix-track/action/"));
+  const repeatedSentCancellation = await owner("POST", `/fix-track/issues/${calendarId}/request-cancellation`);
+  check("sent calendar cancellation cannot be dispatched twice",
+    repeatedSentCancellation.status === 409, JSON.stringify(repeatedSentCancellation));
+
   const concurrentForcedRequests = await Promise.all([
     owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true }),
     owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true }),

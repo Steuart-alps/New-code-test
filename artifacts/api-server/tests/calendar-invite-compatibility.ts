@@ -11,6 +11,8 @@ type FixtureCase = {
   expectedEnd: string;
   expectedSequence: string;
   expectedSummary: string;
+  expectedMethod?: string;
+  expectedStatus?: string;
   invite: string;
 };
 
@@ -54,6 +56,31 @@ const cases: FixtureCase[] = [
       uid: "fix-track-44-881@complytrack",
       sequence: 2,
       allDay: true,
+      generatedAt: new Date("2030-10-01T08:00:00.000Z"),
+    }),
+  },
+  {
+    filename: "uk-cancelled-calendar-update.ics",
+    expectedStart: "20301027",
+    expectedEnd: "20301028",
+    expectedSequence: "3",
+    expectedSummary: "Révision complète — chaudière № 12 🔧 with an intentionally long title for calendar clients",
+    expectedMethod: "CANCEL",
+    expectedStatus: "CANCELLED",
+    invite: buildCalendarInvite({
+      itemTitle: "Révision complète — chaudière № 12 🔧 with an intentionally long title for calendar clients",
+      dueDate: new Date("2030-10-27T00:00:00.000Z"),
+      contractorName: "Zoë O’Connor",
+      contractorEmail: "zoe@example.test",
+      companyName: "ÅLPS “Facilities” ^ Europe",
+      fromEmail: "compliance@example.test",
+      notes: "This FixTrack assignment has been cancelled.",
+      descriptionLabel: "Cancelled maintenance job",
+      uid: "fix-track-44-881@complytrack",
+      sequence: 3,
+      allDay: true,
+      method: "CANCEL",
+      eventStatus: "CANCELLED",
       generatedAt: new Date("2030-10-01T08:00:00.000Z"),
     }),
   },
@@ -103,9 +130,9 @@ for (const fixture of cases) {
   const lines = unfold(fixture.invite);
   assert.equal(property(lines, "VERSION"), "2.0");
   assert.equal(property(lines, "CALSCALE"), "GREGORIAN");
-  assert.equal(property(lines, "METHOD"), "REQUEST");
+  assert.equal(property(lines, "METHOD"), fixture.expectedMethod ?? "REQUEST");
   assert.equal(property(lines, "SEQUENCE"), fixture.expectedSequence);
-  assert.equal(property(lines, "STATUS"), "CONFIRMED");
+  assert.equal(property(lines, "STATUS"), fixture.expectedStatus ?? "CONFIRMED");
   assert.equal(property(lines, "DTSTART;VALUE=DATE"), fixture.expectedStart);
   assert.equal(property(lines, "DTEND;VALUE=DATE"), fixture.expectedEnd);
   assert.equal(unescapeText(property(lines, "SUMMARY")), fixture.expectedSummary);
