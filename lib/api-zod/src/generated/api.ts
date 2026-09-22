@@ -785,6 +785,15 @@ export const getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin = 0;
 
 export const getStorageUsageResponseEstimatedCostTotalMinorUnitsMin = 0;
 
+export const getStorageUsageResponseEstimatedCostIncludedStorageBytesMin = 0;
+
+export const getStorageUsageResponseEstimatedCostExcessStorageBytesMin = 0;
+
+export const getStorageUsageResponseEstimatedCostStorageAddonBlocksMin = 0;
+
+
+export const getStorageUsageResponseEstimatedCostStorageAddonUnitMinorUnitsMin = 0;
+
 
 
 export const GetStorageUsageResponse = zod.object({
@@ -799,7 +808,12 @@ export const GetStorageUsageResponse = zod.object({
   "currency": zod.enum(['GBP']),
   "storageMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageMinorUnitsMin),
   "downloadMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin),
-  "totalMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostTotalMinorUnitsMin)
+  "totalMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostTotalMinorUnitsMin),
+  "includedStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostIncludedStorageBytesMin),
+  "excessStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostExcessStorageBytesMin),
+  "storageAddonBlocks": zod.number().min(getStorageUsageResponseEstimatedCostStorageAddonBlocksMin),
+  "storageAddonUnitGib": zod.number().min(1),
+  "storageAddonUnitMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageAddonUnitMinorUnitsMin)
 }).nullable()
 })
 

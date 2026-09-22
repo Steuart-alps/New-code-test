@@ -15,4 +15,14 @@ export type StorageUsageEstimatedCost = {
   downloadMinorUnits: number;
   /** @minimum 0 */
   totalMinorUnits: number;
+  /** @minimum 0 */
+  includedStorageBytes: number;
+  /** @minimum 0 */
+  excessStorageBytes: number;
+  /** @minimum 0 */
+  storageAddonBlocks: number;
+  /** @minimum 1 */
+  storageAddonUnitGib: number;
+  /** @minimum 0 */
+  storageAddonUnitMinorUnits: number;
 } | null;

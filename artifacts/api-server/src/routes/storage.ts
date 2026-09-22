@@ -20,6 +20,12 @@ const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
+const DEFAULT_REPLIT_STORAGE_USD_PER_GIB_MONTH = 0.015;
+const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
+const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
+  core: 1,
+  bundle: 1,
+};
 
 function requestRange(raw: string | undefined, size: number): { start: number; end: number } | "invalid" | undefined {
   if (!raw) return undefined;
@@ -71,11 +77,18 @@ function rateMinor(name: string): number | null {
 }
 
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rate = rateMinor("STORAGE_EXCESS_GBP_PER_GIB_MONTH");
+  const rawRate = process.env.STORAGE_REPLIT_USD_PER_GIB_MONTH;
+  const providerRate = rawRate ? Number(rawRate) : DEFAULT_REPLIT_STORAGE_USD_PER_GIB_MONTH;
+  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT;
+  const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
+  if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;
   const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
-  if (rate === null || !rawAllowances) return null;
   let allowanceMap: Record<string, unknown>;
-  try { allowanceMap = JSON.parse(rawAllowances); } catch { return null; }
+  try {
+    allowanceMap = rawAllowances ? JSON.parse(rawAllowances) : DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE;
+  } catch {
+    return null;
+  }
   if (!allowanceMap || typeof allowanceMap !== "object" || Array.isArray(allowanceMap)) return null;
   const configuredValues = Object.values(allowanceMap);
   if (!configuredValues.length || configuredValues.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER / GIB)) return null;
@@ -91,8 +104,20 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
   if (!allowances.length) return null;
   const includedBytes = Math.max(...allowances) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
-  const storageMinorUnits = Math.round(rate * excess / GIB);
-  return { currency: "GBP" as const, storageMinorUnits, downloadMinorUnits: 0, totalMinorUnits: storageMinorUnits };
+  const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
+  const markupMinorUnits = Math.round(providerMinorUnits * markupPercent / 100);
+  const storageMinorUnits = providerMinorUnits + markupMinorUnits;
+  return {
+    currency: "USD" as const,
+    storageMinorUnits,
+    downloadMinorUnits: 0,
+    totalMinorUnits: storageMinorUnits,
+    includedStorageBytes: includedBytes,
+    excessStorageBytes: excess,
+    providerMinorUnits,
+    markupMinorUnits,
+    markupPercent,
+  };
 }
 
 router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Request, res: Response): Promise<void> => {

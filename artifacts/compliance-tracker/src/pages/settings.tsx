@@ -179,9 +179,17 @@ function StorageUsageCard() {
                 </p>
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
-                    ? `Estimated current cost: £${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)}`
-                    : "Pricing unavailable — configure validated GBP/GiB rates to show an estimate."}
+                    ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
+                      ? `Estimated excess storage charge: $${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month`
+                      : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
+                    : "Storage pricing is currently unavailable for this subscription."}
                 </p>
+                {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Based on Replit’s storage cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
+                    Downloads are measured separately and are not charged here.
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-2">

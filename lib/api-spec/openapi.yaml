@@ -2336,11 +2336,11 @@ components:
         estimatedCost:
           type: object
           nullable: true
-          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits]
+          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits, includedStorageBytes, excessStorageBytes, storageAddonBlocks, storageAddonUnitGib, storageAddonUnitMinorUnits]
           properties:
             currency:
               type: string
-              enum: [GBP]
+              enum: [USD]
             storageMinorUnits:
               type: integer
               minimum: 0
@@ -2349,6 +2349,21 @@ components:
               minimum: 0
             totalMinorUnits:
               type: integer
+              minimum: 0
+            includedStorageBytes:
+              type: integer
+              minimum: 0
+            excessStorageBytes:
+              type: integer
+              minimum: 0
+            providerMinorUnits:
+              type: integer
+              minimum: 0
+            markupMinorUnits:
+              type: integer
+              minimum: 0
+            markupPercent:
+              type: number
               minimum: 0
 
     SendRemindersResponse:
