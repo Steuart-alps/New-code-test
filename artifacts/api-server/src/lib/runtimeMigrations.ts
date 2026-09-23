@@ -3152,9 +3152,13 @@ async function migrateKitchenCleaning() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_client" ON "kitchen_cleaning_logs" ("client_id")`);
+  // Site-scoped logs need one independent draft/sign-off row per kitchen.
+  // Drop the original account-wide key so existing databases can adopt the
+  // site-aware key without losing any records.
+  await db.execute(sql`DROP INDEX IF EXISTS "IDX_kitchen_cleaning_logs_unique"`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS "IDX_kitchen_cleaning_logs_unique"
-    ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency")
+    ON "kitchen_cleaning_logs" ("client_id", "log_date", "frequency", "site_id")
   `);
 }
 

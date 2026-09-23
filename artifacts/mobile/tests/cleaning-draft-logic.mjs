@@ -10,6 +10,7 @@ const {
   buildCleaningLogPayload,
   hydrateCleaningDraft,
   requestCleaningFrequencyChange,
+  requestCleaningSiteChange,
 } = await import(`data:text/javascript,${encodeURIComponent(javascript)}`);
 
 // Frequency switches with dirty work require confirmation; clean switches
@@ -24,6 +25,18 @@ assert.deepEqual(
 );
 assert.deepEqual(
   requestCleaningFrequencyChange('daily', 'weekly', true, true),
+  { kind: 'ignore' },
+);
+assert.deepEqual(
+  requestCleaningSiteChange(null, 7, false, false),
+  { kind: 'switch', siteId: 7 },
+);
+assert.deepEqual(
+  requestCleaningSiteChange(7, 8, true, false),
+  { kind: 'confirm', siteId: 8 },
+);
+assert.deepEqual(
+  requestCleaningSiteChange(7, 8, true, true),
   { kind: 'ignore' },
 );
 
@@ -51,6 +64,7 @@ assert.equal(hydrateCleaningDraft({
 const extended = buildCleaningLogPayload({
   logDate: '2026-09-23',
   frequency: 'daily',
+  siteId: 7,
   tasks: [
     { id: 1, area: 'Floor', task: 'Mop floor' },
     { id: 2, area: 'Bins', task: 'Empty bins' },
@@ -60,6 +74,7 @@ const extended = buildCleaningLogPayload({
   staffName: 'Bob',
   submit: false,
 });
+assert.equal(extended.siteId, 7);
 assert.deepEqual(extended.completions, [
   { taskId: 1, taskArea: 'Floor', taskName: 'Mop floor', done: true, doneBy: 'Alice' },
   { taskId: 2, taskArea: 'Bins', taskName: 'Empty bins', done: true, doneBy: 'Bob' },

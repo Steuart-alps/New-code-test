@@ -683,6 +683,93 @@ async function testSiteFiltering(req, siteId) {
   check("site-filter: POST with foreign siteId → 400", wrongSite.status === 400, `got ${wrongSite.status}`);
 }
 
+async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
+  console.log("\n── KitchenTrack cleaning site scope ──");
+  const date = isoDate(-4);
+  const frequency = "daily";
+
+  const firstTask = await req("POST", "/kitchen-cleaning/tasks", {
+    siteId,
+    area: "Kitchen A",
+    task: "Clean the prep area",
+    frequency,
+  });
+  const secondTask = await req("POST", "/kitchen-cleaning/tasks", {
+    siteId: otherSiteId,
+    area: "Kitchen B",
+    task: "Clean the service area",
+    frequency,
+  });
+  expectOk("cleaning: create first site task", firstTask.status, [201]);
+  expectOk("cleaning: create second site task", secondTask.status, [201]);
+
+  const firstTasks = await req("GET", `/kitchen-cleaning/tasks?siteId=${siteId}`);
+  expectOk("cleaning: get first site tasks", firstTasks.status);
+  check(
+    "cleaning: first site task filter excludes other site",
+    (firstTasks.data ?? []).some((task) => task.id === firstTask.data?.id) &&
+      !(firstTasks.data ?? []).some((task) => task.id === secondTask.data?.id),
+  );
+
+  const firstLog = await req("POST", "/kitchen-cleaning/logs", {
+    siteId,
+    logDate: date,
+    frequency,
+    completions: [{
+      taskId: firstTask.data?.id,
+      taskName: "Clean the prep area",
+      done: true,
+      doneBy: "Site A staff",
+    }],
+    signedBy: "Site A staff",
+    submittedAt: null,
+  });
+  const secondLog = await req("POST", "/kitchen-cleaning/logs", {
+    siteId: otherSiteId,
+    logDate: date,
+    frequency,
+    completions: [{
+      taskId: secondTask.data?.id,
+      taskName: "Clean the service area",
+      done: true,
+      doneBy: "Site B staff",
+    }],
+    signedBy: "Site B staff",
+    submittedAt: null,
+  });
+  expectOk("cleaning: save first site log", firstLog.status, [201]);
+  expectOk("cleaning: save second site log for same date", secondLog.status, [201]);
+  check("cleaning: first log is stamped with first site", firstLog.data?.site_id === siteId);
+  check("cleaning: second log is stamped with second site", secondLog.data?.site_id === otherSiteId);
+
+  const filteredLog = await req("GET", `/kitchen-cleaning/logs?date=${date}&frequency=${frequency}&siteId=${siteId}`);
+  expectOk("cleaning: get first site log", filteredLog.status);
+  check(
+    "cleaning: log filter cannot return other site",
+    filteredLog.data?.site_id === siteId &&
+      filteredLog.data?.completions?.[0]?.doneBy === "Site A staff",
+  );
+
+  const filteredHistory = await req("GET", `/kitchen-cleaning/logs/history?siteId=${siteId}`);
+  expectOk("cleaning: get first site history", filteredHistory.status);
+  check(
+    "cleaning: history filter excludes other site",
+    (filteredHistory.data ?? []).every((log) => log.site_id === siteId || log.site_id === null),
+  );
+
+  const foreignRead = await req("GET", "/kitchen-cleaning/tasks?siteId=999999999");
+  check("cleaning: foreign site read is rejected", foreignRead.status === 403, `got ${foreignRead.status}`);
+  const foreignWrite = await req("POST", "/kitchen-cleaning/logs", {
+    siteId: 999999999,
+    logDate: isoDate(-5),
+    frequency,
+    completions: [],
+    signedBy: "No access",
+    submittedAt: null,
+  });
+  check("cleaning: foreign site write is rejected", foreignWrite.status === 403, `got ${foreignWrite.status}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
@@ -725,11 +812,21 @@ async function main() {
   }
   const siteId = siteRes.data?.id;
   check("setup: site created", typeof siteId === "number", `siteId=${siteId}`);
+  const secondSiteRes = await req("POST", "/sites", {
+    name: "Module Test Kitchen B",
+    seedStarterChecks: false,
+  });
+  if (secondSiteRes.status !== 201) {
+    console.error("FATAL: second site creation failed", secondSiteRes.status, secondSiteRes.data);
+    process.exit(1);
+  }
+  const secondSiteId = secondSiteRes.data?.id;
 
   await testFireSafety(req, siteId);
   await testLegionella(req, siteId);
   await testFoodSafety(req);
   await testSiteFiltering(req, siteId);
+  await testCleaningSiteFiltering(req, siteId, secondSiteId);
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

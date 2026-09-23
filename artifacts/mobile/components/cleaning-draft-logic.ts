@@ -31,9 +31,15 @@ export type CleaningFrequencyChange =
   | { kind: 'confirm'; frequency: CleaningFrequency }
   | { kind: 'switch'; frequency: CleaningFrequency };
 
+export type CleaningSiteChange =
+  | { kind: 'ignore' }
+  | { kind: 'confirm'; siteId: number }
+  | { kind: 'switch'; siteId: number };
+
 export interface CleaningLogPayload {
   logDate: string;
   frequency: CleaningFrequency;
+  siteId: number | null;
   completions: CleaningDraftCompletion[];
   signedBy: string;
   submittedAt: string | null;
@@ -76,9 +82,21 @@ export function requestCleaningFrequencyChange(
   return { kind: 'switch', frequency: nextFrequency };
 }
 
+export function requestCleaningSiteChange(
+  currentSiteId: number | null,
+  nextSiteId: number,
+  isDirty: boolean,
+  isSaving: boolean,
+): CleaningSiteChange {
+  if (currentSiteId === nextSiteId || isSaving) return { kind: 'ignore' };
+  if (isDirty) return { kind: 'confirm', siteId: nextSiteId };
+  return { kind: 'switch', siteId: nextSiteId };
+}
+
 export function buildCleaningLogPayload(options: {
   logDate: string;
   frequency: CleaningFrequency;
+  siteId?: number | null;
   tasks: CleaningDraftTask[];
   checked: Record<number, boolean>;
   doneBy: Record<number, string>;
@@ -100,6 +118,7 @@ export function buildCleaningLogPayload(options: {
   return {
     logDate: options.logDate,
     frequency: options.frequency,
+    siteId: options.siteId ?? null,
     completions,
     signedBy: staffName,
     submittedAt: options.submit

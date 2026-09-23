@@ -34,12 +34,14 @@ import {
   buildCleaningLogPayload,
   hydrateCleaningDraft,
   requestCleaningFrequencyChange,
+  requestCleaningSiteChange,
 } from '@/components/cleaning-draft-logic';
 
 const MODULE_COLOR = '#14b8a6';
 
 interface CleaningTask {
   id: number;
+  site_id?: number | null;
   area: string;
   task: string;
   frequency: 'daily' | 'weekly' | 'monthly';
@@ -59,6 +61,7 @@ interface CompletionItem {
 
 interface CleaningLog {
   id: number;
+  site_id?: number | null;
   log_date: string;
   frequency: string;
   completions: CompletionItem[] | null;
@@ -66,6 +69,11 @@ interface CleaningLog {
   submitted_at?: string | null;
   completed_count?: number;
   total_count?: number;
+}
+
+interface Site {
+  id: number;
+  name: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -83,6 +91,7 @@ export default function CleaningScreen() {
 
   const [frequency, setFrequency] = useState<CleaningFrequency>('daily');
   const date = cleaningPeriodDate(frequency);
+  const [siteId, setSiteId] = useState<number | null>(null);
 
   // Initials used to record who completed each task
   const [initials, setInitials] = useState<string>(user?.name ?? '');
@@ -90,13 +99,36 @@ export default function CleaningScreen() {
   const [dirty, setDirty] = useState(false);
 
   const {
+    data: sites = [],
+    isLoading: sitesLoading,
+    refetch: refetchSites,
+  } = useQuery<Site[]>({
+    queryKey: ['sites'],
+    queryFn: () => apiFetch<Site[]>('/api/sites'),
+  });
+
+  useEffect(() => {
+    if (sites.length === 1 && siteId === null) {
+      setSiteId(sites[0].id);
+      return;
+    }
+    if (siteId !== null && !sites.some((site) => site.id === siteId)) {
+      setSiteId(sites.length === 1 ? sites[0].id : null);
+      setChecked({});
+      setDoneBy({});
+      setDirty(false);
+    }
+  }, [siteId, sites]);
+
+  const {
     data: tasks = [],
     isLoading: tasksLoading,
     isFetching: tasksFetching,
     refetch: refetchTasks,
   } = useQuery<CleaningTask[]>({
-    queryKey: ['kitchen-cleaning-tasks'],
-    queryFn: () => apiFetch<CleaningTask[]>('/api/kitchen-cleaning/tasks'),
+    queryKey: ['kitchen-cleaning-tasks', siteId],
+    enabled: siteId !== null,
+    queryFn: () => apiFetch<CleaningTask[]>(`/api/kitchen-cleaning/tasks?siteId=${siteId}`),
   });
 
   const visibleTasks = useMemo(
@@ -110,10 +142,11 @@ export default function CleaningScreen() {
     isFetching: logFetching,
     refetch: refetchLog,
   } = useQuery<CleaningLog | null>({
-    queryKey: ['kitchen-cleaning-log', date, frequency],
+    queryKey: ['kitchen-cleaning-log', siteId, date, frequency],
+    enabled: siteId !== null,
     queryFn: () =>
       apiFetch<CleaningLog>(
-        `/api/kitchen-cleaning/logs?date=${date}&frequency=${frequency}`,
+        `/api/kitchen-cleaning/logs?date=${date}&frequency=${frequency}&siteId=${siteId}`,
       ).catch((err: Error) => {
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
@@ -125,8 +158,9 @@ export default function CleaningScreen() {
     isLoading: historyLoading,
     refetch: refetchHistory,
   } = useQuery<CleaningLog[]>({
-    queryKey: ['kitchen-cleaning-history'],
-    queryFn: () => apiFetch<CleaningLog[]>('/api/kitchen-cleaning/logs/history'),
+    queryKey: ['kitchen-cleaning-history', siteId],
+    enabled: siteId !== null,
+    queryFn: () => apiFetch<CleaningLog[]>(`/api/kitchen-cleaning/logs/history?siteId=${siteId}`),
   });
 
   const [checked, setChecked] = useState<Record<number, boolean>>({});
@@ -148,6 +182,7 @@ export default function CleaningScreen() {
       const payload = buildCleaningLogPayload({
         logDate: date,
         frequency,
+        siteId,
         tasks: visibleTasks,
         checked,
         doneBy,
@@ -161,10 +196,10 @@ export default function CleaningScreen() {
     },
     onSuccess: async (savedLog, vars) => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.setQueryData(['kitchen-cleaning-log', date, frequency], savedLog);
+      qc.setQueryData(['kitchen-cleaning-log', siteId, date, frequency], savedLog);
       setDirty(false);
-      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-log', date, frequency] });
-      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-history'] });
+      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-log', siteId, date, frequency] });
+      qc.invalidateQueries({ queryKey: ['kitchen-cleaning-history', siteId] });
       Alert.alert(
         vars.submit ? 'Schedule signed off' : 'Draft saved',
         vars.submit
@@ -214,14 +249,38 @@ export default function CleaningScreen() {
     switchFrequency();
   }
 
+  function chooseSite(nextSiteId: number) {
+    const decision = requestCleaningSiteChange(siteId, nextSiteId, dirty, isPending);
+    if (decision.kind === 'ignore') return;
+    const switchSite = () => {
+      setChecked({});
+      setDoneBy({});
+      setInitials(user?.name ?? '');
+      setDirty(false);
+      setSiteId(decision.siteId);
+    };
+    if (decision.kind === 'confirm') {
+      Alert.alert(
+        'Discard unsaved changes?',
+        'Save your draft before changing kitchen, or discard these changes.',
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', onPress: switchSite },
+        ],
+      );
+      return;
+    }
+    switchSite();
+  }
+
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([refetchTasks(), refetchLog(), refetchHistory()]);
+    await Promise.all([refetchSites(), refetchTasks(), refetchLog(), refetchHistory()]);
     setRefreshing(false);
   }
 
   const isLoading = tasksLoading || logLoading;
-  const isBusy = isLoading || tasksFetching || logFetching || refreshing;
+  const isBusy = sitesLoading || isLoading || tasksFetching || logFetching || refreshing;
   const doneCount = visibleTasks.filter((t) => checked[t.id]).length;
   const total = visibleTasks.length;
   const progress = total > 0 ? doneCount / total : 0;
@@ -263,6 +322,41 @@ export default function CleaningScreen() {
           </View>
           <View style={{ width: 22 }} />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Kitchen site</Text>
+        {sitesLoading ? (
+          <ActivityIndicator color={colors.primary} style={{ alignSelf: 'flex-start' }} />
+        ) : sites.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+            No kitchens are available for your account.
+          </Text>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.frequencyRow}>
+              {sites.map((site) => (
+                <TouchableOpacity
+                  key={site.id}
+                  testID={`cleaning-site-${site.id}`}
+                  onPress={() => chooseSite(site.id)}
+                  disabled={isBusy}
+                  style={[
+                    styles.siteChip,
+                    {
+                      backgroundColor: siteId === site.id ? `${MODULE_COLOR}18` : colors.card,
+                      borderColor: siteId === site.id ? MODULE_COLOR : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: siteId === site.id ? MODULE_COLOR : colors.foreground, fontFamily: 'Inter_600SemiBold' }}>
+                    {site.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        )}
       </View>
 
       {/* Progress card */}
@@ -347,7 +441,15 @@ export default function CleaningScreen() {
         <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
           {frequency.charAt(0).toUpperCase() + frequency.slice(1)} tasks
         </Text>
-        {isLoading ? (
+        {siteId === null ? (
+          <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="map-pin" size={32} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Select a kitchen</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              Choose a kitchen above to view its cleaning schedule.
+            </Text>
+          </View>
+        ) : isLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
         ) : visibleTasks.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -563,6 +665,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
     textAlign: 'right',
+  },
+  siteChip: {
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
   },
   taskRow: {
     flexDirection: 'row',

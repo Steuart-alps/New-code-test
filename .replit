@@ -242,7 +242,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/mobile run test:kitchen-diary-scope"
+args = "pnpm --filter @workspace/mobile run test:kitchen-site-scope"
 
 [workflows.workflow.metadata]
 isValidation = true
