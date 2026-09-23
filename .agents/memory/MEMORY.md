@@ -31,6 +31,7 @@
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
 - [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
+- [Storage happy-path fixture](storage-happy-path-fixture.md) — required object-storage tests need a dedicated bucket plus Google signing credentials; never reuse the application bucket.
 - [Concurrent task reconciliation](concurrent-task-reconciliation.md) — task merges can drop untracked main-workspace helpers; recheck status and typecheck immediately after reconciliation.
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
 - [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.

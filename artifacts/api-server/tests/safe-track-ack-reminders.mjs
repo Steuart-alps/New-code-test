@@ -47,7 +47,7 @@ try {
   const department = await db.execute(sql`INSERT INTO departments (client_id, name) VALUES (${primary}, 'Operations') RETURNING id`);
   const departmentId = department.rows[0].id;
   await db.execute(sql`UPDATE sites SET department_id = ${departmentId} WHERE id = ${siteId} AND client_id = ${primary}`);
-  const active = await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, department, active) VALUES (${primary}, 'Active', ${siteId}, 'differently formatted dept', true) RETURNING id`);
+  const active = await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, department, email, active) VALUES (${primary}, 'Active', ${siteId}, 'differently formatted dept', 'staff@test.local', true) RETURNING id`);
   await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, active) VALUES (${primary}, 'Inactive', ${siteId}, false)`);
   await db.execute(sql`INSERT INTO staff_roster (client_id, name, active) VALUES (${primary}, 'Elsewhere', true)`);
   const doc = await db.execute(sql`
@@ -78,14 +78,19 @@ try {
     send: async ({ to, html }) => {
       if (to === "failed@test.local") throw new Error("mail failure");
       assert.match(html, /Risk Assessment/);
-      assert.match(html, /Waiting on: Active/);
+      if (to === "staff@test.local") {
+        assert.match(html, /Your SafeTrack sign-offs are outstanding/);
+        assert.doesNotMatch(html, /Waiting on:/);
+      } else {
+        assert.match(html, /Waiting on: Active/);
+      }
       sent.push(to);
     },
   };
   // Two concurrent real database claims: only one scheduler gets the digest.
   const [one, two] = await Promise.all([runSafeTrackAckReminderJob(deps), runSafeTrackAckReminderJob(deps)]);
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
-  assert.equal(sent.length, 1);
+  assert.deepEqual(sent.sort(), ["manager@test.local", "staff@test.local"]);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
@@ -99,7 +104,7 @@ try {
   assert.equal(fullyAcknowledgedSendCalled, false);
   const schedules = [];
   registerSafeTrackAckReminderSchedule((expression, task) => schedules.push({ expression, task }), async () => {});
-  assert.equal(schedules[0].expression, "50 8 * * *");
+  assert.equal(schedules[0].expression, "50 8 * * 1");
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {
