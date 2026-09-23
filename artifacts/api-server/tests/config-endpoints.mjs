@@ -16,6 +16,12 @@
 //        - after PUT custom list, the custom type is accepted
 //        - PUT (edit) with an unchanged legacy value still succeeds after the
 //          option is removed from the list
+//   2b. FixTrack contractors + PremisesTrack inspections
+//        - account-specific active custom trades and inspection types are
+//          accepted for new records
+//        - disabled or another client's values are rejected for new records
+//        - unrelated edits preserve an unchanged disabled value
+//        - consultant ?clientId context keeps both modules tenant-scoped
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
@@ -450,6 +456,199 @@ async function testRecordValidation(admin, ts) {
   await admin("DELETE", "/form-options/incident_types");
   await admin("DELETE", `/incidents/${legacyId}`);
   if (Number.isInteger(customRecord.data?.id)) await admin("DELETE", `/incidents/${customRecord.data.id}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2b. FixTrack contractors + PremisesTrack inspection validation
+// ─────────────────────────────────────────────────────────────────────────────
+async function testCustomTradeAndInspectionValidation(admin, clientAId, clientBId, ts) {
+  console.log("\n── FixTrack trades + PremisesTrack inspection types ──");
+
+  const tradeA = `A trade ${ts}`;
+  const tradeAReplacement = `A replacement trade ${ts}`;
+  const tradeB = `B trade ${ts}`;
+  const tradeBReplacement = `B replacement trade ${ts}`;
+  const inspectionA = `A inspection ${ts}`;
+  const inspectionAReplacement = `A replacement inspection ${ts}`;
+  const inspectionB = `B inspection ${ts}`;
+  const inspectionBReplacement = `B replacement inspection ${ts}`;
+
+  const setOptions = async (clientId, key, items) => {
+    const suffix = clientId === clientAId ? "" : `?clientId=${clientId}`;
+    return admin("PUT", `/form-options/${key}${suffix}`, { items });
+  };
+
+  const getOptions = async (clientId) => {
+    const suffix = clientId === clientAId ? "" : `?clientId=${clientId}`;
+    return admin("GET", `/form-options${suffix}`);
+  };
+
+  const contractorBody = (label, trades) => ({
+    name: `${label} contractor`,
+    email: `${label.toLowerCase().replaceAll(" ", "-")}-${ts}@test.local`,
+    trades,
+  });
+
+  const inspectionBody = (inspectionType, findings) => ({
+    inspectionDate: isoDate(-2),
+    inspectionType,
+    area: "Test kitchen",
+    findings,
+    inspectedBy: "Config endpoint tester",
+  });
+
+  const createdContractorIds = [];
+  const createdInspectionIds = [];
+
+  try {
+    // The consultant's two selectable clients receive different active values.
+    expectOk(
+      "custom records: save client A FixTrack trade",
+      (await setOptions(clientAId, "fixtrack_trades", [tradeA])).status,
+    );
+    expectOk(
+      "custom records: save client B FixTrack trade via ?clientId",
+      (await setOptions(clientBId, "fixtrack_trades", [tradeB])).status,
+    );
+    expectOk(
+      "custom records: save client A PremisesTrack inspection type",
+      (await setOptions(clientAId, "premises_inspection_types", [inspectionA])).status,
+    );
+    expectOk(
+      "custom records: save client B PremisesTrack inspection type via ?clientId",
+      (await setOptions(clientBId, "premises_inspection_types", [inspectionB])).status,
+    );
+
+    const aOptions = await getOptions(clientAId);
+    const bOptions = await getOptions(clientBId);
+    check(
+      "custom records: client A exposes only its active custom values",
+      JSON.stringify(aOptions.data?.options?.fixtrack_trades) === JSON.stringify([tradeA])
+        && JSON.stringify(aOptions.data?.options?.premises_inspection_types) === JSON.stringify([inspectionA]),
+      `got ${JSON.stringify(aOptions.data?.options)}`,
+    );
+    check(
+      "custom records: client B exposes only its active custom values",
+      JSON.stringify(bOptions.data?.options?.fixtrack_trades) === JSON.stringify([tradeB])
+        && JSON.stringify(bOptions.data?.options?.premises_inspection_types) === JSON.stringify([inspectionB]),
+      `got ${JSON.stringify(bOptions.data?.options)}`,
+    );
+
+    // New records accept each client's active custom value, but not the other
+    // client's value, even when the same consultant selects that client.
+    const aContractor = await admin("POST", "/contractors", contractorBody("A active", [tradeA]));
+    expectOk("custom records: client A accepts active custom trade", aContractor.status, [201]);
+    if (Number.isInteger(aContractor.data?.id)) createdContractorIds.push(["", aContractor.data.id]);
+
+    const aForeignContractor = await admin("POST", "/contractors", contractorBody("A foreign", [tradeB]));
+    expectStatus("custom records: client A rejects client B trade", aForeignContractor.status, 400);
+
+    const bContractor = await admin(
+      "POST",
+      `/contractors?clientId=${clientBId}`,
+      contractorBody("B active", [tradeB]),
+    );
+    expectOk("custom records: client B accepts active custom trade", bContractor.status, [201]);
+    if (Number.isInteger(bContractor.data?.id)) createdContractorIds.push([`?clientId=${clientBId}`, bContractor.data.id]);
+
+    const bForeignContractor = await admin(
+      "POST",
+      `/contractors?clientId=${clientBId}`,
+      contractorBody("B foreign", [tradeA]),
+    );
+    expectStatus("custom records: client B rejects client A trade", bForeignContractor.status, 400);
+
+    const aInspection = await admin("POST", "/premises-track", inspectionBody(inspectionA, "A active type"));
+    expectOk("custom records: client A accepts active inspection type", aInspection.status, [201]);
+    if (Number.isInteger(aInspection.data?.id)) createdInspectionIds.push(["", aInspection.data.id]);
+
+    const aForeignInspection = await admin(
+      "POST",
+      "/premises-track",
+      inspectionBody(inspectionB, "A foreign type"),
+    );
+    expectStatus("custom records: client A rejects client B inspection type", aForeignInspection.status, 400);
+
+    const bInspection = await admin(
+      "POST",
+      `/premises-track?clientId=${clientBId}`,
+      inspectionBody(inspectionB, "B active type"),
+    );
+    expectOk("custom records: client B accepts active inspection type", bInspection.status, [201]);
+    if (Number.isInteger(bInspection.data?.id)) createdInspectionIds.push([`?clientId=${clientBId}`, bInspection.data.id]);
+
+    const bForeignInspection = await admin(
+      "POST",
+      `/premises-track?clientId=${clientBId}`,
+      inspectionBody(inspectionA, "B foreign type"),
+    );
+    expectStatus("custom records: client B rejects client A inspection type", bForeignInspection.status, 400);
+
+    // Remove the values from the active lists. New records reject them, but an
+    // unrelated edit may retain the unchanged value already stored on a record.
+    expectOk(
+      "custom records: disable client A trade",
+      (await setOptions(clientAId, "fixtrack_trades", [tradeAReplacement])).status,
+    );
+    const disabledContractor = await admin("POST", "/contractors", contractorBody("A disabled", [tradeA]));
+    expectStatus("custom records: new contractor rejects disabled trade", disabledContractor.status, 400);
+
+    if (Number.isInteger(aContractor.data?.id)) {
+      const editedContractor = await admin("PUT", `/contractors/${aContractor.data.id}`, {
+        name: "A active contractor renamed",
+        email: aContractor.data.email,
+      });
+      expectOk("custom records: contractor edit preserves disabled trade", editedContractor.status, [200]);
+      check(
+        "custom records: contractor keeps unchanged disabled trade",
+        JSON.stringify(editedContractor.data?.trades) === JSON.stringify([tradeA]),
+        `got ${JSON.stringify(editedContractor.data?.trades)}`,
+      );
+    }
+
+    expectOk(
+      "custom records: disable client A inspection type",
+      (await setOptions(clientAId, "premises_inspection_types", [inspectionAReplacement])).status,
+    );
+    const disabledInspection = await admin(
+      "POST",
+      "/premises-track",
+      inspectionBody(inspectionA, "A disabled type"),
+    );
+    expectStatus("custom records: new inspection rejects disabled type", disabledInspection.status, 400);
+
+    if (Number.isInteger(aInspection.data?.id)) {
+      const editedInspection = await admin("PUT", `/premises-track/${aInspection.data.id}`, {
+        ...inspectionBody(inspectionA, "A unrelated edit"),
+      });
+      expectOk("custom records: inspection edit preserves disabled type", editedInspection.status, [200]);
+      const afterEdit = await admin("GET", `/premises-track?type=${encodeURIComponent(inspectionA)}`);
+      const stored = Array.isArray(afterEdit.data)
+        ? afterEdit.data.find((row) => row.id === aInspection.data.id)
+        : null;
+      check(
+        "custom records: inspection keeps unchanged disabled type",
+        stored?.inspectionType === inspectionA && stored?.findings === "A unrelated edit",
+        `got ${JSON.stringify(stored)}`,
+      );
+    }
+  } finally {
+    for (const [suffix, id] of createdContractorIds) {
+      await admin("DELETE", `/contractors/${id}${suffix}`).catch(() => {});
+    }
+    for (const [suffix, id] of createdInspectionIds) {
+      await admin("DELETE", `/premises-track/${id}${suffix}`).catch(() => {});
+    }
+    await setOptions(clientAId, "fixtrack_trades", [
+      "electrical", "plumbing", "gas_kitchen", "gas_fireplace", "gas_heating",
+      "structural", "equipment", "hvac", "it_comms", "safety_hazard", "cleaning", "general",
+    ]);
+    await setOptions(clientAId, "premises_inspection_types", [
+      "routine", "hazard", "fault", "housekeeping", "signage",
+    ]);
+    await admin("DELETE", `/form-options/fixtrack_trades?clientId=${clientBId}`).catch(() => {});
+    await admin("DELETE", `/form-options/premises_inspection_types?clientId=${clientBId}`).catch(() => {});
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1016,6 +1215,7 @@ async function main() {
   await testFormOptions(a.session, viewer, staff, ts);
   const { clientBId } = await testFormOptionsIsolation(a.session, a.clientId, ts);
   await testRecordValidation(a.session, ts);
+  await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);
