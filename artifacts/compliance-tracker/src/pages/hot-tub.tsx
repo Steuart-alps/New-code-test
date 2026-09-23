@@ -89,6 +89,8 @@ interface HotTubConfig {
   operatingRanges?: { ph?: { min: number; max: number }; sanitiser?: { min: number; max: number }; temperature?: { max: number } };
 }
 
+type TubActivityFilter = "all" | "active" | "inactive";
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CHECK_TYPE_LABELS: Record<CheckType, string> = {
@@ -1093,10 +1095,11 @@ function ManageTubsDialog({
 }) {
   const { toast } = useToast();
   const { activeClientId } = useAuth();
+  const [activityFilter, setActivityFilter] = useState<TubActivityFilter>("all");
 
   const { data: tubs = [], refetch } = useQuery<HotTub[]>({
-    queryKey: ["hot-tubs-mgmt", activeClientId],
-    queryFn: () => apiFetch("/hot-tub/tubs"),
+    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter],
+    queryFn: () => apiFetch(`/hot-tub/tubs${activityFilter === "all" ? "" : `?active=${activityFilter === "active"}`}`),
     enabled: open && !!activeClientId,
   });
 
@@ -1161,10 +1164,24 @@ function ManageTubsDialog({
           </DialogTitle>
         </DialogHeader>
 
+        <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
+          <SelectTrigger className="rounded-sm">
+            <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All tubs</SelectItem>
+            <SelectItem value="active">Active tubs</SelectItem>
+            <SelectItem value="inactive">Inactive tubs</SelectItem>
+          </SelectContent>
+        </Select>
+
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
           {tubs.length === 0 && !adding && (
             <p className="text-sm text-muted-foreground text-center py-6">
-              No tubs registered yet. Add your first one below.
+              {activityFilter === "all"
+                ? "No tubs registered yet. Add your first one below."
+                : `No ${activityFilter} tubs found.`}
             </p>
           )}
 

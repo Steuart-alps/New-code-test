@@ -293,6 +293,21 @@ async function main() {
     check("inactive HotTub asset is stored as inactive",
       inactiveHotTubAfterCreate?.active === false,
       JSON.stringify(inactiveHotTubAfterCreate));
+    const inactiveHotTubFilter = await admin("GET", "/hot-tub/tubs?active=false");
+    check("HotTub inactive filter includes inactive asset",
+      inactiveHotTubFilter.data?.some?.(row => row.id === inactiveHotTub.data?.id) &&
+      inactiveHotTubFilter.data?.every?.(row => row.active === false),
+      JSON.stringify(inactiveHotTubFilter.data));
+    const activeHotTubFilter = await scopedStaff("GET", "/hot-tub/tubs?active=true");
+    check("HotTub active filter keeps department visibility",
+      activeHotTubFilter.data?.some?.(row => row.id === scopedHotTubCreate.data?.id) &&
+      activeHotTubFilter.data?.every?.(row => row.active === true) &&
+      !activeHotTubFilter.data?.some?.(row => row.id === inactiveHotTub.data?.id),
+      JSON.stringify(activeHotTubFilter.data));
+    const invalidHotTubFilter = await admin("GET", "/hot-tub/tubs?active=maybe");
+    check("HotTub rejects invalid activity filter",
+      invalidHotTubFilter.status === 400,
+      `${invalidHotTubFilter.status} ${JSON.stringify(invalidHotTubFilter.data)}`);
     const reactivatedHotTub = await admin("PUT", `/hot-tub/tubs/${inactiveHotTub.data?.id}`, {
       active: true,
     });

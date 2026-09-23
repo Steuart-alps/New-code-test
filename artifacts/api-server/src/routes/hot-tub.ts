@@ -52,6 +52,15 @@ const tubSchema = z.object({
 router.get("/tubs", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const activeParam = req.query.active;
+  const activeFilter = activeParam === undefined
+    ? undefined
+    : activeParam === "true"
+      ? true
+      : activeParam === "false"
+        ? false
+        : null;
+  if (activeFilter === null) return res.status(400).json({ error: "Invalid active filter" });
   const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
     SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
@@ -68,6 +77,7 @@ router.get("/tubs", requireAuth, async (req, res) => {
             AND (department_id IS NULL OR department_id = ${departmentId})
         )
       )` : sql``}
+      ${activeFilter !== undefined ? sql`AND ht.active = ${activeFilter}` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);
