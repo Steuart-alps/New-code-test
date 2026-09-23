@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import {
+  approveContractorEmail,
+  dismissContractorEmail,
+} from "@/lib/contractor-approval-actions";
 
 interface EmailQueueItem {
   id: number;
@@ -94,20 +98,14 @@ export default function ContractorApprovalsPage() {
 
   async function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
     const isCancellation = item.emailType === "cancellation";
-    if (isCancellation && !confirm(
-      "Approve this calendar cancellation? It will send the contractor a cancellation notice and remove the previously sent calendar event."
-    )) return;
     setSubmittingId(item.id);
     try {
-      const endpoint = modifiedPreview ? "edit-and-send" : "approve-and-send";
-      const payload = modifiedPreview
-        ? { subject: modifiedPreview.subject, bodyText: modifiedPreview.text }
-        : {};
-      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${item.id}/${endpoint}`, {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error("Failed to approve email");
+      const result = await approveContractorEmail(
+        item,
+        { confirm: message => window.confirm(message), clientApiFetch },
+        modifiedPreview,
+      );
+      if (!result.confirmed) return;
       toast({
         title: isCancellation ? "Calendar cancellation approved and sent" : "Email approved and sent",
       });
@@ -122,17 +120,13 @@ export default function ContractorApprovalsPage() {
 
   async function handleCancel(item: EmailQueueItem) {
     const isCancellation = item.emailType === "cancellation";
-    if (!confirm(
-      isCancellation
-        ? "Dismiss this calendar cancellation? Nothing will be sent and the existing calendar event will remain in place."
-        : "Are you sure you want to cancel this email request?"
-    )) return;
     setSubmittingId(item.id);
     try {
-      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${item.id}/cancel`, {
-        method: "POST"
-      });
-      if (!res.ok) throw new Error("Failed to cancel email");
+      const result = await dismissContractorEmail(
+        item,
+        { confirm: message => window.confirm(message), clientApiFetch },
+      );
+      if (!result.confirmed) return;
       toast({ title: isCancellation ? "Calendar cancellation dismissed" : "Email cancelled" });
       setItems(prev => prev.filter(i => i.id !== item.id));
     } catch (e: any) {
