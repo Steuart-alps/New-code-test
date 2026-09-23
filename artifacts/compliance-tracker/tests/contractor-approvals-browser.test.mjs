@@ -92,6 +92,7 @@ async function openTab(cdp, url) {
 let httpServer;
 let chromium;
 let cdp;
+const chromeErrors = [];
 const tabs = [];
 
 try {
@@ -113,6 +114,9 @@ try {
     response.end("<!doctype html><title>approval refresh browser test</title>");
   });
   const httpPort = await waitForPort(httpServer);
+  const helperUrl = `http://127.0.0.1:${httpPort}/contractor-approval-refresh-state.mjs`;
+  const helperResponse = await fetch(helperUrl);
+  assert.equal(helperResponse.status, 200, "the browser fixture server must expose the helper bundle");
   const debugPort = 9200 + Math.floor(Math.random() * 500);
   chromium = spawn(chromiumPath, [
     "--headless=new",
@@ -124,7 +128,6 @@ try {
     `--user-data-dir=${path.join(tempDir, "profile")}`,
     "about:blank",
   ], { stdio: ["ignore", "ignore", "pipe"] });
-  const chromeErrors = [];
   chromium.stderr.on("data", chunk => chromeErrors.push(String(chunk)));
   const devTools = await waitForDevTools(debugPort);
   cdp = new CdpConnection(devTools.webSocketDebuggerUrl);
@@ -134,7 +137,6 @@ try {
   const otherClientTab = await openTab(cdp, testUrl);
   tabs.push(firstTab, secondTab, otherClientTab);
 
-  const helperUrl = `http://127.0.0.1:${httpPort}/contractor-approval-refresh-state.mjs`;
   const sharedKey = "complytrack:contractor-approvals:7:42";
   const otherClientKey = "complytrack:contractor-approvals:7:43";
   await evaluate(cdp, secondTab.sessionId, `
@@ -216,7 +218,52 @@ try {
     "real Chromium keeps the denied-storage baseline in memory",
   );
 
-  console.log("Contractor approval real-browser privacy checks passed (Chromium incognito + denied storage).");
+  const unsupportedKey = "complytrack:contractor-approvals:7:45";
+  await evaluate(cdp, secondTab.sessionId, `
+    (async () => {
+      const mod = await import(${JSON.stringify(helperUrl)});
+      const unsupportedWindow = Object.create(window);
+      Object.defineProperty(unsupportedWindow, "localStorage", {
+        get() { throw new DOMException("Access denied", "SecurityError"); },
+      });
+      Object.defineProperty(unsupportedWindow, "BroadcastChannel", { value: undefined });
+      window.__unsupportedState = null;
+      window.__unsupportedUnsubscribe = mod.subscribeToApprovalRefreshStorage(
+        unsupportedWindow,
+        ${JSON.stringify(unsupportedKey)},
+        state => { window.__unsupportedState = state; },
+      );
+    })()
+  `);
+  await evaluate(cdp, firstTab.sessionId, `
+    (async () => {
+      const mod = await import(${JSON.stringify(helperUrl)});
+      const unsupportedWindow = Object.create(window);
+      Object.defineProperty(unsupportedWindow, "localStorage", {
+        get() { throw new DOMException("Access denied", "SecurityError"); },
+      });
+      Object.defineProperty(unsupportedWindow, "BroadcastChannel", { value: undefined });
+      mod.persistApprovalRefreshState(unsupportedWindow, ${JSON.stringify(unsupportedKey)}, new Set([404]), [404]);
+      window.__unsupportedBaseline = mod.readPersistedApprovalRefreshState(
+        unsupportedWindow,
+        ${JSON.stringify(unsupportedKey)},
+      );
+    })()
+  `);
+  assert.deepEqual(
+    await evaluate(cdp, firstTab.sessionId, "window.__unsupportedBaseline"),
+    { knownQueueIds: [404], newRequestIds: [404] },
+    "unsupported browser APIs retain a predictable same-tab baseline",
+  );
+  assert.equal(
+    await evaluate(cdp, secondTab.sessionId, "window.__unsupportedState"),
+    null,
+    "unsupported browser APIs do not invent cross-tab delivery",
+  );
+
+  console.log("Contractor approval Chromium privacy checks passed (incognito, denied storage, unsupported APIs).");
+  console.log("Firefox private-mode check skipped: Firefox is not installed in this runtime.");
+  console.log("Safari private-mode check skipped: Safari is unavailable on this Linux runtime.");
 } catch (error) {
   if (chromium && !chromium.killed) {
     const details = chromeErrors?.join("") ?? "";
@@ -238,5 +285,10 @@ try {
     await exited;
   }
   await new Promise(resolve => httpServer?.close(() => resolve()));
-  await rm(tempDir, { recursive: true, force: true });
+  await rm(tempDir, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 250,
+  });
 }
