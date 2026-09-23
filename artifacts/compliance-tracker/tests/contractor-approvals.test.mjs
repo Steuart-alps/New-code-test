@@ -168,6 +168,31 @@ assert.match(
   "the idle refresh control must have a refresh affordance",
 );
 assert.match(
+  source,
+  /const \[newRequestIds, setNewRequestIds\] = useState<number\[\]>\(\[\]\)/,
+  "the page must track approval requests discovered since the prior refresh",
+);
+assert.match(
+  source,
+  /const knownQueueIdsRef = useRef<Set<number> \| null>\(null\)/,
+  "the page must retain the previous queue IDs for refresh comparisons",
+);
+assert.match(
+  source,
+  /incomingNewIds = nextItems[\s\S]*previousQueueIds\.has\(item\.id\)/,
+  "successful refreshes must identify requests that were not in the previous queue",
+);
+assert.match(
+  source,
+  /newRequestIds\.length === 1 \? "request" : "requests"/,
+  "the refresh result must show a clear new-request count",
+);
+assert.match(
+  source,
+  /onClick=\{\(\) => setNewRequestIds\(\[\]\)\}/,
+  "managers must be able to acknowledge and clear the new-request indication",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",

@@ -71,8 +71,10 @@ export default function ContractorApprovalsPage() {
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
     useState<PendingCancellationConfirmation | null>(null);
+  const [newRequestIds, setNewRequestIds] = useState<number[]>([]);
   const mountedRef = useRef(false);
   const fetchGenerationRef = useRef(0);
+  const knownQueueIdsRef = useRef<Set<number> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -83,6 +85,8 @@ export default function ContractorApprovalsPage() {
 
   useEffect(() => {
     setItems([]);
+    setNewRequestIds([]);
+    knownQueueIdsRef.current = null;
     fetchItems();
   }, [activeClientId]);
 
@@ -95,6 +99,23 @@ export default function ContractorApprovalsPage() {
       if (res.ok) {
         const nextItems = await res.json();
         if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+          const nextQueueIds = new Set<number>(
+            nextItems.map((item: EmailQueueItem) => item.id),
+          );
+          const previousQueueIds = knownQueueIdsRef.current;
+          if (previousQueueIds) {
+            const incomingNewIds = nextItems
+              .filter((item: EmailQueueItem) => !previousQueueIds.has(item.id))
+              .map((item: EmailQueueItem) => item.id);
+            setNewRequestIds(previousIds => {
+              const stillPendingIds = new Set(
+                previousIds.filter(id => nextQueueIds.has(id)),
+              );
+              incomingNewIds.forEach((id: number) => stillPendingIds.add(id));
+              return Array.from(stillPendingIds);
+            });
+          }
+          knownQueueIdsRef.current = nextQueueIds;
           setItems(nextItems);
           setLoadError(null);
         }
@@ -283,6 +304,27 @@ export default function ContractorApprovalsPage() {
           </div>
         ) : (
           <>
+            {newRequestIds.length > 0 && (
+              <div className="mb-4 flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-950">
+                    {newRequestIds.length} new approval{" "}
+                    {newRequestIds.length === 1 ? "request" : "requests"} found
+                  </p>
+                  <p className="text-xs text-blue-900/80">
+                    Review the refreshed list to see the new work.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setNewRequestIds([])}
+                >
+                  Mark as reviewed
+                </Button>
+              </div>
+            )}
             {loadError && (
               <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
