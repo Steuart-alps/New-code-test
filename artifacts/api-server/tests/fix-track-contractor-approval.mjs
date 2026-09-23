@@ -254,6 +254,51 @@ async function main() {
       !firstCalendarMessage?.icsAttachment?.includes("/api/fix-track/action/"),
     firstCalendarMessage?.icsAttachment);
 
+  const directCancellationId = await contractorIssue(owner, "calendar-direct-cancellation", "2030-03-10");
+  check("direct cancellation fixture queues its dated assignment",
+    (await owner("POST", `/fix-track/issues/${directCancellationId}/request-send`, { mode: "assign" })).status === 200);
+  check("direct cancellation fixture approves its assignment",
+    (await owner("POST", `/fix-track/issues/${directCancellationId}/approve-send`)).status === 200);
+  check("direct cancellation fixture dispatches its assignment",
+    (await owner("POST", `/fix-track/issues/${directCancellationId}/send-to-contractor`)).status === 200);
+  calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const directAssignmentMessage = calendarOutbox.at(-1);
+  check("direct cancellation fixture sends a dated assignment",
+    directAssignmentMessage?.icsAttachment?.includes("METHOD:REQUEST") &&
+      directAssignmentMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300310"),
+    JSON.stringify(directAssignmentMessage));
+  check("direct cancellation enters the manager approval queue",
+    (await owner("POST", `/fix-track/issues/${directCancellationId}/request-cancellation`)).status === 202);
+  const directCancellationQueue = (await owner("GET", "/fix-track/contractor-email-queue")).data?.find(
+    (entry) => entry.entityId === directCancellationId && entry.emailType === "cancellation",
+  );
+  check("unedited cancellation appears in the manager queue",
+    !!directCancellationQueue, JSON.stringify(directCancellationQueue));
+  const directCancellationApproval = directCancellationQueue
+    ? await owner("POST", `/fix-track/contractor-email-queue/${directCancellationQueue.id}/approve-and-send`)
+    : { status: 0, data: null };
+  check("manager can approve an unedited cancellation",
+    directCancellationApproval.status === 200, JSON.stringify(directCancellationApproval));
+  calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
+    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const directCancellationMessage = calendarOutbox.at(-1);
+  check("unedited cancellation keeps its stored subject and removal wording",
+    directCancellationMessage?.subject?.startsWith("Cancelled:") &&
+      directCancellationMessage?.text?.includes("The attached calendar cancellation removes the previously sent assignment.") &&
+      directCancellationMessage?.html?.includes("The attached calendar cancellation removes the previously sent assignment."),
+    JSON.stringify(directCancellationMessage));
+  check("unedited cancellation keeps the event identity and advances its sequence",
+    directCancellationMessage?.icsAttachment?.includes(`UID:fix-track-${ownerClientId}-${directCancellationId}@complytrack`) &&
+      directCancellationMessage?.icsAttachment?.includes("METHOD:CANCEL") &&
+      directCancellationMessage?.icsAttachment?.includes("STATUS:CANCELLED") &&
+      directCancellationMessage?.icsAttachment?.includes("SEQUENCE:1") &&
+      directCancellationMessage?.icsAttachment?.includes("DTSTART;VALUE=DATE:20300310"),
+    directCancellationMessage?.icsAttachment);
+  check("unedited cancellation has no contractor action links",
+    !directCancellationMessage?.html?.includes("/api/fix-track/action/") &&
+      !directCancellationMessage?.icsAttachment?.includes("/api/fix-track/action/"));
+
   check("changing a sent assignment target date succeeds",
     (await owner("PUT", `/fix-track/issues/${calendarId}`, { targetDate: "2030-02-12" })).status === 200);
   check("resend still requires explicit force",
