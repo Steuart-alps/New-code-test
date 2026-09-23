@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
+import { appendFile } from "node:fs/promises";
 
 function getResend(apiKeyOverride?: string | null) {
   const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
@@ -130,6 +131,20 @@ export async function sendSystemEmail(opts: {
   /** Stable provider key for workflows which must never duplicate a handoff. */
   idempotencyKey?: string;
 }) {
+  // Integration tests can inspect exactly what would have been handed to the
+  // provider without sending real mail. This is deliberately restricted to
+  // test mode and an explicitly configured capture file.
+  const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
+  if (process.env.NODE_ENV === "test" && capturePath) {
+    await appendFile(capturePath, `${JSON.stringify({
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.text,
+    })}\n`);
+    return;
+  }
+
   const resend = getResend();
   const rawFrom = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const email = extractEmail(rawFrom);

@@ -67,6 +67,7 @@
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:calendar-invite-compatibility": "esbuild tests/calendar-invite-compatibility.ts --bundle --platform=node --format=cjs --outfile=/tmp/calendar-invite-compatibility.cjs && node /tmp/calendar-invite-compatibility.cjs",
     "test:twofa-recovery": "bash tests/run-twofa-recovery.sh",
+    "test:staff-invitations": "bash tests/run-staff-invitations.sh",
     "test:contractor-upload-signatures": "bash tests/run-db-workflow.sh tests/contractor-upload-signatures.mjs",
     "test:contractor-compliance-reminders": "bash tests/run-db-workflow.sh tests/contractor-compliance-reminders.mjs",
     "test:fix-track-history": "bash tests/run-fix-track-history.sh",
