@@ -232,6 +232,35 @@ async function testFormOptions(admin, viewer, staff, ts) {
     `customised=${afterPut.data?.customised?.incident_types}`,
   );
 
+  // Removing an active custom value keeps it available for restoration, just
+  // like a disabled built-in default.
+  const disabledCustom = await admin("PUT", "/form-options/incident_types", {
+    items: [custom[0]],
+  });
+  expectOk("form-options: disable one custom option", disabledCustom.status);
+  const afterDisable = await admin("GET", "/form-options");
+  const disabledIncidentOptions = afterDisable.data?.disabled?.incident_types ?? [];
+  check(
+    "form-options: disabled custom option remains visible",
+    disabledIncidentOptions.includes(custom[1]),
+    `disabled=${JSON.stringify(disabledIncidentOptions)}`,
+  );
+  check(
+    "form-options: disabled built-in option remains visible",
+    disabledIncidentOptions.includes(afterDisable.data?.defaults?.incident_types?.[0]),
+    `disabled=${JSON.stringify(disabledIncidentOptions)}`,
+  );
+
+  const reenabled = await admin("PUT", "/form-options/incident_types", { items: custom });
+  expectOk("form-options: re-enable disabled custom option", reenabled.status);
+  const afterReenable = await admin("GET", "/form-options");
+  check(
+    "form-options: re-enabled custom option is active again",
+    afterReenable.data?.options?.incident_types?.includes(custom[1])
+      && !afterReenable.data?.disabled?.incident_types?.includes(custom[1]),
+    `active=${JSON.stringify(afterReenable.data?.options?.incident_types)}, disabled=${JSON.stringify(afterReenable.data?.disabled?.incident_types)}`,
+  );
+
   // DELETE resets to default.
   const del = await admin("DELETE", "/form-options/incident_types");
   expectOk("form-options: DELETE resets", del.status);

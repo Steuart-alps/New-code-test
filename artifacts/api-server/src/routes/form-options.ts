@@ -5,7 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
 import {
   FORM_OPTION_DEFAULTS, FORM_OPTION_KEYS, isFormOptionKey, settingKey,
-  validateOptionList, type FormOptionKey,
+  parseStoredOptionState, serialiseOptionState, validateOptionList, type FormOptionKey, type StoredOptionState,
 } from "../lib/formOptions";
 
 const router = Router();
@@ -29,6 +29,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const options: Record<string, string[]> = {};
   const defaults: Record<string, string[]> = {};
+  const disabled: Record<string, string[]> = {};
   const customised: Record<string, boolean> = {};
 
   for (const key of FORM_OPTION_KEYS) {
@@ -36,19 +37,26 @@ router.get("/", requireAuth, async (req, res) => {
     defaults[key] = def;
     const raw = saved.get(settingKey(key));
     let effective = def;
+    let disabledItems: string[] = [];
     let isCustom = false;
     if (raw) {
       try {
-        const parsed = JSON.parse(raw);
-        const check = validateOptionList(parsed);
-        if (check.ok) { effective = check.value; isCustom = true; }
+        const check = parseStoredOptionState(JSON.parse(raw), def);
+        if (check.ok) {
+          effective = check.value.active;
+          disabledItems = check.value.disabled;
+          isCustom = true;
+        }
       } catch { /* keep default */ }
     }
     options[key] = effective;
+    disabled[key] = disabledItems.filter(item =>
+      !effective.some(active => active.toLowerCase() === item.toLowerCase()),
+    );
     customised[key] = isCustom;
   }
 
-  res.json({ options, defaults, customised });
+  res.json({ options, defaults, disabled, customised });
 });
 
 /**
@@ -64,7 +72,16 @@ router.put("/:key", requireAuth, denyViewers, requireClientAdmin, async (req, re
 
   const check = validateOptionList(req.body?.items);
   if (!check.ok) return res.status(400).json({ error: check.error });
-  await saveOption(clientId, key, check.value);
+  const current = await loadOptionState(clientId, key);
+  const activeKeys = new Set(check.value.map(item => item.toLowerCase()));
+  const disabled = [
+    ...current.disabled,
+    ...current.active.filter(item => !activeKeys.has(item.toLowerCase())),
+  ].filter((item, index, all) =>
+    !activeKeys.has(item.toLowerCase())
+      && all.findIndex(candidate => candidate.toLowerCase() === item.toLowerCase()) === index,
+  );
+  await saveOption(clientId, key, { active: check.value, disabled });
   res.json({ ok: true, items: check.value });
 });
 
@@ -85,8 +102,23 @@ router.delete("/:key", requireAuth, denyViewers, requireClientAdmin, async (req,
   res.json({ ok: true, items: [...FORM_OPTION_DEFAULTS[key]] });
 });
 
-async function saveOption(clientId: number, key: FormOptionKey, items: string[]) {
-  const value = JSON.stringify(items);
+async function loadOptionState(clientId: number, key: FormOptionKey): Promise<StoredOptionState> {
+  const rows = await db.select({ value: appSettingsTable.value }).from(appSettingsTable)
+    .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey(key)))).limit(1);
+  const raw = rows[0]?.value;
+  if (raw) {
+    try {
+      const parsed = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
+      if (parsed.ok) return parsed.value;
+    } catch {
+      // Invalid saved settings are treated as an unsaved default list.
+    }
+  }
+  return { active: [...FORM_OPTION_DEFAULTS[key]], disabled: [] };
+}
+
+async function saveOption(clientId: number, key: FormOptionKey, state: StoredOptionState) {
+  const value = serialiseOptionState(state);
   const existing = await db.select({ clientId: appSettingsTable.clientId }).from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, settingKey(key)))).limit(1);
   if (existing.length > 0) {

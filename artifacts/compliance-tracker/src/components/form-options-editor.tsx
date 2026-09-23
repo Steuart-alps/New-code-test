@@ -32,6 +32,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
   const isAdmin = user?.role === "client_admin" || user?.role === "consultant";
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<string[]>([]);
+  const [disabledItems, setDisabledItems] = useState<string[]>([]);
   const [newItem, setNewItem] = useState("");
   const [saving, setSaving] = useState(false);
   const { data } = useFormOptions();
@@ -42,6 +43,8 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
   useEffect(() => {
     if (!open || !data) return;
     setItems([...(data.options?.[optionKey] ?? [])]);
+    setDisabledItems([...(data.disabled?.[optionKey] ?? (data.defaults?.[optionKey] ?? [])
+      .filter(item => !(data.options?.[optionKey] ?? []).some(active => active.toLowerCase() === item.toLowerCase())))]);
     setNewItem("");
   }, [open, data, optionKey]);
 
@@ -70,9 +73,20 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
 
   const updateItem = (idx: number, value: string) =>
     setItems(items.map((item, i) => i === idx ? value : item));
-  const disableItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
-  const disabledDefaults = (data?.defaults?.[optionKey] ?? [])
-    .filter(item => !items.some(active => active.toLowerCase() === item.toLowerCase()));
+  const disableItem = (idx: number) => {
+    const item = items[idx];
+    if (!item) return;
+    setItems(items.filter((_, i) => i !== idx));
+    setDisabledItems([...disabledItems, item]);
+  };
+  const enableItem = (item: string) => {
+    if (items.length >= 50) {
+      toast({ title: "Too many items", description: "Max 50 options", variant: "destructive" });
+      return;
+    }
+    setItems([...items, item]);
+    setDisabledItems(disabledItems.filter(candidate => candidate.toLowerCase() !== item.toLowerCase()));
+  };
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["form-options"] });
 
@@ -109,6 +123,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
       const res = await call<{ items: string[] }>(`/${optionKey}`, { method: "DELETE" });
       invalidate();
       setItems([...(res?.items ?? data?.defaults?.[optionKey] ?? [])]);
+      setDisabledItems([]);
       toast({ title: "Reset to default" });
     } catch (e: any) {
       toast({ title: "Failed to reset", description: e.message, variant: "destructive" });
@@ -162,10 +177,10 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
             )}
           </div>
 
-          {disabledDefaults.length > 0 && (
+          {disabledItems.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Disabled defaults</p>
-              {disabledDefaults.map(item => (
+              <p className="text-xs font-medium text-muted-foreground">Disabled options</p>
+              {disabledItems.map(item => (
                 <div key={item} className="flex items-center justify-between gap-2 rounded-sm border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground">
                   <span className="truncate">{label(item)}</span>
                   <Button
@@ -173,7 +188,7 @@ export function FormOptionsEditor({ optionKey, title, labelFor, triggerLabel }: 
                     variant="ghost"
                     size="sm"
                     className="h-7 gap-1"
-                    onClick={() => setItems([...items, item])}
+                    onClick={() => enableItem(item)}
                   >
                     <Undo2 className="w-3.5 h-3.5" /> Enable
                   </Button>

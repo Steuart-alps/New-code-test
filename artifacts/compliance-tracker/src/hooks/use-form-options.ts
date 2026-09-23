@@ -22,6 +22,7 @@ export type FormOptionKey =
 export interface FormOptionsResponse {
   options: Record<string, string[]>;
   defaults: Record<string, string[]>;
+  disabled: Record<string, string[]>;
   customised: Record<string, boolean>;
 }
 
