@@ -153,6 +153,21 @@ assert.match(
   "a refresh must keep an existing approval list visible while it runs",
 );
 assert.match(
+  source,
+  /onClick=\{fetchItems\}\s*disabled=\{loading\}/,
+  "the page header must expose a refresh control that uses the queue loader and disables while loading",
+);
+assert.match(
+  source,
+  /loading \? "Refreshing…" : "Refresh approvals"/,
+  "the refresh control must show a pending label while the queue request is running",
+);
+assert.match(
+  source,
+  /RefreshCw/,
+  "the idle refresh control must have a refresh affordance",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",

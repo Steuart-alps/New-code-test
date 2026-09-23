@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { 
-  CheckCircle2, Search, Building, MapPin,
+  CheckCircle2, Search, Building, MapPin, RefreshCw,
   ChevronDown, ChevronRight, Loader2, Pencil, Send, CalendarX2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -250,14 +250,30 @@ export default function ContractorApprovalsPage() {
               Review and approve outbound emails before they are sent to contractors.
             </p>
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search emails..."
-              className="pl-9 bg-background"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchItems}
+              disabled={loading}
+              className="shrink-0"
+            >
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              {loading ? "Refreshing…" : "Refresh approvals"}
+            </Button>
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search emails..."
+                className="pl-9 bg-background"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
           </div>
         </div>
 
