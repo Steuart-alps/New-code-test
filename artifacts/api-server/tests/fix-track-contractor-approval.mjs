@@ -308,13 +308,48 @@ async function main() {
     repeatedCancellation.status === 409, JSON.stringify(repeatedCancellation));
   check("calendar cancellation cannot bypass manager approval",
     (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 403);
-  check("manager approves calendar cancellation",
-    (await owner("POST", `/fix-track/issues/${calendarId}/approve-send`)).status === 200);
-  check("approved calendar cancellation dispatches",
-    (await owner("POST", `/fix-track/issues/${calendarId}/send-to-contractor`)).status === 200);
+
+  const pendingQueue = await owner("GET", "/fix-track/contractor-email-queue");
+  const cancellationQueue = pendingQueue.data?.find(
+    (entry) => entry.entityId === calendarId && entry.emailType === "cancellation",
+  );
+  check("calendar cancellation appears in the manager queue",
+    !!cancellationQueue, JSON.stringify(pendingQueue.data));
+  const editedCancellationDraft = cancellationQueue
+    ? await owner("PUT", `/fix-track/contractor-email-queue/${cancellationQueue.id}`, {
+        subject: "Routine assignment update",
+        bodyHtml: "<p>Please review this update.</p>",
+        bodyText: "Please review this update.",
+      })
+    : { status: 0, data: null };
+  check("editing a cancellation draft keeps cancellation subject and notice",
+    editedCancellationDraft.status === 200 &&
+      editedCancellationDraft.data?.subject?.startsWith("Calendar cancellation:"),
+    JSON.stringify(editedCancellationDraft));
+  const editedQueue = await owner("GET", "/fix-track/contractor-email-queue");
+  const editedCancellationPreview = editedQueue.data?.find(
+    (entry) => entry.id === cancellationQueue?.id,
+  )?.emailPreviewJson;
+  check("saved cancellation preview keeps calendar removal wording",
+    editedCancellationPreview?.text?.includes("The attached calendar cancellation removes the previously sent assignment."),
+    JSON.stringify(editedCancellationPreview));
+  const editedAndSentCancellation = cancellationQueue
+    ? await owner("POST", `/fix-track/contractor-email-queue/${cancellationQueue.id}/edit-and-send`, {
+        subject: "Maintenance update",
+        bodyText: "Please disregard the old appointment details.",
+      })
+    : { status: 0, data: null };
+  check("manager can send an edited cancellation draft",
+    editedAndSentCancellation.status === 200 &&
+      editedAndSentCancellation.data?.subject?.startsWith("Calendar cancellation:"),
+    JSON.stringify(editedAndSentCancellation));
   calendarOutbox = (await readFile(process.env.FIXTRACK_TEST_EMAIL_OUTBOX, "utf8"))
     .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const cancellationMessage = calendarOutbox.at(-1);
+  check("edited cancellation outbound body keeps calendar removal wording",
+    cancellationMessage?.text?.includes("The attached calendar cancellation removes the previously sent assignment.") &&
+      cancellationMessage?.html?.includes("The attached calendar cancellation removes the previously sent assignment."),
+    JSON.stringify(cancellationMessage));
   check("calendar cancellation reuses UID and increments sequence",
     cancellationMessage?.icsAttachment?.includes(`UID:fix-track-${ownerClientId}-${calendarId}@complytrack`) &&
       cancellationMessage?.icsAttachment?.includes("METHOD:CANCEL") &&

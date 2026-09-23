@@ -29,6 +29,34 @@ function hydrateQueuedContent(q: any) {
   return { html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
 }
 const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
+const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
+const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
+
+function preserveCancellationDraft(
+  emailType: unknown,
+  subject: string,
+  bodyText: string | null | undefined,
+) {
+  if (emailType !== "cancellation") return { subject, bodyText };
+
+  const safeSubject = /^(?:cancelled|calendar cancellation)\s*:/i.test(subject.trim())
+    ? subject
+    : `${CALENDAR_CANCELLATION_SUBJECT_PREFIX} ${subject.trim()}`;
+  const text = bodyText?.trim() ?? "";
+  const safeBodyText = /the attached calendar cancellation removes the previously sent assignment\./i.test(text)
+    ? bodyText
+    : [text, CALENDAR_CANCELLATION_NOTICE].filter(Boolean).join("\n\n");
+
+  return { subject: safeSubject, bodyText: safeBodyText };
+}
+
+function preserveCancellationHtml(emailType: unknown, bodyHtml: string): string {
+  if (emailType !== "cancellation" || bodyHtml.toLowerCase().includes(CALENDAR_CANCELLATION_NOTICE.toLowerCase())) {
+    return bodyHtml;
+  }
+  return `${bodyHtml}<p>${escapeHtml(CALENDAR_CANCELLATION_NOTICE)}</p>`;
+}
+
 function placeholderizeQueuedValue(value: string, payload: Record<string, string>): string {
   let safe = value;
   for (const [kind, raw] of Object.entries(payload)) {
@@ -1289,13 +1317,19 @@ router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => 
   const scope = queueDepartmentScope(req);
   const qid = Number(req.params.queueId); const parsed = z.object({ subject: z.string().min(1).max(500), bodyHtml: z.string().min(1), bodyText: z.string().optional() }).safeParse(req.body);
   if (!Number.isInteger(qid) || !parsed.success) return res.status(400).json({ error: "Invalid queue draft" });
-  const existing = (await db.execute(sql`SELECT encrypted_token_payload FROM contractor_email_queue
+  const existing = (await db.execute(sql`SELECT encrypted_token_payload,email_type FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`)).rows[0] as any;
   if (!existing) return res.status(404).json({ error: "Queue entry not found" });
   const payload = existing.encrypted_token_payload ? decryptTokenPayload(existing.encrypted_token_payload) : {};
+  const cancellationDraft = preserveCancellationDraft(existing.email_type, parsed.data.subject, parsed.data.bodyText ?? null);
   let persisted;
   try {
-    persisted = placeholderizeQueuedDraft(parsed.data.subject, parsed.data.bodyHtml, parsed.data.bodyText ?? null, payload);
+    persisted = placeholderizeQueuedDraft(
+      cancellationDraft.subject,
+      preserveCancellationHtml(existing.email_type, parsed.data.bodyHtml),
+      cancellationDraft.bodyText ?? null,
+      payload,
+    );
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : "Invalid queue draft" });
   }
@@ -1345,7 +1379,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, as
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
-    await sendEmail({ to: q.to_email, subject: q.subject, html: hydrated.html, text: hydrated.text ?? undefined,
+    await dispatchStoredContractorEmail({ to: q.to_email, subject: q.subject, html: hydrated.html, text: hydrated.text ?? undefined,
       cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
       icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
       clientId, idempotencyKey: q.idempotency_key });
@@ -1383,16 +1417,17 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   let safeSubject: string;
   let safeBodyText: string;
   try {
-    safeSubject = placeholderizeQueuedValue(p.data.subject, payload);
-    safeBodyText = placeholderizeQueuedValue(p.data.bodyText, payload);
+    const cancellationDraft = preserveCancellationDraft(existingDraft.email_type, p.data.subject, p.data.bodyText);
+    safeSubject = placeholderizeQueuedValue(cancellationDraft.subject, payload);
+    safeBodyText = placeholderizeQueuedValue(cancellationDraft.bodyText ?? "", payload);
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : "Invalid email draft" });
   }
   const escapedBody = escapeHtml(safeBodyText).replace(/\r?\n/g, "<br>");
-   const existingQuoteToken = existingDraft.quote_token ??
-     (existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload).quote : null);
+  const existingQuoteToken = existingDraft.quote_token ??
+    (existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload).quote : null);
   const quoteLink = existingDraft.email_type === "quote_request" && existingQuoteToken
-     ? `<p><a href="${getPublicAppUrl()}/contractor-quote/{{QUOTE_TOKEN}}">Submit Quote</a></p>`
+    ? `<p><a href="${getPublicAppUrl()}/contractor-quote/{{QUOTE_TOKEN}}">Submit Quote</a></p>`
     : "";
   const safeHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b"><p>${escapedBody}</p>${quoteLink}</div>`;
   const persisted = placeholderizeQueuedDraft(safeSubject, safeHtml, safeBodyText, payload);
@@ -1409,7 +1444,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
-    await sendEmail({
+    await dispatchStoredContractorEmail({
       to: q.to_email,
       subject: q.subject,
       html: hydrated.html,
@@ -1430,7 +1465,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
       await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     }
-    res.json({ ok: true, queueId: qid });
+    res.json({ ok: true, queueId: qid, subject: q.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
