@@ -36,7 +36,7 @@ import {
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
 import { z } from "zod";
-import { requireAuth, getClientId, requireRole, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -769,7 +769,7 @@ router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), a
 // the caller's client and re-check Stripe fresh. Called by the lock screen
 // after checkout so a new subscription restores access immediately instead of
 // waiting out the cache TTL.
-router.post("/refresh-access", requireAuth, async (req, res) => {
+router.post("/refresh-access", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.json({ billingLocked: false });
   try {

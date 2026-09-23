@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { clientDocumentsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, getClientId, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import {
   ObjectStorageService,
   ObjectNotFoundError,
@@ -45,7 +45,7 @@ const CreateDocBody = z.object({
   mimeType: z.string().optional().nullable(),
 });
 
-router.post("/documents", requireAuth, async (req, res) => {
+router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -103,7 +103,7 @@ const UpdateDocBody = z.object({
   description: z.string().max(2000).optional().nullable(),
 });
 
-router.patch("/documents/:id", requireAuth, async (req, res) => {
+router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -148,7 +148,7 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
 
 // ── Delete a document (removes DB record; object storage is cleaned by GC) ───
 
-router.delete("/documents/:id", requireAuth, async (req, res) => {
+router.delete("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {

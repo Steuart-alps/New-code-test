@@ -1311,7 +1311,7 @@ router.get("/contractor-email-queue/count", requireAuth, async (req, res) => {
   res.json({ count: Number((result.rows as any[])[0]?.count ?? 0) });
 });
 
-router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => {
+router.put("/contractor-email-queue/:queueId", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const scope = queueDepartmentScope(req);
@@ -1340,7 +1340,7 @@ router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => 
   res.json((rows.rows as any[])[0]);
 });
 
-router.post("/contractor-email-queue/:queueId/cancel", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const scope = queueDepartmentScope(req);
@@ -1360,7 +1360,7 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, async (req, 
 });
 
 // Approval is atomic and idempotent: only one manager can claim a draft.
-router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1402,7 +1402,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, as
   }
 });
 
-router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1477,7 +1477,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   }
 });
 
-router.post("/contractor-email-queue/:queueId/decline", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/decline", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1488,7 +1488,7 @@ router.post("/contractor-email-queue/:queueId/decline", requireAuth, async (req,
   res.json({ ok: true });
 });
 
-router.post("/quotes/:quoteId/decline", requireAuth, async (req, res) => {
+router.post("/quotes/:quoteId/decline", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
@@ -1505,7 +1505,7 @@ router.post("/quotes/:quoteId/decline", requireAuth, async (req, res) => {
   res.json({ ok: true, status: "declined" });
 });
 
-router.post("/quotes/:quoteId/accept", requireAuth, async (req, res) => {
+router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
