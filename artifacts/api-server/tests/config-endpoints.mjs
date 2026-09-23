@@ -324,6 +324,7 @@ async function testRecordValidation(admin, ts) {
     description: "Test incident",
     involvedName: "Jane Doe",
     reportedBy: "Test Reporter",
+    riddorRationale: "Assessed against RIDDOR criteria; no reportable injury or occurrence.",
     ...overrides,
   });
 

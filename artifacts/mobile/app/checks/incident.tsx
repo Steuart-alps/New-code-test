@@ -119,6 +119,8 @@ export default function IncidentScreen() {
   const [firstAiderName, setFirstAiderName] = useState('');
   const [witnesses, setWitnesses] = useState('');
   const [immediateActions, setImmediateActions] = useState('');
+  const [riddorReportable, setRiddorReportable] = useState<boolean | null>(null);
+  const [riddorRationale, setRiddorRationale] = useState('');
   const [reportedBy, setReportedBy] = useState('');
   const [siteId, setSiteId] = useState<number | null>(null);
 
@@ -183,6 +185,8 @@ export default function IncidentScreen() {
       setFirstAiderName('');
       setWitnesses('');
       setImmediateActions('');
+      setRiddorReportable(null);
+      setRiddorRationale('');
       setReportedBy('');
       setSiteId(null);
       setShowForm(false);
@@ -215,6 +219,10 @@ export default function IncidentScreen() {
       Alert.alert('Reporter required', 'Please enter who is reporting this incident.');
       return;
     }
+    if (riddorReportable === null || !riddorRationale.trim()) {
+      Alert.alert('RIDDOR assessment required', 'Choose whether this incident may be reportable and explain your assessment.');
+      return;
+    }
     const body: Record<string, unknown> = {
       incidentType: effectiveIncidentType,
       severity: effectiveSeverity,
@@ -225,6 +233,9 @@ export default function IncidentScreen() {
       involvedEmploymentType,
       firstAidGiven,
       reportedBy: reportedBy.trim(),
+      riddorReportable,
+      reportedToHse: false,
+      riddorRationale: riddorRationale.trim(),
       ...(incidentTime.trim() ? { incidentTime: incidentTime.trim() } : {}),
       ...(involvedJobTitle.trim() ? { involvedJobTitle: involvedJobTitle.trim() } : {}),
       ...(injuriesSustained.trim() ? { injuriesSustained: injuriesSustained.trim() } : {}),
@@ -579,6 +590,45 @@ export default function IncidentScreen() {
               value={immediateActions}
               onChangeText={setImmediateActions}
               placeholder="What was done straight away?"
+              placeholderTextColor={colors.mutedForeground}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+          </View>
+
+          {/* Reported by */}
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.foreground }]}>RIDDOR reportability assessment</Text>
+            <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+              Record your assessment, not an HSE submission. A manager can review and update it on the web app.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {([false, true] as const).map((value) => (
+                <TouchableOpacity
+                  key={String(value)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: riddorReportable === value }}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: riddorReportable === value ? colors.primary : colors.border,
+                      backgroundColor: riddorReportable === value ? colors.primary + '1a' : colors.card,
+                    },
+                  ]}
+                  onPress={() => setRiddorReportable(value)}
+                >
+                  <Text style={[styles.chipText, { color: riddorReportable === value ? colors.primary : colors.mutedForeground }]}>
+                    {value ? 'Potentially reportable' : 'Not reportable'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={[styles.input, styles.textArea, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card, marginTop: 8 }]}
+              value={riddorRationale}
+              onChangeText={setRiddorRationale}
+              placeholder="Why did you reach this decision?"
               placeholderTextColor={colors.mutedForeground}
               multiline
               numberOfLines={3}

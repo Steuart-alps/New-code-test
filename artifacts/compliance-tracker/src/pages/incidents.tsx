@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { Link } from "wouter";
@@ -16,10 +16,6 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -34,7 +30,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   AlertOctagon, Plus, AlertTriangle, CheckCircle2, Clock,
-  Pencil, Trash2, Lock, Search, Filter, FileWarning,
+  Pencil, Lock, Search, Filter, FileWarning,
   ShieldAlert, UserX, Activity, Settings, X, Printer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -75,6 +71,7 @@ interface Incident {
   hseReference: string | null;
   hseReportDate: string | null;
   immediateActions: string | null;
+  investigationFindings: string | null;
   correctiveActions: string | null;
   reportedBy: string;
   createdAt: string;
@@ -97,6 +94,11 @@ interface RiddorHistoryEvent {
   hseReportDate: string | null; decisionMaker: string | null; decisionAt: string;
   submittedAt: string | null; submissionEvidence: string | null;
   createdAt: string; actorName: string | null; actorEmail: string | null;
+}
+interface IncidentAction {
+  id: number; title: string; status: string; ownerName: string;
+  correctiveAction: string; evidenceReference: string | null;
+  verificationNotes: string | null; verifiedAt: string | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -345,6 +347,7 @@ const emptyForm = () => ({
   submissionEvidence: "",
   riddorRationale: "",
   immediateActions: "",
+  investigationFindings: "",
   correctiveActions: "",
   reportedBy: "",
   siteId: "",
@@ -370,9 +373,10 @@ export default function IncidentsPage() {
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editItem, setEditItem] = useState<Incident | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [historyIncident, setHistoryIncident] = useState<Incident | null>(null);
+  const [actionDraft, setActionDraft] = useState({ title: "", ownerName: "", correctiveAction: "" });
+  const [savingAction, setSavingAction] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [formSection, setFormSection] = useState<"details" | "actions">("details");
 
@@ -424,6 +428,12 @@ export default function IncidentsPage() {
     queryKey: ["incident-riddor-history", historyIncident?.id, activeClientId],
     queryFn: () => apiFetch(`/incidents/${historyIncident!.id}/riddor-history`),
     enabled: !!historyIncident && !!activeClientId,
+  });
+  const { data: linkedActions = [], isLoading: isLoadingActions } = useQuery<IncidentAction[]>({
+    queryKey: ["incident-actions", historyIncident?.id, activeClientId],
+    queryFn: () => apiFetch(`/incidents/${historyIncident!.id}/actions`),
+    enabled: !!historyIncident && !!activeClientId,
+    refetchOnWindowFocus: true,
   });
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -522,11 +532,6 @@ ${rows.map(r => `<tr>
     qc.invalidateQueries({ queryKey: ["incidents-summary"] });
   };
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/incidents/${id}`, { method: "DELETE" }),
-    onSuccess: () => { invalidate(); toast({ title: "Record deleted" }); setDeleteId(null); },
-    onError: (e: any) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
-  });
 
   // ── Dialog ─────────────────────────────────────────────────────────────────
 
@@ -566,6 +571,7 @@ ${rows.map(r => `<tr>
       submissionEvidence: "",
       riddorRationale: "",
       immediateActions: r.immediateActions ?? "",
+      investigationFindings: r.investigationFindings ?? "",
       correctiveActions: r.correctiveActions ?? "",
       reportedBy: r.reportedBy,
       siteId: r.siteId ? String(r.siteId) : "",
@@ -580,6 +586,24 @@ ${rows.map(r => `<tr>
     if (!form.involvedName.trim()) { toast({ title: "Person involved is required", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     if (!form.reportedBy.trim()) { toast({ title: "Reported by is required", variant: "destructive" }); return; }
+    const assessmentChanged = !editItem || form.riddorReportable !== editItem.riddorReportable ||
+      form.reportedToHse !== editItem.reportedToHse ||
+      form.hseReference.trim() !== (editItem.hseReference ?? "") ||
+      form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? "");
+    if (assessmentChanged && !form.riddorRationale.trim()) {
+      setFormSection("actions");
+      toast({ title: "Explain the RIDDOR decision", variant: "destructive" });
+      return;
+    }
+    const submissionChanged = form.reportedToHse &&
+      (!editItem?.reportedToHse || form.hseReference.trim() !== (editItem.hseReference ?? "") ||
+        form.hseReportDate !== (editItem.hseReportDate?.slice(0, 10) ?? ""));
+    if (submissionChanged &&
+      (!form.hseReference.trim() || !form.hseReportDate || !form.submittedAt || !form.submissionEvidence.trim())) {
+      setFormSection("actions");
+      toast({ title: "Record the HSE reference, date, time and submission evidence", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -603,10 +627,11 @@ ${rows.map(r => `<tr>
         hseReportDate: form.hseReportDate || null,
         // Empty audit fields are omitted while editing: they are append-only,
         // not a request to overwrite an earlier decision or submission.
-        submittedAt: form.submittedAt ? new Date(form.submittedAt).toISOString() : (editItem ? undefined : null),
+        submittedAt: form.submittedAt ? new Date(form.submittedAt).toISOString() : undefined,
         submissionEvidence: form.submissionEvidence.trim() || (editItem ? undefined : null),
-        riddorRationale: form.riddorRationale.trim() || (editItem ? undefined : null),
+        riddorRationale: form.riddorRationale.trim() || undefined,
         immediateActions: form.immediateActions.trim() || null,
+        investigationFindings: form.investigationFindings.trim() || null,
         correctiveActions: form.correctiveActions.trim() || null,
         reportedBy: form.reportedBy.trim(),
         siteId: form.siteId ? Number(form.siteId) : null,
@@ -624,6 +649,31 @@ ${rows.map(r => `<tr>
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function createIncidentAction() {
+    if (!historyIncident || !actionDraft.title.trim() || !actionDraft.ownerName.trim() || !actionDraft.correctiveAction.trim()) {
+      toast({ title: "Title, owner and corrective action are required", variant: "destructive" });
+      return;
+    }
+    setSavingAction(true);
+    try {
+      await apiFetch("/compliance-hub/actions", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceTrack: "IncidentTrack", sourceRecordId: String(historyIncident.id),
+          title: actionDraft.title.trim(), ownerName: actionDraft.ownerName.trim(),
+          correctiveAction: actionDraft.correctiveAction.trim(),
+        }),
+      });
+      setActionDraft({ title: "", ownerName: "", correctiveAction: "" });
+      await qc.invalidateQueries({ queryKey: ["incident-actions", historyIncident.id, activeClientId] });
+      toast({ title: "Corrective action linked to incident" });
+    } catch (e: any) {
+      toast({ title: "Could not link action", description: e.message, variant: "destructive" });
+    } finally {
+      setSavingAction(false);
     }
   }
 
@@ -889,9 +939,6 @@ ${rows.map(r => `<tr>
                       <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm" onClick={() => openEdit(r)}>
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(r.id)}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -1122,11 +1169,19 @@ ${rows.map(r => `<tr>
 
                 {/* Corrective actions */}
                 <div>
+                  <Label>Investigation findings</Label>
+                  <Textarea placeholder="Findings, contributing factors and conclusions"
+                    value={form.investigationFindings}
+                    onChange={e => setForm(f => ({ ...f, investigationFindings: e.target.value }))}
+                    className="mt-1 rounded-sm" rows={3} />
+                </div>
+                <div>
                   <Label>Corrective / Preventive Actions</Label>
                   <Textarea placeholder="What actions have been or will be taken to prevent recurrence?"
                     value={form.correctiveActions}
                     onChange={e => setForm(f => ({ ...f, correctiveActions: e.target.value }))}
                     className="mt-1 rounded-sm" rows={3} />
+                  <p className="mt-1 text-xs text-muted-foreground">This is a working note, not verified closure. Link follow-up actions from the incident history after saving.</p>
                 </div>
 
                 {/* RIDDOR section */}
@@ -1136,7 +1191,10 @@ ${rows.map(r => `<tr>
                   </p>
                   <div className="flex items-start gap-3">
                     <Checkbox id="riddor" checked={form.riddorReportable}
-                      onCheckedChange={v => setForm(f => ({ ...f, riddorReportable: !!v, reportedToHse: !!v ? f.reportedToHse : false }))}
+                      onCheckedChange={v => setForm(f => ({
+                        ...f, riddorReportable: !!v, reportedToHse: !!v ? f.reportedToHse : false,
+                        hseReference: !!v ? f.hseReference : "", hseReportDate: !!v ? f.hseReportDate : "",
+                      }))}
                       className="mt-0.5" />
                     <div>
                       <Label htmlFor="riddor" className="cursor-pointer">This incident is RIDDOR reportable</Label>
@@ -1230,10 +1288,10 @@ ${rows.map(r => `<tr>
       </Dialog>
 
       <Dialog open={historyIncident !== null} onOpenChange={v => { if (!v) setHistoryIncident(null); }}>
-        <DialogContent className="max-w-lg rounded-sm">
+        <DialogContent className="max-w-2xl rounded-sm">
           <DialogHeader>
             <DialogTitle>RIDDOR decision & submission history</DialogTitle>
-            <DialogDescription>Immutable record for {historyIncident?.involvedName ?? "this incident"}.</DialogDescription>
+            <DialogDescription>Decision, submission, investigation and follow-up for {historyIncident?.involvedName ?? "this incident"}.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[55vh] overflow-y-auto space-y-3">
             {isLoadingHistory ? <p className="text-sm text-muted-foreground">Loading history…</p> :
@@ -1250,28 +1308,34 @@ ${rows.map(r => `<tr>
                   {event.submittedAt && <p className="text-xs text-muted-foreground">Submitted {fmtDateTime(event.submittedAt)}{event.submissionEvidence ? ` · Evidence: ${event.submissionEvidence}` : ""}</p>}
                 </div>
               ))}
+            <div className="border-t pt-3 space-y-2 text-sm">
+              <h3 className="font-semibold">Investigation & evidence</h3>
+              <p>{historyIncident?.investigationFindings || "No investigation findings recorded yet."}</p>
+              {historyIncident?.correctiveActions && <p className="text-muted-foreground">Proposed actions: {historyIncident.correctiveActions}</p>}
+              {historyIncident && <CheckPhotoUploader entityType="incident" entityId={historyIncident.id} compact />}
+              <h3 className="font-semibold pt-2">Linked corrective actions</h3>
+              {isLoadingActions ? <p>Loading actions…</p> : linkedActions.length === 0 ?
+                <p className="text-muted-foreground">No linked corrective actions yet.</p> :
+                linkedActions.map(action => (
+                  <div key={action.id} className="rounded-sm border p-3 space-y-1">
+                    <p className="font-medium">{action.title} · {action.status.replaceAll("_", " ")}</p>
+                    <p>{action.correctiveAction} · Owner: {action.ownerName}</p>
+                    {action.evidenceReference && <p>Evidence: {action.evidenceReference}</p>}
+                    {action.verifiedAt && <p className="text-emerald-700">Verified closed {fmtDateTime(action.verifiedAt)}{action.verificationNotes ? ` · ${action.verificationNotes}` : ""}</p>}
+                  </div>
+                ))}
+              <Link href="/compliance-hub"><Button variant="outline" size="sm">Review and verify actions in Compliance Hub</Button></Link>
+              {canAdmin && <div className="space-y-2 border-t pt-3">
+                <h4 className="font-medium">Add a linked action</h4>
+                <Input aria-label="Action title" placeholder="Action title" value={actionDraft.title} onChange={e => setActionDraft(d => ({ ...d, title: e.target.value }))} />
+                <Input aria-label="Action owner" placeholder="Action owner" value={actionDraft.ownerName} onChange={e => setActionDraft(d => ({ ...d, ownerName: e.target.value }))} />
+                <Textarea aria-label="Corrective action" placeholder="Corrective action to complete" value={actionDraft.correctiveAction} onChange={e => setActionDraft(d => ({ ...d, correctiveAction: e.target.value }))} />
+                <Button size="sm" disabled={savingAction} onClick={createIncidentAction}>Link corrective action</Button>
+              </div>}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Delete confirm */}
-      <AlertDialog open={deleteId !== null} onOpenChange={v => { if (!v) setDeleteId(null); }}>
-        <AlertDialogContent className="rounded-sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete incident record?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove the incident record. This cannot be undone. Ensure you have a physical copy if required for compliance purposes.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="rounded-sm bg-destructive hover:bg-destructive/90"
-              onClick={() => deleteId !== null && deleteMutation.mutate(deleteId)}
-            >Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
     </AppLayout>
   );

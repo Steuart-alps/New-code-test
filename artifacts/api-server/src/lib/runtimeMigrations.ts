@@ -2640,6 +2640,7 @@ async function migrateIncidents() {
       "hse_reference"            text,
       "hse_report_date"          date,
       "immediate_actions"        text,
+      "investigation_findings"   text,
       "corrective_actions"       text,
       "reported_by"              text NOT NULL,
       "created_by"               integer REFERENCES "users"("id") ON DELETE SET NULL,
@@ -2647,6 +2648,7 @@ async function migrateIncidents() {
       "updated_at"               timestamp NOT NULL DEFAULT now()
     )
   `);
+  await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "investigation_findings" text`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_client" ON "incidents" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_incidents_date" ON "incidents" ("client_id", "incident_date" DESC)`);
   await db.execute(sql`
@@ -3000,6 +3002,18 @@ async function migrateComplianceHub() {
       CONSTRAINT "CK_compliance_action_status" CHECK ("status" IN ('open', 'in_progress', 'awaiting_verification', 'verified')),
       CONSTRAINT "CK_compliance_action_severity" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'))
     )
+  `);
+  // Older generic action forms accepted free-form incident references. Preserve
+  // ambiguous/orphaned values for admin review; normalize only references that
+  // unambiguously identify an incident belonging to the same tenant.
+  await db.execute(sql`
+    UPDATE "compliance_actions" a SET "source_record_id" = i.id::text
+    FROM "incidents" i
+    WHERE a."source_track" = 'IncidentTrack'
+      AND a."client_id" = i."client_id"
+      AND a."source_record_id" ~ '^[[:space:]]*[+]?0*[0-9]{1,10}([eE][+]?0?[0-9]{1,2})?[[:space:]]*$'
+      AND btrim(a."source_record_id")::numeric = i.id
+      AND a."source_record_id" <> i.id::text
   `);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_compliance_actions_client_status_due"
