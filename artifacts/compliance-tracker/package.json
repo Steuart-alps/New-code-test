@@ -13,6 +13,7 @@
     "test:contractor-approvals": "node tests/contractor-approvals.test.mjs",
     "test:contractor-approvals-storage": "node tests/contractor-approvals-storage.test.mjs",
     "test:contractor-approvals-browser": "node tests/contractor-approvals-browser.test.mjs",
+    "test:contractor-approvals-browser-engine": "node tests/contractor-approvals-browser-engine.test.mjs",
     "test:kitchen-dashboard-status": "node tests/kitchen-dashboard-status.test.mjs",
     "test:training-matrix": "node tests/training-matrix.test.mjs",
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",

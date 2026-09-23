@@ -1,0 +1,55 @@
+name: Contractor approval browser privacy checks
+
+on:
+  pull_request:
+    paths:
+      - "artifacts/compliance-tracker/src/lib/contractor-approval-refresh-state.ts"
+      - "artifacts/compliance-tracker/tests/contractor-approvals-*.mjs"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/contractor-approvals-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "artifacts/compliance-tracker/src/lib/contractor-approval-refresh-state.ts"
+      - "artifacts/compliance-tracker/tests/contractor-approvals-*.mjs"
+      - "artifacts/compliance-tracker/package.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/contractor-approvals-browser.yml"
+  workflow_dispatch:
+
+jobs:
+  browser-privacy:
+    name: ${{ matrix.browser }} private approval refresh
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run private-browser approval checks
+        env:
+          APPROVAL_BROWSER: ${{ matrix.browser }}
+        run: pnpm --filter @workspace/compliance-tracker run test:contractor-approvals-browser-engine
