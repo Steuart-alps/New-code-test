@@ -47,3 +47,4 @@
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from Replit storage cost plus a 20% ALPS margin.
 - [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
+- [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.

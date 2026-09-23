@@ -97,7 +97,7 @@ export default function ContractorApprovalsPage() {
 
   useEffect(() => {
     const persistedState = readPersistedApprovalRefreshState(
-      window.localStorage,
+      window,
       approvalRefreshStorageKey,
     );
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
@@ -147,8 +147,8 @@ export default function ContractorApprovalsPage() {
           newRequestIdsRef.current = nextNewRequestIds;
           setNewRequestIds(nextNewRequestIds);
           knownQueueIdsRef.current = nextQueueIds;
-          persistApprovalRefreshState(
-            window.localStorage,
+           persistApprovalRefreshState(
+             window,
             refreshStorageKeyRef.current,
             nextQueueIds,
             nextNewRequestIds,
@@ -204,8 +204,8 @@ export default function ContractorApprovalsPage() {
     const nextNewRequestIds = newRequestIdsRef.current.filter(id => id !== itemId);
     newRequestIdsRef.current = nextNewRequestIds;
     setNewRequestIds(nextNewRequestIds);
-    persistApprovalRefreshState(
-      window.localStorage,
+     persistApprovalRefreshState(
+       window,
       refreshStorageKeyRef.current,
       knownQueueIdsRef.current,
       nextNewRequestIds,
@@ -215,8 +215,8 @@ export default function ContractorApprovalsPage() {
   function markAllRequestsReviewed() {
     newRequestIdsRef.current = [];
     setNewRequestIds([]);
-    persistApprovalRefreshState(
-      window.localStorage,
+     persistApprovalRefreshState(
+       window,
       refreshStorageKeyRef.current,
       knownQueueIdsRef.current,
       [],

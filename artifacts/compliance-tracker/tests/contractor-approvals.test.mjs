@@ -233,7 +233,7 @@ assert.match(
 );
 assert.match(
   source,
-  /const persistedState = readPersistedApprovalRefreshState\(\s*window\.localStorage,\s*approvalRefreshStorageKey/,
+  /const persistedState = readPersistedApprovalRefreshState\(\s*window,\s*approvalRefreshStorageKey/,
   "the page must restore the selected client's refresh context when it mounts",
 );
 assert.match(
@@ -258,7 +258,7 @@ assert.match(
 );
 assert.match(
   refreshStateSource,
-  /event\.storageArea !== windowLike\.localStorage \|\| event\.key !== storageKey/,
+  /event\.storageArea !== storage \|\| event\.key !== scopedStorageKey/,
   "storage events must remain isolated to the current user and client key",
 );
 assert.match(
