@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth } from "@/context/auth-context";
@@ -70,6 +70,15 @@ export default function ContractorApprovalsPage() {
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
     useState<PendingCancellationConfirmation | null>(null);
+  const mountedRef = useRef(false);
+  const fetchGenerationRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setItems([]);
@@ -77,16 +86,24 @@ export default function ContractorApprovalsPage() {
   }, [activeClientId]);
 
   async function fetchItems() {
+    const fetchGeneration = ++fetchGenerationRef.current;
     setLoading(true);
     try {
       const res = await clientApiFetch("/fix-track/contractor-email-queue?status=pending");
       if (res.ok) {
-        setItems(await res.json());
+        const nextItems = await res.json();
+        if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+          setItems(nextItems);
+        }
       }
     } catch (e) {
-      console.error(e);
+      if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        console.error(e);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -143,6 +160,7 @@ export default function ContractorApprovalsPage() {
         modifiedPreview,
       );
       if (!result.confirmed) return false;
+      if (!mountedRef.current) return false;
       toast({
         title: isCancellation ? "Calendar cancellation approved and sent" : "Email approved and sent",
       });
@@ -150,10 +168,12 @@ export default function ContractorApprovalsPage() {
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      if (mountedRef.current) {
+        toast({ title: "Error", description: e.message, variant: "destructive" });
+      }
       return false;
     } finally {
-      setSubmittingId(null);
+      if (mountedRef.current) setSubmittingId(null);
     }
   }
 
@@ -177,14 +197,17 @@ export default function ContractorApprovalsPage() {
         },
       );
       if (!result.confirmed) return false;
+      if (!mountedRef.current) return false;
       toast({ title: isCancellation ? "Calendar cancellation dismissed" : "Email cancelled" });
       setItems(prev => prev.filter(i => i.id !== item.id));
       return true;
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      if (mountedRef.current) {
+        toast({ title: "Error", description: e.message, variant: "destructive" });
+      }
       return false;
     } finally {
-      setSubmittingId(null);
+      if (mountedRef.current) setSubmittingId(null);
     }
   }
 
@@ -195,11 +218,11 @@ export default function ContractorApprovalsPage() {
 
     if (pending.action === "approve") {
       void submitApproval(pending.item, pending.modifiedPreview).then(success => {
-        if (success) setPendingCancellationConfirmation(null);
+        if (success && mountedRef.current) setPendingCancellationConfirmation(null);
       });
     } else {
       void submitDismissal(pending.item).then(success => {
-        if (success) setPendingCancellationConfirmation(null);
+        if (success && mountedRef.current) setPendingCancellationConfirmation(null);
       });
     }
   }

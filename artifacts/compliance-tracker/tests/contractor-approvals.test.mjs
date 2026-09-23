@@ -89,8 +89,33 @@ assert.match(
 );
 assert.match(
   source,
-  /if \(success\) setPendingCancellationConfirmation\(null\)/,
+  /if \(success && mountedRef\.current\) setPendingCancellationConfirmation\(null\)/,
   "the dialog must close only after a successful cancellation request",
+);
+assert.match(
+  source,
+  /const mountedRef = useRef\(false\)/,
+  "the approvals page must track whether it is still mounted before handling async results",
+);
+assert.match(
+  source,
+  /mountedRef\.current = false/,
+  "unmounting the approvals page must invalidate in-flight state updates",
+);
+assert.match(
+  source,
+  /if \(mountedRef\.current\) setSubmittingId\(null\)/,
+  "a completed cancellation must not reset state on an unmounted page",
+);
+assert.match(
+  source,
+  /const fetchGeneration = \+\+fetchGenerationRef\.current/,
+  "queue loads must identify their generation so stale responses cannot overwrite a newer view",
+);
+assert.match(
+  source,
+  /fetchGeneration === fetchGenerationRef\.current/,
+  "stale queue responses must be ignored after a remount or client switch",
 );
 assert.match(
   actionSource,
