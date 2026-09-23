@@ -74,6 +74,10 @@ args = "web-typecheck"
 task = "workflow.run"
 args = "api-codegen-drift"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "mobile-kitchen-site-scope"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -224,6 +228,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run check:api-codegen"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "mobile-kitchen-site-scope"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mobile run test:kitchen-diary-scope"
 
 [workflows.workflow.metadata]
 isValidation = true

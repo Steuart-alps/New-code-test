@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { DEFAULT_DIARY_SITE, kitchenDiaryScope } from './kitchen-diary-scope';
 import {
   canSaveTemperatureForm,
   hasAnyValue,
@@ -131,20 +132,13 @@ function currentTime(): string {
   return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
-function siteQuery(siteId: number | null): string {
-  return siteId === null ? '' : `&siteId=${siteId}`;
-}
-
-function siteOnlyQuery(siteId: number | null): string {
-  return siteId === null ? '' : `?siteId=${siteId}`;
-}
-
 export function KitchenTemperatureForm() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
   const date = today();
-  const [siteId, setSiteId] = useState<number | null>(null);
+  const [siteId, setSiteId] = useState<number | null>(DEFAULT_DIARY_SITE);
+  const scope = kitchenDiaryScope(siteId, date);
   const [coldFood, setColdFood] = useState<ColdReading[]>([]);
   const [initialColdFood, setInitialColdFood] = useState<ColdReading[]>([]);
   const [delivery, setDelivery] = useState<DeliveryReading>(EMPTY_DELIVERY);
@@ -166,8 +160,8 @@ export function KitchenTemperatureForm() {
     isError: configError,
     refetch: refetchConfig,
   } = useQuery<FoodSafetyConfig>({
-    queryKey: ['food-safety', 'config', siteId],
-    queryFn: () => apiFetch(`/api/food-safety/config${siteOnlyQuery(siteId)}`),
+    queryKey: scope.configKey,
+    queryFn: () => apiFetch(scope.configUrl),
   });
   const units = useMemo(() => configuredUnits(config), [config]);
 
@@ -177,8 +171,8 @@ export function KitchenTemperatureForm() {
     isError: recordError,
     refetch: refetchRecord,
   } = useQuery<FoodSafetyRecord | null>({
-    queryKey: ['food-safety', 'today', siteId, date],
-    queryFn: () => apiFetch(`/api/food-safety?date=${date}${siteQuery(siteId)}`),
+    queryKey: scope.recordKey,
+    queryFn: () => apiFetch(scope.recordUrl),
   });
 
   useEffect(() => {
@@ -211,6 +205,7 @@ export function KitchenTemperatureForm() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (loadedRecordId === undefined) throw new Error('Wait for the selected diary to load.');
       const hasValues = (row: object) =>
         Object.values(row).some((value) => typeof value === 'string' && value.trim());
       const deliveryRow = config?.food_show_deliveries !== 'false' && hasValues(delivery)
@@ -247,9 +242,7 @@ export function KitchenTemperatureForm() {
         },
       };
       return apiFetch(
-        loadedRecordId === null
-          ? `/api/food-safety${siteOnlyQuery(siteId)}`
-          : `/api/food-safety/${loadedRecordId}`,
+        scope.saveUrl(loadedRecordId),
         {
           method: loadedRecordId === null ? 'POST' : 'PUT',
           body: JSON.stringify(body),
