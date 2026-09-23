@@ -1,6 +1,6 @@
 // E2E test: 2FA recovery code + admin 2FA reset.
 // Usage: node tests/twofa-recovery.mjs  (API must be running on API_BASE)
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,6 +59,22 @@ async function mobileRequest(method, path, body, token, ipSuffix) {
 
 async function main() {
   const ts = Date.now();
+  function tokenRows(userId) {
+    const output = execFileSync("psql", [
+      process.env.DATABASE_URL,
+      "-X",
+      "-At",
+      "-F",
+      "\t",
+      "-c",
+      `SELECT id, (used_at IS NULL) AS unused FROM password_reset_tokens WHERE user_id = ${Number(userId)} ORDER BY id`,
+    ], { encoding: "utf8" }).trim();
+    if (!output) return [];
+    return output.split("\n").map((line) => {
+      const [id, unused] = line.split("\t");
+      return { id: Number(id), unused: unused === "t" };
+    });
+  }
   const admin = makeSession();
   const reg = await admin("POST", "/auth/register", {
     email: `twofa-admin-${ts}@test.local`,
@@ -87,6 +103,33 @@ async function main() {
   });
   check("create staff", [200, 201].includes(staffCreate.status), `got ${staffCreate.status}`);
   const staffId = staffCreate.data?.id;
+
+  // ── Resend invitation: supersede the prior unused setup token ───────────────
+  const invitedEmail = `twofa-invited-${ts}@test.local`;
+  const invitedCreate = await admin("POST", "/users", {
+    email: invitedEmail, name: "Invited Staff", role: "client_staff", clientId,
+  });
+  check("create invited staff without password", invitedCreate.status === 201, `got ${invitedCreate.status}`);
+  const invitedId = invitedCreate.data?.id;
+  const beforeResend = tokenRows(invitedId);
+  check(
+    "initial invitation creates an unused setup token",
+    beforeResend.length === 1 && beforeResend[0].unused,
+    JSON.stringify(beforeResend),
+  );
+  const resend = await admin("POST", `/users/${invitedId}/resend-invite`, {});
+  check("admin can resend staff invitation", [200, 502].includes(resend.status), `got ${resend.status}`);
+  const afterResend = tokenRows(invitedId);
+  check(
+    "resend invalidates the previous setup token",
+    afterResend.length >= 2 && !afterResend[0].unused,
+    JSON.stringify(afterResend),
+  );
+  check(
+    "resend leaves one fresh unused setup token",
+    afterResend.filter((row) => row.unused).length === 1,
+    JSON.stringify(afterResend),
+  );
 
   const staff = makeSession();
   await staff("POST", "/auth/login", { email: staffEmail, password: "password-456" });
@@ -175,6 +218,8 @@ async function main() {
   // Staff cannot reset another user's 2FA (route is admin-only).
   const staffReset = await s4("POST", `/users/${staffId}/reset-2fa`, {});
   check("staff blocked from reset-2fa", [401, 403].includes(staffReset.status), `got ${staffReset.status}`);
+  const staffResend = await s4("POST", `/users/${invitedId}/resend-invite`, {});
+  check("staff blocked from resending invitations", [401, 403].includes(staffResend.status), `got ${staffResend.status}`);
 
   rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);

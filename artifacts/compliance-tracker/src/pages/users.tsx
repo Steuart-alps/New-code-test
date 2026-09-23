@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -245,6 +245,8 @@ export default function UsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [reassigning, setReassigning] = useState<number | null>(null);
+  const [resendingInvite, setResendingInvite] = useState<number | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -284,6 +286,27 @@ export default function UsersPage() {
     load();
   }
 
+  async function resendInvite(user: User) {
+    if (!confirm(`Send a fresh password setup link to ${user.name} at ${user.email}? Any older unused setup links will stop working.`)) return;
+    setResendingInvite(user.id);
+    setActionMessage(null);
+    try {
+      const res = await apiFetch(`/users/${user.id}/resend-invite`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Failed to resend password setup link");
+      }
+      setActionMessage({ kind: "success", text: `A fresh password setup link was sent to ${user.email}.` });
+    } catch (err: unknown) {
+      setActionMessage({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Failed to resend password setup link",
+      });
+    } finally {
+      setResendingInvite(null);
+    }
+  }
+
   async function reassignDept(userId: number, value: string) {
     const departmentId = value === NO_DEPT_VALUE ? null : Number(value);
     setReassigning(userId);
@@ -308,6 +331,18 @@ export default function UsersPage() {
             Add User
           </Button>
         </div>
+        {actionMessage && (
+          <p
+            className={`rounded-md border px-3 py-2 text-sm ${
+              actionMessage.kind === "success"
+                ? "border-green-200 bg-green-50 text-green-800"
+                : "border-destructive/30 bg-destructive/5 text-destructive"
+            }`}
+            role={actionMessage.kind === "error" ? "alert" : "status"}
+          >
+            {actionMessage.text}
+          </p>
+        )}
 
         {loading ? (
           <div className="text-center py-16 text-muted-foreground">Loading users...</div>
@@ -380,6 +415,19 @@ export default function UsersPage() {
                               title={u.isMaintenanceManager ? "Remove maintenance manager access" : "Make maintenance manager (FixTrack full access)"}
                             >
                               <Wrench className={`w-4 h-4 ${u.isMaintenanceManager ? "text-amber-600" : "text-muted-foreground"}`} />
+                            </Button>
+                          )}
+                          {canAdmin && u.role === "client_staff" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => resendInvite(u)}
+                              disabled={resendingInvite === u.id}
+                              title="Resend password setup link"
+                              aria-label={`Resend password setup link to ${u.name}`}
+                            >
+                              <Mail className={`w-4 h-4 ${resendingInvite === u.id ? "animate-pulse text-primary" : "text-muted-foreground"}`} />
                             </Button>
                           )}
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
