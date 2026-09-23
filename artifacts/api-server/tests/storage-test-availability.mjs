@@ -17,6 +17,9 @@ export function getStorageUnavailableSkipReason(response, suiteName) {
 export function skipWhenStorageUnavailable(response, suiteName) {
   const reason = getStorageUnavailableSkipReason(response, suiteName);
   if (!reason) return false;
+  if (process.env.STORAGE_TEST_REQUIRE_AVAILABLE === "1") {
+    throw new Error(`${reason}; the required storage fixture must not skip`);
+  }
   console.log(`SKIP: ${reason}`);
   return true;
 }
