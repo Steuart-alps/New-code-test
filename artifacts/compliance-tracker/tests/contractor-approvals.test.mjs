@@ -219,8 +219,8 @@ assert.match(
 );
 assert.match(
   source,
-  /window\.sessionStorage\.getItem\(storageKey\)/,
-  "new-request context must persist in tab-scoped session storage",
+  /window\.localStorage\.getItem\(storageKey\)/,
+  "new-request context must persist in shared local storage",
 );
 assert.match(
   source,
@@ -229,7 +229,7 @@ assert.match(
 );
 assert.match(
   source,
-  /const persistedState = readPersistedApprovalRefreshState\(storageKey\)/,
+  /const persistedState = readPersistedApprovalRefreshState\(approvalRefreshStorageKey\)/,
   "the page must restore the selected client's refresh context when it mounts",
 );
 assert.match(
@@ -244,8 +244,23 @@ assert.match(
 );
 assert.match(
   source,
-  /refreshStorageKeyRef\.current = storageKey/,
+  /refreshStorageKeyRef\.current = approvalRefreshStorageKey/,
   "changing the selected client must switch the persistence scope before fetching",
+);
+assert.match(
+  source,
+  /window\.addEventListener\("storage", handleApprovalRefreshStorage\)/,
+  "other tabs must be able to notify this page about acknowledgment changes",
+);
+assert.match(
+  source,
+  /event\.storageArea !== window\.localStorage \|\| event\.key !== storageKey/,
+  "storage events must remain isolated to the current user and client key",
+);
+assert.match(
+  source,
+  /knownQueueIdsRef\.current = new Set\(persistedState\.knownQueueIds\)/,
+  "cross-tab updates must update the comparison baseline without replacing queue rows",
 );
 assert.match(
   actionSource,

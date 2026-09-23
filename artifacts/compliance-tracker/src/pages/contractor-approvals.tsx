@@ -70,8 +70,16 @@ function readPersistedApprovalRefreshState(storageKey: string | null) {
   if (!storageKey || typeof window === "undefined") return null;
 
   try {
-    const raw = window.sessionStorage.getItem(storageKey);
-    if (!raw) return null;
+    return parsePersistedApprovalRefreshState(window.localStorage.getItem(storageKey));
+  } catch {
+    return null;
+  }
+}
+
+function parsePersistedApprovalRefreshState(raw: string | null) {
+  if (!raw) return null;
+
+  try {
     const parsed = JSON.parse(raw) as Partial<PersistedApprovalRefreshState>;
     if (
       !Array.isArray(parsed.knownQueueIds) ||
@@ -102,9 +110,9 @@ function persistApprovalRefreshState(
       knownQueueIds: Array.from(knownQueueIds),
       newRequestIds,
     };
-    window.sessionStorage.setItem(storageKey, JSON.stringify(state));
+    window.localStorage.setItem(storageKey, JSON.stringify(state));
   } catch {
-    // Session storage may be unavailable or quota-limited; in-memory state still works.
+    // Local storage may be unavailable or quota-limited; in-memory state still works.
   }
 }
 
@@ -130,6 +138,10 @@ export default function ContractorApprovalsPage() {
   const fetchGenerationRef = useRef(0);
   const knownQueueIdsRef = useRef<Set<number> | null>(null);
   const refreshStorageKeyRef = useRef<string | null>(null);
+  const approvalRefreshStorageKey = getApprovalRefreshStorageKey(
+    user?.id ?? null,
+    activeClientId,
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -139,9 +151,8 @@ export default function ContractorApprovalsPage() {
   }, []);
 
   useEffect(() => {
-    const storageKey = getApprovalRefreshStorageKey(user?.id ?? null, activeClientId);
-    const persistedState = readPersistedApprovalRefreshState(storageKey);
-    refreshStorageKeyRef.current = storageKey;
+    const persistedState = readPersistedApprovalRefreshState(approvalRefreshStorageKey);
+    refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
     setNewRequestIds(newRequestIdsRef.current);
@@ -149,7 +160,25 @@ export default function ContractorApprovalsPage() {
       ? new Set(persistedState.knownQueueIds)
       : null;
     fetchItems();
-  }, [activeClientId, user?.id]);
+  }, [activeClientId, approvalRefreshStorageKey, user?.id]);
+
+  useEffect(() => {
+    const storageKey = approvalRefreshStorageKey;
+    if (!storageKey || typeof window === "undefined") return;
+
+    function handleApprovalRefreshStorage(event: StorageEvent) {
+      if (event.storageArea !== window.localStorage || event.key !== storageKey) return;
+      const persistedState = parsePersistedApprovalRefreshState(event.newValue);
+      if (!persistedState) return;
+
+      knownQueueIdsRef.current = new Set(persistedState.knownQueueIds);
+      newRequestIdsRef.current = persistedState.newRequestIds;
+      setNewRequestIds(persistedState.newRequestIds);
+    }
+
+    window.addEventListener("storage", handleApprovalRefreshStorage);
+    return () => window.removeEventListener("storage", handleApprovalRefreshStorage);
+  }, [approvalRefreshStorageKey]);
 
   async function fetchItems() {
     const fetchGeneration = ++fetchGenerationRef.current;
