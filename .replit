@@ -269,7 +269,7 @@ timeoutMs = 180000
 
 [nix]
 channel = "stable-25_05"
-packages = ["glib", "gtk3", "gtk4", "pango", "cairo", "gdk-pixbuf", "harfbuzz", "vulkan-loader", "icu", "libxml2", "sqlite", "libxslt", "lcms2", "libevent", "libopus", "flite", "libwebp", "libavif", "libjpeg", "libepoxy", "libsecret", "enchant", "hyphen", "xorg.libX11", "xorg.libxcb", "xorg.libXext", "xorg.libXrandr", "xorg.libXcomposite", "xorg.libXcursor", "xorg.libXdamage", "xorg.libXfixes", "xorg.libXi", "libxkbcommon", "wayland", "mesa", "atk", "at-spi2-atk", "gst_all_1.gstreamer", "gst_all_1.gst-plugins-base", "gst_all_1.gst-plugins-good", "gst_all_1.gst-plugins-bad", "gst_all_1.gst-plugins-ugly", "libdrm", "libgbm", "alsa-lib", "libvpx", "libmanette", "gst_all_1.gst-libav", "woff2", "libjpeg_turbo", "libglvnd", "icu74", "libgcc", "harfbuzzFull", "libjpeg8", "libGL", "libGLX"]
+packages = ["glib", "gtk3", "gtk4", "pango", "cairo", "gdk-pixbuf", "harfbuzz", "vulkan-loader", "icu", "libxml2", "nspr", "sqlite", "libxslt", "lcms2", "libevent", "libopus", "flite", "libwebp", "libavif", "libjpeg", "libepoxy", "libsecret", "enchant", "hyphen", "xorg.libX11", "xorg.libxcb", "xorg.libXext", "xorg.libXrandr", "xorg.libXcomposite", "xorg.libXcursor", "xorg.libXdamage", "xorg.libXfixes", "xorg.libXi", "libxkbcommon", "wayland", "mesa", "atk", "at-spi2-atk", "gst_all_1.gstreamer", "gst_all_1.gst-plugins-base", "gst_all_1.gst-plugins-good", "gst_all_1.gst-plugins-bad", "gst_all_1.gst-plugins-ugly", "libdrm", "libgbm", "alsa-lib", "libvpx", "libmanette", "gst_all_1.gst-libav", "woff2", "libjpeg_turbo", "libglvnd", "icu74", "libgcc", "harfbuzzFull", "libjpeg8", "libGL", "libGLX"]
 
 [userenv]
 
