@@ -130,7 +130,7 @@ export default function ContractorApprovalsPage() {
   async function submitApproval(
     item: EmailQueueItem,
     modifiedPreview?: { subject: string; text: string },
-  ) {
+  ): Promise<boolean> {
     const isCancellation = item.emailType === "cancellation";
     setSubmittingId(item.id);
     try {
@@ -142,14 +142,16 @@ export default function ContractorApprovalsPage() {
         },
         modifiedPreview,
       );
-      if (!result.confirmed) return;
+      if (!result.confirmed) return false;
       toast({
         title: isCancellation ? "Calendar cancellation approved and sent" : "Email approved and sent",
       });
       setEditingId(null);
       setItems(prev => prev.filter(i => i.id !== item.id));
+      return true;
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
+      return false;
     } finally {
       setSubmittingId(null);
     }
@@ -163,7 +165,7 @@ export default function ContractorApprovalsPage() {
     void submitDismissal(item);
   }
 
-  async function submitDismissal(item: EmailQueueItem) {
+  async function submitDismissal(item: EmailQueueItem): Promise<boolean> {
     const isCancellation = item.emailType === "cancellation";
     setSubmittingId(item.id);
     try {
@@ -174,25 +176,31 @@ export default function ContractorApprovalsPage() {
           clientApiFetch,
         },
       );
-      if (!result.confirmed) return;
+      if (!result.confirmed) return false;
       toast({ title: isCancellation ? "Calendar cancellation dismissed" : "Email cancelled" });
       setItems(prev => prev.filter(i => i.id !== item.id));
+      return true;
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
+      return false;
     } finally {
       setSubmittingId(null);
     }
   }
 
-  function confirmCancellation() {
+  function confirmCancellation(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
     const pending = pendingCancellationConfirmation;
-    setPendingCancellationConfirmation(null);
-    if (!pending) return;
+    if (!pending || submittingId === pending.item.id) return;
 
     if (pending.action === "approve") {
-      void submitApproval(pending.item, pending.modifiedPreview);
+      void submitApproval(pending.item, pending.modifiedPreview).then(success => {
+        if (success) setPendingCancellationConfirmation(null);
+      });
     } else {
-      void submitDismissal(pending.item);
+      void submitDismissal(pending.item).then(success => {
+        if (success) setPendingCancellationConfirmation(null);
+      });
     }
   }
 
@@ -415,7 +423,10 @@ export default function ContractorApprovalsPage() {
       <AlertDialog
         open={pendingCancellationConfirmation !== null}
         onOpenChange={open => {
-          if (!open) setPendingCancellationConfirmation(null);
+          const isSubmittingCancellation =
+            pendingCancellationConfirmation !== null &&
+            submittingId === pendingCancellationConfirmation.item.id;
+          if (!open && !isSubmittingCancellation) setPendingCancellationConfirmation(null);
         }}
       >
         <AlertDialogContent>
@@ -432,8 +443,19 @@ export default function ContractorApprovalsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep reviewing</AlertDialogCancel>
+            <AlertDialogCancel
+              disabled={
+                pendingCancellationConfirmation !== null &&
+                submittingId === pendingCancellationConfirmation.item.id
+              }
+            >
+              Keep reviewing
+            </AlertDialogCancel>
             <AlertDialogAction
+              disabled={
+                pendingCancellationConfirmation !== null &&
+                submittingId === pendingCancellationConfirmation.item.id
+              }
               className={
                 pendingCancellationConfirmation?.action === "approve"
                   ? "bg-amber-600 text-white hover:bg-amber-700"
@@ -441,9 +463,17 @@ export default function ContractorApprovalsPage() {
               }
               onClick={confirmCancellation}
             >
-              {pendingCancellationConfirmation?.action === "approve"
-                ? "Approve Cancellation"
-                : "Dismiss"}
+              {pendingCancellationConfirmation !== null &&
+              submittingId === pendingCancellationConfirmation.item.id ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending…
+                </>
+              ) : pendingCancellationConfirmation?.action === "approve" ? (
+                "Approve Cancellation"
+              ) : (
+                "Dismiss"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

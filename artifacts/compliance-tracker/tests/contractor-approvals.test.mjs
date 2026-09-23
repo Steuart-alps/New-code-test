@@ -68,6 +68,31 @@ assert.match(
   "ordinary confirmation behavior must remain available for non-cancellation actions",
 );
 assert.match(
+  source,
+  /event\.preventDefault\(\);\s*const pending = pendingCancellationConfirmation/,
+  "confirming a cancellation must keep the dialog open while the request is pending",
+);
+assert.match(
+  source,
+  /Sending…/,
+  "the cancellation dialog must show a sending state while the request is pending",
+);
+assert.match(
+  source,
+  /<AlertDialogCancel[\s\S]*disabled=\{/,
+  "the dialog cancel action must be disabled while the request is pending",
+);
+assert.match(
+  source,
+  /<AlertDialogAction[\s\S]*disabled=\{/,
+  "the dialog confirm action must be disabled while the request is pending",
+);
+assert.match(
+  source,
+  /if \(success\) setPendingCancellationConfirmation\(null\)/,
+  "the dialog must close only after a successful cancellation request",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",
