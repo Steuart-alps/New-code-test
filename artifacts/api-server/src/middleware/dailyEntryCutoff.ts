@@ -116,10 +116,10 @@ function isTrackWrite(req: Request): boolean {
  * allowlist: both halves are SQL identifiers and must never come from a URL.
  * Metadata/configuration routes are intentionally absent.
  */
-export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: string }> = [
+export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: string; siteScoped?: boolean }> = [
   { path: /^\/food-safety\/\d+$/, table: "food_safety_records", date: "record_date" },
   { path: /^\/fire-safety\/\d+$/, table: "fire_safety_checks", date: "check_date" },
-  { path: /^\/legionella\/\d+$/, table: "legionella_checks", date: "check_date" },
+  { path: /^\/legionella\/\d+$/, table: "legionella_checks", date: "check_date", siteScoped: true },
   { path: /^\/hot-tub\/\d+$/, table: "hot_tub_checks", date: "check_date" },
   { path: /^\/tree-track\/\d+$/, table: "tree_inspections", date: "check_date" },
   { path: /^\/pool-track\/\d+$/, table: "pool_checks", date: "check_date" },
@@ -135,8 +135,8 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/swim-track\/surveillance\/\d+$/, table: "swim_surveillance_checks", date: "check_date" },
   { path: /^\/swim-track\/first-aid\/\d+$/, table: "swim_first_aid_checks", date: "check_date" },
   { path: /^\/swim-track\/incidents\/\d+$/, table: "swim_incidents", date: "incident_date" },
-  { path: /^\/kitchen-weekly\/weekly\/\d+$/, table: "kitchen_weekly_records", date: "week_commencing" },
-  { path: /^\/kitchen-weekly\/probe\/\d+$/, table: "kitchen_probe_checks", date: "check_date" },
+  { path: /^\/kitchen-weekly\/weekly\/\d+$/, table: "kitchen_weekly_records", date: "week_commencing", siteScoped: true },
+  { path: /^\/kitchen-weekly\/probe\/\d+$/, table: "kitchen_probe_checks", date: "check_date", siteScoped: true },
   { path: /^\/bike-track\/hires\/\d+$/, table: "bike_hire_records", date: "hire_date" },
   { path: /^\/bike-track\/services\/\d+$/, table: "bike_services", date: "service_date" },
   { path: /^\/green-track\/pre-use-checks\/\d+$/, table: "green_pre_use_checks", date: "check_date" },
@@ -159,10 +159,10 @@ function storedDateLookup(path: string) {
   return STORED_DATE_LOOKUPS.find(lookup => lookup.path.test(path));
 }
 
-async function findStoredEntryDate(req: Request): Promise<string | null | "missing"> {
+async function findStoredEntryDate(req: Request): Promise<string | null | "missing" | "forbidden"> {
   // Lazy imports keep the pure decision helper usable by lightweight clients
   // and tooling that evaluates this module without a database connection.
-  const [{ db }, { getClientId }, { sql }] = await Promise.all([
+  const [{ db }, { getClientId, getActiveDepartmentId }, { sql }] = await Promise.all([
     import("@workspace/db"),
     import("./requireAuth"),
     import("drizzle-orm"),
@@ -179,13 +179,24 @@ async function findStoredEntryDate(req: Request): Promise<string | null | "missi
   // Identifiers are selected only from STORED_DATE_LOOKUPS above; values remain
   // ordinary tagged parameters (never interpolated into SQL text).
   const result = await db.execute(sql`
-    SELECT ${sql.raw(`"${lookup.date}"`)} AS entry_date
-    FROM ${sql.raw(`"${lookup.table}"`)}
-    WHERE id = ${id} AND client_id = ${clientId}
+    SELECT ${sql.raw(`record."${lookup.date}"`)} AS entry_date
+      ${lookup.siteScoped ? sql`, site.department_id AS site_department_id` : sql``}
+    FROM ${sql.raw(`"${lookup.table}"`)} AS record
+      ${lookup.siteScoped ? sql`LEFT JOIN "sites" AS site
+        ON site.id = record.site_id AND site.client_id = record.client_id` : sql``}
+    WHERE record.id = ${id} AND record.client_id = ${clientId}
     LIMIT 1
   `);
-  const row = (result as any).rows?.[0] as { entry_date?: string | Date | null } | undefined;
+  const row = (result as any).rows?.[0] as {
+    entry_date?: string | Date | null;
+    site_department_id?: number | null;
+  } | undefined;
   if (!row) return "missing";
+  const departmentId = getActiveDepartmentId(req);
+  if (lookup.siteScoped && departmentId !== null
+    && row.site_department_id !== null && row.site_department_id !== departmentId) {
+    return "forbidden";
+  }
   if (!row.entry_date) return null;
   return row.entry_date instanceof Date
     ? localClock(row.entry_date, ACCOUNT_TIMEZONE).date
@@ -257,6 +268,10 @@ export async function enforceDailyEntryCutoff(req: Request, res: Response, next:
       const storedDate = await findStoredEntryDate(req);
       if (storedDate === "missing") {
         res.status(404).json({ error: "Record not found" });
+        return;
+      }
+      if (storedDate === "forbidden") {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
       // A mapped record with a NULL date fails closed; never fall back to a

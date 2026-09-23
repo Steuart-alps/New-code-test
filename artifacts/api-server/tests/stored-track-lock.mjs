@@ -53,11 +53,76 @@ async function main() {
   expect("create staff account", staffCreated, [200, 201]);
   const staff = session();
   expect("login staff", await staff("POST", "/auth/login", { email: staffEmail, password: "password-123" }), [200]);
+  const old = iso(-3), yesterday = iso(-1), today = iso(0);
+
+  // Department-scoped staff must pass the site boundary before the date lock
+  // is evaluated. Otherwise an old record in another department could leak its
+  // existence through a 423 response instead of the route's 403.
+  const alphaDepartment = await admin("POST", "/departments", { name: `Lock Alpha ${suffix}` });
+  const betaDepartment = await admin("POST", "/departments", { name: `Lock Beta ${suffix}` });
+  expect("create lock alpha department", alphaDepartment, [200, 201]);
+  expect("create lock beta department", betaDepartment, [200, 201]);
+  const alphaSite = await admin("POST", "/sites", {
+    name: `Lock Alpha Site ${suffix}`, departmentId: alphaDepartment.data?.id, seedStarterChecks: false,
+  });
+  const betaSite = await admin("POST", "/sites", {
+    name: `Lock Beta Site ${suffix}`, departmentId: betaDepartment.data?.id, seedStarterChecks: false,
+  });
+  expect("create lock alpha site", alphaSite, [200, 201]);
+  expect("create lock beta site", betaSite, [200, 201]);
+  const scopedStaffEmail = `stored-lock-scoped-staff-${suffix}@test.local`;
+  expect("create department-scoped staff", await admin("POST", "/users", {
+    name: "Stored Date Lock Alpha Staff", email: scopedStaffEmail, password: "password-123",
+    role: "client_staff", clientId, departmentId: alphaDepartment.data?.id,
+  }), [200, 201]);
+  const scopedStaff = session();
+  expect("login department-scoped staff",
+    await scopedStaff("POST", "/auth/login", { email: scopedStaffEmail, password: "password-123" }), [200]);
+
+  const scopedAlphaOld = await admin("POST", "/legionella", {
+    checkType: "calorifier_temp", checkDate: old, result: "pass", temperature: 60,
+    performedBy: "Lock Fixture", siteId: alphaSite.data?.id,
+  });
+  const scopedBetaOld = await admin("POST", "/legionella", {
+    checkType: "calorifier_temp", checkDate: old, result: "pass", temperature: 60,
+    performedBy: "Lock Fixture", siteId: betaSite.data?.id,
+  });
+  const scopedAlphaCurrent = await admin("POST", "/legionella", {
+    checkType: "calorifier_temp", checkDate: today, result: "pass", temperature: 60,
+    performedBy: "Lock Fixture", siteId: alphaSite.data?.id,
+  });
+  expect("seed scoped alpha old Legionella check", scopedAlphaOld, [201]);
+  expect("seed scoped beta old Legionella check", scopedBetaOld, [201]);
+  expect("seed scoped alpha current Legionella check", scopedAlphaCurrent, [201]);
+  if (scopedAlphaOld.status === 201 && scopedBetaOld.status === 201 && scopedAlphaCurrent.status === 201) {
+    const alphaOldPath = `/legionella/${scopedAlphaOld.data?.id}`;
+    const betaOldPath = `/legionella/${scopedBetaOld.data?.id}`;
+    const alphaCurrentPath = `/legionella/${scopedAlphaCurrent.data?.id}`;
+    const scopedList = await scopedStaff("GET", "/legionella");
+    expect("scoped staff can list Legionella", scopedList, [200]);
+    check("scoped Legionella list includes alpha only",
+      scopedList.data?.some?.(row => row.id === scopedAlphaOld.data.id)
+      && !scopedList.data?.some?.(row => row.id === scopedBetaOld.data.id),
+      JSON.stringify(scopedList.data));
+    const alphaOldEdit = await scopedStaff("PUT", alphaOldPath, { notes: "scoped staff edit" });
+    check("in-scope old Legionella PUT is locked",
+      alphaOldEdit.status === 423 && alphaOldEdit.data?.code === "TRACK_RECORD_LOCKED",
+      `${alphaOldEdit.status} ${JSON.stringify(alphaOldEdit.data)}`);
+    const alphaForged = await scopedStaff("PUT", alphaOldPath, { checkDate: today, notes: "forged fresh date" });
+    check("in-scope forged Legionella date remains locked",
+      alphaForged.status === 423 && alphaForged.data?.code === "TRACK_RECORD_LOCKED",
+      `${alphaForged.status} ${JSON.stringify(alphaForged.data)}`);
+    expect("in-scope current Legionella PUT works",
+      await scopedStaff("PUT", alphaCurrentPath, { notes: "current staff edit" }), [200]);
+    check("out-of-scope old Legionella PUT is hidden",
+      (await scopedStaff("PUT", betaOldPath, { notes: "foreign department edit" })).status === 403);
+    expect("admin can correct beta Legionella record",
+      await admin("PUT", betaOldPath, { notes: "admin correction" }), [200]);
+  }
 
   // Food-safety also supplies the metadata/config regression assertion.
   const configBefore = await admin("GET", "/food-safety/config");
   expect("read food config before", configBefore, [200]);
-  const old = iso(-3), yesterday = iso(-1), today = iso(0);
   const foodOld = await admin("POST", "/food-safety", { recordDate: old, correctives: "seed" });
   expect("seed old food record", foodOld, [201]);
   const foodId = foodOld.data?.id;

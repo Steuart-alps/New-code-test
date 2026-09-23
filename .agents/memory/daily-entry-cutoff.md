@@ -13,4 +13,4 @@ For ID-addressed operational evidence, use the record's tenant-scoped persisted 
 
 **Why:** Action remediation can legitimately continue after the source check's correction window, and documents or configuration should not become uneditable merely because they were created long ago.
 
-**How to apply:** Classify new ID-addressed routes by whether they mutate day-bound evidence before adding them to the persisted-date lookup; keep unrelated follow-up and metadata authorization separate.
+**How to apply:** Classify new ID-addressed routes by whether they mutate day-bound evidence before adding them to the persisted-date lookup; for site-scoped rows, enforce the caller's department/site boundary before returning a date-lock decision; keep unrelated follow-up and metadata authorization separate.
