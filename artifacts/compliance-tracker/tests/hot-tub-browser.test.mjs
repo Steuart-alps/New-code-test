@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chromium } from "@playwright/test";
+import { chromium, firefox, webkit } from "@playwright/test";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const browserName = process.env.HOT_TUB_BROWSER ?? "chromium";
+const browserTypes = { chromium, firefox, webkit };
+const browserType = browserTypes[browserName];
 const port = 23000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
-const chromiumPath = process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium";
+const browserExecutablePath = browserName === "chromium"
+  ? process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium"
+  : process.env.HOT_TUB_BROWSER_EXECUTABLE_PATH;
+
+if (!browserType) {
+  throw new Error(`Unsupported HOT_TUB_BROWSER=${browserName}; expected chromium, firefox, or webkit`);
+}
 
 const activeTub = {
   id: 701,
@@ -60,7 +69,10 @@ function jsonResponse(route, data, status = 200) {
 
 try {
   await waitForServer();
-  browser = await chromium.launch({ headless: true, executablePath: chromiumPath });
+  browser = await browserType.launch({
+    headless: true,
+    executablePath: browserExecutablePath,
+  });
   page = await browser.newPage();
   page.on("console", message => console.error(`[browser:${message.type()}] ${message.text()}`));
   page.on("pageerror", error => console.error(`[browser:error] ${error.message}`));
@@ -153,10 +165,10 @@ try {
   await reopenedDialog.getByText(inactiveTub.name, { exact: true }).waitFor({ state: "visible" });
   await reopenedDialog.getByText(activeTub.name, { exact: true }).waitFor({ state: "hidden" });
 
-  console.log("HotTub activity filter browser checks passed.");
+  console.log(`HotTub activity filter ${browserName} browser checks passed.`);
 } catch (error) {
   if (/Executable doesn't exist|browserType\.launch:.*executable/i.test(String(error))) {
-    console.log("HotTub activity filter browser check skipped: browser binary is unavailable.");
+    console.log(`HotTub activity filter ${browserName} browser check skipped: browser binary is unavailable.`);
   } else {
     if (page) {
       console.error("HotTub browser URL at failure:", page.url());
