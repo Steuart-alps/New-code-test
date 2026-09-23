@@ -276,6 +276,16 @@ async function main() {
     });
     expect("scoped staff can create HotTub asset in current department",
       scopedHotTubCreate, [201]);
+    const clientWideSite = await admin("POST", "/sites", {
+      name: `Lock Client-Wide Site ${suffix}`, seedStarterChecks: false,
+    });
+    expect("create lock client-wide site", clientWideSite, [200, 201]);
+    if (clientWideSite.status === 200 || clientWideSite.status === 201) {
+      expect("scoped staff can create HotTub asset at client-wide site",
+        await scopedStaff("POST", "/hot-tub/tubs", {
+          name: `Scoped client-wide tub ${suffix}`, siteId: clientWideSite.data.id,
+        }), [201]);
+    }
     const blockedHotTubCreate = await scopedStaff("POST", "/hot-tub/tubs", {
       name: `Blocked cross-department tub ${suffix}`, siteId: betaSite.data.id,
     });
