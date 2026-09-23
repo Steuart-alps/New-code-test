@@ -5,6 +5,12 @@ import { eq, and, inArray } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
+import {
+  CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING,
+  MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+  MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+  parseContractorComplianceLeadDays,
+} from "../lib/contractorComplianceReminders";
 
 const router: IRouter = Router();
 
@@ -18,6 +24,7 @@ const SETTING_KEYS = [
   "smtpFrom",
   "smtpFromName",
   "defaultLeadTimeDays",
+  CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING,
   "companyName",
   "maintenanceEmail",
   "additionalReminderEmails",
@@ -142,6 +149,21 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     rawBody.fixTrackStaleDays = String(parsed);
+  }
+  if (rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] !== undefined) {
+    const rawLeadDays = rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING];
+    if (rawLeadDays === null || rawLeadDays.trim() === "") {
+      rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] = null;
+    } else {
+      const parsed = parseContractorComplianceLeadDays(rawLeadDays);
+      if (parsed === null) {
+        res.status(400).json({
+          error: `Contractor reminder lead time must be a whole number between ${MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS} and ${MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS} days`,
+        });
+        return;
+      }
+      rawBody[CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING] = String(parsed);
+    }
   }
   if (rawBody.storageWarningThresholdBytes !== undefined) {
     if (rawBody.storageWarningThresholdBytes === null) {

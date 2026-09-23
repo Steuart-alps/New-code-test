@@ -1960,6 +1960,7 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     companyName: "",
     defaultLeadTimeDays: "30",
+    contractorComplianceLeadTimeDays: "30",
     notificationEmail: "",
     maintenanceEmail: "",
     additionalReminderEmails: "",
@@ -1977,6 +1978,7 @@ export default function SettingsPage() {
       setFormData({
         companyName: settings.companyName || "",
         defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
+        contractorComplianceLeadTimeDays: (settings as any).contractorComplianceLeadTimeDays || "30",
         notificationEmail: (settings as any).notificationEmail || "",
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
@@ -2068,6 +2070,22 @@ export default function SettingsPage() {
                   value={formData.notificationEmail}
                   onChange={handleChange}
                   placeholder="owner@yourcompany.com"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Contractor expiry warning lead time (days)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Send insurance, DBS / PVG, and certificate warnings this many days before expiry. Existing accounts use 30 days.
+                </p>
+                <Input
+                  type="number"
+                  name="contractorComplianceLeadTimeDays"
+                  min="0"
+                  max="365"
+                  step="1"
+                  value={formData.contractorComplianceLeadTimeDays}
+                  onChange={handleChange}
                 />
               </div>
 

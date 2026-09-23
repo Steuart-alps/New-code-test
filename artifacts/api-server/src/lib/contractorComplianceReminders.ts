@@ -3,7 +3,7 @@
  *
  * For each active client, alerts the client's managers (client_admin users and
  * maintenance managers) when a contractor's:
- *   - public liability insurance expires within 30 days or has already expired, or
+ *   - public liability insurance expires within the client's configured lead time or has already expired, or
  *   - DBS check is older than 3 years (or missing a renewal for that long).
  *
  * Sends an email digest (Resend-based, mirroring fixTrackOverdueAlerts) plus a
@@ -18,8 +18,8 @@
  */
 
 import { db } from "@workspace/db";
-import { clientsTable } from "@workspace/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { appSettingsTable, clientsTable } from "@workspace/db/schema";
+import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
@@ -27,9 +27,38 @@ import { sendPushToUsers } from "./pushNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
 
 /** Insurance is flagged when it expires within this many days (or has expired). */
-export const INSURANCE_LEAD_DAYS = 30;
+export const DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS = 30;
+export const MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS = 0;
+export const MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS = 365;
+/** Backwards-compatible name for callers that use the default window. */
+export const INSURANCE_LEAD_DAYS = DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS;
 /** DBS checks older than this many years are flagged for re-check. */
 export const DBS_MAX_AGE_YEARS = 3;
+export const CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING = "contractorComplianceLeadTimeDays";
+
+export function parseContractorComplianceLeadDays(value: unknown): number | null {
+  const normalized = typeof value === "number" ? value : String(value ?? "").trim();
+  if (normalized === "") return null;
+  const parsed = typeof normalized === "number" ? normalized : Number(normalized);
+  if (!Number.isSafeInteger(parsed)
+    || parsed < MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS
+    || parsed > MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS) {
+    return null;
+  }
+  return parsed;
+}
+
+async function getClientContractorComplianceLeadDays(clientId: number): Promise<number> {
+  const [setting] = await db
+    .select({ value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(and(
+      eq(appSettingsTable.clientId, clientId),
+      eq(appSettingsTable.key, CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING),
+    ))
+    .limit(1);
+  return parseContractorComplianceLeadDays(setting?.value) ?? DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS;
+}
 
 function esc(s: string | null | undefined): string {
   return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -77,6 +106,7 @@ interface ContractorCertRow {
 export async function getContractorComplianceAlerts(
   clientId: number,
   now: Date,
+  leadDays = DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
 ): Promise<ContractorComplianceAlert[]> {
   const contractorResult = await db.execute(sql`
     SELECT id, name, email, company,
@@ -100,7 +130,9 @@ export async function getContractorComplianceAlerts(
   `);
   const certRows = (certResult.rows ?? []) as unknown as ContractorCertRow[];
 
-  const insuranceThreshold = new Date(now.getTime() + INSURANCE_LEAD_DAYS * 24 * 60 * 60 * 1000);
+  const normalizedLeadDays = parseContractorComplianceLeadDays(leadDays)
+    ?? DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS;
+  const insuranceThreshold = new Date(now.getTime() + normalizedLeadDays * 24 * 60 * 60 * 1000);
 
   const alerts: ContractorComplianceAlert[] = [];
 
@@ -350,7 +382,8 @@ export async function runContractorComplianceReminderJob(
   for (const client of clients) {
     result.clientsChecked++;
     try {
-      const candidates = await getContractorComplianceAlerts(client.id, now);
+      const leadDays = await getClientContractorComplianceLeadDays(client.id);
+      const candidates = await getContractorComplianceAlerts(client.id, now, leadDays);
       if (candidates.length === 0) continue;
 
       // Claim each (contractor, milestone) first so we never re-send the same

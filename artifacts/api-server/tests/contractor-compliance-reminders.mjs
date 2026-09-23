@@ -3,8 +3,9 @@
 // Seeds a client with contractors at various insurance/DBS states, runs the
 // real runContractorComplianceReminderJob with a fake email sender injected,
 // and verifies:
-//   - insurance expiring within 30 days OR already expired is alerted
-//   - insurance expiring far in the future is NOT alerted
+//   - each client's configured warning window controls expiry alerts
+//   - an absent setting preserves the 30-day default and exact boundaries
+//   - insurance expiring outside the configured window is NOT alerted
 //   - an expired DBS/PVG record and a check older than 3 years are alerted
 //   - only client_admin / maintenance-manager users are emailed
 //   - a second run sends nothing (dedupe by contractor+milestone)
@@ -62,7 +63,10 @@ async function main() {
   const { outDir, outFile } = await bundleEntry();
   const lib = await import(pathToUrl(outFile));
   const {
-    runContractorComplianceReminderJob, runRuntimeMigrations, reencryptQueuedTokenPayloads,
+    runContractorComplianceReminderJob, getContractorComplianceAlerts,
+    DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS, MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+    MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS, parseContractorComplianceLeadDays,
+    runRuntimeMigrations, reencryptQueuedTokenPayloads,
     encryptTokenPayload, decryptTokenPayload, tokenPayloadNeedsReencryption,
     db, pool, clientsTable, usersTable, contractorsTable, fixTrackIssuesTable, sql,
   } = lib;
@@ -118,6 +122,22 @@ async function main() {
     const insSoon = await seedContractor("ins-soon", { publicLiabilityExpiry: daysFromNow(10) });
     const insExpired = await seedContractor("ins-expired", { publicLiabilityExpiry: daysFromNow(-5) });
     const insFar = await seedContractor("ins-far", { publicLiabilityExpiry: daysFromNow(200) });
+    const insConfiguredWindow = await seedContractor("ins-configured-window", {
+      publicLiabilityExpiry: daysFromNow(60),
+    });
+    // These fixed dates keep boundary checks independent from the test's runtime clock.
+    const defaultBoundary = await seedContractor("ins-default-boundary", {
+      publicLiabilityExpiry: new Date("2030-01-31T00:00:00.000Z"),
+    });
+    const defaultOutside = await seedContractor("ins-default-outside", {
+      publicLiabilityExpiry: new Date("2030-02-01T00:00:00.000Z"),
+    });
+    const configuredBoundary = await seedContractor("ins-configured-boundary", {
+      publicLiabilityExpiry: new Date("2030-04-01T00:00:00.000Z"),
+    });
+    const configuredOutside = await seedContractor("ins-configured-outside", {
+      publicLiabilityExpiry: new Date("2030-04-02T00:00:00.000Z"),
+    });
     const dbsOld = await seedContractor("dbs-old", {});
     const dbsRecent = await seedContractor("dbs-recent", {});
     const dbsStaleCheck = await seedContractor("dbs-stale-check", {
@@ -130,6 +150,41 @@ async function main() {
     // shared Drizzle schema, so seed it explicitly.
     await db.execute(sql`UPDATE contractors SET dbs_expiry_date = ${daysFromNow(-10)} WHERE id = ${dbsOld.id}`);
     await db.execute(sql`UPDATE contractors SET dbs_expiry_date = ${daysFromNow(200)} WHERE id = ${dbsRecent.id}`);
+    await db.execute(sql`
+      INSERT INTO app_settings (client_id, key, value)
+      VALUES (${clientId}, 'contractorComplianceLeadTimeDays', '90')
+      ON CONFLICT (client_id, key) DO UPDATE SET value = EXCLUDED.value
+    `);
+
+    check("lead-time parser accepts the inclusive boundaries",
+      parseContractorComplianceLeadDays(String(MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS)) === MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS
+        && parseContractorComplianceLeadDays(String(MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS)) === MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+      "inclusive lead-time bounds were rejected");
+    check("lead-time parser rejects values outside the inclusive boundaries",
+      parseContractorComplianceLeadDays(String(MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS - 1)) === null
+        && parseContractorComplianceLeadDays(String(MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS + 1)) === null
+        && parseContractorComplianceLeadDays("1.5") === null
+        && parseContractorComplianceLeadDays("") === null,
+      "out-of-range or fractional lead time was accepted");
+
+    const defaultBoundaryAlerts = await getContractorComplianceAlerts(
+      clientId,
+      new Date("2030-01-01T00:00:00.000Z"),
+    );
+    check("missing setting preserves the 30-day default boundary",
+      DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS === 30
+        && defaultBoundaryAlerts.some((alert) => alert.contractorId === defaultBoundary.id)
+        && !defaultBoundaryAlerts.some((alert) => alert.contractorId === defaultOutside.id),
+      "default window did not include exactly 30 days and exclude day 31");
+    const configuredBoundaryAlerts = await getContractorComplianceAlerts(
+      clientId,
+      new Date("2030-01-01T12:00:00.000Z"),
+      90,
+    );
+    check("configured lead-time includes its exact boundary and excludes the next day",
+      configuredBoundaryAlerts.some((alert) => alert.contractorId === configuredBoundary.id)
+        && !configuredBoundaryAlerts.some((alert) => alert.contractorId === configuredOutside.id),
+      "configured window boundary was incorrect");
 
     // --- Run 1 ---
     const sent = [];
@@ -144,14 +199,15 @@ async function main() {
     check("run1: client alerted once", r1.clientsAlerted === 1, `clientsAlerted=${r1.clientsAlerted}`);
     check("run1: single digest email captured", sent.length === 1, `captured=${sent.length}`);
     check(
-      "run1: four reminders claimed (insurance, explicit DBS expiry, stale DBS check)",
-      r1.remindersClaimed === 4,
+      "run1: five reminders claimed using the client's 90-day window",
+      r1.remindersClaimed === 5,
       `remindersClaimed=${r1.remindersClaimed}`,
     );
 
     const html = sent[0]?.html ?? "";
     check("run1: ins-soon included", html.includes(insSoon.name), "missing ins-soon");
     check("run1: ins-expired included", html.includes(insExpired.name), "missing ins-expired");
+    check("run1: configured-window insurance included", html.includes(insConfiguredWindow.name), "missing configured-window insurance");
     check("run1: dbs-old included", html.includes(dbsOld.name), "missing dbs-old");
     check("run1: stale DBS check included", html.includes(dbsStaleCheck.name), "missing dbs-stale-check");
     check("run1: ins-far NOT included", !html.includes(insFar.name), "ins-far wrongly included");
@@ -170,7 +226,7 @@ async function main() {
       pushes.length === 1
         && pushes[0].userIds.includes(admin.id)
         && pushes[0].payload.data?.route === "/contractors"
-        && pushes[0].payload.body.includes("4 contractor compliance items"),
+        && pushes[0].payload.body.includes("5 contractor compliance items"),
       JSON.stringify(pushes),
     );
     const queuedResult = await db.execute(sql`
@@ -182,7 +238,7 @@ async function main() {
     `);
     const queued = queuedResult.rows;
     check("run1: contractor reminders wait for manager approval",
-      queued.length === 4 && queued.every((row) => row.status === "pending" && row.email_type === "reminder"),
+      queued.length === 5 && queued.every((row) => row.status === "pending" && row.email_type === "reminder"),
       JSON.stringify(queued));
     check("run1: contractor reminders do not bypass the approval queue",
       queued.every((row) => !recipients.includes(row.to_email)),

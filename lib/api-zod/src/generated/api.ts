@@ -729,6 +729,7 @@ export const GetSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
 })
@@ -748,6 +749,7 @@ export const UpdateSettingsBody = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish()
 })
@@ -763,6 +765,7 @@ export const UpdateSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
   "companyName": zod.string().nullish(),
   "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
 })
