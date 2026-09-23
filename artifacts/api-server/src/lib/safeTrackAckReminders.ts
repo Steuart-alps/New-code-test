@@ -281,25 +281,67 @@ export async function getOutstandingSafeTrackStaffReminders(
   return [...grouped.values()];
 }
 
-function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
-  const rows = docs.map((doc) => `
+export const MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES = 90_000;
+const MAX_NAMES_PER_MANAGER_ROW = 8;
+const MAX_NAME_CHARS_IN_MANAGER_ROW = 120;
+const MAX_TITLE_CHARS_IN_MANAGER_ROW = 300;
+
+function renderManagerRow(doc: OutstandingDocSummary): string {
+  const names = doc.outstanding
+    .slice(0, MAX_NAMES_PER_MANAGER_ROW)
+    .map((name) => esc(name.slice(0, MAX_NAME_CHARS_IN_MANAGER_ROW)))
+    .join(", ");
+  const remaining = Math.max(0, doc.outstandingCount - Math.min(doc.outstanding.length, MAX_NAMES_PER_MANAGER_ROW));
+  const waitingOn = remaining > 0
+    ? `${names ? `${names}, ` : ""}and ${remaining} more staff`
+    : names;
+
+  return `
     <tr><td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
-      <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(doc.title)}</div>
+      <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(doc.title.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}</div>
       <div style="font-size:12px;color:#64748b;margin-top:2px;">
-        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName)}` : ""} ·
+        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}` : ""} ·
         ${doc.acknowledgedCount}/${doc.staffTotal} acknowledged
       </div>
       <div style="font-size:12px;color:#b45309;margin-top:4px;">
-        Waiting on: ${doc.outstanding.map(esc).join(", ")}
+        Waiting on: ${waitingOn || `${doc.outstandingCount} staff`}
       </div>
-    </td></tr>`).join("");
+    </td></tr>`;
+}
+
+function managerEmailHtml(
+  visibleDocs: OutstandingDocSummary[],
+  allDocs: OutstandingDocSummary[],
+  appUrl: string,
+): string {
+  const totalOutstanding = allDocs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  const hiddenDocs = allDocs.length - visibleDocs.length;
+  const hiddenOutstanding = allDocs
+    .slice(visibleDocs.length)
+    .reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  const overflowNotice = hiddenDocs > 0
+    ? `<p style="font-size:12px;color:#b45309;">Additional documents not shown here: ${hiddenDocs} document${hiddenDocs === 1 ? "" : "s"} with ${hiddenOutstanding} outstanding acknowledgement${hiddenOutstanding === 1 ? "" : "s"}. Open the secure register for the complete list.</p>`
+    : "";
+  const rows = visibleDocs.map(renderManagerRow).join("");
+
   return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
     <h2 style="color:#0f172a;">SafeTrack acknowledgements outstanding</h2>
-    <p>Required SafeTrack documents still need staff acknowledgement. Open the secure register to review and follow up.</p>
+    <p>${totalOutstanding} outstanding acknowledgement${totalOutstanding === 1 ? "" : "s"} across ${allDocs.length} required document${allDocs.length === 1 ? "" : "s"}. Open the secure register to review and follow up.</p>
+    ${overflowNotice}
     <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
-    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
-    <p style="font-size:12px;color:#64748b;">Sign in to review acknowledgement details and follow up.</p>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
+    <p style="font-size:12px;color:#64748b;">Sign in to review the complete acknowledgement details and follow up.</p>
   </body></html>`;
+}
+
+function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
+  const visibleDocs: OutstandingDocSummary[] = [];
+  for (const doc of docs) {
+    const candidate = managerEmailHtml([...visibleDocs, doc], docs, appUrl);
+    if (Buffer.byteLength(candidate, "utf8") > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES) break;
+    visibleDocs.push(doc);
+  }
+  return managerEmailHtml(visibleDocs, docs, appUrl);
 }
 
 function buildStaffEmailHtml(

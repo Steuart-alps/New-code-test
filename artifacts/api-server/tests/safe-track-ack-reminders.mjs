@@ -35,6 +35,7 @@ try {
     getOutstandingSafeTrackAcknowledgements,
     parseSafeTrackReminderSettings,
     isSafeTrackReminderDue,
+    MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES,
     registerSafeTrackAckReminderSchedule,
   } = lib;
   pool = lib.pool;
@@ -131,6 +132,30 @@ try {
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
   assert.deepEqual(sent.sort(), ["manager@test.local", "staff@test.local"]);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
+  let largeManagerHtml = "";
+  const largeDocs = Array.from({ length: 250 }, (_, index) => ({
+    title: `Required document ${index} ${"Long title ".repeat(8)}`,
+    docType: "Risk Assessment",
+    siteName: "Main site",
+    outstanding: Array.from({ length: 30 }, (_, staffIndex) => `Staff member ${staffIndex} ${"Very long name ".repeat(4)}`),
+    outstandingCount: 30,
+    acknowledgedCount: 70,
+    staffTotal: 100,
+  }));
+  const largeDigest = await runSafeTrackAckReminderJob({
+    ...deps,
+    getOutstanding: async () => largeDocs,
+    getStaffOutstanding: async () => [],
+    getRecipients: async () => ({ emails: ["manager@test.local"] }),
+    claim: async () => 987654,
+    send: async ({ html }) => { largeManagerHtml = html; },
+    appUrl: () => "https://app.example",
+  });
+  assert.equal(largeDigest.emailsSent, 1);
+  assert.ok(Buffer.byteLength(largeManagerHtml, "utf8") <= MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES);
+  assert.match(largeManagerHtml, /7500 outstanding acknowledgements/);
+  assert.match(largeManagerHtml, /Additional documents not shown/);
+  assert.match(largeManagerHtml, /https:\/\/app\.example\/safe-track/);
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
     ...deps,
