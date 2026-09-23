@@ -19,6 +19,7 @@
     "test:hot-tub-browser-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-engines": "pnpm run test:hot-tub-browser-firefox && pnpm run test:hot-tub-browser-webkit",
     "test:kitchen-dashboard-status": "node tests/kitchen-dashboard-status.test.mjs",
+    "test:kitchen-template-completeness": "node tests/kitchen-template-completeness.test.mjs",
     "test:training-matrix": "node tests/training-matrix.test.mjs",
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",

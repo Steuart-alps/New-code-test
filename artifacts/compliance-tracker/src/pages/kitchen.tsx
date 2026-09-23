@@ -40,6 +40,15 @@ import ProbeCheckTab from "./kitchen-probe";
 import CleaningScheduleTab from "./kitchen-cleaning";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  isKitchenTemplateReady,
+  parseColdUnits,
+  parseJsonArray,
+  parseStringArray,
+  stampedLimit,
+  shouldDisplayKitchenSection,
+  type ColdUnit,
+} from "@/lib/kitchen-state";
 
 // CookSafe All-in-One Record field shapes
 type DeliveryRow = {
@@ -98,14 +107,6 @@ type SousVideRow = {
 type ActiveTab = "diary" | "weekly" | "probe" | "cleaning" | "checks";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
-function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): T[] {
-  if (!raw) return fallback;
-  try { return JSON.parse(raw) as T[]; } catch { return fallback; }
-}
-function parseStringArray(raw: string | undefined | null): string[] {
-  return parseJsonArray<string>(raw);
-}
-
 function buildDiaryBaseline(record: FoodSafetyRecord) {
   const raw = record as any;
   return {
@@ -138,18 +139,6 @@ function coolingMins(start: string, finish: string): number | null {
   if (m < 0) m += 24 * 60; // overnight wrap
   return m;
 }
-type ColdUnit = { name: string; type: "fridge" | "freezer" };
-function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"]): ColdUnit[] {
-  const c = config as any;
-  if (c?.food_cold_units) return parseJsonArray<ColdUnit>(c.food_cold_units);
-  const nf = Number(c?.food_num_fridges || "2");
-  const nz = Number(c?.food_num_freezers || "2");
-  return [
-    ...Array.from({ length: nf }, (_, i) => ({ name: `Fridge ${i + 1}`, type: "fridge" as const })),
-    ...Array.from({ length: nz }, (_, i) => ({ name: `Freezer ${i + 1}`, type: "freezer" as const })),
-  ];
-}
-
 const REHEATING_LIMITS = {
   scotland: "Above 82°C",
   england_wales: "Above 75°C",
@@ -174,10 +163,7 @@ function ConfigDialog() {
   const { data: clientConfig, isLoading: clientConfigLoading } = useGetFoodSafetyConfig(undefined, {
     query: { queryKey: getGetFoodSafetyConfigQueryKey() },
   });
-  const templateReady = !!config
-    && !!clientConfig
-    && !configLoading
-    && !clientConfigLoading;
+  const templateReady = isKitchenTemplateReady(config, clientConfig, configLoading, clientConfigLoading);
   const siteOverrides: string[] = ((config as any)?._siteOverrides as string[] | undefined) ?? [];
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -840,20 +826,20 @@ function DailyDiaryTab() {
 
   // Historical records retain the limits that were filed with them. The
   // current template applies only when starting a new diary day.
-  const entryCookingLimit = record?.cookingLimit || cookingLimit;
-  const entryCoolingLimit = record?.coolingLimit || coolingLimit;
-  const entryReheatingLimit = record?.reheatingLimit || reheatingLimit;
-  const entryHotHoldingLimit = record?.hotHoldingLimit || hotHoldingLimit;
+  const entryCookingLimit = stampedLimit(record?.cookingLimit, cookingLimit);
+  const entryCoolingLimit = stampedLimit(record?.coolingLimit, coolingLimit);
+  const entryReheatingLimit = stampedLimit(record?.reheatingLimit, reheatingLimit);
+  const entryHotHoldingLimit = stampedLimit(record?.hotHoldingLimit, hotHoldingLimit);
 
   // A later template change must not hide evidence already stored on an older
   // record. Empty sections still follow the current template.
-  const displayDeliveries = showDeliveries || (!!record && deliveries.length > 0);
-  const displayColdFood = showColdFood || (!!record && coldFood.length > 0);
-  const displayHotTemp = showHotTemp || (!!record && cooking.length > 0);
-  const displayCooling = showCooling || (!!record && cooling.length > 0);
-  const displayReheating = showReheating || (!!record && reheating.length > 0);
-  const displayHotHolding = showHotHolding || (!!record && hotHolding.length > 0);
-  const displaySousVide = showSousVide || (!!record && sousVide.length > 0);
+  const displayDeliveries = shouldDisplayKitchenSection(showDeliveries, !!record && deliveries.length > 0);
+  const displayColdFood = shouldDisplayKitchenSection(showColdFood, !!record && coldFood.length > 0);
+  const displayHotTemp = shouldDisplayKitchenSection(showHotTemp, !!record && cooking.length > 0);
+  const displayCooling = shouldDisplayKitchenSection(showCooling, !!record && cooling.length > 0);
+  const displayReheating = shouldDisplayKitchenSection(showReheating, !!record && reheating.length > 0);
+  const displayHotHolding = shouldDisplayKitchenSection(showHotHolding, !!record && hotHolding.length > 0);
+  const displaySousVide = shouldDisplayKitchenSection(showSousVide, !!record && sousVide.length > 0);
 
   // Invalidate the record queries for the current diary scope.
   const invalidateRecords = () => {

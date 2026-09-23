@@ -5,6 +5,11 @@ import { useListSites } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, ClipboardCheck, CalendarDays } from "lucide-react";
+import {
+  classifyFoodSafetyCompleteness,
+  foodSafetyCompletenessPath,
+  type FoodSafetyCompleteness,
+} from "@/lib/kitchen-state";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -79,26 +84,10 @@ async function fetchGaps(
   to: string,
   siteId: number | null,
 ): Promise<{ recorded: Set<string>; drafts: string[]; gaps: string[] }> {
-  const siteQuery = siteId == null ? "" : `&siteId=${siteId}`;
-  const res = await apiFetch(`/food-safety/missing-dates?from=${from}&to=${to}${siteQuery}`);
+  const res = await apiFetch(foodSafetyCompletenessPath(from, to, siteId));
   if (!res.ok) throw new Error("Food-safety completeness could not be loaded");
-  const data: { missingDates: string[]; draftDates: string[] } = await res.json();
-  const missing = new Set(data.missingDates);
-  const drafts = new Set(data.draftDates);
-  const recorded = new Set(daysBetween(from, to).filter((date) => !missing.has(date) && !drafts.has(date)));
-  return { recorded, drafts: data.draftDates, gaps: data.missingDates };
-}
-
-function daysBetween(from: string, to: string): string[] {
-  const dates: string[] = [];
-  for (
-    let day = Date.parse(`${from}T00:00:00Z`);
-    day <= Date.parse(`${to}T00:00:00Z`);
-    day += 86_400_000
-  ) {
-    dates.push(new Date(day).toISOString().slice(0, 10));
-  }
-  return dates;
+  const data: FoodSafetyCompleteness = await res.json();
+  return classifyFoodSafetyCompleteness(from, to, data);
 }
 
 // ── Calendar grid ─────────────────────────────────────────────────────────────
