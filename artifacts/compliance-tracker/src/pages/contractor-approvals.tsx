@@ -163,7 +163,12 @@ export default function ContractorApprovalsPage() {
     setExpandedSites(next);
   }
 
+  function markRequestReviewed(itemId: number) {
+    setNewRequestIds(previousIds => previousIds.filter(id => id !== itemId));
+  }
+
   function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+    markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "approve", item, modifiedPreview });
       return;
@@ -205,6 +210,7 @@ export default function ContractorApprovalsPage() {
   }
 
   function handleCancel(item: EmailQueueItem) {
+    markRequestReviewed(item.id);
     if (item.emailType === "cancellation") {
       setPendingCancellationConfirmation({ action: "dismiss", item });
       return;
@@ -255,6 +261,7 @@ export default function ContractorApprovalsPage() {
   }
 
   function startEdit(item: EmailQueueItem) {
+    markRequestReviewed(item.id);
     setEditingId(item.id);
     const p = item.emailPreviewJson || {};
     setEditSubject(p.subject || "");
@@ -387,10 +394,17 @@ export default function ContractorApprovalsPage() {
                         {siteItems.map(item => {
                           const isEditing = editingId === item.id;
                            const isCancellation = item.emailType === "cancellation";
+                          const isNewRequest = newRequestIds.includes(item.id);
                            const preview = item.emailPreviewJson || {};
 
                           return (
-                            <div key={item.id} className="p-4 flex flex-col gap-4">
+                            <div
+                              key={item.id}
+                              className={cn(
+                                "p-4 flex flex-col gap-4",
+                                isNewRequest && "bg-blue-50/40",
+                              )}
+                            >
                               <div className="flex items-start justify-between gap-4 flex-wrap">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
@@ -409,6 +423,14 @@ export default function ContractorApprovalsPage() {
                                             ? "Reminder"
                                             : "Assigning Job"}
                                     </span>
+                                    {isNewRequest && (
+                                      <span
+                                        className="rounded border border-blue-200 bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-800"
+                                        aria-label="New approval request"
+                                      >
+                                        New
+                                      </span>
+                                    )}
                                     <span className="text-xs text-muted-foreground">
                                       {format(new Date(item.createdAt), "dd MMM, HH:mm")}
                                     </span>

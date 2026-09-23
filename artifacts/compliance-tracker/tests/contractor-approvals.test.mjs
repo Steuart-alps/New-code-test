@@ -193,6 +193,31 @@ assert.match(
   "managers must be able to acknowledge and clear the new-request indication",
 );
 assert.match(
+  source,
+  /const isNewRequest = newRequestIds\.includes\(item\.id\)/,
+  "newly discovered rows must be identified from the refresh result",
+);
+assert.match(
+  source,
+  /aria-label="New approval request"/,
+  "newly discovered rows must have an accessible New indicator",
+);
+assert.match(
+  source,
+  /isNewRequest && "bg-blue-50\/40"/,
+  "newly discovered rows must receive a visual highlight",
+);
+assert.match(
+  source,
+  /function markRequestReviewed\(itemId: number\)/,
+  "the page must support clearing an individual new-request indicator",
+);
+assert.match(
+  source,
+  /function startEdit\(item: EmailQueueItem\) \{\s*markRequestReviewed\(item\.id\)/,
+  "opening a new request for editing must clear its indicator",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",
