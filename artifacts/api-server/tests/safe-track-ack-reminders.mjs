@@ -28,7 +28,15 @@ try {
     banner: { js: "import { createRequire as __bannerCrReq } from 'node:module'; globalThis.require = __bannerCrReq(import.meta.url);" },
   });
   const lib = await import(new URL(`file://${outFile}`).href);
-  const { db, sql, runSafeTrackAckReminderJob, getOutstandingSafeTrackAcknowledgements, registerSafeTrackAckReminderSchedule } = lib;
+  const {
+    db,
+    sql,
+    runSafeTrackAckReminderJob,
+    getOutstandingSafeTrackAcknowledgements,
+    parseSafeTrackReminderSettings,
+    isSafeTrackReminderDue,
+    registerSafeTrackAckReminderSchedule,
+  } = lib;
   pool = lib.pool;
   const tag = `safe-ack-${Date.now()}`;
   const insertClient = async (suffix) => {
@@ -69,10 +77,41 @@ try {
   const remaining = await getOutstandingSafeTrackAcknowledgements(primary);
   assert.deepEqual(remaining.map((gap) => gap.title), ["Second required document"]);
   await db.execute(sql`DELETE FROM safe_track_acknowledgements WHERE client_id = ${primary}`);
+  assert.deepEqual(parseSafeTrackReminderSettings({}), {
+    frequency: "daily",
+    time: "08:50",
+    timeZone: "Europe/London",
+  });
+  assert.equal(
+    isSafeTrackReminderDue(
+      new Date("2026-01-07T08:49:00.000Z"),
+      parseSafeTrackReminderSettings({}),
+    ),
+    false,
+  );
+  assert.equal(
+    isSafeTrackReminderDue(
+      new Date("2026-01-07T08:50:00.000Z"),
+      parseSafeTrackReminderSettings({}),
+    ),
+    true,
+  );
+  const weeklySettings = parseSafeTrackReminderSettings({
+    safeTrackReminderFrequency: "weekly",
+    safeTrackReminderTime: "08:50",
+    accountTimezone: "Europe/London",
+  });
+  assert.equal(isSafeTrackReminderDue(new Date("2026-01-05T08:50:00.000Z"), weeklySettings), true);
+  assert.equal(isSafeTrackReminderDue(new Date("2026-01-06T08:50:00.000Z"), weeklySettings), false);
   const sent = [];
   const deps = {
-    now: () => new Date(),
+    now: () => new Date("2026-01-05T08:50:00.000Z"),
     listClients: async () => [{ id: primary, name: "Primary" }],
+    getSettings: async () => ({
+      safeTrackReminderFrequency: "weekly",
+      safeTrackReminderTime: "08:50",
+      accountTimezone: "Europe/London",
+    }),
     isSafeTrackEntitled: async () => true,
     getRecipients: async () => ({ emails: ["manager@test.local", "MANAGER@test.local", "failed@test.local"] }),
     send: async ({ to, html }) => {
@@ -104,7 +143,7 @@ try {
   assert.equal(fullyAcknowledgedSendCalled, false);
   const schedules = [];
   registerSafeTrackAckReminderSchedule((expression, task) => schedules.push({ expression, task }), async () => {});
-  assert.equal(schedules[0].expression, "50 8 * * 1");
+  assert.equal(schedules[0].expression, "*/5 * * * *");
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {

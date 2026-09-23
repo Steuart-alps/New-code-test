@@ -1,6 +1,8 @@
 export {
   runSafeTrackAckReminderJob,
   getOutstandingSafeTrackAcknowledgements,
+  parseSafeTrackReminderSettings,
+  isSafeTrackReminderDue,
 } from "../src/lib/safeTrackAckReminders";
 export { registerSafeTrackAckReminderSchedule } from "../src/lib/safeTrackAckReminderSchedule";
 export { db, pool } from "@workspace/db";

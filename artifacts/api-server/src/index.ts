@@ -313,10 +313,10 @@ function startScheduler() {
   });
   logger.info("Contractor insurance expiry reminder scheduler started (weekly Monday at 09:00)");
 
-  // Alert client admins and staff weekly when required SafeTrack documents
-  // have not been acknowledged (risk assessments, SOPs, handbook entries).
+  // Check tenant-specific SafeTrack acknowledgement reminder settings every
+  // five minutes. Each account chooses daily or weekly cadence and local time.
   registerSafeTrackAckReminderSchedule(cron.schedule);
-  logger.info("SafeTrack acknowledgement reminder scheduler started (weekly Monday at 08:50)");
+  logger.info("SafeTrack acknowledgement reminder scheduler started (every five minutes)");
 }
 
 async function runTrialReminders() {

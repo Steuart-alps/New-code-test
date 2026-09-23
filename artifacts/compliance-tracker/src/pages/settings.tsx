@@ -1965,6 +1965,8 @@ export default function SettingsPage() {
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
+    safeTrackReminderFrequency: "daily",
+    safeTrackReminderTime: "08:50",
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
@@ -1984,6 +1986,8 @@ export default function SettingsPage() {
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
+        safeTrackReminderFrequency: (settings as any).safeTrackReminderFrequency || "daily",
+        safeTrackReminderTime: (settings as any).safeTrackReminderTime || "08:50",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
@@ -2073,6 +2077,44 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
+              <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
+                <div>
+                  <Label>SafeTrack acknowledgement reminders</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Choose how often account admins and staff are reminded about outstanding SafeTrack sign-offs.
+                    The delivery time uses your account timezone.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeTrackReminderFrequency">Frequency</Label>
+                    <Select
+                      value={formData.safeTrackReminderFrequency}
+                      onValueChange={(value) =>
+                        setFormData((prev) => ({ ...prev, safeTrackReminderFrequency: value }))
+                      }
+                    >
+                      <SelectTrigger id="safeTrackReminderFrequency">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Every day</SelectItem>
+                        <SelectItem value="weekly">Once a week</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeTrackReminderTime">Preferred delivery time</Label>
+                    <Input
+                      id="safeTrackReminderTime"
+                      type="time"
+                      name="safeTrackReminderTime"
+                      value={formData.safeTrackReminderTime}
+                      onChange={handleChange}
+                    />
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>
                 <p className="text-xs text-muted-foreground">

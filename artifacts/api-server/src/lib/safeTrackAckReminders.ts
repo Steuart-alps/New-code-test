@@ -1,16 +1,73 @@
 /**
- * Weekly SafeTrack acknowledgement reminder job.
+ * SafeTrack acknowledgement reminder job.
  *
- * One tenant-scoped digest is claimed per day before delivery, which prevents
- * concurrent schedulers from sending duplicate notifications.
+ * Each tenant can choose a daily or weekly cadence and a local delivery time.
+ * One tenant-scoped digest is claimed per cadence window before delivery.
  */
 import { db } from "@workspace/db";
-import { clientsTable } from "@workspace/db/schema";
+import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
+
+export const SAFE_TRACK_REMINDER_FREQUENCY_SETTING = "safeTrackReminderFrequency";
+export const SAFE_TRACK_REMINDER_TIME_SETTING = "safeTrackReminderTime";
+export const DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY = "daily" as const;
+export const DEFAULT_SAFE_TRACK_REMINDER_TIME = "08:50";
+export const DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE = "Europe/London";
+
+export type SafeTrackReminderFrequency = "daily" | "weekly";
+
+export interface SafeTrackReminderSettings {
+  frequency: SafeTrackReminderFrequency;
+  time: string;
+  timeZone: string;
+}
+
+export function parseSafeTrackReminderSettings(
+  settings: Record<string, string | null | undefined> = {},
+): SafeTrackReminderSettings {
+  const frequency = settings[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] === "weekly"
+    ? "weekly"
+    : DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY;
+  const time = /^\d{2}:[0-5]\d$/.test(settings[SAFE_TRACK_REMINDER_TIME_SETTING] ?? "")
+    ? settings[SAFE_TRACK_REMINDER_TIME_SETTING]!
+    : DEFAULT_SAFE_TRACK_REMINDER_TIME;
+  let timeZone = settings.accountTimezone?.trim() || DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone }).format();
+  } catch {
+    timeZone = DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
+  }
+  return { frequency, time, timeZone };
+}
+
+function localScheduleParts(now: Date, timeZone: string): { minutes: number; weekday: string } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    minutes: Number(values.hour) * 60 + Number(values.minute),
+    weekday: values.weekday,
+  };
+}
+
+export function isSafeTrackReminderDue(
+  now: Date,
+  settings: SafeTrackReminderSettings,
+): boolean {
+  const [hour, minute] = settings.time.split(":").map(Number);
+  const local = localScheduleParts(now, settings.timeZone);
+  if (local.minutes < hour * 60 + minute) return false;
+  return settings.frequency === "daily" || local.weekday === "Mon";
+}
 
 export interface OutstandingDocSummary {
   title: string;
@@ -278,26 +335,31 @@ export interface SafeTrackAckReminderDependencies {
   now?: () => Date;
   appUrl?: () => string;
   listClients?: () => Promise<{ id: number; name: string }[]>;
+  getSettings?: (clientId: number) => Promise<Record<string, string | null | undefined>>;
   isSafeTrackEntitled?: (clientId: number) => Promise<boolean>;
   getOutstanding?: (clientId: number) => Promise<OutstandingDocSummary[]>;
   getStaffOutstanding?: (clientId: number) => Promise<OutstandingStaffReminder[]>;
   getRecipients?: (clientId: number) => Promise<{ emails: string[] }>;
-  claim?: (clientId: number) => Promise<number | null>;
+  claim?: (clientId: number, frequency: SafeTrackReminderFrequency) => Promise<number | null>;
   release?: (claimId: number) => Promise<void>;
   send?: typeof sendSystemEmail;
 }
 
-async function claimReminder(clientId: number): Promise<number | null> {
+async function claimReminder(
+  clientId: number,
+  frequency: SafeTrackReminderFrequency,
+): Promise<number | null> {
   // The transaction-scoped advisory lock serialises claims for this tenant.
   // The lock is released at commit, after the recent-row check and insert are
   // visible together; concurrent scheduler processes therefore cannot both
-  // decide that a weekly reminder is due.
+  // decide that a reminder is due.
   return db.transaction(async (tx) => {
     const locked = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(${clientId}) AS locked`);
     if (!((locked.rows ?? [])[0] as any)?.locked) return null;
     const recent = await tx.execute(sql`
       SELECT 1 FROM safe_track_ack_reminder_log
-       WHERE client_id = ${clientId} AND sent_at > now() - interval '7 days'
+       WHERE client_id = ${clientId}
+         AND sent_at > now() - (${frequency === "weekly" ? 7 : 1} * interval '1 day')
       LIMIT 1
     `);
     if ((recent.rows ?? []).length) return null;
@@ -321,12 +383,18 @@ export async function runSafeTrackAckReminderJob(
   const result: SafeTrackAckReminderJobResult = {
     clientsChecked: 0, clientsAlerted: 0, emailsSent: 0, remindersClaimed: 0, errors: 0,
   };
+  const now = dependencies.now ?? (() => new Date());
   const listClients = dependencies.listClients ?? (() => db.select({ id: clientsTable.id, name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.active, true)));
+  const getSettings = dependencies.getSettings ?? (async (clientId: number) => {
+    const rows = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
+      .from(appSettingsTable)
+      .where(eq(appSettingsTable.clientId, clientId));
+    return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  });
   const isSafeTrackEntitled = dependencies.isSafeTrackEntitled ?? defaultEntitlement;
   const getOutstanding = dependencies.getOutstanding ?? getOutstandingSafeTrackAcknowledgements;
   const getStaffOutstanding = dependencies.getStaffOutstanding ?? getOutstandingSafeTrackStaffReminders;
   const getRecipients = dependencies.getRecipients ?? getNotificationEmails;
-  const claim = dependencies.claim ?? claimReminder;
   const release = dependencies.release ?? (async (claimId: number) => { await db.execute(sql`DELETE FROM safe_track_ack_reminder_log WHERE id = ${claimId}`); });
   const send = dependencies.send ?? sendSystemEmail;
   const appUrl = dependencies.appUrl?.() ?? getPublicAppUrl();
@@ -336,6 +404,8 @@ export async function runSafeTrackAckReminderJob(
     let claimId: number | null = null;
     try {
       if (!await isSafeTrackEntitled(client.id)) continue;
+      const reminderSettings = parseSafeTrackReminderSettings(await getSettings(client.id));
+      if (!isSafeTrackReminderDue(now(), reminderSettings)) continue;
       const outstanding = await getOutstanding(client.id);
       if (!outstanding.length) continue;
       const staffOutstanding = await getStaffOutstanding(client.id);
@@ -343,7 +413,9 @@ export async function runSafeTrackAckReminderJob(
       const managerEmails = [...new Set(recipients.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
       const staffEmails = [...new Map(staffOutstanding.map((reminder) => [reminder.email, reminder])).values()];
       if (!managerEmails.length && !staffEmails.length) continue;
-      claimId = await claim(client.id);
+      claimId = await (dependencies.claim
+        ? dependencies.claim(client.id, reminderSettings.frequency)
+        : claimReminder(client.id, reminderSettings.frequency));
       if (!claimId) continue;
       result.remindersClaimed++;
 

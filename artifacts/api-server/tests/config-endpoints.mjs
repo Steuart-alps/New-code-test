@@ -897,6 +897,37 @@ async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
       accountTimezone: null,
     })).status,
   );
+  expectOk(
+    "SafeTrack reminders: save weekly cadence and preferred time",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderFrequency: "weekly",
+      safeTrackReminderTime: "17:35",
+    })).status,
+  );
+  const safeTrackSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  check(
+    "SafeTrack reminders: saved cadence and time are returned",
+    safeTrackSettings.data?.safeTrackReminderFrequency === "weekly" &&
+      safeTrackSettings.data?.safeTrackReminderTime === "17:35",
+    `got ${JSON.stringify({
+      frequency: safeTrackSettings.data?.safeTrackReminderFrequency,
+      time: safeTrackSettings.data?.safeTrackReminderTime,
+    })}`,
+  );
+  expectStatus(
+    "SafeTrack reminders: invalid cadence is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderFrequency: "monthly",
+    })).status,
+    400,
+  );
+  expectStatus(
+    "SafeTrack reminders: invalid time is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderTime: "5pm",
+    })).status,
+    400,
+  );
 
   const anon = makeSession();
   expectStatus(

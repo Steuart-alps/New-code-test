@@ -15,6 +15,10 @@ import {
   ACCOUNT_TIMEZONE_SETTING,
   isValidAccountTimezone,
 } from "../middleware/dailyEntryCutoff";
+import {
+  SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
+  SAFE_TRACK_REMINDER_TIME_SETTING,
+} from "../lib/safeTrackAckReminders";
 
 const router: IRouter = Router();
 
@@ -41,6 +45,8 @@ const SETTING_KEYS = [
   // Client-defined notification email — all automated digest/alert emails for
   // this client go here instead of to individual admin user addresses.
   "notificationEmail",
+  SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
+  SAFE_TRACK_REMINDER_TIME_SETTING,
   // JSON map of operational module keys to the active manager user IDs who
   // should receive that track's daily action summary.
   "trackSummaryRouting",
@@ -195,6 +201,24 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     } else {
       rawBody[ACCOUNT_TIMEZONE_SETTING] = rawTimezone.trim();
+    }
+  }
+  if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {
+    const rawFrequency = rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING];
+    if (rawFrequency === null || rawFrequency.trim() === "") {
+      rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] = null;
+    } else if (rawFrequency !== "daily" && rawFrequency !== "weekly") {
+      res.status(400).json({ error: "SafeTrack reminder frequency must be daily or weekly" });
+      return;
+    }
+  }
+  if (rawBody[SAFE_TRACK_REMINDER_TIME_SETTING] !== undefined) {
+    const rawTime = rawBody[SAFE_TRACK_REMINDER_TIME_SETTING];
+    if (rawTime === null || rawTime.trim() === "") {
+      rawBody[SAFE_TRACK_REMINDER_TIME_SETTING] = null;
+    } else if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(rawTime)) {
+      res.status(400).json({ error: "SafeTrack reminder time must use 24-hour HH:MM format" });
+      return;
     }
   }
 
