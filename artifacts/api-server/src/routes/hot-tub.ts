@@ -93,6 +93,22 @@ router.put("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = tubSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const existingResult = await db.execute(sql`
+    SELECT id, site_id FROM hot_tubs
+    WHERE id = ${id} AND client_id = ${clientId}
+    LIMIT 1
+  `);
+  const existing = (existingResult.rows ?? [])[0] as { id: number; site_id: number | null } | undefined;
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const departmentId = getActiveDepartmentId(req);
+  const existingAccess = await checkSiteAccess(existing.site_id, clientId, departmentId);
+  if (existingAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (d.siteId !== undefined) {
+    const newAccess = await checkSiteAccess(d.siteId, clientId, departmentId);
+    if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const result = await db.execute(sql`
     UPDATE hot_tubs
     SET name        = COALESCE(${d.name ?? null}, name),

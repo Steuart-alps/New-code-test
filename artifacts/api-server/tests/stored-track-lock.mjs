@@ -214,6 +214,138 @@ async function main() {
         (adminActionMove.data?.siteId ?? adminActionMove.data?.site_id) === betaSite.data.id,
         JSON.stringify(adminActionMove.data));
     }
+
+    const scopedHotTub = await admin("POST", "/hot-tub", {
+      checkType: "water_chemistry", checkDate: today, result: "pass",
+      phValue: 7.4, sanitiserLevel: 2, performedBy: "Lock Fixture",
+      siteId: alphaSite.data.id,
+    });
+    expect("seed current scoped HotTub check", scopedHotTub, [201]);
+    if (scopedHotTub.status === 201) {
+      const hotTubPath = `/hot-tub/${scopedHotTub.data?.id}`;
+      expect("scoped staff can edit current HotTub check",
+        await scopedStaff("PUT", hotTubPath, { notes: "scoped staff edit" }), [200]);
+      const staffHotTubMove = await scopedStaff("PUT", hotTubPath, { siteId: betaSite.data.id });
+      check("scoped staff cannot move HotTub check",
+        staffHotTubMove.status === 403,
+        `${staffHotTubMove.status} ${JSON.stringify(staffHotTubMove.data)}`);
+      const hotTubAfterMove = await admin("GET", "/hot-tub");
+      const hotTubRecordAfterMove = hotTubAfterMove.data?.find?.(row => row.id === scopedHotTub.data.id);
+      check("rejected HotTub move keeps original site",
+        (hotTubRecordAfterMove?.siteId ?? hotTubRecordAfterMove?.site_id) === alphaSite.data.id,
+        JSON.stringify(hotTubRecordAfterMove));
+      const adminHotTubMove = await admin("PUT", hotTubPath, { siteId: betaSite.data.id });
+      expect("admin can move HotTub check", adminHotTubMove, [200]);
+      check("admin HotTub move changes site",
+        (adminHotTubMove.data?.siteId ?? adminHotTubMove.data?.site_id) === betaSite.data.id,
+        JSON.stringify(adminHotTubMove.data));
+    }
+
+    const scopedHotTubAsset = await admin("POST", "/hot-tub/tubs", {
+      name: `Scoped tub ${suffix}`, siteId: alphaSite.data.id,
+    });
+    expect("seed scoped HotTub asset", scopedHotTubAsset, [201]);
+    if (scopedHotTubAsset.status === 201) {
+      const hotTubAssetPath = `/hot-tub/tubs/${scopedHotTubAsset.data?.id}`;
+      expect("scoped staff can edit current HotTub asset",
+        await scopedStaff("PUT", hotTubAssetPath, { name: `Scoped tub edited ${suffix}` }), [200]);
+      const staffHotTubAssetMove = await scopedStaff("PUT", hotTubAssetPath, {
+        siteId: betaSite.data.id,
+      });
+      check("scoped staff cannot move HotTub asset",
+        staffHotTubAssetMove.status === 403,
+        `${staffHotTubAssetMove.status} ${JSON.stringify(staffHotTubAssetMove.data)}`);
+      const hotTubAssetsAfterMove = await admin("GET", "/hot-tub/tubs");
+      const hotTubAssetAfterMove = hotTubAssetsAfterMove.data?.find?.(
+        row => row.id === scopedHotTubAsset.data.id,
+      );
+      check("rejected HotTub asset move keeps original site",
+        (hotTubAssetAfterMove?.siteId ?? hotTubAssetAfterMove?.site_id) === alphaSite.data.id,
+        JSON.stringify(hotTubAssetAfterMove));
+      const adminHotTubAssetMove = await admin("PUT", hotTubAssetPath, {
+        siteId: betaSite.data.id,
+      });
+      expect("admin can move HotTub asset", adminHotTubAssetMove, [200]);
+      check("admin HotTub asset move changes site",
+        (adminHotTubAssetMove.data?.siteId ?? adminHotTubAssetMove.data?.site_id) === betaSite.data.id,
+        JSON.stringify(adminHotTubAssetMove.data));
+    }
+
+    const scopedPremises = await admin("POST", "/premises-track", {
+      inspectionDate: today, nextInspectionDate: iso(30), inspectionType: "routine",
+      area: "Alpha area", findings: "Current finding", status: "actioned",
+      inspectedBy: "Lock Fixture", siteId: alphaSite.data.id,
+    });
+    expect("seed current scoped Premises inspection", scopedPremises, [201]);
+    if (scopedPremises.status === 201) {
+      const premisesPath = `/premises-track/${scopedPremises.data?.id}`;
+      const premisesStaffBody = {
+        inspectionDate: today, nextInspectionDate: iso(30), inspectionType: "routine",
+        area: "Alpha area", findings: "Staff finding", status: "actioned",
+        inspectedBy: "Lock Fixture", siteId: alphaSite.data.id,
+      };
+      expect("scoped staff can edit current Premises inspection",
+        await scopedStaff("PUT", premisesPath, premisesStaffBody), [200]);
+      const staffPremisesMove = await scopedStaff("PUT", premisesPath, {
+        ...premisesStaffBody, siteId: betaSite.data.id,
+      });
+      check("scoped staff cannot move Premises inspection",
+        staffPremisesMove.status === 400 || staffPremisesMove.status === 403,
+        `${staffPremisesMove.status} ${JSON.stringify(staffPremisesMove.data)}`);
+      const premisesAfterMove = await admin("GET", `/premises-track?siteId=${alphaSite.data.id}`);
+      check("rejected Premises move keeps original site",
+        premisesAfterMove.data?.some?.(row => row.id === scopedPremises.data.id
+          && (row.siteId ?? row.site_id) === alphaSite.data.id),
+        JSON.stringify(premisesAfterMove.data));
+      const adminPremisesMove = await admin("PUT", premisesPath, {
+        ...premisesStaffBody, siteId: betaSite.data.id,
+      });
+      expect("admin can move Premises inspection", adminPremisesMove, [200]);
+      const premisesAtBeta = await admin("GET", `/premises-track?siteId=${betaSite.data.id}`);
+      check("admin Premises move changes site",
+        premisesAtBeta.data?.some?.(row => row.id === scopedPremises.data.id
+          && (row.siteId ?? row.site_id) === betaSite.data.id),
+        JSON.stringify(premisesAtBeta.data));
+    }
+
+    const scopedRoom = await admin("POST", "/room-track/rooms", {
+      roomNumber: `SCOPED-${suffix}`, name: "Scoped Suite", floor: "1",
+      siteId: alphaSite.data.id,
+    });
+    expect("seed scoped Room registry", scopedRoom, [201]);
+    if (scopedRoom.status === 201) {
+      const scopedRoomCheck = await admin("POST", "/room-track/checks", {
+        roomId: scopedRoom.data?.id, siteId: alphaSite.data.id, checkDate: today,
+        clean: true, tidy: true, toStandard: true, notes: "Lock Fixture",
+      });
+      expect("seed current scoped Room check", scopedRoomCheck, [201]);
+      if (scopedRoomCheck.status === 201) {
+        const roomCheckPath = `/room-track/checks/${scopedRoomCheck.data?.id}`;
+        expect("scoped staff can edit current Room check",
+          await scopedStaff("PUT", roomCheckPath, { notes: "scoped staff edit" }), [200]);
+        const staffRoomMove = await scopedStaff("PUT", roomCheckPath, { siteId: betaSite.data.id });
+        check("scoped staff cannot move Room check",
+          staffRoomMove.status === 400 || staffRoomMove.status === 403,
+          `${staffRoomMove.status} ${JSON.stringify(staffRoomMove.data)}`);
+        const roomChecksAfterMove = await admin("GET", `/room-track/checks?roomId=${scopedRoom.data.id}`);
+        const roomCheckAfterMove = roomChecksAfterMove.data?.find?.(
+          row => row.id === scopedRoomCheck.data.id,
+        );
+        check("rejected Room move keeps original site",
+          (roomCheckAfterMove?.siteId ?? roomCheckAfterMove?.site_id) === alphaSite.data.id,
+          JSON.stringify(roomCheckAfterMove));
+        const adminRoomMove = await admin("PUT", `/room-track/rooms/${scopedRoom.data.id}`, {
+          roomNumber: `SCOPED-${suffix}`, name: "Scoped Suite", floor: "1",
+          siteId: betaSite.data.id,
+        });
+        expect("admin can move Room registry", adminRoomMove, [200]);
+        const adminRoomCheckMove = await admin("PUT", roomCheckPath, { siteId: betaSite.data.id });
+        expect("admin can move Room check with its registry", adminRoomCheckMove, [200]);
+        check("admin Room move changes site",
+          (adminRoomCheckMove.data?.siteId ?? adminRoomCheckMove.data?.site_id) === betaSite.data.id,
+          JSON.stringify(adminRoomCheckMove.data));
+      }
+    }
   }
 
   // Food-safety also supplies the metadata/config regression assertion.
