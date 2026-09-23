@@ -49,7 +49,7 @@ async function getPool(id: number, clientId: number) {
   const result = await db.execute(sql`
     SELECT * FROM pool_checks WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
   `);
-  return (result as any)[0] ?? null;
+  return (result.rows[0] as Record<string, any> | undefined) ?? null;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     RETURNING *
   `);
 
-  res.status(201).json((result as any)[0]);
+  res.status(201).json(result.rows[0]);
 });
 
 // PUT /pool-track/:id — update check
@@ -152,7 +152,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     RETURNING *
   `);
 
-  res.json((result as any)[0]);
+  res.json(result.rows[0]);
 });
 
 // DELETE /pool-track/:id
@@ -168,7 +168,7 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     RETURNING id
   `);
 
-  if (!(result as any)[0]) return res.status(404).json({ error: "Not found" });
+  if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
 });
 
