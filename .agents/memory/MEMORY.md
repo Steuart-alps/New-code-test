@@ -52,3 +52,4 @@
 - [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
 - [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.
 - [Browser engine runtime](browser-engine-runtime.md) — Playwright WebKit needs exact native sonames that may be unavailable even after its browser archive is installed.
+- [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.

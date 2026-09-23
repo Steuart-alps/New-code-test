@@ -41,7 +41,27 @@ const recordFieldsSchema = z.object({
   staffRosterId: z.number().int().positive().nullable().optional(),
   submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
+const diaryRecordSnapshotSchema = z.object({
+  deliveries: rowsSchema.optional(),
+  coldFood: rowsSchema.optional(),
+  hotTemperature: rowsSchema.optional(),
+  cooling: rowsSchema.optional(),
+  reheating: rowsSchema.optional(),
+  hotHolding: rowsSchema.optional(),
+  sousVide: rowsSchema.optional(),
+  cookingLimit: z.string().nullable().optional(),
+  coolingLimit: z.string().nullable().optional(),
+  reheatingLimit: z.string().nullable().optional(),
+  hotHoldingLimit: z.string().nullable().optional(),
+  correctives: z.string().nullable().optional(),
+  managerSignature: z.string().nullable().optional(),
+  performedBy: z.string().nullable().optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
+  submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
+}).partial();
 const updateRecordSchema = recordFieldsSchema.extend({
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  expectedRecord: diaryRecordSnapshotSchema.optional(),
   mobileTemperatureLog: mobileTemperatureLogSchema.optional(),
 });
 
@@ -115,6 +135,108 @@ const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
   scotland: "Above 82°C",
   england_wales: "Above 75°C",
 };
+
+const DIARY_MERGE_FIELDS = [
+  "deliveries",
+  "coldFood",
+  "hotTemperature",
+  "cooling",
+  "reheating",
+  "hotHolding",
+  "sousVide",
+  "cookingLimit",
+  "coolingLimit",
+  "reheatingLimit",
+  "hotHoldingLimit",
+  "correctives",
+  "managerSignature",
+  "performedBy",
+  "staffRosterId",
+  "submittedAt",
+] as const;
+
+function stableValue(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableValue((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableValue(left) === stableValue(right);
+}
+
+function appendOnlySuffix(base: unknown, current: unknown): unknown[] | null {
+  if (!Array.isArray(base) || !Array.isArray(current) || current.length < base.length) return null;
+  for (let index = 0; index < base.length; index++) {
+    if (!valuesEqual(base[index], current[index])) return null;
+  }
+  const suffix = current.slice(base.length);
+  if (suffix.every(row =>
+    row && typeof row === "object" && typeof (row as Record<string, unknown>)._entryId === "string",
+  )) return suffix;
+  return null;
+}
+
+function rowAlreadyPresent(rows: unknown[], candidate: unknown): boolean {
+  const candidateId = candidate && typeof candidate === "object"
+    ? (candidate as Record<string, unknown>)._entryId
+    : undefined;
+  return rows.some(row => {
+    const rowId = row && typeof row === "object"
+      ? (row as Record<string, unknown>)._entryId
+      : undefined;
+    return typeof candidateId === "string" && typeof rowId === "string"
+      ? candidateId === rowId
+      : valuesEqual(row, candidate);
+  });
+}
+
+/**
+ * Merge a stale web save against the record currently in the database.
+ *
+ * A mobile append is safe to preserve when the current array is exactly the
+ * saved baseline plus rows carrying stable entry IDs. Any concurrent edit to a
+ * baseline row, removal, or unidentifiable append is reported as a conflict.
+ */
+function mergeStaleDiaryUpdate(
+  current: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): { ok: true; updates: Record<string, unknown> } | { ok: false; fields: string[] } {
+  const updates: Record<string, unknown> = {};
+  const conflicts: string[] = [];
+
+  for (const field of DIARY_MERGE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(incoming, field)) continue;
+
+    const incomingValue = incoming[field];
+    const currentValue = current[field];
+    const baselineValue = baseline[field];
+    const currentChanged = !valuesEqual(currentValue, baselineValue);
+    const incomingChanged = !valuesEqual(incomingValue, baselineValue);
+
+    if (!currentChanged) {
+      updates[field] = incomingValue;
+      continue;
+    }
+    if (!incomingChanged || valuesEqual(currentValue, incomingValue)) continue;
+
+    const suffix = appendOnlySuffix(baselineValue, currentValue);
+    if (suffix && Array.isArray(incomingValue)) {
+      updates[field] = [
+        ...incomingValue,
+        ...suffix.filter(row => !rowAlreadyPresent(incomingValue, row)),
+      ];
+      continue;
+    }
+    conflicts.push(field);
+  }
+
+  return conflicts.length > 0 ? { ok: false, fields: conflicts } : { ok: true, updates };
+}
 
 function reheatingLimitForJurisdiction(value: string | null | undefined): string {
   return REHEATING_LIMIT_BY_JURISDICTION[
@@ -922,27 +1044,77 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     return res.json(updated);
   }
 
-  const updates: any = { updatedAt: new Date() };
-  const { submittedAt, mobileTemperatureLog: _mobileTemperatureLog, ...rest } = parsedUpdate.data;
-  for (const [key, value] of Object.entries(rest)) {
-    if (value !== undefined) updates[key] = value;
-  }
-  if (submittedAt !== undefined) {
-    updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
-  }
-  const performer = await resolveStaffPerformerUpdate(clientId, parsedUpdate.data.staffRosterId, parsedUpdate.data.performedBy,
-    existing.staffRosterId, existing.performedBy);
-  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  updates.staffRosterId = performer.staffRosterId;
-  updates.performedBy = performer.performedBy;
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(foodSafetyRecordsTable)
+      .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+      .limit(1)
+      .for("update");
+    if (!current) return { kind: "not_found" as const };
 
-  const [updated] = await db
-    .update(foodSafetyRecordsTable)
-    .set(updates)
-    .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
-    .returning();
+    const {
+      submittedAt,
+      expectedUpdatedAt,
+      expectedRecord,
+      mobileTemperatureLog: _mobileTemperatureLog,
+      ...rest
+    } = parsedUpdate.data;
+    const updates: Record<string, unknown> = {};
+    const stale = expectedUpdatedAt
+      && current.updatedAt.toISOString() !== new Date(expectedUpdatedAt).toISOString();
 
-  res.json(updated);
+    if (stale) {
+      if (!expectedRecord) {
+        return { kind: "conflict" as const, fields: ["record"], record: current };
+      }
+      const merged = mergeStaleDiaryUpdate(
+        current as Record<string, unknown>,
+        expectedRecord as Record<string, unknown>,
+        { ...rest, ...(submittedAt !== undefined ? { submittedAt: submittedAt ? new Date(submittedAt) : null } : {}) },
+      );
+      if (!merged.ok) return { kind: "conflict" as const, fields: merged.fields, record: current };
+      Object.assign(updates, merged.updates);
+    } else {
+      for (const [key, value] of Object.entries(rest)) {
+        if (value !== undefined) updates[key] = value;
+      }
+      if (submittedAt !== undefined) {
+        updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
+      }
+    }
+
+    const performer = await resolveStaffPerformerUpdate(
+      clientId,
+      parsedUpdate.data.staffRosterId,
+      parsedUpdate.data.performedBy,
+      current.staffRosterId,
+      current.performedBy,
+    );
+    if (!performer) return { kind: "invalid_performer" as const };
+    updates.staffRosterId = performer.staffRosterId;
+    updates.performedBy = performer.performedBy;
+    updates.updatedAt = new Date();
+
+    const [updated] = await tx
+      .update(foodSafetyRecordsTable)
+      .set(updates)
+      .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+      .returning();
+    return { kind: "updated" as const, record: updated };
+  });
+
+  if (result.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (result.kind === "conflict") {
+    return res.status(409).json({
+      error: "This diary changed while you were editing. Reload it and review your changes before saving again.",
+      code: "DIARY_CONFLICT",
+      fields: result.fields,
+      record: result.record,
+    });
+  }
+  if (result.kind === "invalid_performer") return res.status(400).json({ error: "Invalid staff roster member" });
+  res.json(result.record);
 });
 
 // ── Status — due/overdue per check type ───────────────────────────────────────

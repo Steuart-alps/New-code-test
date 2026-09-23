@@ -53,6 +53,7 @@ export * from './foodSafetyMissingDatesResponse';
 export * from './foodSafetyMonthlySummary';
 export * from './foodSafetyMonthlySummaryDay';
 export * from './foodSafetyRecord';
+export * from './foodSafetyRecordSnapshot';
 export * from './foodSafetyRecordSummary';
 export * from './getFireSafetyConfigParams';
 export * from './getFireSafetyStatusParams';

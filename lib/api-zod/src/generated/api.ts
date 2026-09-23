@@ -2210,6 +2210,25 @@ export const UpdateFoodSafetyRecordParams = zod.object({
 })
 
 export const UpdateFoodSafetyRecordBody = zod.object({
+  "expectedUpdatedAt": zod.date().optional().describe('Updated-at value returned when the web diary was loaded.'),
+  "expectedRecord": zod.object({
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "cooling": zod.array(zod.unknown()).optional(),
+  "reheating": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "sousVide": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().nullish(),
+  "coolingLimit": zod.string().nullish(),
+  "reheatingLimit": zod.string().nullish(),
+  "hotHoldingLimit": zod.string().nullish(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "submittedAt": zod.date().nullish()
+}).optional().describe('The web diary baseline used for safe three-way merging.'),
   "mobileTemperatureLog": zod.object({
   "coldFood": zod.array(zod.unknown()),
   "expectedColdFood": zod.array(zod.unknown()),
@@ -2231,7 +2250,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
   "hotHoldingLimit": zod.string().optional(),
   "correctives": zod.string().optional(),
   "managerSignature": zod.string().optional(),
-  "submittedAt": zod.string().optional()
+  "submittedAt": zod.date().nullish()
 })
 
 export const UpdateFoodSafetyRecordResponse = zod.object({

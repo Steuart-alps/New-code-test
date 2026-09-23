@@ -3523,6 +3523,12 @@ components:
     UpdateFoodSafetyRecordRequest:
       type: object
       properties:
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+          description: Updated-at value returned when the web diary was loaded.
+        expectedRecord:
+          $ref: "#/components/schemas/FoodSafetyRecordSnapshot"
         mobileTemperatureLog:
           $ref: "#/components/schemas/MobileTemperatureLog"
         deliveries:
@@ -3551,6 +3557,62 @@ components:
           type: string
         submittedAt:
           type: string
+          format: date-time
+          nullable: true
+
+    FoodSafetyRecordSnapshot:
+      type: object
+      description: The web diary baseline used for safe three-way merging.
+      properties:
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        cooling:
+          type: array
+          items: {}
+        reheating:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        sousVide:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+          nullable: true
+        coolingLimit:
+          type: string
+          nullable: true
+        reheatingLimit:
+          type: string
+          nullable: true
+        hotHoldingLimit:
+          type: string
+          nullable: true
+        correctives:
+          type: string
+          nullable: true
+        managerSignature:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     MobileTemperatureLog:
       type: object

@@ -106,6 +106,28 @@ function parseStringArray(raw: string | undefined | null): string[] {
   return parseJsonArray<string>(raw);
 }
 
+function buildDiaryBaseline(record: FoodSafetyRecord) {
+  const raw = record as any;
+  return {
+    deliveries: raw.deliveries ?? [],
+    coldFood: raw.coldFood ?? [],
+    hotTemperature: raw.hotTemperature ?? [],
+    cooling: raw.cooling ?? [],
+    reheating: raw.reheating ?? [],
+    hotHolding: raw.hotHolding ?? [],
+    sousVide: raw.sousVide ?? [],
+    cookingLimit: raw.cookingLimit ?? null,
+    coolingLimit: raw.coolingLimit ?? null,
+    reheatingLimit: raw.reheatingLimit ?? null,
+    hotHoldingLimit: raw.hotHoldingLimit ?? null,
+    correctives: raw.correctives ?? null,
+    managerSignature: raw.managerSignature ?? null,
+    performedBy: raw.performedBy ?? null,
+    staffRosterId: raw.staffRosterId ?? null,
+    submittedAt: raw.submittedAt ?? null,
+  };
+}
+
 /** Returns elapsed minutes between two HH:mm strings, null if either is blank. */
 function coolingMins(start: string, finish: string): number | null {
   if (!start || !finish) return null;
@@ -839,6 +861,23 @@ function DailyDiaryTab() {
     queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey(recordParams) });
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetySummaryQueryKey().slice(0, 1) });
   };
+  const handleDiaryConflict = (error: any) => {
+    hydratedScopeRef.current = null;
+    const latest = error?.data?.record;
+    if (latest) {
+      queryClient.setQueryData(
+        getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams),
+        latest,
+      );
+    } else {
+      invalidateRecords();
+    }
+    toast({
+      title: "Diary changed elsewhere",
+      description: "New entries or edits were made while you were editing. The latest diary has been reloaded; review your changes and try again.",
+      variant: "destructive",
+    });
+  };
 
   const buildData = (submittedAt?: string) => ({
     recordDate: selectedDate,
@@ -863,13 +902,24 @@ function DailyDiaryTab() {
 
     if (record) {
       updateRecord.mutate(
-        { id: record.id, data },
+        {
+          id: record.id,
+          data: {
+            ...data,
+            expectedUpdatedAt: record.updatedAt,
+            expectedRecord: buildDiaryBaseline(record),
+          },
+        },
         {
           onSuccess: () => {
             invalidateRecords();
             toast({ title: "Draft saved" });
           },
           onError: (error: any) => {
+            if (error?.status === 409) {
+              handleDiaryConflict(error);
+              return;
+            }
             toast({ title: "Failed to save", description: error.message, variant: "destructive" });
           },
         }
@@ -900,9 +950,22 @@ function DailyDiaryTab() {
       invalidateRecords();
       toast({ title: "Diary filed", description: "Kitchen diary signed off and stored." });
     };
-    const onError = (error: any) => toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
+    const onError = (error: any) => {
+      if (error?.status === 409) {
+        handleDiaryConflict(error);
+        return;
+      }
+      toast({ title: "Failed to submit", description: error.message, variant: "destructive" });
+    };
     if (record) {
-      updateRecord.mutate({ id: record.id, data }, { onSuccess, onError });
+      updateRecord.mutate({
+        id: record.id,
+        data: {
+          ...data,
+          expectedUpdatedAt: record.updatedAt,
+          expectedRecord: buildDiaryBaseline(record),
+        },
+      }, { onSuccess, onError });
     } else {
       createRecord.mutate({ data, params: recordParams }, { onSuccess, onError });
     }

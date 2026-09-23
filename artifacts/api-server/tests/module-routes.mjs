@@ -458,6 +458,53 @@ async function testFoodSafety(req) {
   check("food-safety: /by-date returns correct id", byDateRes.data?.id === recordId, `got id=${byDateRes.data?.id}`);
   check("food-safety: /by-date returns deliveries array", Array.isArray(byDateRes.data?.deliveries), `got ${typeof byDateRes.data?.deliveries}`);
 
+  // A web form can be stale after mobile appended a row. The web's own edit
+  // should merge that identifiable append instead of replacing it.
+  const staleBaseline = byDateRes.data;
+  const secondEntryId = `mobile-test-${Date.now()}-b`;
+  const secondAppend = await req("POST", "/food-safety/append", {
+    recordDate,
+    recordedAt: `${recordDate}T13:00:00+00:00`,
+    entryId: secondEntryId,
+    section: "hotTemperature",
+    row: { item: "Mobile soup", coreTemp: "77.1" },
+  });
+  expectOk("food-safety: mobile append after web load", secondAppend.status, [201]);
+  const staleWebSave = await req("PUT", `/food-safety/${recordId}`, {
+    expectedUpdatedAt: staleBaseline?.updatedAt,
+    expectedRecord: { hotTemperature: staleBaseline?.hotTemperature ?? [] },
+    hotTemperature: [
+      ...(staleBaseline?.hotTemperature ?? []),
+      { item: "Web soup", coreTemp: "78.0" },
+    ],
+  });
+  expectOk("food-safety: stale web save merges mobile append", staleWebSave.status, [200]);
+  const mergedHotRows = staleWebSave.data?.hotTemperature ?? staleWebSave.data?.hot_temperature ?? [];
+  check(
+    "food-safety: merged web save keeps mobile row",
+    mergedHotRows.some((row) => row?._entryId === secondEntryId),
+    `rows=${JSON.stringify(mergedHotRows)}`,
+  );
+  check(
+    "food-safety: merged web save keeps web edit",
+    mergedHotRows.some((row) => row?.item === "Web soup"),
+    `rows=${JSON.stringify(mergedHotRows)}`,
+  );
+
+  // Two writers editing the same scalar field cannot be merged safely.
+  const conflictBaseline = (await req("GET", `/food-safety/by-date/${recordDate}`)).data;
+  const competingEdit = await req("PUT", `/food-safety/${recordId}`, {
+    correctives: "Another manager's edit",
+  });
+  expectOk("food-safety: competing web edit", competingEdit.status, [200]);
+  const conflictSave = await req("PUT", `/food-safety/${recordId}`, {
+    expectedUpdatedAt: conflictBaseline?.updatedAt,
+    expectedRecord: { correctives: conflictBaseline?.correctives ?? null },
+    correctives: "Stale overwrite attempt",
+  });
+  check("food-safety: unsafe stale web save → 409", conflictSave.status === 409, `got ${conflictSave.status}`);
+  check("food-safety: conflict response identifies diary conflict", conflictSave.data?.code === "DIARY_CONFLICT", `got ${JSON.stringify(conflictSave.data)}`);
+
   // 8. GET /food-safety?date= — same record
   const byQueryRes = await req("GET", `/food-safety?date=${recordDate}`);
   expectOk("food-safety: GET /?date=", byQueryRes.status);

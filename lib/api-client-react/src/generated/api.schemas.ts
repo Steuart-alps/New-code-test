@@ -1006,6 +1006,28 @@ export interface CreateFoodSafetyRecordRequest {
   submittedAt?: string;
 }
 
+/**
+ * The web diary baseline used for safe three-way merging.
+ */
+export interface FoodSafetyRecordSnapshot {
+  deliveries?: unknown[];
+  coldFood?: unknown[];
+  hotTemperature?: unknown[];
+  cooling?: unknown[];
+  reheating?: unknown[];
+  hotHolding?: unknown[];
+  sousVide?: unknown[];
+  cookingLimit?: string | null;
+  coolingLimit?: string | null;
+  reheatingLimit?: string | null;
+  hotHoldingLimit?: string | null;
+  correctives?: string | null;
+  managerSignature?: string | null;
+  performedBy?: string | null;
+  staffRosterId?: number | null;
+  submittedAt?: string | null;
+}
+
 export type MobileTemperatureLogDelivery = { [key: string]: unknown };
 
 export type MobileTemperatureLogHotHolding = { [key: string]: unknown };
@@ -1029,6 +1051,9 @@ export interface MobileTemperatureLog {
 }
 
 export interface UpdateFoodSafetyRecordRequest {
+  /** Updated-at value returned when the web diary was loaded. */
+  expectedUpdatedAt?: string;
+  expectedRecord?: FoodSafetyRecordSnapshot;
   mobileTemperatureLog?: MobileTemperatureLog;
   deliveries?: unknown[];
   coldFood?: unknown[];
@@ -1040,7 +1065,7 @@ export interface UpdateFoodSafetyRecordRequest {
   hotHoldingLimit?: string;
   correctives?: string;
   managerSignature?: string;
-  submittedAt?: string;
+  submittedAt?: string | null;
 }
 
 export type LegionellaCheckType = typeof LegionellaCheckType[keyof typeof LegionellaCheckType];
