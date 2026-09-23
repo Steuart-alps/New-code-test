@@ -1,5 +1,7 @@
 export * from "./clients"
 ;
+export * from "./monthly-compliance-deliveries";
+export * from "./monthly-compliance-batches";
 
 export * from "./departments"
 ;

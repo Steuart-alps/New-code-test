@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { z } from "zod";
+import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -319,6 +320,10 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
   const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
   if (!scope) return;
   const { siteId, departmentId } = scope;
+
+  if (siteId === undefined && departmentId === undefined) {
+    return res.json(await getUnscopedComplianceReport(clientId, from, to));
+  }
 
   // Build WHERE fragments for site-scoped queries
   const siteWhereClause =

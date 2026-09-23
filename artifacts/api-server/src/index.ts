@@ -287,9 +287,9 @@ function startScheduler() {
   });
   logger.info("Data deletion scheduler started (daily at 03:00)");
 
-  // Email all client admins a monthly compliance summary on the 1st of each
-  // month at 08:05 — covers the previous calendar month.
-  cron.schedule("5 8 1 * *", async () => {
+  // Check daily at 08:00 UK local time; the job creates new monthly mail
+  // only on the 1st and resumes unfinished deliveries on subsequent days.
+  cron.schedule("0 8 * * *", async () => {
     logger.info("Running monthly compliance summary job...");
     try {
       const result = await runMonthlyComplianceSummaryJob();
@@ -297,8 +297,8 @@ function startScheduler() {
     } catch (err) {
       logger.error({ err }, "Monthly compliance summary job failed");
     }
-  });
-  logger.info("Monthly compliance summary scheduler started (1st of month at 08:05)");
+  }, { timezone: "Europe/London" });
+  logger.info("Monthly compliance summary scheduler started (daily at 08:00 Europe/London)");
 
   // Alert client admins weekly (Monday 09:00) when contractor public liability
   // insurance is expiring within 30 days or has already expired.

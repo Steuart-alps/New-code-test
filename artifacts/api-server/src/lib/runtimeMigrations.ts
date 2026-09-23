@@ -600,6 +600,32 @@ export async function runRuntimeMigrations() {
 
     await migrateAuditFixes2026_08();
     await migrateOffboardingColumns();
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "monthly_compliance_batches" (
+        id serial PRIMARY KEY,
+        client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        month_key text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (client_id, month_key)
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "monthly_compliance_deliveries" (
+        id serial PRIMARY KEY,
+        client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        month_key text NOT NULL,
+        recipient_email text NOT NULL,
+        subject text NOT NULL,
+        html text NOT NULL,
+        body_text text NOT NULL,
+        state text NOT NULL DEFAULT 'pending',
+        lease_token text,
+        lease_expires_at timestamptz,
+        sent_at timestamptz,
+        UNIQUE (client_id, user_id, month_key)
+      )
+    `);
     await migrateDoctrackSafetrackMerge();
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
