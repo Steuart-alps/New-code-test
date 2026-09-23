@@ -55,9 +55,62 @@ type PendingCancellationConfirmation =
       item: EmailQueueItem;
     };
 
+interface PersistedApprovalRefreshState {
+  knownQueueIds: number[];
+  newRequestIds: number[];
+}
+
+function getApprovalRefreshStorageKey(userId: number | null, clientId: number | null) {
+  return userId !== null && clientId !== null
+    ? `complytrack:contractor-approvals:${userId}:${clientId}`
+    : null;
+}
+
+function readPersistedApprovalRefreshState(storageKey: string | null) {
+  if (!storageKey || typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedApprovalRefreshState>;
+    if (
+      !Array.isArray(parsed.knownQueueIds) ||
+      !Array.isArray(parsed.newRequestIds) ||
+      !parsed.knownQueueIds.every(Number.isInteger) ||
+      !parsed.newRequestIds.every(Number.isInteger)
+    ) {
+      return null;
+    }
+    return {
+      knownQueueIds: parsed.knownQueueIds,
+      newRequestIds: parsed.newRequestIds,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistApprovalRefreshState(
+  storageKey: string | null,
+  knownQueueIds: Set<number> | null,
+  newRequestIds: number[],
+) {
+  if (!storageKey || typeof window === "undefined" || !knownQueueIds) return;
+
+  try {
+    const state: PersistedApprovalRefreshState = {
+      knownQueueIds: Array.from(knownQueueIds),
+      newRequestIds,
+    };
+    window.sessionStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // Session storage may be unavailable or quota-limited; in-memory state still works.
+  }
+}
+
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
-  const { activeClientId } = useAuth();
+  const { activeClientId, user } = useAuth();
   const clientApiFetch = useActiveClientApi();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -72,9 +125,11 @@ export default function ContractorApprovalsPage() {
   const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
     useState<PendingCancellationConfirmation | null>(null);
   const [newRequestIds, setNewRequestIds] = useState<number[]>([]);
+  const newRequestIdsRef = useRef<number[]>([]);
   const mountedRef = useRef(false);
   const fetchGenerationRef = useRef(0);
   const knownQueueIdsRef = useRef<Set<number> | null>(null);
+  const refreshStorageKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -84,11 +139,17 @@ export default function ContractorApprovalsPage() {
   }, []);
 
   useEffect(() => {
+    const storageKey = getApprovalRefreshStorageKey(user?.id ?? null, activeClientId);
+    const persistedState = readPersistedApprovalRefreshState(storageKey);
+    refreshStorageKeyRef.current = storageKey;
     setItems([]);
-    setNewRequestIds([]);
-    knownQueueIdsRef.current = null;
+    newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
+    setNewRequestIds(newRequestIdsRef.current);
+    knownQueueIdsRef.current = persistedState
+      ? new Set(persistedState.knownQueueIds)
+      : null;
     fetchItems();
-  }, [activeClientId]);
+  }, [activeClientId, user?.id]);
 
   async function fetchItems() {
     const fetchGeneration = ++fetchGenerationRef.current;
@@ -103,19 +164,24 @@ export default function ContractorApprovalsPage() {
             nextItems.map((item: EmailQueueItem) => item.id),
           );
           const previousQueueIds = knownQueueIdsRef.current;
+          const stillPendingIds = new Set(
+            newRequestIdsRef.current.filter(id => nextQueueIds.has(id)),
+          );
           if (previousQueueIds) {
             const incomingNewIds = nextItems
               .filter((item: EmailQueueItem) => !previousQueueIds.has(item.id))
               .map((item: EmailQueueItem) => item.id);
-            setNewRequestIds(previousIds => {
-              const stillPendingIds = new Set(
-                previousIds.filter(id => nextQueueIds.has(id)),
-              );
-              incomingNewIds.forEach((id: number) => stillPendingIds.add(id));
-              return Array.from(stillPendingIds);
-            });
+            incomingNewIds.forEach((id: number) => stillPendingIds.add(id));
           }
+          const nextNewRequestIds = Array.from(stillPendingIds);
+          newRequestIdsRef.current = nextNewRequestIds;
+          setNewRequestIds(nextNewRequestIds);
           knownQueueIdsRef.current = nextQueueIds;
+          persistApprovalRefreshState(
+            refreshStorageKeyRef.current,
+            nextQueueIds,
+            nextNewRequestIds,
+          );
           setItems(nextItems);
           setLoadError(null);
         }
@@ -164,7 +230,24 @@ export default function ContractorApprovalsPage() {
   }
 
   function markRequestReviewed(itemId: number) {
-    setNewRequestIds(previousIds => previousIds.filter(id => id !== itemId));
+    const nextNewRequestIds = newRequestIdsRef.current.filter(id => id !== itemId);
+    newRequestIdsRef.current = nextNewRequestIds;
+    setNewRequestIds(nextNewRequestIds);
+    persistApprovalRefreshState(
+      refreshStorageKeyRef.current,
+      knownQueueIdsRef.current,
+      nextNewRequestIds,
+    );
+  }
+
+  function markAllRequestsReviewed() {
+    newRequestIdsRef.current = [];
+    setNewRequestIds([]);
+    persistApprovalRefreshState(
+      refreshStorageKeyRef.current,
+      knownQueueIdsRef.current,
+      [],
+    );
   }
 
   function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
@@ -326,7 +409,7 @@ export default function ContractorApprovalsPage() {
                   variant="outline"
                   size="sm"
                   className="shrink-0"
-                  onClick={() => setNewRequestIds([])}
+                  onClick={markAllRequestsReviewed}
                 >
                   Mark as reviewed
                 </Button>

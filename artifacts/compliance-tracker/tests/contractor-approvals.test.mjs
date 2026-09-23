@@ -189,7 +189,7 @@ assert.match(
 );
 assert.match(
   source,
-  /onClick=\{\(\) => setNewRequestIds\(\[\]\)\}/,
+  /function markAllRequestsReviewed\(\)/,
   "managers must be able to acknowledge and clear the new-request indication",
 );
 assert.match(
@@ -216,6 +216,36 @@ assert.match(
   source,
   /function startEdit\(item: EmailQueueItem\) \{\s*markRequestReviewed\(item\.id\)/,
   "opening a new request for editing must clear its indicator",
+);
+assert.match(
+  source,
+  /window\.sessionStorage\.getItem\(storageKey\)/,
+  "new-request context must persist in tab-scoped session storage",
+);
+assert.match(
+  source,
+  /complytrack:contractor-approvals:\$\{userId\}:\$\{clientId\}/,
+  "new-request context must be scoped to both the user and selected client",
+);
+assert.match(
+  source,
+  /const persistedState = readPersistedApprovalRefreshState\(storageKey\)/,
+  "the page must restore the selected client's refresh context when it mounts",
+);
+assert.match(
+  source,
+  /knownQueueIdsRef\.current = persistedState[\s\S]*new Set\(persistedState\.knownQueueIds\)/,
+  "the restored queue baseline must prevent existing requests being falsely marked new",
+);
+assert.match(
+  source,
+  /persistApprovalRefreshState\([\s\S]*nextQueueIds[\s\S]*nextNewRequestIds/,
+  "successful refreshes must persist the updated queue baseline and new-request IDs",
+);
+assert.match(
+  source,
+  /refreshStorageKeyRef\.current = storageKey/,
+  "changing the selected client must switch the persistence scope before fetching",
 );
 assert.match(
   actionSource,
