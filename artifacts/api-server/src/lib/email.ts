@@ -132,10 +132,20 @@ export async function sendSystemEmail(opts: {
   idempotencyKey?: string;
 }) {
   // Integration tests can inspect exactly what would have been handed to the
-  // provider without sending real mail. This is deliberately restricted to
-  // test mode and an explicitly configured capture file.
+  // provider without sending real mail. The same test-only transport can
+  // simulate slow or failed delivery. This is deliberately restricted to test
+  // mode and an explicitly configured capture file or behavior.
   const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
-  if (process.env.NODE_ENV === "test" && capturePath) {
+  const testBehavior = process.env.TEST_EMAIL_BEHAVIOR;
+  if (process.env.NODE_ENV === "test" && (capturePath || testBehavior)) {
+    if (testBehavior === "delay") {
+      const delayMs = Number(process.env.TEST_EMAIL_DELAY_MS ?? 2500);
+      await new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 2500));
+    }
+    if (testBehavior === "reject") {
+      throw new Error("Simulated email delivery failure");
+    }
+    if (!capturePath) return;
     await appendFile(capturePath, `${JSON.stringify({
       to: opts.to,
       subject: opts.subject,
