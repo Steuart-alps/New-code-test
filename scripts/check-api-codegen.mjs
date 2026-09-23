@@ -1,58 +1,44 @@
 import { createHash } from "node:crypto";
-import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
-const workspace = await mkdtemp(path.join("/tmp", "complytrack-api-codegen-"));
+const codegenLock = "/tmp/complytrack-api-codegen.lock";
 
-const findInstalledOrval = async () => {
-  const pnpmStore = path.join(root, "node_modules/.pnpm");
-  const packages = (await readdir(pnpmStore))
-    .filter((name) => name.startsWith("orval@"))
-    .sort();
-
-  for (const packageDirectory of packages) {
-    const candidate = path.join(pnpmStore, packageDirectory, "node_modules/orval");
-    try {
-      await access(path.join(candidate, "dist/bin/orval.mjs"));
-      return candidate;
-    } catch {
-      // Try the next installed pnpm package variant.
-    }
-  }
-
-  throw new Error("could not find an installed Orval package under node_modules/.pnpm");
-};
-
-const copy = async (source, destination) => {
-  await cp(path.join(root, source), path.join(workspace, destination), { recursive: true });
-};
-
-const run = async (args, cwd) => {
+const run = async (args, cwd, options = {}) => {
   try {
-    await execFileAsync("pnpm", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+    await execFileAsync("pnpm", args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      ...options,
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const output = error && typeof error === "object"
       ? [error.stdout, error.stderr].filter(Boolean).join("\n")
       : "";
     throw new Error(
-      `command failed in ${path.relative(workspace, cwd)}: pnpm ${args.join(" ")}\n${detail}\n${output}`,
-      {
-        cause: error,
-      },
+      `command failed in ${path.relative(root, cwd)}: pnpm ${args.join(" ")}\n${detail}\n${output}`,
+      { cause: error },
     );
   }
 };
 
-const runOrval = async (cwd, orvalPackage) => {
-  const executable = path.join(orvalPackage, "dist/bin/orval.mjs");
+const runCodegen = async () => {
   try {
-    await execFileAsync(process.execPath, [executable, "--config", "./orval.config.ts"], {
-      cwd,
+    await execFileAsync("flock", [
+      "-x",
+      codegenLock,
+      "pnpm",
+      "--dir",
+      "lib/api-spec",
+      "run",
+      "codegen",
+    ], {
+      cwd: root,
       maxBuffer: 10 * 1024 * 1024,
     });
   } catch (error) {
@@ -60,7 +46,7 @@ const runOrval = async (cwd, orvalPackage) => {
     const output = error && typeof error === "object"
       ? [error.stdout, error.stderr].filter(Boolean).join("\n")
       : "";
-    throw new Error(`command failed in lib/api-spec: ${process.execPath} ${executable} --config ./orval.config.ts\n${detail}\n${output}`, {
+    throw new Error(`command failed: pnpm --dir lib/api-spec run codegen\n${detail}\n${output}`, {
       cause: error,
     });
   }
@@ -94,37 +80,15 @@ const diffSnapshots = (before, after) => {
 };
 
 try {
-  const orvalPackage = await findInstalledOrval();
-  await copy("tsconfig.base.json", "tsconfig.base.json");
-  await copy("lib/api-spec/openapi.yaml", "lib/api-spec/openapi.yaml");
-  await copy("lib/api-spec/orval.config.ts", "lib/api-spec/orval.config.ts");
-  await copy("lib/api-spec/package.json", "lib/api-spec/package.json");
-  await copy("lib/api-client-react/src", "lib/api-client-react/src");
-  await copy("lib/api-client-react/tsconfig.json", "lib/api-client-react/tsconfig.json");
-  await copy("lib/api-client-react/package.json", "lib/api-client-react/package.json");
-  await copy("lib/api-zod/src", "lib/api-zod/src");
-  await copy("lib/api-zod/tsconfig.json", "lib/api-zod/tsconfig.json");
-  await copy("lib/api-zod/package.json", "lib/api-zod/package.json");
-  await symlink(path.join(root, "node_modules"), path.join(workspace, "node_modules"), "dir");
-  await symlink(
-    path.join(root, "lib/api-client-react/node_modules"),
-    path.join(workspace, "lib/api-client-react/node_modules"),
-    "dir",
-  );
-  await symlink(
-    path.join(root, "lib/api-zod/node_modules"),
-    path.join(workspace, "lib/api-zod/node_modules"),
-    "dir",
-  );
-  await mkdir(path.join(workspace, "lib/api-spec/node_modules"), { recursive: true });
-  await symlink(orvalPackage, path.join(workspace, "lib/api-spec/node_modules/orval"), "dir");
-
-  const apiSpec = path.join(workspace, "lib/api-spec");
-  const apiClient = path.join(workspace, "lib/api-client-react");
-  const apiZod = path.join(workspace, "lib/api-zod");
+  const apiClient = path.join(root, "lib/api-client-react");
+  const apiZod = path.join(root, "lib/api-zod");
   const generated = [
     ["api-client-react", path.join(apiClient, "src/generated")],
     ["api-zod", path.join(apiZod, "src/generated")],
+  ];
+  const manualBarrels = [
+    ["api-client-react/src/index.ts", path.join(apiClient, "src/index.ts")],
+    ["api-zod/src/index.ts", path.join(apiZod, "src/index.ts")],
   ];
 
   const first = new Map();
@@ -132,10 +96,24 @@ try {
   for (const [name, directory] of generated) {
     for (const [file, digest] of await snapshot(directory)) committed.set(`${name}/${file}`, digest);
   }
+  const manualBefore = new Map();
+  for (const [name, file] of manualBarrels) {
+    manualBefore.set(name, createHash("sha256").update(await readFile(file)).digest("hex"));
+  }
 
-  await runOrval(apiSpec, orvalPackage);
+  await runCodegen();
   for (const [name, directory] of generated) {
     for (const [file, digest] of await snapshot(directory)) first.set(`${name}/${file}`, digest);
+  }
+  const manualAfterFirst = new Map();
+  for (const [name, file] of manualBarrels) {
+    manualAfterFirst.set(name, createHash("sha256").update(await readFile(file)).digest("hex"));
+  }
+  const changedManualBarrels = diffSnapshots(manualBefore, manualAfterFirst);
+  if (changedManualBarrels.length > 0) {
+    throw new Error(
+      `manual API barrel exports changed during codegen:\n${changedManualBarrels.join("\n")}`,
+    );
   }
 
   const committedDifferences = diffSnapshots(committed, first);
@@ -146,7 +124,7 @@ try {
     );
   }
 
-  await runOrval(apiSpec, orvalPackage);
+  await runCodegen();
   const second = new Map();
   for (const [name, directory] of generated) {
     for (const [file, digest] of await snapshot(directory)) second.set(`${name}/${file}`, digest);
@@ -172,6 +150,4 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
-} finally {
-  await rm(workspace, { recursive: true, force: true });
 }

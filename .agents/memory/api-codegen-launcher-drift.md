@@ -3,8 +3,8 @@ name: API codegen launcher drift
 description: An environment-specific Orval launcher mismatch can make deterministic API codegen appear to rewrite unrelated generated files.
 ---
 
-When API codegen unexpectedly rewrites unrelated generated client files, verify the installed Orval launcher and peer-variant path before changing the OpenAPI contract or generated output.
+Run API codegen through the package script with the installed Orval module path, and keep source consumers from compiling while generated directories are being replaced.
 
-**Why:** The workspace launcher can retain a path to an Orval peer variant that is no longer installed. The direct generator may then use a different dependency-resolution path from the repository's deterministic codegen validation, producing noisy but unrelated diffs.
+**Why:** The workspace launcher can retain a path to an Orval peer variant that is no longer installed. Synthetic copied workspaces can also resolve the custom mutator differently, while direct codegen can briefly remove generated files and race concurrent typechecks.
 
-**How to apply:** Run the repository's API codegen drift check and compare its isolated output before accepting broad generated changes. Repair the ignored local launcher/install link or regenerate from the matching installed Orval package; do not edit generated clients by hand.
+**How to apply:** Use `pnpm --dir lib/api-spec run codegen` for the authoritative output, compare the generated trees across two runs, and serialize codegen against API/web typechecks with a shared lock. Do not edit generated clients by hand.
