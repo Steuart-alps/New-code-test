@@ -276,6 +276,30 @@ async function main() {
     });
     expect("scoped staff can create HotTub asset in current department",
       scopedHotTubCreate, [201]);
+    check("HotTub asset creation defaults to active",
+      scopedHotTubCreate.data?.active === true,
+      JSON.stringify(scopedHotTubCreate.data));
+    const inactiveHotTub = await admin("POST", "/hot-tub/tubs", {
+      name: `Inactive tub ${suffix}`, siteId: alphaSite.data.id, active: false,
+    });
+    expect("manager can create inactive HotTub asset", inactiveHotTub, [201]);
+    check("inactive HotTub asset remains inactive",
+      inactiveHotTub.data?.active === false,
+      JSON.stringify(inactiveHotTub.data));
+    const hotTubAssetsAfterInactiveCreate = await admin("GET", "/hot-tub/tubs");
+    const inactiveHotTubAfterCreate = hotTubAssetsAfterInactiveCreate.data?.find?.(
+      row => row.id === inactiveHotTub.data?.id,
+    );
+    check("inactive HotTub asset is stored as inactive",
+      inactiveHotTubAfterCreate?.active === false,
+      JSON.stringify(inactiveHotTubAfterCreate));
+    const reactivatedHotTub = await admin("PUT", `/hot-tub/tubs/${inactiveHotTub.data?.id}`, {
+      active: true,
+    });
+    expect("manager can reactivate HotTub asset", reactivatedHotTub, [200]);
+    check("reactivated HotTub asset is active",
+      reactivatedHotTub.data?.active === true,
+      JSON.stringify(reactivatedHotTub.data));
     const clientWideSite = await admin("POST", "/sites", {
       name: `Lock Client-Wide Site ${suffix}`, seedStarterChecks: false,
     });

@@ -85,7 +85,7 @@ router.post("/tubs", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const result = await db.execute(sql`
     INSERT INTO hot_tubs (client_id, site_id, name, description, active)
-    VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.description ?? null}, true)
+    VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.description ?? null}, ${d.active ?? true})
     RETURNING *
   `);
   res.status(201).json((result.rows ?? [result])[0]);
