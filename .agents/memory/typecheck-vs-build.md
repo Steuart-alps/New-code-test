@@ -10,3 +10,9 @@ Treat the root typecheck as a required validation signal. In manually maintained
 **Why:** Double-quoted exports are semantically equivalent to TypeScript, but repeated Orval regeneration does not recognize them and appends duplicate single-quoted exports. Duplicate wildcard exports can obscure or reintroduce ambiguous generated names.
 
 **How to apply:** After changing the OpenAPI spec or Orval configuration, run codegen and the root typecheck. Confirm a second codegen run leaves manually maintained barrel files unchanged.
+
+Package-level checks must build their own referenced composite libraries before invoking `tsc -p --noEmit`; the root check already does this through `tsc --build`, but direct API/web checks otherwise fail with TS6305 when ignored declaration output is absent.
+
+**Why:** A clean workspace has no committed `lib/*/dist` declarations. Direct package validation then reports missing referenced outputs and can also degrade inferred types into misleading follow-on errors.
+
+**How to apply:** Keep package `typecheck` scripts self-preparing only their declared references, and retain the root `tsc --build` as the shared library gate.

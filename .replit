@@ -62,6 +62,14 @@ args = "build-web"
 task = "workflow.run"
 args = "typecheck"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "api-typecheck"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "web-typecheck"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -143,12 +151,12 @@ isValidation = true
 name = "build-api-server"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run build"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/api-server && source tests/api-integration-lock.sh && pnpm run build"
 
 [[workflows.workflow]]
 name = "build-web"
@@ -179,6 +187,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "api-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "web-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true

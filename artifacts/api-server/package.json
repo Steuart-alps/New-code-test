@@ -7,7 +7,7 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm exec tsc --build ../../lib/db ../../lib/api-zod && tsc -p tsconfig.json --noEmit",
     "test:api-runner-lock": "bash tests/test-api-integration-lock.sh",
     "test:isolation": "bash tests/run-db-workflow.sh tests/tenant-isolation.mjs",
     "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
