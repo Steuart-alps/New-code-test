@@ -9,7 +9,7 @@ Staff can edit a dated track record during its scheduled local day and the follo
 
 **How to apply:** Keep the rule at the API boundary so web, mobile, and future clients share it. Return `TRACK_RECORD_LOCKED` with HTTP 423 and identify the administrator override path.
 
-For ID-addressed operational evidence, use the record's tenant-scoped persisted date rather than a request-body date. Do not treat every old row as locked: SOPs, risk-assessment documents, assets, templates, and action follow-up workflows are not historical daily check records.
+For ID-addressed operational evidence, use the record's tenant-scoped persisted date rather than a request-body date. Do not treat every old row as locked: SOPs, risk-assessment documents, assets, templates, FixTrack issues, and action follow-up workflows are not historical daily check records. A created_at timestamp alone is not an operational evidence date.
 
 **Why:** Action remediation can legitimately continue after the source check's correction window, and documents or configuration should not become uneditable merely because they were created long ago.
 

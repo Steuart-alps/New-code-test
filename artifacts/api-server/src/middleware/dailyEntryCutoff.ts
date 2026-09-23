@@ -131,7 +131,6 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/room-track\/checks\/\d+$/, table: "room_track_checks", date: "check_date" },
   { path: /^\/staff-training\/\d+$/, table: "staff_training_records", date: "issued_at" },
   { path: /^\/train-track\/records\/\d+$/, table: "train_track_records", date: "completed_date" },
-  { path: /^\/fix-track\/issues\/\d+$/, table: "fix_track_issues", date: "created_at" },
   { path: /^\/swim-track\/sessions\/\d+$/, table: "swim_sessions", date: "session_date" },
   { path: /^\/swim-track\/surveillance\/\d+$/, table: "swim_surveillance_checks", date: "check_date" },
   { path: /^\/swim-track\/first-aid\/\d+$/, table: "swim_first_aid_checks", date: "check_date" },

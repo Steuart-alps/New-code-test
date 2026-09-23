@@ -27,7 +27,7 @@ WITH expected(table_name, column_name) AS (VALUES
  ('daily_checklists','check_date'),('daily_manager_signoffs','signoff_date'),
  ('incidents','incident_date'),('premises_inspections','inspection_date'),
  ('room_track_checks','check_date'),('staff_training_records','issued_at'),
- ('train_track_records','completed_date'),('fix_track_issues','created_at'),
+  ('train_track_records','completed_date'),
  ('swim_sessions','session_date'),('swim_surveillance_checks','check_date'),
  ('swim_first_aid_checks','check_date'),('swim_incidents','incident_date'),
  ('kitchen_weekly_records','week_commencing'),('kitchen_probe_checks','check_date'),
