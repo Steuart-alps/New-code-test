@@ -60,6 +60,7 @@ export default function ContractorApprovalsPage() {
   const { activeClientId } = useAuth();
   const clientApiFetch = useActiveClientApi();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { toast } = useToast();
   const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set());
@@ -87,6 +88,7 @@ export default function ContractorApprovalsPage() {
 
   async function fetchItems() {
     const fetchGeneration = ++fetchGenerationRef.current;
+    setLoadError(null);
     setLoading(true);
     try {
       const res = await clientApiFetch("/fix-track/contractor-email-queue?status=pending");
@@ -94,10 +96,16 @@ export default function ContractorApprovalsPage() {
         const nextItems = await res.json();
         if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
           setItems(nextItems);
+          setLoadError(null);
         }
+      } else if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        setItems([]);
+        setLoadError("We couldn't load pending contractor emails. Please try again.");
       }
     } catch (e) {
       if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
+        setItems([]);
+        setLoadError("We couldn't load pending contractor emails. Please try again.");
         console.error(e);
       }
     } finally {
@@ -258,6 +266,14 @@ export default function ContractorApprovalsPage() {
         {loading ? (
           <div className="flex items-center justify-center h-40">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-16 bg-card border rounded-lg">
+            <p className="text-sm font-medium text-foreground">Unable to load approvals</p>
+            <p className="text-xs text-muted-foreground mt-1">{loadError}</p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={fetchItems}>
+              Try again
+            </Button>
           </div>
         ) : items.length === 0 ? (
           <div className="text-center py-16 bg-card border rounded-lg text-muted-foreground">

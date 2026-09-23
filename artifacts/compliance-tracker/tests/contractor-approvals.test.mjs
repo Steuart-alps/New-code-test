@@ -118,6 +118,26 @@ assert.match(
   "stale queue responses must be ignored after a remount or client switch",
 );
 assert.match(
+  source,
+  /const \[loadError, setLoadError\] = useState<string \| null>\(null\)/,
+  "the approvals page must track queue-load failures separately from an empty queue",
+);
+assert.match(
+  source,
+  /We couldn't load pending contractor emails\. Please try again\./,
+  "queue-load failures must use clear retry guidance",
+);
+assert.match(
+  source,
+  /Unable to load approvals/,
+  "queue-load failures must not show the no-pending-emails empty state",
+);
+assert.match(
+  source,
+  /<Button variant="outline" size="sm" className="mt-4" onClick=\{fetchItems\}>/,
+  "managers must be able to retry the queue request from the error state",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",
