@@ -138,6 +138,21 @@ assert.match(
   "managers must be able to retry the queue request from the error state",
 );
 assert.match(
+  source,
+  /Approvals may be out of date/,
+  "refresh failures must warn that the displayed approval list may be stale",
+);
+assert.match(
+  source,
+  /Showing the last successful approval list below\./,
+  "refresh failures must explain that the last successful list remains visible",
+);
+assert.match(
+  source,
+  /loading && items\.length === 0/,
+  "a refresh must keep an existing approval list visible while it runs",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",

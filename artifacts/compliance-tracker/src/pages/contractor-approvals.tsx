@@ -99,12 +99,10 @@ export default function ContractorApprovalsPage() {
           setLoadError(null);
         }
       } else if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
-        setItems([]);
         setLoadError("We couldn't load pending contractor emails. Please try again.");
       }
     } catch (e) {
       if (mountedRef.current && fetchGeneration === fetchGenerationRef.current) {
-        setItems([]);
         setLoadError("We couldn't load pending contractor emails. Please try again.");
         console.error(e);
       }
@@ -263,200 +261,225 @@ export default function ContractorApprovalsPage() {
           </div>
         </div>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <div className="flex items-center justify-center h-40">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
-        ) : loadError ? (
-          <div className="text-center py-16 bg-card border rounded-lg">
-            <p className="text-sm font-medium text-foreground">Unable to load approvals</p>
-            <p className="text-xs text-muted-foreground mt-1">{loadError}</p>
-            <Button variant="outline" size="sm" className="mt-4" onClick={fetchItems}>
-              Try again
-            </Button>
-          </div>
-        ) : items.length === 0 ? (
-          <div className="text-center py-16 bg-card border rounded-lg text-muted-foreground">
-            <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="text-sm font-medium text-foreground">No pending emails</p>
-            <p className="text-xs mt-1">All contractor emails have been reviewed.</p>
-          </div>
         ) : (
-          <div className="space-y-4">
-            {grouped.map(([site, siteItems]) => (
-              <div key={site} className="border rounded-lg bg-card overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors"
-                  onClick={() => toggleSite(site)}
-                >
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-muted-foreground" />
-                    <span className="font-semibold">{site}</span>
-                    <span className="text-xs px-2 py-0.5 bg-background border rounded-full text-muted-foreground ml-2 tabular-nums">
-                      {siteItems.length}
-                    </span>
-                  </div>
-                  {expandedSites.has(site) ? (
-                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  )}
-                </button>
-
-                {expandedSites.has(site) && (
-                  <div className="divide-y border-t">
-                    {siteItems.map(item => {
-                      const isEditing = editingId === item.id;
-                       const isCancellation = item.emailType === "cancellation";
-                      const preview = item.emailPreviewJson || {};
-                      
-                      return (
-                        <div key={item.id} className="p-4 flex flex-col gap-4">
-                          <div className="flex items-start justify-between gap-4 flex-wrap">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border", 
-                                  isCancellation
-                                    ? "bg-amber-50 text-amber-800 border-amber-300"
-                                    : item.emailType === "quote_request"
-                                      ? "bg-violet-50 text-violet-700 border-violet-200"
-                                      : "bg-blue-50 text-blue-700 border-blue-200"
-                                )}>
-                                  {isCancellation
-                                    ? "Calendar Cancellation"
-                                    : item.emailType === "quote_request"
-                                      ? "Requesting Quote"
-                                      : item.emailType === "reminder"
-                                        ? "Reminder"
-                                        : "Assigning Job"}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {format(new Date(item.createdAt), "dd MMM, HH:mm")}
-                                </span>
-                              </div>
-                              <h3 className="font-medium">{item.jobTitle || "Untitled Job"}</h3>
-                              <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                                <Building className="w-3.5 h-3.5" />
-                                {item.contractorName || "Unknown Contractor"}
-                              </div>
-                              {item.requestedBy && (
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Requested by: {item.requestedBy}
-                                </p>
-                              )}
-                            </div>
-                            
-                            {!isEditing && (
-                              <div className="flex items-center gap-2 shrink-0">
-                                <Button
-                                  variant="outline" size="sm"
-                                   onClick={() => handleCancel(item)}
-                                  disabled={submittingId === item.id}
-                                  className="h-8"
-                                >
-                                   {isCancellation ? "Dismiss" : "Cancel"}
-                                </Button>
-                                <Button
-                                  variant="outline" size="sm"
-                                  onClick={() => startEdit(item)}
-                                  disabled={submittingId === item.id}
-                                  className="h-8"
-                                >
-                                  <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                   onClick={() => handleApprove(item)}
-                                  disabled={submittingId === item.id}
-                                   className={cn(
-                                     "h-8 text-white",
-                                     isCancellation
-                                       ? "bg-amber-600 hover:bg-amber-700"
-                                       : "bg-blue-600 hover:bg-blue-700"
-                                   )}
-                                >
-                                   {submittingId === item.id
-                                     ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                                     : isCancellation
-                                       ? <CalendarX2 className="w-3.5 h-3.5 mr-1" />
-                                       : <Send className="w-3.5 h-3.5 mr-1" />}
-                                   {isCancellation ? "Approve Cancellation" : "Approve & Send"}
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="bg-muted/30 border rounded-md p-3 text-sm font-mono whitespace-pre-wrap text-foreground/80">
-                            {isEditing ? (
-                              <div className="space-y-3 font-sans">
-                                 {isCancellation && (
-                                   <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950">
-                                     <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                                     <div>
-                                       <p className="font-semibold">This cancels an existing calendar event</p>
-                                       <p className="mt-0.5 text-xs text-amber-900/80">
-                                         Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
-                                       </p>
-                                     </div>
-                                   </div>
-                                 )}
-                                <div>
-                                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Subject</label>
-                                  <Input 
-                                    value={editSubject} 
-                                    onChange={e => setEditSubject(e.target.value)} 
-                                    className="h-8 font-mono text-sm"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Body</label>
-                                  <Textarea 
-                                    value={editText} 
-                                    onChange={e => setEditText(e.target.value)} 
-                                    className="min-h-[200px] font-mono text-sm"
-                                  />
-                                </div>
-                                <div className="flex justify-end gap-2 pt-2">
-                                  <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} disabled={submittingId === item.id}>
-                                    Cancel Edit
-                                  </Button>
-                                   <Button
-                                     size="sm"
-                                     className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
-                                      onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
-                                     disabled={submittingId === item.id}
-                                   >
-                                    {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-                                     {isCancellation ? "Save & Send Cancellation" : "Save & Send"}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                 {isCancellation && (
-                                   <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 font-sans text-amber-950">
-                                     <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                                     <div>
-                                       <p className="font-semibold">This cancels an existing calendar event</p>
-                                       <p className="mt-0.5 text-xs text-amber-900/80">
-                                         Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
-                                       </p>
-                                     </div>
-                                   </div>
-                                 )}
-                                <div className="font-semibold text-foreground mb-2">Subject: {preview.subject}</div>
-                                {preview.text}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+          <>
+            {loadError && (
+              <div className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-amber-950">Approvals may be out of date</p>
+                  <p className="text-xs text-amber-900/80">
+                    {loadError} Showing the last successful approval list below.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchItems} className="shrink-0">
+                  Try again
+                </Button>
               </div>
-            ))}
-          </div>
+            )}
+            {loading && items.length > 0 && (
+              <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Refreshing approvals…
+              </div>
+            )}
+            {items.length === 0 ? (
+              loadError ? (
+                <div className="text-center py-16 bg-card border rounded-lg">
+                  <p className="text-sm font-medium text-foreground">Unable to load approvals</p>
+                  <p className="text-xs text-muted-foreground mt-1">{loadError}</p>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={fetchItems}>
+                    Try again
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center py-16 bg-card border rounded-lg text-muted-foreground">
+                  <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+                  <p className="text-sm font-medium text-foreground">No pending emails</p>
+                  <p className="text-xs mt-1">All contractor emails have been reviewed.</p>
+                </div>
+              )
+            ) : (
+              <div className="space-y-4">
+                {grouped.map(([site, siteItems]) => (
+                  <div key={site} className="border rounded-lg bg-card overflow-hidden">
+                    <button
+                      className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors"
+                      onClick={() => toggleSite(site)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-semibold">{site}</span>
+                        <span className="text-xs px-2 py-0.5 bg-background border rounded-full text-muted-foreground ml-2 tabular-nums">
+                          {siteItems.length}
+                        </span>
+                      </div>
+                      {expandedSites.has(site) ? (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </button>
+
+                    {expandedSites.has(site) && (
+                      <div className="divide-y border-t">
+                        {siteItems.map(item => {
+                          const isEditing = editingId === item.id;
+                           const isCancellation = item.emailType === "cancellation";
+                           const preview = item.emailPreviewJson || {};
+
+                          return (
+                            <div key={item.id} className="p-4 flex flex-col gap-4">
+                              <div className="flex items-start justify-between gap-4 flex-wrap">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                      isCancellation
+                                        ? "bg-amber-50 text-amber-800 border-amber-300"
+                                        : item.emailType === "quote_request"
+                                          ? "bg-violet-50 text-violet-700 border-violet-200"
+                                          : "bg-blue-50 text-blue-700 border-blue-200"
+                                    )}>
+                                      {isCancellation
+                                        ? "Calendar Cancellation"
+                                        : item.emailType === "quote_request"
+                                          ? "Requesting Quote"
+                                          : item.emailType === "reminder"
+                                            ? "Reminder"
+                                            : "Assigning Job"}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {format(new Date(item.createdAt), "dd MMM, HH:mm")}
+                                    </span>
+                                  </div>
+                                  <h3 className="font-medium">{item.jobTitle || "Untitled Job"}</h3>
+                                  <div className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                                    <Building className="w-3.5 h-3.5" />
+                                    {item.contractorName || "Unknown Contractor"}
+                                  </div>
+                                  {item.requestedBy && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      Requested by: {item.requestedBy}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {!isEditing && (
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Button
+                                      variant="outline" size="sm"
+                                       onClick={() => handleCancel(item)}
+                                      disabled={submittingId === item.id}
+                                      className="h-8"
+                                    >
+                                       {isCancellation ? "Dismiss" : "Cancel"}
+                                    </Button>
+                                    <Button
+                                      variant="outline" size="sm"
+                                      onClick={() => startEdit(item)}
+                                      disabled={submittingId === item.id}
+                                      className="h-8"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                       onClick={() => handleApprove(item)}
+                                      disabled={submittingId === item.id}
+                                       className={cn(
+                                         "h-8 text-white",
+                                         isCancellation
+                                           ? "bg-amber-600 hover:bg-amber-700"
+                                           : "bg-blue-600 hover:bg-blue-700"
+                                       )}
+                                    >
+                                       {submittingId === item.id
+                                         ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                         : isCancellation
+                                           ? <CalendarX2 className="w-3.5 h-3.5 mr-1" />
+                                           : <Send className="w-3.5 h-3.5 mr-1" />}
+                                       {isCancellation ? "Approve Cancellation" : "Approve & Send"}
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="bg-muted/30 border rounded-md p-3 text-sm font-mono whitespace-pre-wrap text-foreground/80">
+                                {isEditing ? (
+                                  <div className="space-y-3 font-sans">
+                                     {isCancellation && (
+                                       <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950">
+                                         <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                         <div>
+                                           <p className="font-semibold">This cancels an existing calendar event</p>
+                                           <p className="mt-0.5 text-xs text-amber-900/80">
+                                             Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
+                                           </p>
+                                         </div>
+                                       </div>
+                                     )}
+                                    <div>
+                                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Subject</label>
+                                      <Input
+                                        value={editSubject}
+                                        onChange={e => setEditSubject(e.target.value)}
+                                        className="h-8 font-mono text-sm"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-xs font-medium text-muted-foreground mb-1 block">Body</label>
+                                      <Textarea
+                                        value={editText}
+                                        onChange={e => setEditText(e.target.value)}
+                                        className="min-h-[200px] font-mono text-sm"
+                                      />
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-2">
+                                      <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} disabled={submittingId === item.id}>
+                                        Cancel Edit
+                                      </Button>
+                                       <Button
+                                         size="sm"
+                                         className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
+                                         onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
+                                         disabled={submittingId === item.id}
+                                       >
+                                        {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+                                         {isCancellation ? "Save & Send Cancellation" : "Save & Send"}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                     {isCancellation && (
+                                       <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 font-sans text-amber-950">
+                                         <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                         <div>
+                                           <p className="font-semibold">This cancels an existing calendar event</p>
+                                           <p className="mt-0.5 text-xs text-amber-900/80">
+                                             Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
+                                           </p>
+                                         </div>
+                                       </div>
+                                     )}
+                                    <div className="font-semibold text-foreground mb-2">Subject: {preview.subject}</div>
+                                    {preview.text}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
       <AlertDialog
