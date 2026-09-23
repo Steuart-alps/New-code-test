@@ -48,6 +48,7 @@ export * from './fireSafetyStatus';
 export * from './fireSafetyStatusLastResult';
 export * from './fireSafetyStatusStatus';
 export * from './foodSafetyConfig';
+export * from './foodSafetyConfigFoodJurisdiction';
 export * from './foodSafetyMissingDatesResponse';
 export * from './foodSafetyMonthlySummary';
 export * from './foodSafetyMonthlySummaryDay';

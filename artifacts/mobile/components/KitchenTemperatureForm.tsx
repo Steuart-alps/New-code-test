@@ -69,6 +69,7 @@ interface FoodSafetyConfig {
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
   food_hot_holding_limit?: string | null;
+  food_reheating_limit?: string | null;
   food_show_deliveries?: string | null;
   food_show_cold_food?: string | null;
   food_show_hot_temperature?: string | null;
@@ -488,7 +489,13 @@ export function KitchenTemperatureForm() {
         <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
       ) : null}
       {config?.food_show_reheating !== 'false' ? (
-        <CoreTemperatureCard title="Reheating" icon="rotate-cw" value={reheating} onChange={(value) => { markDirty(); setReheating(value); }} />
+        <CoreTemperatureCard
+          title="Reheating"
+          icon="rotate-cw"
+          target={`Target: ${config?.food_reheating_limit ?? 'Above 82°C'}`}
+          value={reheating}
+          onChange={(value) => { markDirty(); setReheating(value); }}
+        />
       ) : null}
 
       <SectionTitle icon="tool" title="Corrective actions" color={colors.foreground} />
@@ -531,11 +538,13 @@ function SectionTitle({ icon, title, color }: { icon: React.ComponentProps<typeo
 function CoreTemperatureCard({
   title,
   icon,
+  target,
   value,
   onChange,
 }: {
   title: string;
   icon: React.ComponentProps<typeof Feather>['name'];
+  target?: string;
   value: CoreTemperatureReading;
   onChange: React.Dispatch<React.SetStateAction<CoreTemperatureReading>>;
 }) {
@@ -550,6 +559,7 @@ function CoreTemperatureCard({
           <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
           <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
         </View>
+        {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
       </View>
     </>
   );

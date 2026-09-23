@@ -70,6 +70,7 @@ const SECTION_SHOW_KEYS = [
 const CONFIG_KEYS = [
   "food_num_fridges",
   "food_num_freezers",
+  "food_jurisdiction",
   "food_cooking_limit",
   "food_cooling_limit",
   "food_reheating_limit",
@@ -87,6 +88,9 @@ const CONFIG_KEYS = [
 const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_num_fridges: "2",
   food_num_freezers: "2",
+  // Keep the historical 82°C default for existing accounts. Administrators
+  // can select England/Wales to use the 75°C limit.
+  food_jurisdiction: "scotland",
   food_cooking_limit: "Above 75°C (10 seconds)",
   food_cooling_limit: "8°C within 90 minutes",
   food_reheating_limit: "Above 82°C",
@@ -104,6 +108,19 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_hot_holding: "true",
   food_show_sous_vide: "true",
 };
+
+const FOOD_JURISDICTIONS = ["scotland", "england_wales"] as const;
+type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
+const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
+  scotland: "Above 82°C",
+  england_wales: "Above 75°C",
+};
+
+function reheatingLimitForJurisdiction(value: string | null | undefined): string {
+  return REHEATING_LIMIT_BY_JURISDICTION[
+    value as FoodJurisdiction
+  ] ?? REHEATING_LIMIT_BY_JURISDICTION.scotland;
+}
 
 // ── Per-site override support ─────────────────────────────────────────────────
 // Site-level values are stored in app_settings under a prefixed key:
@@ -215,6 +232,11 @@ function validateConfigPatch(
     if ((SECTION_SHOW_KEYS as readonly string[]).includes(key)) {
       if (raw !== "true" && raw !== "false") return { error: `${key} must be "true" or "false"` };
       out[key] = raw;
+    } else if (key === "food_jurisdiction") {
+      if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
+        return { error: `${key} must be "scotland" or "england_wales"` };
+      }
+      out[key] = raw;
     } else if (key === "food_cold_units") {
       const r = cleanColdUnits(raw);
       if ("error" in r) return { error: r.error };
@@ -278,18 +300,28 @@ router.get("/config", requireAuth, async (req, res) => {
     if (!clientStored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
     if (!clientStored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
   }
+  if (clientStored.has("food_jurisdiction") && !clientStored.has("food_reheating_limit")) {
+    config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
+  }
 
   // Overlay site-level values on top of the client-level config.
   const siteOverrides: string[] = [];
   if (site.siteId !== null) {
     const prefix = `${SITE_PREFIX}${site.siteId}.`;
+    let siteJurisdictionOverride = false;
+    let siteReheatingOverride = false;
     for (const row of rows) {
       if (!row.key.startsWith(prefix) || row.value == null) continue;
       const baseKey = row.key.slice(prefix.length);
       if (CONFIG_KEYS.includes(baseKey as (typeof CONFIG_KEYS)[number])) {
         config[baseKey] = row.value;
         siteOverrides.push(baseKey);
+        if (baseKey === "food_jurisdiction") siteJurisdictionOverride = true;
+        if (baseKey === "food_reheating_limit") siteReheatingOverride = true;
       }
+    }
+    if (siteJurisdictionOverride && !siteReheatingOverride) {
+      config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
     }
     return res.json({ ...config, _siteOverrides: siteOverrides });
   }
@@ -312,6 +344,19 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
 
   const validated = validateConfigPatch((req.body ?? {}) as Record<string, unknown>);
   if ("error" in validated) return res.status(400).json({ error: validated.error });
+
+  // Selecting a jurisdiction also selects its standard reheating limit unless
+  // the caller explicitly supplied a legacy/custom limit. This keeps existing
+  // custom templates intact while making the new selector deterministic.
+  const rawUpdates = (req.body ?? {}) as Record<string, unknown>;
+  if (
+    validated.values.food_jurisdiction
+    && !Object.prototype.hasOwnProperty.call(rawUpdates, "food_reheating_limit")
+  ) {
+    validated.values.food_reheating_limit = reheatingLimitForJurisdiction(
+      validated.values.food_jurisdiction,
+    );
+  }
 
   const storageKeyOf = (baseKey: string) =>
     site.siteId !== null ? siteKeyFor(site.siteId, baseKey) : baseKey;
@@ -385,6 +430,26 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
 
   res.json({ ...DEFAULT_CONFIG });
 });
+
+/** Resolve the configured jurisdiction for a diary scope. Site-level settings
+ * take precedence over the client-level setting, matching GET /config. */
+async function resolveReheatingLimit(
+  clientId: number,
+  siteId: number | null,
+  requestedLimit?: string,
+): Promise<string> {
+  if (requestedLimit !== undefined) return requestedLimit;
+
+  const rows = await db
+    .select({ key: appSettingsTable.key, value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+  const clientJurisdiction = rows.find((row) => row.key === "food_jurisdiction")?.value;
+  const siteJurisdiction = siteId === null
+    ? undefined
+    : rows.find((row) => row.key === siteKeyFor(siteId, "food_jurisdiction"))?.value;
+  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction);
+}
 
 // Drizzle condition selecting the right diary scope: a specific site when
 // siteId is given, otherwise the whole-organisation diary (site_id IS NULL).
@@ -593,6 +658,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const data = parsed.data;
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  const reheatingLimit = await resolveReheatingLimit(clientId, siteId, data.reheatingLimit);
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
@@ -623,7 +689,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       sousVide: data.sousVide ?? [],
       cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
       coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
-      reheatingLimit: data.reheatingLimit ?? "Above 82°C",
+      reheatingLimit,
       hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
       correctives: data.correctives,
       managerSignature: data.managerSignature,
@@ -694,22 +760,41 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   };
   const rowJson = JSON.stringify(storedRow);
   const userId = (req.session as any).userId ?? null;
+  const reheatingLimit = section === "reheating"
+    ? await resolveReheatingLimit(clientId, siteId)
+    : undefined;
 
   // Ensure the day's record exists for this diary scope (ignore the race where
   // another writer creates it first), then append in a single UPDATE. The
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
-    await db.execute(sql`
-      INSERT INTO food_safety_records (client_id, record_date, created_by)
-      VALUES (${clientId}, ${recordDate}, ${userId})
-      ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-    `);
+    if (reheatingLimit !== undefined) {
+      await db.execute(sql`
+        INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
+        VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
+        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+      `);
+    } else {
+      await db.execute(sql`
+        INSERT INTO food_safety_records (client_id, record_date, created_by)
+        VALUES (${clientId}, ${recordDate}, ${userId})
+        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+      `);
+    }
   } else {
-    await db.execute(sql`
-      INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
-      VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
-      ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-    `);
+    if (reheatingLimit !== undefined) {
+      await db.execute(sql`
+        INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
+        VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
+        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+      `);
+    } else {
+      await db.execute(sql`
+        INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
+        VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
+        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+      `);
+    }
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;

@@ -468,6 +468,44 @@ async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
     `got ${probeConfig.data?.food_probe_names}`,
   );
 
+  expectStatus(
+    "food-config: invalid jurisdiction → 400",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "northern_ireland" })).status,
+    400,
+  );
+  expectOk(
+    "food-config: Scotland jurisdiction",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "scotland" })).status,
+  );
+  const scotlandConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: Scotland reheating target is 82°C",
+    scotlandConfig.data?.food_jurisdiction === "scotland"
+      && scotlandConfig.data?.food_reheating_limit === "Above 82°C",
+    `jurisdiction=${scotlandConfig.data?.food_jurisdiction}, limit=${scotlandConfig.data?.food_reheating_limit}`,
+  );
+  expectOk(
+    "food-config: England/Wales jurisdiction",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status,
+  );
+  const englandWalesConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: England/Wales reheating target is 75°C",
+    englandWalesConfig.data?.food_jurisdiction === "england_wales"
+      && englandWalesConfig.data?.food_reheating_limit === "Above 75°C",
+    `jurisdiction=${englandWalesConfig.data?.food_jurisdiction}, limit=${englandWalesConfig.data?.food_reheating_limit}`,
+  );
+  const jurisdictionRecord = await admin("POST", "/food-safety", {
+    recordDate: isoDate(-5),
+    reheating: [{ item: "Soup", coreTemp: "75" }],
+  });
+  expectOk("food-config: new diary uses jurisdiction reheating target", jurisdictionRecord.status, [201]);
+  check(
+    "food-config: England/Wales diary record stores 75°C target",
+    jurisdictionRecord.data?.reheatingLimit === "Above 75°C",
+    `got ${jurisdictionRecord.data?.reheatingLimit}`,
+  );
+
   // siteId belonging to another client → 400.
   // Create a site under client B; using it on client A's config must be rejected.
   const bSite = await admin("POST", `/sites?clientId=${clientBId}`, { name: `B Site ${ts}` });

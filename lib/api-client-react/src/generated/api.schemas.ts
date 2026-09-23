@@ -904,6 +904,17 @@ export interface PoolTrackConfig {
   pool_default_performer?: string;
 }
 
+/**
+ * Food-safety jurisdiction used to choose the standard reheating limit.
+ */
+export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
+
+
+export const FoodSafetyConfigFoodJurisdiction = {
+  scotland: 'scotland',
+  england_wales: 'england_wales',
+} as const;
+
 export interface FoodSafetyConfig {
   food_cold_units?: string | null;
   food_default_hot_items?: string | null;
@@ -919,6 +930,8 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
+  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
   food_reheating_limit?: string | null;

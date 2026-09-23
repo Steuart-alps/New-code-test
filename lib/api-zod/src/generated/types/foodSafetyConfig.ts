@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { FoodSafetyConfigFoodJurisdiction } from './foodSafetyConfigFoodJurisdiction';
 
 export interface FoodSafetyConfig {
   food_cold_units?: string | null;
@@ -21,6 +22,8 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
+  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
   food_reheating_limit?: string | null;

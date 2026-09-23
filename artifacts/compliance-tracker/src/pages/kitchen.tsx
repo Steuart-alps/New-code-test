@@ -128,6 +128,13 @@ function parseColdUnits(config: ReturnType<typeof useGetFoodSafetyConfig>["data"
   ];
 }
 
+const REHEATING_LIMITS = {
+  scotland: "Above 82°C",
+  england_wales: "Above 75°C",
+} as const;
+
+type FoodJurisdiction = keyof typeof REHEATING_LIMITS;
+
 // ── ConfigDialog ───────────────────────────────────────────────────────────────
 function ConfigDialog() {
   const [open, setOpen] = useState(false);
@@ -158,6 +165,7 @@ function ConfigDialog() {
   // Limits tab
   const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
+  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("scotland");
   const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
   const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
 
@@ -183,6 +191,7 @@ function ConfigDialog() {
     if (!config) return;
     setCookingLimit(config.food_cooking_limit || "Above 75°C (10 seconds)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
+    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "scotland");
     setReheatingLimit(config.food_reheating_limit || "Above 82°C");
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
@@ -209,6 +218,7 @@ function ConfigDialog() {
     const desired: Record<string, string> = {
       food_cooking_limit: cookingLimit,
       food_cooling_limit: coolingLimit,
+      food_jurisdiction: foodJurisdiction,
       food_reheating_limit: reheatingLimit,
       food_hot_holding_limit: hotHoldingLimit,
       food_show_deliveries: showDeliveries ? "true" : "false",
@@ -471,6 +481,24 @@ function ConfigDialog() {
               <Input value={coolingLimit} placeholder="8°C within 90 minutes"
                 onChange={e => setCoolingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Set a safe cooling limit and corrective action for your process in the HACCP system.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Food-safety jurisdiction</Label>
+              <select
+                value={foodJurisdiction}
+                onChange={e => {
+                  const next = e.target.value as FoodJurisdiction;
+                  setFoodJurisdiction(next);
+                  setReheatingLimit(REHEATING_LIMITS[next]);
+                }}
+                className="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
+              >
+                <option value="scotland">Scotland — above 82°C</option>
+                <option value="england_wales">England / Wales — above 75°C</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Selecting a jurisdiction sets the standard reheating target used for new diary records.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Reheating limit</Label>

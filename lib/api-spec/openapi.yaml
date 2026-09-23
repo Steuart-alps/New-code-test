@@ -3321,6 +3321,13 @@ components:
         food_num_freezers:
           type: string
           nullable: true
+        food_jurisdiction:
+          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          type: string
+          enum:
+            - scotland
+            - england_wales
+          nullable: true
         food_cooking_limit:
           type: string
           nullable: true
