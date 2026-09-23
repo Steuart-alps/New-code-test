@@ -26,6 +26,12 @@ import {
   approveContractorEmail,
   dismissContractorEmail,
 } from "@/lib/contractor-approval-actions";
+import {
+  getApprovalRefreshStorageKey,
+  readPersistedApprovalRefreshState,
+  persistApprovalRefreshState,
+  subscribeToApprovalRefreshStorage,
+} from "@/lib/contractor-approval-refresh-state";
 
 interface EmailQueueItem {
   id: number;
@@ -54,67 +60,6 @@ type PendingCancellationConfirmation =
       action: "dismiss";
       item: EmailQueueItem;
     };
-
-interface PersistedApprovalRefreshState {
-  knownQueueIds: number[];
-  newRequestIds: number[];
-}
-
-function getApprovalRefreshStorageKey(userId: number | null, clientId: number | null) {
-  return userId !== null && clientId !== null
-    ? `complytrack:contractor-approvals:${userId}:${clientId}`
-    : null;
-}
-
-function readPersistedApprovalRefreshState(storageKey: string | null) {
-  if (!storageKey || typeof window === "undefined") return null;
-
-  try {
-    return parsePersistedApprovalRefreshState(window.localStorage.getItem(storageKey));
-  } catch {
-    return null;
-  }
-}
-
-function parsePersistedApprovalRefreshState(raw: string | null) {
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedApprovalRefreshState>;
-    if (
-      !Array.isArray(parsed.knownQueueIds) ||
-      !Array.isArray(parsed.newRequestIds) ||
-      !parsed.knownQueueIds.every(Number.isInteger) ||
-      !parsed.newRequestIds.every(Number.isInteger)
-    ) {
-      return null;
-    }
-    return {
-      knownQueueIds: parsed.knownQueueIds,
-      newRequestIds: parsed.newRequestIds,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function persistApprovalRefreshState(
-  storageKey: string | null,
-  knownQueueIds: Set<number> | null,
-  newRequestIds: number[],
-) {
-  if (!storageKey || typeof window === "undefined" || !knownQueueIds) return;
-
-  try {
-    const state: PersistedApprovalRefreshState = {
-      knownQueueIds: Array.from(knownQueueIds),
-      newRequestIds,
-    };
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
-  } catch {
-    // Local storage may be unavailable or quota-limited; in-memory state still works.
-  }
-}
 
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
@@ -151,7 +96,10 @@ export default function ContractorApprovalsPage() {
   }, []);
 
   useEffect(() => {
-    const persistedState = readPersistedApprovalRefreshState(approvalRefreshStorageKey);
+    const persistedState = readPersistedApprovalRefreshState(
+      window.localStorage,
+      approvalRefreshStorageKey,
+    );
     refreshStorageKeyRef.current = approvalRefreshStorageKey;
     setItems([]);
     newRequestIdsRef.current = persistedState?.newRequestIds ?? [];
@@ -166,18 +114,11 @@ export default function ContractorApprovalsPage() {
     const storageKey = approvalRefreshStorageKey;
     if (!storageKey || typeof window === "undefined") return;
 
-    function handleApprovalRefreshStorage(event: StorageEvent) {
-      if (event.storageArea !== window.localStorage || event.key !== storageKey) return;
-      const persistedState = parsePersistedApprovalRefreshState(event.newValue);
-      if (!persistedState) return;
-
+    return subscribeToApprovalRefreshStorage(window, storageKey, persistedState => {
       knownQueueIdsRef.current = new Set(persistedState.knownQueueIds);
       newRequestIdsRef.current = persistedState.newRequestIds;
       setNewRequestIds(persistedState.newRequestIds);
-    }
-
-    window.addEventListener("storage", handleApprovalRefreshStorage);
-    return () => window.removeEventListener("storage", handleApprovalRefreshStorage);
+    });
   }, [approvalRefreshStorageKey]);
 
   async function fetchItems() {
@@ -207,6 +148,7 @@ export default function ContractorApprovalsPage() {
           setNewRequestIds(nextNewRequestIds);
           knownQueueIdsRef.current = nextQueueIds;
           persistApprovalRefreshState(
+            window.localStorage,
             refreshStorageKeyRef.current,
             nextQueueIds,
             nextNewRequestIds,
@@ -263,6 +205,7 @@ export default function ContractorApprovalsPage() {
     newRequestIdsRef.current = nextNewRequestIds;
     setNewRequestIds(nextNewRequestIds);
     persistApprovalRefreshState(
+      window.localStorage,
       refreshStorageKeyRef.current,
       knownQueueIdsRef.current,
       nextNewRequestIds,
@@ -273,6 +216,7 @@ export default function ContractorApprovalsPage() {
     newRequestIdsRef.current = [];
     setNewRequestIds([]);
     persistApprovalRefreshState(
+      window.localStorage,
       refreshStorageKeyRef.current,
       knownQueueIdsRef.current,
       [],

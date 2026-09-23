@@ -7,6 +7,10 @@ import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = await readFile(path.join(root, "src/pages/contractor-approvals.tsx"), "utf8");
+const refreshStateSource = await readFile(
+  path.join(root, "src/lib/contractor-approval-refresh-state.ts"),
+  "utf8",
+);
 const actionSource = await readFile(
   path.join(root, "src/lib/contractor-approval-actions.ts"),
   "utf8",
@@ -218,18 +222,18 @@ assert.match(
   "opening a new request for editing must clear its indicator",
 );
 assert.match(
-  source,
-  /window\.localStorage\.getItem\(storageKey\)/,
+  refreshStateSource,
+  /storage\.getItem\(storageKey\)/,
   "new-request context must persist in shared local storage",
 );
 assert.match(
-  source,
+  refreshStateSource,
   /complytrack:contractor-approvals:\$\{userId\}:\$\{clientId\}/,
   "new-request context must be scoped to both the user and selected client",
 );
 assert.match(
   source,
-  /const persistedState = readPersistedApprovalRefreshState\(approvalRefreshStorageKey\)/,
+  /const persistedState = readPersistedApprovalRefreshState\(\s*window\.localStorage,\s*approvalRefreshStorageKey/,
   "the page must restore the selected client's refresh context when it mounts",
 );
 assert.match(
@@ -249,12 +253,12 @@ assert.match(
 );
 assert.match(
   source,
-  /window\.addEventListener\("storage", handleApprovalRefreshStorage\)/,
+  /subscribeToApprovalRefreshStorage\(window, storageKey/,
   "other tabs must be able to notify this page about acknowledgment changes",
 );
 assert.match(
-  source,
-  /event\.storageArea !== window\.localStorage \|\| event\.key !== storageKey/,
+  refreshStateSource,
+  /event\.storageArea !== windowLike\.localStorage \|\| event\.key !== storageKey/,
   "storage events must remain isolated to the current user and client key",
 );
 assert.match(
