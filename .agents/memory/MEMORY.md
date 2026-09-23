@@ -40,7 +40,7 @@
 - [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.
 - [Mobile draft hydration](mobile-draft-hydration.md) — server refreshes must never overwrite dirty mobile form state; reset abandoned edits before changing query scope.
 - [Custom form-option semantics](custom-form-option-semantics.md) — customize only business vocabularies; new records use active values, while edits preserve disabled legacy values.
-- [Daily entry cutoff](daily-entry-cutoff.md) — staff entries close at 23:59 and backdated writes stay closed; client admins and consultants can override.
+- [Track record lock](daily-entry-cutoff.md) — staff get the scheduled day plus one correction day; older records lock, while client admins and consultants can override.
 - [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.
 - [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.

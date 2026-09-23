@@ -1,18 +1,19 @@
 import type { NextFunction, Request, Response } from "express";
 
 /**
- * Track records are day-bound operational evidence. Staff can submit the
- * current day's record until 23:58:59 in the account's operating timezone.
- * At 23:59 the day closes; after midnight, only the new current day can be
- * entered. Client admins and consultants can correct or backfill at any time.
+ * Track records are day-bound operational evidence. Staff have the record's
+ * scheduled day plus the following local calendar day to complete corrections.
+ * After that 24-hour grace window, the record is immutable for staff. Client
+ * admins and consultants retain the correction/backfill override.
  *
  * Keep this guard at the API boundary so web, mobile, and other clients share
  * the same rule. The date field is intentionally best-effort because legacy
- * routes use different names; writes without a date are closed during the
- * cutoff minute but remain available at the start of a new day.
+ * routes use different names. The lookup includes nested request bodies, query
+ * values, and date segments in the request path so route shapes do not silently
+ * bypass the shared lock.
  */
 
-const TRACK_WRITE_PREFIXES = [
+export const TRACK_WRITE_PREFIXES = [
   "/food-safety",
   "/daily-checklists",
   "/staff-training",
@@ -55,11 +56,24 @@ const ENTRY_DATE_FIELDS = [
   "inspectionDate",
   "serviceDate",
   "completionDate",
+  "completedDate",
   "actionDate",
   "trainingDate",
   "visitDate",
   "testDate",
   "assessmentDate",
+  "activityDate",
+  "signoffDate",
+  "reportedDate",
+  "recordedDate",
+  "hireDate",
+  "replacementDate",
+  "resolvedDate",
+  "riskAssessmentDate",
+  "reviewDate",
+  "weekCommencing",
+  "dueDate",
+  "targetDate",
 ] as const;
 
 const ACCOUNT_TIMEZONE = process.env.COMPLYTRACK_TIMEZONE ?? "Europe/London";
@@ -93,19 +107,39 @@ function isTrackWrite(req: Request): boolean {
   return TRACK_WRITE_PREFIXES.some(prefix => req.path === prefix || req.path.startsWith(`${prefix}/`));
 }
 
-function findEntryDate(body: unknown): string | null {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-  for (const field of ENTRY_DATE_FIELDS) {
-    const value = (body as Record<string, unknown>)[field];
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-      return value.slice(0, 10);
+function findEntryDate(value: unknown, depth = 0): string | null {
+  if (!value || typeof value !== "object" || depth > 4) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findEntryDate(item, depth + 1);
+      if (nested) return nested;
     }
+    return null;
+  }
+  for (const field of ENTRY_DATE_FIELDS) {
+    const fieldValue = (value as Record<string, unknown>)[field];
+    if (typeof fieldValue === "string" && /^\d{4}-\d{2}-\d{2}/.test(fieldValue)) {
+      return fieldValue.slice(0, 10);
+    }
+  }
+  for (const nestedValue of Object.values(value as Record<string, unknown>)) {
+    const nested = findEntryDate(nestedValue, depth + 1);
+    if (nested) return nested;
   }
   return null;
 }
 
+function findPathDate(path: string): string | null {
+  const match = path.match(/(?:^|\/)(\d{4}-\d{2}-\d{2})(?:\/|$)/);
+  return match?.[1] ?? null;
+}
+
+function calendarDay(date: string): number {
+  return Math.floor(Date.parse(`${date}T00:00:00.000Z`) / 86_400_000);
+}
+
 export function getDailyEntryCutoffDecision(
-  req: Pick<Request, "method" | "path" | "body">,
+  req: Pick<Request, "method" | "path" | "body"> & { query?: unknown },
   user: { role?: string } | null | undefined,
   now = new Date(),
   timeZone = ACCOUNT_TIMEZONE,
@@ -116,17 +150,15 @@ export function getDailyEntryCutoffDecision(
   }
 
   const clock = localClock(now, timeZone);
-  const entryDate = findEntryDate(req.body);
-  const cutoffMinute = clock.hour === 23 && clock.minute >= 59;
-  const isEarlierDay = entryDate != null && entryDate < clock.date;
-  const isTodayAtCutoff = entryDate != null && entryDate === clock.date && cutoffMinute;
-  const undatedWriteAtCutoff = entryDate == null && cutoffMinute;
+  const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(req.path);
+  const isPastGraceWindow = entryDate != null
+    && calendarDay(clock.date) - calendarDay(entryDate) > 1;
 
-  if (isEarlierDay || isTodayAtCutoff || undatedWriteAtCutoff) {
+  if (isPastGraceWindow) {
     return {
       blocked: true,
       today: clock.date,
-      reason: entryDate && entryDate < clock.date ? "backdated_entry" : "daily_cutoff",
+      reason: "record_lock",
     };
   }
   return { blocked: false, today: clock.date };
@@ -139,9 +171,9 @@ export function enforceDailyEntryCutoff(req: Request, res: Response, next: NextF
     return;
   }
   res.status(423).json({
-    error: "Daily entry window closed",
-    code: "DAILY_ENTRY_CUTOFF",
-    cutoffTime: "23:59",
+    error: "This record is locked because its 24-hour correction window has closed",
+    code: "TRACK_RECORD_LOCKED",
+    lockAfterHours: 24,
     cutoffDate: decision.today,
     requiresAdministratorOverride: true,
   });

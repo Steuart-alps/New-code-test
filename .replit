@@ -78,6 +78,10 @@ args = "api-codegen-drift"
 task = "workflow.run"
 args = "mobile-kitchen-site-scope"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "track-record-lock"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -239,6 +243,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/mobile run test:kitchen-diary-scope"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "track-record-lock"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:track-record-lock"
 
 [workflows.workflow.metadata]
 isValidation = true
