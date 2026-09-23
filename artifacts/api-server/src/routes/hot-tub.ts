@@ -52,6 +52,7 @@ const tubSchema = z.object({
 router.get("/tubs", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const departmentId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
     SELECT ht.id, ht.client_id, ht.site_id, ht.name, ht.description, ht.active,
            ht.created_at, ht.updated_at,
@@ -59,6 +60,14 @@ router.get("/tubs", requireAuth, async (req, res) => {
     FROM hot_tubs ht
     LEFT JOIN sites s ON s.id = ht.site_id
     WHERE ht.client_id = ${clientId}
+      ${departmentId !== null ? sql`AND (
+        ht.site_id IS NULL
+        OR ht.site_id IN (
+          SELECT id FROM sites
+          WHERE client_id = ${clientId}
+            AND (department_id IS NULL OR department_id = ${departmentId})
+        )
+      )` : sql``}
     ORDER BY ht.active DESC, ht.name
   `);
   res.json(rows.rows ?? rows);

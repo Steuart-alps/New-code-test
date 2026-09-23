@@ -298,10 +298,27 @@ async function main() {
         row => row.name === `Blocked cross-department tub ${suffix}`,
       ),
       JSON.stringify(hotTubAssetsAfterBlockedCreate.data));
-    expect("admin can create HotTub asset in another department",
-      await admin("POST", "/hot-tub/tubs", {
-        name: `Admin beta tub ${suffix}`, siteId: betaSite.data.id,
-      }), [201]);
+    const adminBetaHotTub = await admin("POST", "/hot-tub/tubs", {
+      name: `Admin beta tub ${suffix}`, siteId: betaSite.data.id,
+    });
+    expect("admin can create HotTub asset in another department", adminBetaHotTub, [201]);
+    const scopedHotTubAssets = await scopedStaff("GET", "/hot-tub/tubs");
+    check("scoped staff HotTub list includes current-department asset",
+      scopedHotTubAssets.data?.some?.(row => row.id === scopedHotTubCreate.data?.id),
+      JSON.stringify(scopedHotTubAssets.data));
+    if (clientWideSite.status === 200 || clientWideSite.status === 201) {
+      check("scoped staff HotTub list includes client-wide asset",
+        scopedHotTubAssets.data?.some?.(row => row.name === `Scoped client-wide tub ${suffix}`),
+        JSON.stringify(scopedHotTubAssets.data));
+    }
+    check("scoped staff HotTub list hides other-department assets",
+      !scopedHotTubAssets.data?.some?.(row =>
+        row.id === scopedHotTubAsset.data?.id || row.id === adminBetaHotTub.data?.id),
+      JSON.stringify(scopedHotTubAssets.data));
+    const adminHotTubAssets = await admin("GET", "/hot-tub/tubs");
+    check("admin HotTub list includes other-department asset",
+      adminHotTubAssets.data?.some?.(row => row.id === adminBetaHotTub.data?.id),
+      JSON.stringify(adminHotTubAssets.data));
 
     const scopedPremises = await admin("POST", "/premises-track", {
       inspectionDate: today, nextInspectionDate: iso(30), inspectionType: "routine",
