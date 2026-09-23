@@ -114,10 +114,55 @@ async function main() {
       `${alphaForged.status} ${JSON.stringify(alphaForged.data)}`);
     expect("in-scope current Legionella PUT works",
       await scopedStaff("PUT", alphaCurrentPath, { notes: "current staff edit" }), [200]);
+    const staffLegionellaMove = await scopedStaff("PUT", alphaCurrentPath, {
+      siteId: betaSite.data.id, notes: "cross-department move",
+    });
+    check("scoped staff cannot move current Legionella record",
+      staffLegionellaMove.status === 403,
+      `${staffLegionellaMove.status} ${JSON.stringify(staffLegionellaMove.data)}`);
+    const legionellaAfterMove = await admin("GET", "/legionella");
+    const alphaRecordAfterMove = legionellaAfterMove.data?.find?.(row => row.id === scopedAlphaCurrent.data.id);
+    check("rejected Legionella move keeps original site",
+      (alphaRecordAfterMove?.siteId ?? alphaRecordAfterMove?.site_id) === alphaSite.data.id,
+      JSON.stringify(alphaRecordAfterMove));
+    const adminLegionellaMove = await admin("PUT", alphaCurrentPath, {
+      siteId: betaSite.data.id, notes: "admin site move",
+    });
+    expect("admin can move current Legionella record", adminLegionellaMove, [200]);
+    check("admin Legionella move changes site",
+      (adminLegionellaMove.data?.siteId ?? adminLegionellaMove.data?.site_id) === betaSite.data.id,
+      JSON.stringify(adminLegionellaMove.data));
     check("out-of-scope old Legionella PUT is hidden",
       (await scopedStaff("PUT", betaOldPath, { notes: "foreign department edit" })).status === 403);
     expect("admin can correct beta Legionella record",
       await admin("PUT", betaOldPath, { notes: "admin correction" }), [200]);
+
+    const scopedWeekly = await admin("POST", "/kitchen-weekly/weekly", {
+      weekCommencing: today, checks: { temperatureControl: "yes" },
+      managerSignature: "Lock Fixture", siteId: alphaSite.data.id,
+    });
+    expect("seed current scoped KitchenWeekly record", scopedWeekly, [201]);
+    if (scopedWeekly.status === 201) {
+      const weeklyPath = `/kitchen-weekly/weekly/${scopedWeekly.data?.id}`;
+      expect("scoped staff can edit current KitchenWeekly record",
+        await scopedStaff("PUT", weeklyPath, { checks: { temperatureControl: "no" } }), [200]);
+      const staffWeeklyMove = await scopedStaff("PUT", weeklyPath, {
+        checks: { temperatureControl: "yes" }, siteId: betaSite.data.id,
+      });
+      check("scoped staff cannot move current KitchenWeekly record",
+        staffWeeklyMove.status === 403,
+        `${staffWeeklyMove.status} ${JSON.stringify(staffWeeklyMove.data)}`);
+      const weeklyAfterMove = await admin("GET", `/kitchen-weekly/weekly?siteId=${alphaSite.data.id}`);
+      check("rejected KitchenWeekly move keeps original site",
+        weeklyAfterMove.data?.some?.(row => row.id === scopedWeekly.data.id
+          && row.site_id === alphaSite.data.id),
+        JSON.stringify(weeklyAfterMove.data));
+      const adminWeeklyMove = await admin("PUT", weeklyPath, { siteId: betaSite.data.id });
+      expect("admin can move current KitchenWeekly record", adminWeeklyMove, [200]);
+      check("admin KitchenWeekly move changes site",
+        adminWeeklyMove.data?.site_id === betaSite.data.id,
+        JSON.stringify(adminWeeklyMove.data));
+    }
   }
 
   // Food-safety also supplies the metadata/config regression assertion.
