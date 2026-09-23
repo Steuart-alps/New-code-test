@@ -38,6 +38,36 @@ assert.match(
   "approving a cancellation must require an explicit calendar-removal confirmation",
 );
 assert.match(
+  source,
+  /open=\{pendingCancellationConfirmation !== null\}/,
+  "cancellation actions must open an in-app confirmation dialog",
+);
+assert.match(
+  source,
+  /This will send the contractor a cancellation notice and remove the previously sent calendar event\./,
+  "the approval dialog must explain that the existing calendar event will be removed",
+);
+assert.match(
+  source,
+  /Nothing will be sent and the existing calendar event will remain in place\./,
+  "the dismissal dialog must explain that the existing calendar event will remain",
+);
+assert.match(
+  source,
+  /if \(item\.emailType === "cancellation"\) \{\s*setPendingCancellationConfirmation/,
+  "cancellation actions must open the dialog before submitting",
+);
+assert.match(
+  source,
+  /confirm: message => \(isCancellation \? true : window\.confirm\(message\)\)/,
+  "cancellation submissions must not fall back to a native confirmation",
+);
+assert.match(
+  source,
+  /confirm: message => \(isCancellation \? true : window\.confirm\(message\)\)/g,
+  "ordinary confirmation behavior must remain available for non-cancellation actions",
+);
+assert.match(
   actionSource,
   /CANCELLATION_APPROVAL_CONFIRMATION[\s\S]*remove the previously sent calendar event\./,
   "the approval interaction must use the calendar-removal confirmation",

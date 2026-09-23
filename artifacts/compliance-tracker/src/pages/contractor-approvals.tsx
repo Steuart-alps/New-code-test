@@ -5,6 +5,16 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { 
   CheckCircle2, Search, Building, MapPin,
@@ -34,6 +44,17 @@ interface EmailQueueItem {
   quote?: any;
 }
 
+type PendingCancellationConfirmation =
+  | {
+      action: "approve";
+      item: EmailQueueItem;
+      modifiedPreview?: { subject: string; text: string };
+    }
+  | {
+      action: "dismiss";
+      item: EmailQueueItem;
+    };
+
 export default function ContractorApprovalsPage() {
   const [items, setItems] = useState<EmailQueueItem[]>([]);
   const { activeClientId } = useAuth();
@@ -47,6 +68,8 @@ export default function ContractorApprovalsPage() {
   const [editSubject, setEditSubject] = useState("");
   const [editText, setEditText] = useState("");
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [pendingCancellationConfirmation, setPendingCancellationConfirmation] =
+    useState<PendingCancellationConfirmation | null>(null);
 
   useEffect(() => {
     setItems([]);
@@ -96,13 +119,27 @@ export default function ContractorApprovalsPage() {
     setExpandedSites(next);
   }
 
-  async function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+  function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+    if (item.emailType === "cancellation") {
+      setPendingCancellationConfirmation({ action: "approve", item, modifiedPreview });
+      return;
+    }
+    void submitApproval(item, modifiedPreview);
+  }
+
+  async function submitApproval(
+    item: EmailQueueItem,
+    modifiedPreview?: { subject: string; text: string },
+  ) {
     const isCancellation = item.emailType === "cancellation";
     setSubmittingId(item.id);
     try {
       const result = await approveContractorEmail(
         item,
-        { confirm: message => window.confirm(message), clientApiFetch },
+        {
+          confirm: message => (isCancellation ? true : window.confirm(message)),
+          clientApiFetch,
+        },
         modifiedPreview,
       );
       if (!result.confirmed) return;
@@ -118,13 +155,24 @@ export default function ContractorApprovalsPage() {
     }
   }
 
-  async function handleCancel(item: EmailQueueItem) {
+  function handleCancel(item: EmailQueueItem) {
+    if (item.emailType === "cancellation") {
+      setPendingCancellationConfirmation({ action: "dismiss", item });
+      return;
+    }
+    void submitDismissal(item);
+  }
+
+  async function submitDismissal(item: EmailQueueItem) {
     const isCancellation = item.emailType === "cancellation";
     setSubmittingId(item.id);
     try {
       const result = await dismissContractorEmail(
         item,
-        { confirm: message => window.confirm(message), clientApiFetch },
+        {
+          confirm: message => (isCancellation ? true : window.confirm(message)),
+          clientApiFetch,
+        },
       );
       if (!result.confirmed) return;
       toast({ title: isCancellation ? "Calendar cancellation dismissed" : "Email cancelled" });
@@ -133,6 +181,18 @@ export default function ContractorApprovalsPage() {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
       setSubmittingId(null);
+    }
+  }
+
+  function confirmCancellation() {
+    const pending = pendingCancellationConfirmation;
+    setPendingCancellationConfirmation(null);
+    if (!pending) return;
+
+    if (pending.action === "approve") {
+      void submitApproval(pending.item, pending.modifiedPreview);
+    } else {
+      void submitDismissal(pending.item);
     }
   }
 
@@ -316,7 +376,7 @@ export default function ContractorApprovalsPage() {
                                    <Button
                                      size="sm"
                                      className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
-                                     onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
+                                      onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
                                      disabled={submittingId === item.id}
                                    >
                                     {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
@@ -352,6 +412,42 @@ export default function ContractorApprovalsPage() {
           </div>
         )}
       </div>
+      <AlertDialog
+        open={pendingCancellationConfirmation !== null}
+        onOpenChange={open => {
+          if (!open) setPendingCancellationConfirmation(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingCancellationConfirmation?.action === "approve"
+                ? "Approve calendar cancellation?"
+                : "Dismiss calendar cancellation?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingCancellationConfirmation?.action === "approve"
+                ? "This will send the contractor a cancellation notice and remove the previously sent calendar event."
+                : "Nothing will be sent and the existing calendar event will remain in place."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep reviewing</AlertDialogCancel>
+            <AlertDialogAction
+              className={
+                pendingCancellationConfirmation?.action === "approve"
+                  ? "bg-amber-600 text-white hover:bg-amber-700"
+                  : "bg-muted text-foreground hover:bg-muted/80"
+              }
+              onClick={confirmCancellation}
+            >
+              {pendingCancellationConfirmation?.action === "approve"
+                ? "Approve Cancellation"
+                : "Dismiss"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }
