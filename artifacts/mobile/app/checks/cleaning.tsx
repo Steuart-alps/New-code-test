@@ -30,6 +30,11 @@ import {
   cleaningPeriodDate,
   type CleaningFrequency,
 } from '@/components/cleaning-schedule-logic';
+import {
+  buildCleaningLogPayload,
+  hydrateCleaningDraft,
+  requestCleaningFrequencyChange,
+} from '@/components/cleaning-draft-logic';
 
 const MODULE_COLOR = '#14b8a6';
 
@@ -128,20 +133,11 @@ export default function CleaningScreen() {
   const [doneBy, setDoneBy] = useState<Record<number, string>>({});
 
   useEffect(() => {
-    if (dirty) return;
-    const next: Record<number, boolean> = {};
-    const nextDoneBy: Record<number, string> = {};
-    if (log?.completions) {
-      for (const c of log.completions) {
-        if (typeof c.taskId === 'number') {
-          next[c.taskId] = !!c.done;
-          if (c.doneBy) nextDoneBy[c.taskId] = c.doneBy;
-        }
-      }
-    }
-    setChecked(next);
-    setDoneBy(nextDoneBy);
-    setInitials(log?.signed_by ?? user?.name ?? '');
+    const hydrated = hydrateCleaningDraft(log, user?.name, dirty);
+    if (!hydrated) return;
+    setChecked(hydrated.checked);
+    setDoneBy(hydrated.doneBy);
+    setInitials(hydrated.initials);
     setDirty(false);
   }, [dirty, log, user?.name]);
 
@@ -149,22 +145,18 @@ export default function CleaningScreen() {
     mutationFn: ({ submit }: { submit: boolean }) => {
       const staffName = initials.trim();
       if (!staffName) throw new Error('Enter your name before saving.');
-      const completions: CompletionItem[] = visibleTasks.map((t) => ({
-        taskId: t.id,
-        taskArea: t.area,
-        taskName: t.task,
-        done: !!checked[t.id],
-        ...(checked[t.id] ? { doneBy: doneBy[t.id] ?? staffName } : {}),
-      }));
+      const payload = buildCleaningLogPayload({
+        logDate: date,
+        frequency,
+        tasks: visibleTasks,
+        checked,
+        doneBy,
+        staffName,
+        submit,
+      });
       return apiFetch<CleaningLog>('/api/kitchen-cleaning/logs', {
         method: 'POST',
-        body: JSON.stringify({
-          logDate: date,
-          frequency,
-          completions,
-          signedBy: staffName,
-          submittedAt: submit ? new Date().toISOString() : null,
-        }),
+        body: JSON.stringify(payload),
       });
     },
     onSuccess: async (savedLog, vars) => {
@@ -199,15 +191,16 @@ export default function CleaningScreen() {
   }
 
   function chooseFrequency(next: CleaningFrequency) {
-    if (next === frequency) return;
+    const decision = requestCleaningFrequencyChange(frequency, next, dirty, isPending);
+    if (decision.kind === 'ignore') return;
     const switchFrequency = () => {
       setChecked({});
       setDoneBy({});
       setInitials(user?.name ?? '');
       setDirty(false);
-      setFrequency(next);
+      setFrequency(decision.frequency);
     };
-    if (dirty) {
+    if (decision.kind === 'confirm') {
       Alert.alert(
         'Discard unsaved changes?',
         'Save your draft before changing schedule frequency, or discard these changes.',

@@ -9,6 +9,7 @@
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:cleaning-schedule": "node tests/cleaning-schedule-logic.mjs",
+    "test:cleaning-draft": "node tests/cleaning-draft-logic.mjs",
     "test:kitchen-diary-scope": "node tests/kitchen-diary-scope.mjs",
     "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear",
     "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear",
