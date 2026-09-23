@@ -71,11 +71,9 @@ router.post("/tubs", requireAuth, denyViewers, async (req, res) => {
   const parsed = tubSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
-  if (d.siteId) {
-    const siteCheckResult = await db.execute(sql`SELECT id FROM sites WHERE id = ${d.siteId} AND client_id = ${clientId} LIMIT 1`);
-    const site = ((siteCheckResult as any).rows ?? [])[0];
-    if (!site?.id) return res.status(400).json({ error: "Invalid site" });
-  }
+  const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const result = await db.execute(sql`
     INSERT INTO hot_tubs (client_id, site_id, name, description, active)
     VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.description ?? null}, true)

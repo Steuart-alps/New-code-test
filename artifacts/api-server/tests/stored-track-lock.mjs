@@ -271,6 +271,28 @@ async function main() {
         JSON.stringify(adminHotTubAssetMove.data));
     }
 
+    const scopedHotTubCreate = await scopedStaff("POST", "/hot-tub/tubs", {
+      name: `Scoped created tub ${suffix}`, siteId: alphaSite.data.id,
+    });
+    expect("scoped staff can create HotTub asset in current department",
+      scopedHotTubCreate, [201]);
+    const blockedHotTubCreate = await scopedStaff("POST", "/hot-tub/tubs", {
+      name: `Blocked cross-department tub ${suffix}`, siteId: betaSite.data.id,
+    });
+    check("scoped staff cannot create HotTub asset in another department",
+      blockedHotTubCreate.status === 403,
+      `${blockedHotTubCreate.status} ${JSON.stringify(blockedHotTubCreate.data)}`);
+    const hotTubAssetsAfterBlockedCreate = await admin("GET", "/hot-tub/tubs");
+    check("blocked HotTub create leaves no out-of-scope asset",
+      !hotTubAssetsAfterBlockedCreate.data?.some?.(
+        row => row.name === `Blocked cross-department tub ${suffix}`,
+      ),
+      JSON.stringify(hotTubAssetsAfterBlockedCreate.data));
+    expect("admin can create HotTub asset in another department",
+      await admin("POST", "/hot-tub/tubs", {
+        name: `Admin beta tub ${suffix}`, siteId: betaSite.data.id,
+      }), [201]);
+
     const scopedPremises = await admin("POST", "/premises-track", {
       inspectionDate: today, nextInspectionDate: iso(30), inspectionType: "routine",
       area: "Alpha area", findings: "Current finding", status: "actioned",
