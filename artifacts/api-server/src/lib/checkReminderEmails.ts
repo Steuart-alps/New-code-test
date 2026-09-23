@@ -1,7 +1,7 @@
 /**
  * Daily check-reminder email job.
  *
- * Runs at 08:45. For each active client that has overdue or due-soon safety
+ * Runs at 08:45. For each active client that has unsafe, overdue or due-soon safety
  * checks (fire, legionella, pool), sends one digest email to all active users
  * of that client. Uses check_reminder_log to ensure only one email per client
  * per day.
@@ -18,14 +18,17 @@ import { getNotificationEmails } from "./getNotificationEmails";
 // ── Email HTML builder ────────────────────────────────────────────────────────
 
 function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
+  const unsafe = alerts.filter(a => a.status === "action_required");
   const overdue = alerts.filter(a => a.status === "overdue");
   const dueSoon = alerts.filter(a => a.status === "due_soon");
 
   const rowHtml = (a: CheckAlert) => {
-    const badge = a.status === "overdue"
+    const badge = a.status === "action_required"
+      ? `<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">Action required</span>`
+      : a.status === "overdue"
       ? `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">Overdue</span>`
       : `<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">Due soon</span>`;
-    const when = a.daysUntilDue !== null
+    const when = a.status === "action_required" ? "Unsafe reading or failed check" : a.daysUntilDue !== null
       ? a.daysUntilDue < 0
         ? `${Math.abs(a.daysUntilDue)} day${Math.abs(a.daysUntilDue) !== 1 ? "s" : ""} overdue`
         : a.daysUntilDue === 0
@@ -48,7 +51,7 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
       </tr>`;
   };
 
-  const allRows = [...overdue, ...dueSoon].map(rowHtml).join("");
+  const allRows = [...unsafe, ...overdue, ...dueSoon].map(rowHtml).join("");
 
   return `
 <!DOCTYPE html>
@@ -64,7 +67,9 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
     </div>
     <div style="padding:32px 40px;">
       <p style="font-size:16px;color:#334155;margin:0 0 8px;">
-        ${overdue.length > 0
+        ${unsafe.length > 0
+          ? `<strong>${unsafe.length} safety result${unsafe.length !== 1 ? "s" : ""} require${unsafe.length === 1 ? "s" : ""} action</strong>${overdue.length ? `; ${overdue.length} check${overdue.length !== 1 ? "s are" : " is"} overdue` : ""}.`
+          : overdue.length > 0
           ? `<strong>${overdue.length} check${overdue.length !== 1 ? "s are" : " is"} overdue</strong>${dueSoon.length > 0 ? ` and ${dueSoon.length} more ${dueSoon.length !== 1 ? "are" : "is"} due soon` : ""}.`
           : `<strong>${dueSoon.length} check${dueSoon.length !== 1 ? "s are" : " is"} due soon</strong>.`}
       </p>
@@ -125,9 +130,9 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const rows = (logged as any).rows ?? [];
       if (rows.length > 0) continue;
 
-      // Get alerts (overdue + due_soon only — skip "never")
+      // Get actionable results and due checks — skip "never".
       const alerts = await getCheckAlerts(client.id);
-      const actionable = alerts.filter(a => a.status === "overdue" || a.status === "due_soon");
+      const actionable = alerts.filter(a => a.status === "action_required" || a.status === "overdue" || a.status === "due_soon");
       if (actionable.length === 0) continue;
 
       // Resolve notification recipients (client-level email or admin users).
@@ -135,8 +140,11 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       if (emails.length === 0) continue;
 
       const html = buildEmailHtml(actionable, appUrl);
+      const unsafeCount = actionable.filter(a => a.status === "action_required").length;
       const overdueCount = actionable.filter(a => a.status === "overdue").length;
-      const subject = overdueCount > 0
+      const subject = unsafeCount > 0
+        ? `⚠️ ${unsafeCount} water safety result${unsafeCount !== 1 ? "s" : ""} require action — ComplyTrack`
+        : overdueCount > 0
         ? `⚠️ ${overdueCount} safety check${overdueCount !== 1 ? "s" : ""} overdue — ComplyTrack`
         : `📋 Safety checks due today — ComplyTrack`;
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -85,6 +85,9 @@ interface StatusRow {
 }
 
 interface Site { id: number; name: string; }
+interface HotTubConfig {
+  operatingRanges?: { ph?: { min: number; max: number }; sanitiser?: { min: number; max: number }; temperature?: { max: number } };
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -240,6 +243,13 @@ export default function HotTubPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const configSiteId = form.siteId ? Number(form.siteId) : (filterSite !== "all" ? Number(filterSite) : undefined);
+  const { data: operatingConfig } = useQuery<HotTubConfig>({
+    queryKey: ["hot-tub-config", configSiteId],
+    queryFn: () => apiFetch(`/hot-tub/config${configSiteId ? `?siteId=${configSiteId}` : ""}`),
+    enabled: !!activeClientId,
+  });
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -402,6 +412,12 @@ ${rows.map(r => `<tr>
 
   async function handleSave() {
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
+    if (form.checkType === "water_chemistry" && (!form.phValue || !form.sanitiserLevel)) {
+      toast({ title: "pH and sanitiser readings are required", variant: "destructive" }); return;
+    }
+    if (form.checkType === "temperature" && !form.temperature) {
+      toast({ title: "Temperature reading is required", variant: "destructive" }); return;
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -419,13 +435,22 @@ ${rows.map(r => `<tr>
         staffRosterId: staffRosterId,
         notes: form.notes.trim() || null,
       };
+      const ranges = operatingConfig?.operatingRanges;
+      const outOfRange =
+        (body.phValue != null && ranges?.ph && (body.phValue < ranges.ph.min || body.phValue > ranges.ph.max)) ||
+        (body.sanitiserLevel != null && ranges?.sanitiser && (body.sanitiserLevel < ranges.sanitiser.min || body.sanitiserLevel > ranges.sanitiser.max)) ||
+        (body.temperature != null && ranges?.temperature && body.temperature > ranges.temperature.max);
+      if (outOfRange && !window.confirm("One or more readings are outside the effective operating range. Save anyway? The server will determine the result.")) {
+        setSaving(false);
+        return;
+      }
       if (editItem) {
         const { checkType, ...updateBody } = body;
-        await apiFetch(`/hot-tub/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
-        toast({ title: "Record updated" });
+        const response = await apiFetch(`/hot-tub/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
+        toast({ title: "Record updated", description: `Server outcome: ${response?.result ?? body.result}.` });
       } else {
-        await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
-        toast({ title: "Record saved" });
+        const response = await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
+        toast({ title: "Record saved", description: `Server outcome: ${response?.result ?? body.result}.` });
       }
       invalidate();
       setShowDialog(false);
@@ -494,6 +519,7 @@ ${rows.map(r => `<tr>
               <Settings2 className="w-4 h-4" /> Manage Tubs
             </Button>
           )}
+          {canAdmin && <Button variant="outline" onClick={() => setShowConfig(true)} className="gap-2 rounded-sm">Operating limits</Button>}
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Record Check
           </Button>
@@ -1008,8 +1034,48 @@ ${rows.map(r => `<tr>
         onChanged={refetchTubs}
         sites={sites}
       />
+      <HotTubConfigDialog open={showConfig} onClose={() => setShowConfig(false)} siteId={configSiteId} />
     </AppLayout>
   );
+}
+
+function HotTubConfigDialog({ open, onClose, siteId }: { open: boolean; onClose: () => void; siteId?: number }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [ranges, setRanges] = useState({ ph: { min: 7.2, max: 7.8 }, sanitiser: { min: 3, max: 5 }, temperature: { max: 40 } });
+  const { data } = useQuery<HotTubConfig>({
+    queryKey: ["hot-tub-config-dialog", siteId],
+    queryFn: () => apiFetch(`/hot-tub/config${siteId ? `?siteId=${siteId}` : ""}`),
+    enabled: open,
+  });
+  useEffect(() => {
+    if (data?.operatingRanges) setRanges(r => ({ ...r, ...data.operatingRanges, ph: { ...r.ph, ...data.operatingRanges?.ph }, sanitiser: { ...r.sanitiser, ...data.operatingRanges?.sanitiser }, temperature: { ...r.temperature, ...data.operatingRanges?.temperature } }));
+  }, [data]);
+  async function save() {
+    if (!siteId) { toast({ title: "Choose a site first", description: "Operating limits are site-specific.", variant: "destructive" }); return; }
+    if (!window.confirm("Save these site operating limits? They are local controls and do not override the written operating procedure or benchmark guidance.")) return;
+    try {
+      const response = await apiFetch(`/hot-tub/config?siteId=${siteId}`, { method: "PUT", body: JSON.stringify({ operatingRanges: ranges }) });
+      toast({ title: "Operating limits saved", description: response?.disclaimer ?? "Site limits updated." });
+      qc.invalidateQueries({ queryKey: ["hot-tub-config"] });
+      onClose();
+    } catch (e: any) { toast({ title: "Save failed", description: e.message, variant: "destructive" }); }
+  }
+  return <Dialog open={open} onOpenChange={v => !v && onClose()}>
+    <DialogContent className="max-w-md">
+      <DialogHeader><DialogTitle>Site operating limits</DialogTitle></DialogHeader>
+      <p className="text-xs text-muted-foreground">Effective local limits for review only; they do not override the written scheme or benchmark guidance.</p>
+      {([["pH", "ph", "min", "max"], ["Sanitiser (ppm)", "sanitiser", "min", "max"]] as const).map(([label, key, minKey, maxKey]) =>
+        <div key={key} className="grid grid-cols-[1fr_90px_90px] gap-2 items-center">
+          <Label>{label}</Label>
+          <Input type="number" step="0.1" value={ranges[key][minKey]} onChange={e => setRanges(r => ({ ...r, [key]: { ...r[key], min: Number(e.target.value) } }))} />
+          <Input type="number" step="0.1" value={ranges[key][maxKey]} onChange={e => setRanges(r => ({ ...r, [key]: { ...r[key], max: Number(e.target.value) } }))} />
+        </div>
+      )}
+      <div className="grid grid-cols-[1fr_90px] gap-2 items-center"><Label>Maximum temperature (°C)</Label><Input type="number" step="0.1" value={ranges.temperature.max} onChange={e => setRanges(r => ({ ...r, temperature: { max: Number(e.target.value) } }))} /></div>
+      <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={save}>Save limits</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 // ─── Manage Tubs Dialog ───────────────────────────────────────────────────────

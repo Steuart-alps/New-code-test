@@ -1046,6 +1046,115 @@ paths:
               schema:
                 $ref: "#/components/schemas/LegionellaConfig"
 
+  /hot-tub:
+    get:
+      operationId: listHotTubChecks
+      tags: [legionella]
+      summary: List hot tub water safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/HotTubCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of hot tub checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HotTubCheck"
+    post:
+      operationId: createHotTubCheck
+      tags: [legionella]
+      summary: Record a hot tub water safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHotTubCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
+
+  /hot-tub/config:
+    get:
+      operationId: getHotTubConfig
+      tags: [legionella]
+      summary: Get hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+    put:
+      operationId: updateHotTubConfig
+      tags: [legionella]
+      summary: Update hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          description: Save the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HotTubConfigUpdate"
+      responses:
+        "200":
+          description: Updated hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+
+  /hot-tub/{id}:
+    put:
+      operationId: updateHotTubCheck
+      tags: [legionella]
+      summary: Update a hot tub check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateHotTubCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
+
   /bike-track/config:
     get:
       operationId: getBikeTrackConfig
@@ -2618,6 +2727,11 @@ components:
         siteId:
           type: integer
           nullable: true
+        effectiveTemperatureLimits:
+          type: object
+          description: Effective minimum and maximum temperatures for each temperature check type.
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
         controlProfile:
           $ref: "#/components/schemas/LegionellaControlProfile"
 
@@ -2637,6 +2751,143 @@ components:
         frequencyDays:
           type: object
           additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
+        temperatureLimits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
+
+    TemperatureLimit:
+      type: object
+      properties:
+        min: { type: number }
+        max: { type: number }
+
+    HotTubCheckType:
+      type: string
+      enum: [water_chemistry, temperature, filter_clean, cover_inspection, drain_refill, microbiological_test, risk_assessment]
+
+    HotTubCheck:
+      type: object
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result:
+          type: string
+          description: New records use pass or fail; historical action_required records remain readable.
+          enum: [pass, fail, action_required]
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, clientId, checkType, checkDate, result, createdAt, updatedAt]
+
+    CreateHotTubCheckRequest:
+      type: object
+      description: pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                const: water_chemistry
+          then:
+            required: [phValue, sanitiserLevel]
+        - if:
+            properties:
+              checkType:
+                const: temperature
+          then:
+            required: [temperature]
+      properties:
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+      required: [checkType, checkDate, result]
+
+    UpdateHotTubCheckRequest:
+      type: object
+      description: For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.
+      properties:
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+
+    HotTubConfig:
+      type: object
+      properties:
+        siteId: { type: integer, nullable: true }
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+        controlProfile:
+          type: object
+          nullable: true
+          additionalProperties: true
+        disclaimer: { type: string }
+      required: [siteId, operatingRanges, disclaimer]
+
+    HotTubConfigUpdate:
+      type: object
+      properties:
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+
+    HotTubOperatingRanges:
+      type: object
+      properties:
+        ph:
+          type: object
+          properties:
+            min: { type: number, minimum: 0, maximum: 14 }
+            max: { type: number, minimum: 0, maximum: 14 }
+          required: [min, max]
+        sanitiser:
+          type: object
+          properties:
+            min: { type: number, minimum: 0 }
+            max: { type: number, minimum: 0 }
+          required: [min, max]
+        temperature:
+          type: object
+          properties:
+            max: { type: number, exclusiveMinimum: 0, maximum: 40 }
+          required: [max]
+      required: [ph, sanitiser, temperature]
 
     BikeTrackConfig:
       type: object
@@ -3342,6 +3593,7 @@ components:
           type: string
         result:
           type: string
+          description: New records use pass or fail; historical action_required records remain readable.
           enum: [pass, fail, action_required]
         temperature:
           type: string
@@ -3372,6 +3624,14 @@ components:
 
     CreateLegionellaCheckRequest:
       type: object
+      description: temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                enum: [calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, cold_nonsent_temp]
+          then:
+            required: [temperature]
       properties:
         checkType:
           $ref: "#/components/schemas/LegionellaCheckType"
@@ -3379,7 +3639,7 @@ components:
           type: string
         result:
           type: string
-          enum: [pass, fail, action_required]
+          enum: [pass, fail]
         temperature:
           type: number
           nullable: true
@@ -3402,12 +3662,13 @@ components:
 
     UpdateLegionellaCheckRequest:
       type: object
+      description: For an existing temperature check, temperature is required. New results use pass or fail.
       properties:
         checkDate:
           type: string
         result:
           type: string
-          enum: [pass, fail, action_required]
+          enum: [pass, fail]
         temperature:
           type: number
           nullable: true

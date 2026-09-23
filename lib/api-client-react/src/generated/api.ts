@@ -33,6 +33,7 @@ import type {
   CreateFireSafetyCheckRequest,
   CreateFoodSafetyRecordParams,
   CreateFoodSafetyRecordRequest,
+  CreateHotTubCheckRequest,
   CreateLegionellaCheckRequest,
   CreatePATApplianceRequest,
   CreatePATTestRequest,
@@ -54,11 +55,15 @@ import type {
   GetFoodSafetyMissingDatesParams,
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
+  GetHotTubConfigParams,
   GetLegionellaConfigParams,
   GetLegionellaStatusParams,
   GetPATPresetTemplates200,
   GreenTrackConfig,
   HealthStatus,
+  HotTubCheck,
+  HotTubConfig,
+  HotTubConfigUpdate,
   IncidentConfig,
   LegionellaCheck,
   LegionellaConfig,
@@ -66,6 +71,7 @@ import type {
   ListComplianceItemsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
+  ListHotTubChecksParams,
   ListLegionellaChecksParams,
   ListPATTestsParams,
   ListPremisesInspectionsParams,
@@ -93,6 +99,8 @@ import type {
   UpdateFoodSafetyConfig200,
   UpdateFoodSafetyConfigParams,
   UpdateFoodSafetyRecordRequest,
+  UpdateHotTubCheckRequest,
+  UpdateHotTubConfigParams,
   UpdateLegionellaCheckRequest,
   UpdateLegionellaConfigParams,
   UpdateSiteRequest,
@@ -3880,6 +3888,396 @@ export const useUpdateLegionellaConfig = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateLegionellaConfigMutationOptions(options));
+    }
+
+export const getListHotTubChecksUrl = (params?: ListHotTubChecksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/hot-tub?${stringifiedParams}` : `/api/hot-tub`
+}
+
+/**
+ * @summary List hot tub water safety logbook entries
+ */
+export const listHotTubChecks = async (params?: ListHotTubChecksParams, options?: RequestInit): Promise<HotTubCheck[]> => {
+
+  return customFetch<HotTubCheck[]>(getListHotTubChecksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListHotTubChecksQueryKey = (params?: ListHotTubChecksParams,) => {
+    return [
+    `/api/hot-tub`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListHotTubChecksQueryOptions = <TData = Awaited<ReturnType<typeof listHotTubChecks>>, TError = ErrorType<unknown>>(params?: ListHotTubChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHotTubChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListHotTubChecksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listHotTubChecks>>> = ({ signal }) => listHotTubChecks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listHotTubChecks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListHotTubChecksQueryResult = NonNullable<Awaited<ReturnType<typeof listHotTubChecks>>>
+export type ListHotTubChecksQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List hot tub water safety logbook entries
+ */
+
+export function useListHotTubChecks<TData = Awaited<ReturnType<typeof listHotTubChecks>>, TError = ErrorType<unknown>>(
+ params?: ListHotTubChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listHotTubChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListHotTubChecksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateHotTubCheckUrl = () => {
+
+
+
+
+  return `/api/hot-tub`
+}
+
+/**
+ * @summary Record a hot tub water safety check
+ */
+export const createHotTubCheck = async (createHotTubCheckRequest: CreateHotTubCheckRequest, options?: RequestInit): Promise<HotTubCheck> => {
+
+  return customFetch<HotTubCheck>(getCreateHotTubCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createHotTubCheckRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateHotTubCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHotTubCheck>>, TError,{data: BodyType<CreateHotTubCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHotTubCheck>>, TError,{data: BodyType<CreateHotTubCheckRequest>}, TContext> => {
+
+const mutationKey = ['createHotTubCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHotTubCheck>>, {data: BodyType<CreateHotTubCheckRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createHotTubCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHotTubCheckMutationResult = NonNullable<Awaited<ReturnType<typeof createHotTubCheck>>>
+    export type CreateHotTubCheckMutationBody = BodyType<CreateHotTubCheckRequest>
+    export type CreateHotTubCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record a hot tub water safety check
+ */
+export const useCreateHotTubCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHotTubCheck>>, TError,{data: BodyType<CreateHotTubCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createHotTubCheck>>,
+        TError,
+        {data: BodyType<CreateHotTubCheckRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateHotTubCheckMutationOptions(options));
+    }
+
+export const getGetHotTubConfigUrl = (params?: GetHotTubConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/hot-tub/config?${stringifiedParams}` : `/api/hot-tub/config`
+}
+
+/**
+ * @summary Get hot tub water safety configuration
+ */
+export const getHotTubConfig = async (params?: GetHotTubConfigParams, options?: RequestInit): Promise<HotTubConfig> => {
+
+  return customFetch<HotTubConfig>(getGetHotTubConfigUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHotTubConfigQueryKey = (params?: GetHotTubConfigParams,) => {
+    return [
+    `/api/hot-tub/config`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetHotTubConfigQueryOptions = <TData = Awaited<ReturnType<typeof getHotTubConfig>>, TError = ErrorType<unknown>>(params?: GetHotTubConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHotTubConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHotTubConfigQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHotTubConfig>>> = ({ signal }) => getHotTubConfig(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHotTubConfig>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHotTubConfigQueryResult = NonNullable<Awaited<ReturnType<typeof getHotTubConfig>>>
+export type GetHotTubConfigQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get hot tub water safety configuration
+ */
+
+export function useGetHotTubConfig<TData = Awaited<ReturnType<typeof getHotTubConfig>>, TError = ErrorType<unknown>>(
+ params?: GetHotTubConfigParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHotTubConfig>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHotTubConfigQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateHotTubConfigUrl = (params: UpdateHotTubConfigParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/hot-tub/config?${stringifiedParams}` : `/api/hot-tub/config`
+}
+
+/**
+ * @summary Update hot tub water safety configuration
+ */
+export const updateHotTubConfig = async (hotTubConfigUpdate: HotTubConfigUpdate,
+    params: UpdateHotTubConfigParams, options?: RequestInit): Promise<HotTubConfig> => {
+
+  return customFetch<HotTubConfig>(getUpdateHotTubConfigUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(hotTubConfigUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateHotTubConfigMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubConfig>>, TError,{data: BodyType<HotTubConfigUpdate>;params: UpdateHotTubConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateHotTubConfig>>, TError,{data: BodyType<HotTubConfigUpdate>;params: UpdateHotTubConfigParams}, TContext> => {
+
+const mutationKey = ['updateHotTubConfig'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateHotTubConfig>>, {data: BodyType<HotTubConfigUpdate>;params: UpdateHotTubConfigParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updateHotTubConfig(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateHotTubConfigMutationResult = NonNullable<Awaited<ReturnType<typeof updateHotTubConfig>>>
+    export type UpdateHotTubConfigMutationBody = BodyType<HotTubConfigUpdate>
+    export type UpdateHotTubConfigMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update hot tub water safety configuration
+ */
+export const useUpdateHotTubConfig = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubConfig>>, TError,{data: BodyType<HotTubConfigUpdate>;params: UpdateHotTubConfigParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateHotTubConfig>>,
+        TError,
+        {data: BodyType<HotTubConfigUpdate>;params: UpdateHotTubConfigParams},
+        TContext
+      > => {
+      return useMutation(getUpdateHotTubConfigMutationOptions(options));
+    }
+
+export const getUpdateHotTubCheckUrl = (id: number,) => {
+
+
+
+
+  return `/api/hot-tub/${id}`
+}
+
+/**
+ * @summary Update a hot tub check entry
+ */
+export const updateHotTubCheck = async (id: number,
+    updateHotTubCheckRequest: UpdateHotTubCheckRequest, options?: RequestInit): Promise<HotTubCheck> => {
+
+  return customFetch<HotTubCheck>(getUpdateHotTubCheckUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateHotTubCheckRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateHotTubCheckMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubCheck>>, TError,{id: number;data: BodyType<UpdateHotTubCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateHotTubCheck>>, TError,{id: number;data: BodyType<UpdateHotTubCheckRequest>}, TContext> => {
+
+const mutationKey = ['updateHotTubCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateHotTubCheck>>, {id: number;data: BodyType<UpdateHotTubCheckRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateHotTubCheck(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateHotTubCheckMutationResult = NonNullable<Awaited<ReturnType<typeof updateHotTubCheck>>>
+    export type UpdateHotTubCheckMutationBody = BodyType<UpdateHotTubCheckRequest>
+    export type UpdateHotTubCheckMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a hot tub check entry
+ */
+export const useUpdateHotTubCheck = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubCheck>>, TError,{id: number;data: BodyType<UpdateHotTubCheckRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateHotTubCheck>>,
+        TError,
+        {id: number;data: BodyType<UpdateHotTubCheckRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateHotTubCheckMutationOptions(options));
     }
 
 export const getGetBikeTrackConfigUrl = () => {

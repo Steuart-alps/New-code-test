@@ -35,7 +35,7 @@ if ! healthy; then
   pnpm run build
   NODE_ENV=test OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 75); do
     if healthy; then break; fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
       echo "API server process exited before becoming healthy" >&2
@@ -44,7 +44,7 @@ if ! healthy; then
     sleep 1
   done
   if ! healthy; then
-    echo "API server did not become healthy at ${API_BASE} within 30s" >&2
+    echo "API server did not become healthy at ${API_BASE} within 75s" >&2
     exit 1
   fi
 fi

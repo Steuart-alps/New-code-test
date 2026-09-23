@@ -42,6 +42,8 @@ const ActionUpdateBody = ActionBody.partial().extend({
   verificationNotes: z.string().trim().max(4000).optional().nullable(),
 });
 
+const WATER_SOURCE_TRACKS = ["LegionellaTrack", "HotTubTrack"] as const;
+
 function clientOrError(req: Parameters<typeof getClientId>[0], res: any): number | null {
   const clientId = getClientId(req);
   if (!clientId) {
@@ -131,6 +133,23 @@ router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<voi
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
       ))
+      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+        SELECT 1
+        FROM legionella_checks lc
+        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+        WHERE a.source_track = 'LegionellaTrack'
+          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ) OR EXISTS (
+        SELECT 1
+        FROM hot_tub_checks hc
+        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+        WHERE a.source_track = 'HotTubTrack'
+          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
     ORDER BY CASE WHEN a.status = 'verified' THEN 1 ELSE 0 END, a.due_date NULLS LAST, a.created_at DESC
   `);
   res.json(rows(result));
@@ -145,6 +164,10 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
     return;
   }
   const a = parsed.data;
+  if (WATER_SOURCE_TRACKS.includes(a.sourceTrack as typeof WATER_SOURCE_TRACKS[number])) {
+    res.status(400).json({ error: "LegionellaTrack and HotTubTrack actions are created automatically from water checks" });
+    return;
+  }
   const incidentId = a.sourceTrack === "IncidentTrack" ? Number(a.sourceRecordId) : null;
   if (a.sourceTrack === "IncidentTrack" && (!Number.isSafeInteger(incidentId) || !incidentId || incidentId < 1)) {
     res.status(400).json({ error: "A valid incident is required" });
@@ -211,6 +234,23 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
         WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
+      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+        SELECT 1
+        FROM legionella_checks lc
+        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+        WHERE a.source_track = 'LegionellaTrack'
+          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ) OR EXISTS (
+        SELECT 1
+        FROM hot_tub_checks hc
+        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+        WHERE a.source_track = 'HotTubTrack'
+          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
       )) LIMIT 1
   `);
   const existing = rows<{ evidence_reference: string | null; verification_notes: string | null; status: string; created_by: number | null; source_track: string; source_record_id: string | null }>(existingResult)[0];
@@ -223,6 +263,19 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     return;
   }
   const a = parsed.data;
+  const existingIsWater = WATER_SOURCE_TRACKS.includes(existing.source_track as typeof WATER_SOURCE_TRACKS[number]);
+  const incomingIsWater = a.sourceTrack !== undefined &&
+    WATER_SOURCE_TRACKS.includes(a.sourceTrack as typeof WATER_SOURCE_TRACKS[number]);
+  if ((existingIsWater && (
+    (a.sourceTrack !== undefined && a.sourceTrack !== existing.source_track) ||
+    (a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)
+  )) || (incomingIsWater && (
+    !existingIsWater ||
+    (a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)
+  ))) {
+    res.status(409).json({ error: "Water action links are established at creation and cannot be reassigned" });
+    return;
+  }
   if ((existing.source_track === "IncidentTrack" &&
     (a.sourceTrack !== undefined && a.sourceTrack !== existing.source_track ||
       a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)) ||
@@ -258,11 +311,30 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     WHERE id = ${id}
       AND client_id = ${clientId}
       AND status <> 'verified'
-      AND (source_track <> 'IncidentTrack' OR EXISTS (
+       AND (source_track <> 'IncidentTrack' OR EXISTS (
         SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
         WHERE i.client_id = ${clientId} AND i.id::text = compliance_actions.source_record_id
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+       ))
+       AND (source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+         SELECT 1
+         FROM legionella_checks lc
+         LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+         WHERE source_track = 'LegionellaTrack'
+           AND lc.client_id = compliance_actions.client_id
+           AND lc.id::text = compliance_actions.source_record_id
+           AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+       ) OR EXISTS (
+         SELECT 1
+         FROM hot_tub_checks hc
+         LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+         WHERE source_track = 'HotTubTrack'
+           AND hc.client_id = compliance_actions.client_id
+           AND hc.id::text = compliance_actions.source_record_id
+           AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
       ))
       AND (${a.status === "verified"} = false OR status = 'awaiting_verification')
       AND (${a.status === "verified"} = false OR NULLIF(btrim(evidence_reference), '') IS NOT NULL)

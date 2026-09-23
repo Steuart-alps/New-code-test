@@ -292,7 +292,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled && departmentId === null) {
       try {
-        const alerts = await getCheckAlerts(clientId);
+        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
         const fireAlerts = alerts.filter((a) => a.module === "fire");
         const overdue = fireAlerts.filter((a) => a.status === "overdue");
         const dueSoon = fireAlerts.filter((a) => a.status === "due_soon");
@@ -357,7 +357,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled && departmentId === null) {
       try {
-        const alerts = await getCheckAlerts(clientId);
+        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
         const legAlerts = alerts.filter((a) => a.module === "legionella");
         const overdue = legAlerts.filter((a) => a.status === "overdue");
         const dueSoon = legAlerts.filter((a) => a.status === "due_soon");
@@ -413,7 +413,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled && departmentId === null) {
       try {
-        const alerts = await getCheckAlerts(clientId);
+        const alerts = await getCheckAlerts(clientId, { siteId, accessibleSiteIds });
         const poolAlerts = alerts.filter((a) => a.module === "pool");
         const overdue = poolAlerts.filter((a) => a.status === "overdue");
         const dueSoon = poolAlerts.filter((a) => a.status === "due_soon");
@@ -1050,11 +1050,16 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         };
 
         const lastRows = await db.execute(sql`
-          SELECT check_type, MAX(check_date) AS last_date
+          SELECT DISTINCT ON (site_id, check_type, COALESCE(hot_tub_id, 0))
+            site_id, hot_tub_id, check_type, check_date
           FROM hot_tub_checks WHERE client_id = ${clientId} ${siteClause}
-          GROUP BY check_type
+          ORDER BY site_id, check_type, COALESCE(hot_tub_id, 0), check_date DESC, id DESC
         `);
-        const lastByType = new Map(rows(lastRows).map((r: any) => [r.check_type, r.last_date]));
+        const lastByType = new Map<string, string>();
+        for (const row of rows(lastRows)) {
+          const previous = lastByType.get(row.check_type);
+          if (!previous || row.check_date > previous) lastByType.set(row.check_type, row.check_date);
+        }
 
         let overdueCount = 0;
         let dueSoonCount = 0;
@@ -1464,9 +1469,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       trackId: "legionella",
       path: "/legionella",
       query: sql`
-        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        SELECT DISTINCT ON (site_id, check_type, COALESCE(outlet_id, 0)) check_type, check_date AS date, result, location
         FROM legionella_checks WHERE client_id = ${clientId} ${protectedSiteClause}
-        ORDER BY site_id, check_type, check_date DESC, id DESC
+        ORDER BY site_id, check_type, COALESCE(outlet_id, 0), check_date DESC, id DESC
       `,
     },
     {
@@ -1482,9 +1487,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       trackId: "hot_tub",
       path: "/hot-tub",
       query: sql`
-        SELECT DISTINCT ON (site_id, check_type) check_type, check_date AS date, result, location
+        SELECT DISTINCT ON (site_id, check_type, COALESCE(hot_tub_id, 0)) check_type, check_date AS date, result, location
         FROM hot_tub_checks WHERE client_id = ${clientId} ${protectedSiteClause}
-        ORDER BY site_id, check_type, check_date DESC, id DESC
+        ORDER BY site_id, check_type, COALESCE(hot_tub_id, 0), check_date DESC, id DESC
       `,
     },
     {
@@ -1559,6 +1564,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         );
         if (!failedResult) continue;
         actionRequiredTrackIds.add(track.trackId);
+        if (track.status !== "overdue") {
+          track.status = "attention";
+          track.badge = "Action required";
+        }
         track.items.unshift({
           label: `${String(result.check_type ?? "Check").replace(/_/g, " ")} result requires action`,
           detail: `${result.result || "Action required"}${result.location ? ` — ${result.location}` : ""}${result.date ? ` (${result.date})` : ""}`,

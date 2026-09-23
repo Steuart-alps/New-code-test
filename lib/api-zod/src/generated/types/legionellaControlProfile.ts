@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.2.0
  */
 import type { LegionellaControlProfileFrequencyDays } from './legionellaControlProfileFrequencyDays';
+import type { LegionellaControlProfileTemperatureLimits } from './legionellaControlProfileTemperatureLimits';
 import type { LegionellaControlProfileUkNation } from './legionellaControlProfileUkNation';
 
 export interface LegionellaControlProfile {
@@ -20,4 +21,5 @@ export interface LegionellaControlProfile {
   schemeReviewDate?: Date | null;
   ukNation?: LegionellaControlProfileUkNation;
   frequencyDays?: LegionellaControlProfileFrequencyDays;
+  temperatureLimits?: LegionellaControlProfileTemperatureLimits;
 }

@@ -1191,6 +1191,10 @@ export const GetLegionellaConfigResponse = zod.object({
   "water_sentinel_outlets": zod.string().optional(),
   "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
   "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
   "controlProfile": zod.object({
   "systemInventoryReference": zod.string().nullish(),
   "writtenControlSchemeReference": zod.string().nullish(),
@@ -1202,7 +1206,11 @@ export const GetLegionellaConfigResponse = zod.object({
   "remedialVerificationReference": zod.string().nullish(),
   "schemeReviewDate": zod.date().nullish(),
   "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
-  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
 }).optional()
 })
 
@@ -1224,6 +1232,10 @@ export const UpdateLegionellaConfigBody = zod.object({
   "water_sentinel_outlets": zod.string().optional(),
   "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
   "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
   "controlProfile": zod.object({
   "systemInventoryReference": zod.string().nullish(),
   "writtenControlSchemeReference": zod.string().nullish(),
@@ -1235,7 +1247,11 @@ export const UpdateLegionellaConfigBody = zod.object({
   "remedialVerificationReference": zod.string().nullish(),
   "schemeReviewDate": zod.date().nullish(),
   "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
-  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne)).optional()
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
 }).optional()
 })
 
@@ -1249,6 +1265,10 @@ export const UpdateLegionellaConfigResponse = zod.object({
   "water_sentinel_outlets": zod.string().optional(),
   "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
   "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
   "controlProfile": zod.object({
   "systemInventoryReference": zod.string().nullish(),
   "writtenControlSchemeReference": zod.string().nullish(),
@@ -1260,8 +1280,235 @@ export const UpdateLegionellaConfigResponse = zod.object({
   "remedialVerificationReference": zod.string().nullish(),
   "schemeReviewDate": zod.date().nullish(),
   "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
-  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
 }).optional()
+})
+
+
+/**
+ * @summary List hot tub water safety logbook entries
+ */
+export const ListHotTubChecksQueryParams = zod.object({
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']).optional(),
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListHotTubChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListHotTubChecksResponse = zod.array(ListHotTubChecksResponseItem)
+
+
+/**
+ * @summary Record a hot tub water safety check
+ */
+export const CreateHotTubCheckBody = zod.unknown().and(zod.unknown()).and(zod.object({
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail']),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish()
+})).describe('pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.')
+
+export const CreateHotTubCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Get hot tub water safety configuration
+ */
+export const GetHotTubConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific HotTubTrack control profile.')
+})
+
+export const getHotTubConfigResponseOperatingRangesPhMinMin = 0;
+export const getHotTubConfigResponseOperatingRangesPhMinMax = 14;
+
+export const getHotTubConfigResponseOperatingRangesPhMaxMin = 0;
+export const getHotTubConfigResponseOperatingRangesPhMaxMax = 14;
+
+export const getHotTubConfigResponseOperatingRangesSanitiserMinMin = 0;
+
+export const getHotTubConfigResponseOperatingRangesSanitiserMaxMin = 0;
+
+export const getHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const getHotTubConfigResponseOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const GetHotTubConfigResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(getHotTubConfigResponseOperatingRangesPhMinMin).max(getHotTubConfigResponseOperatingRangesPhMinMax),
+  "max": zod.number().min(getHotTubConfigResponseOperatingRangesPhMaxMin).max(getHotTubConfigResponseOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(getHotTubConfigResponseOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(getHotTubConfigResponseOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(getHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin).max(getHotTubConfigResponseOperatingRangesTemperatureMaxMax)
+})
+}),
+  "controlProfile": zod.record(zod.string(), zod.unknown()).nullish(),
+  "disclaimer": zod.string()
+})
+
+
+/**
+ * @summary Update hot tub water safety configuration
+ */
+export const UpdateHotTubConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().describe('Save the site-specific HotTubTrack control profile.')
+})
+
+export const updateHotTubConfigBodyOperatingRangesPhMinMin = 0;
+export const updateHotTubConfigBodyOperatingRangesPhMinMax = 14;
+
+export const updateHotTubConfigBodyOperatingRangesPhMaxMin = 0;
+export const updateHotTubConfigBodyOperatingRangesPhMaxMax = 14;
+
+export const updateHotTubConfigBodyOperatingRangesSanitiserMinMin = 0;
+
+export const updateHotTubConfigBodyOperatingRangesSanitiserMaxMin = 0;
+
+export const updateHotTubConfigBodyOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const updateHotTubConfigBodyOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const UpdateHotTubConfigBody = zod.object({
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(updateHotTubConfigBodyOperatingRangesPhMinMin).max(updateHotTubConfigBodyOperatingRangesPhMinMax),
+  "max": zod.number().min(updateHotTubConfigBodyOperatingRangesPhMaxMin).max(updateHotTubConfigBodyOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(updateHotTubConfigBodyOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(updateHotTubConfigBodyOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(updateHotTubConfigBodyOperatingRangesTemperatureMaxExclusiveMin).max(updateHotTubConfigBodyOperatingRangesTemperatureMaxMax)
+})
+}).optional()
+})
+
+export const updateHotTubConfigResponseOperatingRangesPhMinMin = 0;
+export const updateHotTubConfigResponseOperatingRangesPhMinMax = 14;
+
+export const updateHotTubConfigResponseOperatingRangesPhMaxMin = 0;
+export const updateHotTubConfigResponseOperatingRangesPhMaxMax = 14;
+
+export const updateHotTubConfigResponseOperatingRangesSanitiserMinMin = 0;
+
+export const updateHotTubConfigResponseOperatingRangesSanitiserMaxMin = 0;
+
+export const updateHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const updateHotTubConfigResponseOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const UpdateHotTubConfigResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(updateHotTubConfigResponseOperatingRangesPhMinMin).max(updateHotTubConfigResponseOperatingRangesPhMinMax),
+  "max": zod.number().min(updateHotTubConfigResponseOperatingRangesPhMaxMin).max(updateHotTubConfigResponseOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(updateHotTubConfigResponseOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(updateHotTubConfigResponseOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(updateHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin).max(updateHotTubConfigResponseOperatingRangesTemperatureMaxMax)
+})
+}),
+  "controlProfile": zod.record(zod.string(), zod.unknown()).nullish(),
+  "disclaimer": zod.string()
+})
+
+
+/**
+ * @summary Update a hot tub check entry
+ */
+export const UpdateHotTubCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateHotTubCheckBody = zod.object({
+  "checkDate": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish()
+}).describe('For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.')
+
+export const UpdateHotTubCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
 })
 
 
@@ -2013,7 +2260,7 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -2027,16 +2274,16 @@ export const ListLegionellaChecksResponse = zod.array(ListLegionellaChecksRespon
 /**
  * @summary Record a Legionella water safety check
  */
-export const CreateLegionellaCheckBody = zod.object({
+export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail']),
   "temperature": zod.number().nullish(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish()
-})
+})).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({
   "id": zod.number(),
@@ -2044,7 +2291,7 @@ export const CreateLegionellaCheckResponse = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -2081,13 +2328,13 @@ export const UpdateLegionellaCheckParams = zod.object({
 
 export const UpdateLegionellaCheckBody = zod.object({
   "checkDate": zod.string().optional(),
-  "result": zod.enum(['pass', 'fail', 'action_required']).optional(),
+  "result": zod.enum(['pass', 'fail']).optional(),
   "temperature": zod.number().nullish(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish()
-})
+}).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
 export const UpdateLegionellaCheckResponse = zod.object({
   "id": zod.number(),
@@ -2095,7 +2342,7 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),

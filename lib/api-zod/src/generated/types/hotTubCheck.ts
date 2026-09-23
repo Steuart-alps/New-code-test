@@ -5,18 +5,23 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
-import type { LegionellaCheckResult } from './legionellaCheckResult';
-import type { LegionellaCheckType } from './legionellaCheckType';
+import type { HotTubCheckResult } from './hotTubCheckResult';
+import type { HotTubCheckSession } from './hotTubCheckSession';
+import type { HotTubCheckType } from './hotTubCheckType';
 
-export interface LegionellaCheck {
+export interface HotTubCheck {
   id: number;
   clientId: number;
   siteId?: number | null;
-  checkType: LegionellaCheckType;
+  hotTubId?: number | null;
+  checkType: HotTubCheckType;
   checkDate: string;
   /** New records use pass or fail; historical action_required records remain readable. */
-  result: LegionellaCheckResult;
-  temperature?: string | null;
+  result: HotTubCheckResult;
+  session?: HotTubCheckSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;

@@ -29,6 +29,7 @@ interface CheckStatus {
   status: 'ok' | 'due_soon' | 'overdue' | 'never';
   lastDate: string | null;
   dueDate: string | null;
+  lastResult?: string | null;
 }
 
 function greeting(): string {
@@ -56,6 +57,7 @@ function ModuleStatusCard({
   const due = statuses.filter((s) => s.status === 'due_soon').length;
   const all = statuses.length;
   const ok = statuses.filter((s) => s.status === 'ok').length;
+  const failed = statuses.filter((s) => s.lastResult === 'fail' || s.lastResult === 'action_required').length;
 
   let bg = colors.card;
   let accent = colors.success;
@@ -69,6 +71,11 @@ function ModuleStatusCard({
     bg = '#fffbeb';
     accent = colors.warning;
     label2 = summaryOverride ?? `${due} due soon`;
+  }
+  if (failed > 0 && !summaryOverride) {
+    bg = '#fff7ed';
+    accent = colors.warning;
+    label2 = `${failed} warning${failed === 1 ? '' : 's'}`;
   }
 
   return (
@@ -134,6 +141,13 @@ export default function TodayScreen() {
         `/api/legionella/status${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}`,
       ),
   });
+  const { data: hotTubStatus = [], refetch: refetchHotTub } = useQuery<CheckStatus[]>({
+    queryKey: ['hot-tub-status', selectedSiteId],
+    queryFn: () =>
+      apiFetch(
+        `/api/hot-tub/status${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}`,
+      ),
+  });
 
   const { data: issues, isLoading: issuesLoading, refetch: refetchIssues } = useQuery<
     FixTrackIssue[]
@@ -149,7 +163,7 @@ export default function TodayScreen() {
   const [refreshing, setRefreshing] = useState(false);
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([refetchFire(), refetchWater(), refetchIssues()]);
+    await Promise.all([refetchFire(), refetchWater(), refetchHotTub(), refetchIssues()]);
     setRefreshing(false);
   }
 
@@ -281,6 +295,12 @@ export default function TodayScreen() {
             icon="droplet"
             statuses={waterStatus}
             onPress={() => router.push('/checks/water' as any)}
+          />
+          <ModuleStatusCard
+            label="HotTubTrack"
+            icon="droplet"
+            statuses={hotTubStatus}
+            onPress={() => router.push('/checks/hot-tub' as any)}
           />
           <ModuleStatusCard
             label="KitchenTrack"

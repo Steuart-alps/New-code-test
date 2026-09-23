@@ -185,6 +185,7 @@ type LegionellaProfileState = {
   remedialVerificationReference: string;
   schemeReviewDate: string;
   ukNation: string;
+  temperatureLimits: Record<string, { min?: number; max?: number }>;
 };
 
 function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
@@ -203,6 +204,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     systemInventoryReference: "", writtenControlSchemeReference: "", riskAssessmentReference: "",
     riskAssessmentReviewDate: "", competentPerson: "", samplingLabRecordReference: "",
     controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
+    temperatureLimits: {},
   });
 
   useEffect(() => {
@@ -210,7 +212,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
     const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
-    const savedProfile = config.controlProfile ?? {};
+     const savedProfile: any = config.controlProfile ?? {};
     setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
     setProfile({
       systemInventoryReference: savedProfile.systemInventoryReference ?? "",
@@ -223,17 +225,19 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
       remedialVerificationReference: savedProfile.remedialVerificationReference ?? "",
       schemeReviewDate: savedProfile.schemeReviewDate ?? "",
       ukNation: savedProfile.ukNation ?? "",
+       temperatureLimits: savedProfile.temperatureLimits ?? (config as any).effectiveTemperatureLimits ?? {},
     });
   }, [config, open]);
 
   const handleSave = () => {
     const numericFrequencies = Object.fromEntries(Object.entries(frequencyDays).map(([key, value]) => [key, Math.max(1, Number(value) || DEFAULT_LEGIONELLA_FREQUENCIES[key])]));
+    if (!window.confirm("Save these site control limits? They are local controls for the written scheme and do not override the benchmark guidance.")) return;
     updateConfig.mutate(
       {
         data: {
           water_default_performer: defaultPerformer,
           water_non_sentinel_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
-          ...(siteId ? { controlProfile: { ...profile, frequencyDays: numericFrequencies } } : { water_frequency_days: JSON.stringify(numericFrequencies) }),
+          ...(siteId ? { controlProfile: { ...profile, frequencyDays: numericFrequencies, temperatureLimits: profile.temperatureLimits } } : { water_frequency_days: JSON.stringify(numericFrequencies) }),
         } as any,
         params: siteId ? { siteId } : undefined,
       },
@@ -315,6 +319,21 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
            <TabsContent value="controls" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
              {!siteId && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm p-2">Choose a site in the history filter to save a site-specific control profile.</p>}
              <p className="text-xs text-muted-foreground">Record the site water-system controls and evidence references used during inspection.</p>
+              <div className="space-y-2 rounded-sm border border-amber-200 bg-amber-50 p-3">
+                <Label>Site temperature limits (°C)</Label>
+                <p className="text-xs text-amber-800">These are effective local controls only; they never rewrite or override the written scheme or benchmark guidance.</p>
+                {Array.from(TEMPERATURE_TYPES).map(key => (
+                  <div key={key} className="grid grid-cols-[1fr_80px_80px] gap-2 items-center">
+                    <span className="text-xs">{CHECK_TYPE_LABELS[key]}</span>
+                    <Input type="number" step="0.1" placeholder="Min" disabled={!siteId}
+                      value={profile.temperatureLimits[key]?.min ?? ""}
+                      onChange={e => setProfile(p => ({ ...p, temperatureLimits: { ...p.temperatureLimits, [key]: { ...p.temperatureLimits[key], min: e.target.value === "" ? undefined : Number(e.target.value) } } }))} />
+                    <Input type="number" step="0.1" placeholder="Max" disabled={!siteId}
+                      value={profile.temperatureLimits[key]?.max ?? ""}
+                      onChange={e => setProfile(p => ({ ...p, temperatureLimits: { ...p.temperatureLimits, [key]: { ...p.temperatureLimits[key], max: e.target.value === "" ? undefined : Number(e.target.value) } } }))} />
+                  </div>
+                ))}
+              </div>
              {([
                ["systemInventoryReference", "Water-system inventory reference"],
                ["writtenControlSchemeReference", "Written control scheme reference"],
@@ -794,8 +813,18 @@ function RecordCheckDialog({
   }, [open]);
 
   const isTemperatureCheck = TEMPERATURE_TYPES.has(checkType);
+  const effectiveLimit = (config as any)?.effectiveTemperatureLimits?.[checkType] ??
+    (config as any)?.controlProfile?.temperatureLimits?.[checkType];
+  const enteredTemperature = temperature === "" ? null : Number(temperature);
+  const localLimitWarning = isTemperatureCheck && enteredTemperature !== null && effectiveLimit &&
+    ((effectiveLimit.min !== undefined && enteredTemperature < effectiveLimit.min) ||
+      (effectiveLimit.max !== undefined && enteredTemperature > effectiveLimit.max));
 
   const handleSubmit = async () => {
+    if (isTemperatureCheck && !temperature) {
+      toast({ title: "Temperature reading is required", variant: "destructive" });
+      return;
+    }
     const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
       checkType,
       checkDate,
@@ -810,10 +839,10 @@ function RecordCheckDialog({
     createCheck.mutate(
       { data },
       {
-        onSuccess: () => {
+        onSuccess: (response: any) => {
           queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
-          toast({ title: "Check recorded", description: "Legionella check saved successfully." });
+          toast({ title: "Check recorded", description: `Server outcome: ${response?.result ?? result}.` });
           setOpen(false);
           setTemperature("");
           setLocation("");
@@ -887,6 +916,12 @@ function RecordCheckDialog({
                   className="pl-9"
                 />
               </div>
+            </div>
+          )}
+          {localLimitWarning && (
+            <div className="flex items-start gap-2 rounded-sm border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              This reading is outside the effective site limit. The server will evaluate the result on save.
             </div>
           )}
 

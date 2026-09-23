@@ -60,6 +60,14 @@ const MODULES: CheckModule[] = [
     ],
   },
   {
+    id: 'hot-tub',
+    label: 'HotTubTrack',
+    subtitle: 'Hot-tub water safety checks',
+    icon: 'droplet',
+    iconColor: '#06b6d4',
+    checks: ['Water chemistry', 'Temperature', 'Cover inspection'],
+  },
+  {
     id: 'kitchen',
     label: 'KitchenTrack',
     subtitle: 'Food safety diary',
@@ -178,6 +186,8 @@ export default function ChecksScreen() {
                 router.push('/checks/green' as any);
               } else if (mod.id === 'safe-track') {
                 router.push('/checks/safe-track' as any);
+              } else if (mod.id === 'hot-tub') {
+                router.push('/checks/hot-tub' as any);
               } else {
                 router.push(`/checks/${mod.id}` as any);
               }

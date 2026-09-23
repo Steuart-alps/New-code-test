@@ -9,10 +9,10 @@
 /**
  * New records use pass or fail; historical action_required records remain readable.
  */
-export type LegionellaCheckResult = typeof LegionellaCheckResult[keyof typeof LegionellaCheckResult];
+export type HotTubCheckResult = typeof HotTubCheckResult[keyof typeof HotTubCheckResult];
 
 
-export const LegionellaCheckResult = {
+export const HotTubCheckResult = {
   pass: 'pass',
   fail: 'fail',
   action_required: 'action_required',

@@ -3019,6 +3019,17 @@ async function migrateComplianceHub() {
     CREATE INDEX IF NOT EXISTS "IDX_compliance_actions_client_status_due"
     ON "compliance_actions" ("client_id", "status", "due_date")
   `);
+  // Existing manually linked water actions may have duplicate references.
+  // Tag only new, server-created actions so the unique index never rewrites or
+  // rejects legitimate historical records during an upgrade.
+  await db.execute(sql`ALTER TABLE "compliance_actions" ADD COLUMN IF NOT EXISTS "auto_generated" boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`DROP INDEX IF EXISTS "UQ_compliance_actions_water_source"`);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_compliance_actions_water_auto_source"
+    ON "compliance_actions" ("client_id", "source_track", "source_record_id")
+    WHERE "auto_generated" AND "source_track" IN ('LegionellaTrack', 'HotTubTrack')
+      AND "source_record_id" IS NOT NULL
+  `);
 }
 
 async function migratePremisesTrack() {

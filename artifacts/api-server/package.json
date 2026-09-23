@@ -59,6 +59,7 @@
     "test:pesttrack-billing": "node tests/pesttrack-billing.mjs",
     "test:pest-control-register": "bash tests/run-pest-control-register.sh",
     "test:riddor-audit-history": "bash tests/run-riddor-audit-history.sh",
+    "test:water-safety": "bash tests/run-water-safety.sh",
     "test:compliance-audit-history": "bash tests/run-compliance-audit-history.sh",
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:calendar-invite-compatibility": "esbuild tests/calendar-invite-compatibility.ts --bundle --platform=node --format=cjs --outfile=/tmp/calendar-invite-compatibility.cjs && node /tmp/calendar-invite-compatibility.cjs",

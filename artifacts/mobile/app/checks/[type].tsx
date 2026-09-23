@@ -43,14 +43,30 @@ const WATER_TYPES = [
   { value: 'tmv_service',           label: 'TMV service & verify' },
   { value: 'outlet_flush',          label: 'Little-used outlet flush (5 min)' },
 ];
+const HOT_TUB_TYPES = [
+  { value: 'water_chemistry', label: 'Water chemistry' },
+  { value: 'temperature', label: 'Temperature' },
+  { value: 'cover_inspection', label: 'Cover inspection' },
+];
 
 interface Site {
   id: number;
   name: string;
 }
+interface LegionellaConfig {
+  effectiveTemperatureLimits?: Record<string, { min?: number; max?: number }>;
+  controlProfile?: { temperatureLimits?: Record<string, { min?: number; max?: number }> };
+}
+interface HotTubConfig {
+  operatingRanges?: {
+    ph?: { min?: number; max?: number };
+    sanitiser?: { min?: number; max?: number };
+    temperature?: { max?: number };
+  };
+}
 
 type FireResult = 'pass' | 'fail';
-type WaterResult = 'pass' | 'fail' | 'action_required';
+type WaterResult = 'pass' | 'fail';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -106,15 +122,19 @@ export default function CheckFormScreen() {
 
   const isFire = type === 'fire';
   const isWater = type === 'water';
+  const isHotTub = type === 'hot-tub';
   const isKitchen = type === 'kitchen';
 
-  const checkTypes = isFire ? FIRE_TYPES : isWater ? WATER_TYPES : [];
+  const checkTypes = isFire ? FIRE_TYPES : isWater ? WATER_TYPES : isHotTub ? HOT_TUB_TYPES : [];
 
   const [checkType, setCheckType] = useState(checkTypes[0]?.value ?? '');
   const [checkDate, setCheckDate] = useState(today());
   const [fireResult, setFireResult] = useState<FireResult>('pass');
   const [waterResult, setWaterResult] = useState<WaterResult>('pass');
+  const [hotResult, setHotResult] = useState<FireResult>('pass');
   const [temperature, setTemperature] = useState('');
+  const [ph, setPh] = useState('');
+  const [sanitiser, setSanitiser] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [performedBy, setPerformedBy] = useState('');
@@ -124,17 +144,29 @@ export default function CheckFormScreen() {
     queryKey: ['sites'],
     queryFn: () => apiFetch('/api/sites'),
   });
+  const { data: legionellaConfig } = useQuery<LegionellaConfig>({
+    queryKey: ['legionella-config', siteId],
+    queryFn: () => apiFetch(`/api/legionella/config${siteId ? `?siteId=${siteId}` : ''}`),
+    enabled: isWater,
+  });
+  const { data: hotTubConfig } = useQuery<HotTubConfig>({
+    queryKey: ['hot-tub-config', siteId],
+    queryFn: () => apiFetch(`/api/hot-tub/config${siteId ? `?siteId=${siteId}` : ''}`),
+    enabled: isHotTub,
+  });
 
-  const endpoint = isFire ? '/api/fire-safety' : '/api/legionella';
+  const endpoint = isFire ? '/api/fire-safety' : isHotTub ? '/api/hot-tub' : '/api/legionella';
 
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async () => {
+    onSuccess: async (response: any) => {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['fire-status'] });
       qc.invalidateQueries({ queryKey: ['water-status'] });
-      Alert.alert('Logged', 'Check recorded successfully.', [
+      qc.invalidateQueries({ queryKey: ['hot-tub-status'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      Alert.alert('Logged', `Server outcome: ${response?.result ?? (isFire ? fireResult : isHotTub ? hotResult : waterResult)}.`, [
         { text: 'Done', onPress: () => router.back() },
         { text: 'Log another', style: 'default' },
       ]);
@@ -153,16 +185,49 @@ export default function CheckFormScreen() {
       );
       return;
     }
+    if (!checkDate || !/^\d{4}-\d{2}-\d{2}$/.test(checkDate)) {
+      Alert.alert('Check date required', 'Enter the date as YYYY-MM-DD.');
+      return;
+    }
+    if (isHotTub && checkType === 'water_chemistry' && (!ph || !sanitiser)) {
+      Alert.alert('Reading required', 'Enter both pH and sanitiser for a water chemistry check.');
+      return;
+    }
+    if (isHotTub && checkType === 'temperature' && !temperature) {
+      Alert.alert('Reading required', 'Enter the water temperature.');
+      return;
+    }
     const body: Record<string, unknown> = {
       checkType,
       checkDate,
-      result: isFire ? fireResult : waterResult,
+      result: isFire ? fireResult : isHotTub ? hotResult : waterResult,
       ...(siteId ? { siteId } : {}),
       ...(location ? { location } : {}),
       ...(notes ? { notes } : {}),
       ...(performedBy ? { performedBy } : {}),
       ...(isWater && temperature ? { temperature: parseFloat(temperature) } : {}),
+      ...(isHotTub && ph ? { phValue: Number(ph) } : {}),
+      ...(isHotTub && sanitiser ? { sanitiserLevel: Number(sanitiser) } : {}),
+      ...(isHotTub && temperature ? { temperature: Number(temperature) } : {}),
     };
+    const limit = legionellaConfig?.effectiveTemperatureLimits?.[checkType] ??
+      legionellaConfig?.controlProfile?.temperatureLimits?.[checkType];
+    const value = temperature === '' ? null : Number(temperature);
+    const ranges = hotTubConfig?.operatingRanges;
+    const hotBreaches = isHotTub && (
+      (ph !== '' && ((ranges?.ph?.min !== undefined && Number(ph) < ranges.ph.min) || (ranges?.ph?.max !== undefined && Number(ph) > ranges.ph.max))) ||
+      (sanitiser !== '' && ((ranges?.sanitiser?.min !== undefined && Number(sanitiser) < ranges.sanitiser.min) || (ranges?.sanitiser?.max !== undefined && Number(sanitiser) > ranges.sanitiser.max))) ||
+      (temperature !== '' && ranges?.temperature?.max !== undefined && Number(temperature) > ranges.temperature.max)
+    );
+    const outOfRange = isWater && value !== null && !!limit &&
+      ((limit.min !== undefined && value < limit.min) || (limit.max !== undefined && value > limit.max));
+    if (outOfRange || hotBreaches) {
+      Alert.alert('Outside effective site limit', 'This reading is outside the effective site control. The server will evaluate the result when saved.', [
+          { text: 'Cancel', style: 'cancel' },
+        { text: 'Save anyway', onPress: () => mutate(body) },
+      ]);
+      return;
+    }
     mutate(body);
   }
 
@@ -170,8 +235,10 @@ export default function CheckFormScreen() {
     ? 'FireTrack'
     : isWater
     ? 'LegionellaTrack'
+    : isHotTub
+    ? 'HotTubTrack'
     : 'KitchenTrack';
-  const moduleColor = isFire ? '#f97316' : isWater ? '#0ea5e9' : '#eab308';
+  const moduleColor = isFire ? '#f97316' : isWater ? '#0ea5e9' : isHotTub ? '#06b6d4' : '#eab308';
 
   if (isKitchen) {
     return <KitchenTemperatureForm />;
@@ -273,16 +340,20 @@ export default function CheckFormScreen() {
             value={fireResult}
             onChange={setFireResult}
           />
+        ) : isHotTub ? (
+          <ResultPicker
+            options={[
+              { value: 'pass' as FireResult, label: 'Pass', color: '#22c55e' },
+              { value: 'fail' as FireResult, label: 'Fail', color: '#ef4444' },
+            ]}
+            value={hotResult}
+            onChange={setHotResult}
+          />
         ) : (
           <ResultPicker
             options={[
               { value: 'pass' as WaterResult, label: 'Pass', color: '#22c55e' },
               { value: 'fail' as WaterResult, label: 'Fail', color: '#ef4444' },
-              {
-                value: 'action_required' as WaterResult,
-                label: 'Action required',
-                color: '#f59e0b',
-              },
             ]}
             value={waterResult}
             onChange={setWaterResult}
@@ -309,6 +380,62 @@ export default function CheckFormScreen() {
           />
         </View>
       )}
+      {isHotTub && (checkType === 'water_chemistry' || checkType === 'temperature') && (
+        <>
+          {checkType === 'water_chemistry' && (
+            <>
+              <View style={styles.field}>
+                <Text style={[styles.label, { color: colors.foreground }]}>pH</Text>
+                <TextInput
+                  style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
+                  value={ph}
+                  onChangeText={setPh}
+                  placeholder="e.g. 7.5"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.field}>
+                <Text style={[styles.label, { color: colors.foreground }]}>Sanitiser level</Text>
+                <TextInput
+                  style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
+                  value={sanitiser}
+                  onChangeText={setSanitiser}
+                  placeholder="e.g. 4"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </>
+          )}
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.foreground }]}>Temperature (°C)</Text>
+            <TextInput
+              style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
+              value={temperature}
+              onChangeText={setTemperature}
+              placeholder="e.g. 38"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="decimal-pad"
+            />
+          </View>
+          {(() => {
+            const ranges = hotTubConfig?.operatingRanges;
+            const warnings = [
+              ph !== '' && ranges?.ph && ((ranges.ph.min !== undefined && Number(ph) < ranges.ph.min) || (ranges.ph.max !== undefined && Number(ph) > ranges.ph.max)) ? 'pH' : '',
+              sanitiser !== '' && ranges?.sanitiser && ((ranges.sanitiser.min !== undefined && Number(sanitiser) < ranges.sanitiser.min) || (ranges.sanitiser.max !== undefined && Number(sanitiser) > ranges.sanitiser.max)) ? 'sanitiser' : '',
+              temperature !== '' && ranges?.temperature?.max !== undefined && Number(temperature) > ranges.temperature.max ? 'temperature' : '',
+            ].filter(Boolean);
+            return warnings.length ? <Text style={{ color: '#b45309', paddingHorizontal: 16, marginTop: -12, marginBottom: 16 }}>Warning: {warnings.join(', ')} is outside the site operating range.</Text> : null;
+          })()}
+        </>
+      )}
+      {isWater && (() => {
+        const limit = legionellaConfig?.effectiveTemperatureLimits?.[checkType] ?? legionellaConfig?.controlProfile?.temperatureLimits?.[checkType];
+        const value = temperature === '' ? null : Number(temperature);
+        if (value === null || !limit || !((limit.min !== undefined && value < limit.min) || (limit.max !== undefined && value > limit.max))) return null;
+        return <Text style={{ color: '#b45309', paddingHorizontal: 16, marginTop: -12, marginBottom: 16 }}>Warning: outside effective site limit; server determines the saved result.</Text>;
+      })()}
 
       {/* Site */}
       {sites.length > 0 && (

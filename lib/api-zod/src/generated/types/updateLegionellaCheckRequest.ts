@@ -7,6 +7,9 @@
  */
 import type { UpdateLegionellaCheckRequestResult } from './updateLegionellaCheckRequestResult';
 
+/**
+ * For an existing temperature check, temperature is required. New results use pass or fail.
+ */
 export interface UpdateLegionellaCheckRequest {
   checkDate?: string;
   result?: UpdateLegionellaCheckRequestResult;

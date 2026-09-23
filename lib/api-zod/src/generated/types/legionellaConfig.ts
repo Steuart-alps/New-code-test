@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { LegionellaConfigEffectiveTemperatureLimits } from './legionellaConfigEffectiveTemperatureLimits';
 import type { LegionellaControlProfile } from './legionellaControlProfile';
 
 export interface LegionellaConfig {
@@ -14,5 +15,7 @@ export interface LegionellaConfig {
   /** JSON object mapping check types to risk-assessed intervals in days. */
   water_frequency_days?: string;
   siteId?: number | null;
+  /** Effective minimum and maximum temperatures for each temperature check type. */
+  effectiveTemperatureLimits?: LegionellaConfigEffectiveTemperatureLimits;
   controlProfile?: LegionellaControlProfile;
 }

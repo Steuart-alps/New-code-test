@@ -335,7 +335,15 @@ async function testLegionella(req, siteId) {
   check("legionella: status uses site frequency", siteSentinel?.frequencyDays === 45);
 
   // 8. DELETE
-  const delId = createdIds["shower_clean"];
+  const protectedId = createdIds["shower_clean"];
+  const protectedDelete = await req("DELETE", `/legionella/${protectedId}`);
+  check("legionella: failed check with linked action cannot be deleted", protectedDelete.status === 409,
+    `got ${protectedDelete.status}`);
+  const deletable = await req("POST", "/legionella", {
+    checkType: "shower_clean", checkDate: isoDate(), result: "pass", siteId,
+  });
+  check("legionella: passing check can be created for deletion", deletable.status === 201);
+  const delId = deletable.data?.id;
   const delRes = await req("DELETE", `/legionella/${delId}`);
   check("legionella: DELETE /:id → 204", delRes.status === 204, `got ${delRes.status}`);
 

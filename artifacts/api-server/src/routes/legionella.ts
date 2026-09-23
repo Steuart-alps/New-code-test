@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable } from "@workspace/db/schema";
+import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
-import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
@@ -46,6 +46,10 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
 };
 
 const LEGIONELLA_PROFILE_MODULE = "legionella";
+const DEFAULT_TEMPERATURE_LIMITS: Record<string, { min?: number; max?: number }> = {
+  calorifier_temp: { min: 60 }, hot_sentinel_temp: { min: 50 }, hot_nonsent_temp: { min: 50 },
+  cold_tank_temp: { max: 20 }, cold_sentinel_temp: { max: 20 }, cold_nonsent_temp: { max: 20 },
+};
 const legionellaProfileSchema = z.object({
   systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
   writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
@@ -58,6 +62,9 @@ const legionellaProfileSchema = z.object({
   schemeReviewDate: z.string().date().nullable().optional(),
   ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
+  temperatureLimits: z.record(z.enum(CHECK_TYPES), z.object({
+    min: z.number().finite().optional(), max: z.number().finite().optional(),
+  }).refine(v => v.min == null || v.max == null || v.min <= v.max, "min must not exceed max")).optional(),
 }).strict();
 
 function effectiveLegionellaFrequencies(raw: unknown, profile: unknown = null) {
@@ -82,7 +89,7 @@ const createSchema = z.object({
   // New observations are canonicalised at the write boundary. Historical
   // action_required values remain readable from the database.
   result: z.enum(["pass", "fail"]),
-  temperature: z.number().nullable().optional(),
+  temperature: z.number().finite().nullable().optional(),
   siteId: z.number().int().nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
@@ -185,18 +192,26 @@ router.get("/status", requireAuth, async (req, res) => {
     );
   }
 
-  // Latest check per type, including its result (DISTINCT ON keeps the newest row per check_type)
-  const lastChecks = await db
-    .selectDistinctOn([legionellaChecksTable.checkType], {
-      checkType: legionellaChecksTable.checkType,
-      lastDate: legionellaChecksTable.checkDate,
-      lastResult: legionellaChecksTable.result,
-    })
-    .from(legionellaChecksTable)
-    .where(and(...conditions))
-    .orderBy(legionellaChecksTable.checkType, desc(legionellaChecksTable.checkDate), desc(legionellaChecksTable.id));
+  // Keep the latest check for each physical outlet/site unit. Aggregate below so
+  // an unsafe outlet cannot be hidden by a passing result from another outlet.
+  const lastChecks = await db.execute(sql`
+    SELECT DISTINCT ON (site_id, check_type, COALESCE(outlet_id, 0))
+      site_id AS "siteId", outlet_id AS "outletId", check_type AS "checkType",
+      check_date AS "lastDate", result AS "lastResult"
+    FROM legionella_checks
+    WHERE ${and(...conditions)}
+    ORDER BY site_id, check_type, COALESCE(outlet_id, 0), check_date DESC, id DESC
+  `);
 
-  const lastByType = new Map(lastChecks.map((r) => [r.checkType, { lastDate: r.lastDate, lastResult: r.lastResult }]));
+  const lastByType = new Map<string, { lastDate: string; lastResult: string }>();
+  for (const row of ((lastChecks as any).rows ?? []) as { checkType: string; lastDate: string; lastResult: string }[]) {
+    const previous = lastByType.get(row.checkType);
+    const lastDate = previous && previous.lastDate > row.lastDate ? previous.lastDate : row.lastDate;
+    const lastResult = previous?.lastResult === "fail" || previous?.lastResult === "action_required"
+      || row.lastResult === "fail" || row.lastResult === "action_required"
+      ? "fail" : row.lastResult;
+    lastByType.set(row.checkType, { lastDate, lastResult });
+  }
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
   const now = new Date();
@@ -243,6 +258,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
+  if (data.checkType.endsWith("_temp") && data.temperature == null)
+    return res.status(400).json({ error: "Record a temperature before marking this check" });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -251,22 +268,20 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const [inserted] = await db
-    .insert(legionellaChecksTable)
-    .values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: data.result,
+  const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
+  const breach = legionellaBreach(data.checkType, data.temperature, profile);
+  const inserted = await db.transaction(async tx => {
+    const [row] = await tx.insert(legionellaChecksTable).values({
+      clientId, checkType: data.checkType, checkDate: data.checkDate,
+      result: breach ? "fail" : data.result,
       temperature: data.temperature != null ? String(data.temperature) : null,
-      siteId: data.siteId ?? null,
-      location: data.location ?? null,
-      notes: data.notes ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
+      siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
+      performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
       createdBy: (req.session as any).userId ?? null,
-    })
-    .returning();
+    }).returning();
+    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    return row;
+  });
 
   // Link to sentinel outlet if provided (column added via runtime migration).
   if (inserted && data.outletId) {
@@ -468,12 +483,19 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   if (temperature !== undefined) {
     updateData.temperature = temperature != null ? String(temperature) : null;
   }
-
-  const [updated] = await db
-    .update(legionellaChecksTable)
-    .set(updateData)
-    .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId)))
-    .returning();
+  const siteForCheck = parsed.data.siteId !== undefined ? parsed.data.siteId : existing.siteId;
+  const profile = siteForCheck == null ? null : await getLegionellaProfile(clientId, siteForCheck);
+  const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
+  if (existing.checkType.endsWith("_temp") && nextTemperature == null)
+    return res.status(400).json({ error: "Record a temperature before marking this check" });
+  const breach = legionellaBreach(existing.checkType, nextTemperature, profile);
+  updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
+  const updated = await db.transaction(async tx => {
+    const [row] = await tx.update(legionellaChecksTable).set(updateData)
+      .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId))).returning();
+    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    return row;
+  });
 
   if (!updated) return res.status(404).json({ error: "Not found" });
   res.json(updated);
@@ -497,6 +519,12 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const deptId = getActiveDepartmentId(req);
   const access = await checkSiteAccess(existing.siteId, clientId, deptId);
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+
+  const linkedAction = await db.execute(sql`
+    SELECT 1 FROM compliance_actions WHERE client_id = ${clientId}
+      AND source_track = 'LegionellaTrack' AND source_record_id = ${String(id)} LIMIT 1
+  `);
+  if (linkedAction.rows.length) return res.status(409).json({ error: "Resolve the linked safety action; its source check must be retained for audit" });
 
   await db
     .delete(legionellaChecksTable)
@@ -537,6 +565,38 @@ async function getLegionellaProfile(clientId: number, siteId: number) {
   return row?.profile ?? null;
 }
 
+function legionellaLimits(profile: unknown, checkType: string) {
+  const configured = profile && typeof profile === "object"
+    ? (profile as any).temperatureLimits?.[checkType] : undefined;
+  const limits = DEFAULT_TEMPERATURE_LIMITS[checkType];
+  return configured && typeof configured === "object"
+    ? { min: typeof configured.min === "number" && Number.isFinite(configured.min) ? configured.min : limits?.min,
+        max: typeof configured.max === "number" && Number.isFinite(configured.max) ? configured.max : limits?.max }
+    : limits;
+}
+
+function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown) {
+  if (temperature == null || !Number.isFinite(temperature)) return null;
+  const limits = legionellaLimits(profile, checkType);
+  if (!limits || (limits.min == null && limits.max == null)) return null;
+  if ((limits.min != null && temperature < limits.min) || (limits.max != null && temperature > limits.max)) {
+    return { temperature, limits };
+  }
+  return null;
+}
+
+async function ensureLegionellaAction(tx: any, clientId: number, checkId: number, breach: any | null, userId: number | null, ownerName: string | null) {
+  await tx.execute(sql`INSERT INTO compliance_actions
+    (client_id, source_track, source_record_id, title, severity, owner_name, corrective_action, evidence_reference, created_by, updated_by, auto_generated)
+    SELECT ${clientId}, 'LegionellaTrack', ${String(checkId)}, 'Failed Legionella safety check', 'high',
+      ${ownerName ?? "Duty manager"}, 'Investigate and record remedial controls in the written scheme',
+      ${JSON.stringify({ reportedResult: "fail", breachedRange: breach?.limits ?? null, observedTemperature: breach?.temperature ?? null })},
+      ${userId}, ${userId}, true
+    WHERE NOT EXISTS (SELECT 1 FROM compliance_actions WHERE client_id = ${clientId}
+      AND source_track = 'LegionellaTrack' AND source_record_id = ${String(checkId)})
+    ON CONFLICT DO NOTHING`);
+}
+
 router.get("/config", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -555,10 +615,17 @@ router.get("/config", requireAuth, async (req, res) => {
     }
   }
   const profile = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
-  res.json({ ...config, controlProfile: profile, siteId });
+  const effectiveTemperatureLimits = Object.fromEntries(
+    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+      checkType,
+      { ...defaults, ...((profile as any)?.temperatureLimits?.[checkType] ?? {}) },
+    ]),
+  );
+  res.json({ ...config, effectiveTemperatureLimits, controlProfile: profile ? { ...(profile as any), temperatureLimits: effectiveTemperatureLimits } : { temperatureLimits: effectiveTemperatureLimits }, siteId,
+    disclaimer: "Defaults are guidance only; the site's written scheme and risk assessment are authoritative." });
 });
 
-router.put("/config", requireAuth, denyViewers, async (req, res) => {
+router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const siteId = parseSiteId(req.query.siteId);
@@ -573,11 +640,20 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
     if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
     const profile = legionellaProfileSchema.safeParse(updates.controlProfile);
     if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
-    await db.insert(trackControlProfilesTable).values({
-      clientId, siteId, module: LEGIONELLA_PROFILE_MODULE, profile: profile.data,
-    }).onConflictDoUpdate({
-      target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
-      set: { profile: profile.data, updatedAt: new Date() },
+    await db.transaction(async tx => {
+      const [previous] = await tx.select({ profile: trackControlProfilesTable.profile })
+        .from(trackControlProfilesTable).where(and(eq(trackControlProfilesTable.clientId, clientId),
+          eq(trackControlProfilesTable.siteId, siteId), eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE))).limit(1);
+      await tx.insert(trackControlProfilesTable).values({
+        clientId, siteId, module: LEGIONELLA_PROFILE_MODULE, profile: profile.data,
+      }).onConflictDoUpdate({
+        target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
+        set: { profile: profile.data, updatedAt: new Date() },
+      });
+      await tx.insert(auditEventsTable).values({
+        clientId, actorId: req.currentUser?.id ?? null, entityType: "legionella_control_profile",
+        entityId: siteId, action: "updated", before: previous?.profile ?? null, after: profile.data,
+      });
     });
   }
   for (const key of WATER_CONFIG_KEYS) {
@@ -597,7 +673,15 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
   for (const row of settingRows) {
     if (WATER_CONFIG_KEYS.includes(row.key as (typeof WATER_CONFIG_KEYS)[number]) && row.value != null) config[row.key] = row.value;
   }
-  res.json({ ...config, controlProfile: siteId == null ? null : await getLegionellaProfile(clientId, siteId), siteId });
+  const after = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
+  const effectiveTemperatureLimits = Object.fromEntries(
+    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+      checkType,
+      { ...defaults, ...((after as any)?.temperatureLimits?.[checkType] ?? {}) },
+    ]),
+  );
+  res.json({ ...config, effectiveTemperatureLimits, controlProfile: after ? { ...(after as any), temperatureLimits: effectiveTemperatureLimits } : null, siteId,
+    disclaimer: "Defaults are guidance only; the site's written scheme and risk assessment are authoritative." });
 });
 
 export default router;

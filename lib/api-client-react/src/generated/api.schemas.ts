@@ -480,6 +480,16 @@ export interface FireSafetyConfig {
   controlProfile?: FireControlProfile;
 }
 
+export interface TemperatureLimit {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * Effective minimum and maximum temperatures for each temperature check type.
+ */
+export type LegionellaConfigEffectiveTemperatureLimits = {[key: string]: TemperatureLimit};
+
 export type LegionellaControlProfileUkNation = typeof LegionellaControlProfileUkNation[keyof typeof LegionellaControlProfileUkNation] | null;
 
 
@@ -491,6 +501,8 @@ export const LegionellaControlProfileUkNation = {
 } as const;
 
 export type LegionellaControlProfileFrequencyDays = {[key: string]: number};
+
+export type LegionellaControlProfileTemperatureLimits = {[key: string]: TemperatureLimit};
 
 export interface LegionellaControlProfile {
   systemInventoryReference?: string | null;
@@ -504,6 +516,7 @@ export interface LegionellaControlProfile {
   schemeReviewDate?: string | null;
   ukNation?: LegionellaControlProfileUkNation;
   frequencyDays?: LegionellaControlProfileFrequencyDays;
+  temperatureLimits?: LegionellaControlProfileTemperatureLimits;
 }
 
 export interface LegionellaConfig {
@@ -513,7 +526,179 @@ export interface LegionellaConfig {
   /** JSON object mapping check types to risk-assessed intervals in days. */
   water_frequency_days?: string;
   siteId?: number | null;
+  /** Effective minimum and maximum temperatures for each temperature check type. */
+  effectiveTemperatureLimits?: LegionellaConfigEffectiveTemperatureLimits;
   controlProfile?: LegionellaControlProfile;
+}
+
+export type HotTubCheckType = typeof HotTubCheckType[keyof typeof HotTubCheckType];
+
+
+export const HotTubCheckType = {
+  water_chemistry: 'water_chemistry',
+  temperature: 'temperature',
+  filter_clean: 'filter_clean',
+  cover_inspection: 'cover_inspection',
+  drain_refill: 'drain_refill',
+  microbiological_test: 'microbiological_test',
+  risk_assessment: 'risk_assessment',
+} as const;
+
+/**
+ * New records use pass or fail; historical action_required records remain readable.
+ */
+export type HotTubCheckResult = typeof HotTubCheckResult[keyof typeof HotTubCheckResult];
+
+
+export const HotTubCheckResult = {
+  pass: 'pass',
+  fail: 'fail',
+  action_required: 'action_required',
+} as const;
+
+export type HotTubCheckSession = typeof HotTubCheckSession[keyof typeof HotTubCheckSession] | null;
+
+
+export const HotTubCheckSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+export interface HotTubCheck {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  checkType: HotTubCheckType;
+  checkDate: string;
+  /** New records use pass or fail; historical action_required records remain readable. */
+  result: HotTubCheckResult;
+  session?: HotTubCheckSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateHotTubCheckRequestResult = typeof CreateHotTubCheckRequestResult[keyof typeof CreateHotTubCheckRequestResult];
+
+
+export const CreateHotTubCheckRequestResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export type CreateHotTubCheckRequestSession = typeof CreateHotTubCheckRequestSession[keyof typeof CreateHotTubCheckRequestSession] | null;
+
+
+export const CreateHotTubCheckRequestSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+/**
+ * pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.
+ */
+export type CreateHotTubCheckRequest = unknown & unknown & ({
+  checkType: HotTubCheckType;
+  checkDate: string;
+  result: CreateHotTubCheckRequestResult;
+  session?: CreateHotTubCheckRequestSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+});
+
+export type UpdateHotTubCheckRequestResult = typeof UpdateHotTubCheckRequestResult[keyof typeof UpdateHotTubCheckRequestResult];
+
+
+export const UpdateHotTubCheckRequestResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export type UpdateHotTubCheckRequestSession = typeof UpdateHotTubCheckRequestSession[keyof typeof UpdateHotTubCheckRequestSession] | null;
+
+
+export const UpdateHotTubCheckRequestSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+/**
+ * For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.
+ */
+export interface UpdateHotTubCheckRequest {
+  checkDate?: string;
+  result?: UpdateHotTubCheckRequestResult;
+  session?: UpdateHotTubCheckRequestSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type HotTubConfigControlProfile = { [key: string]: unknown } | null;
+
+export type HotTubOperatingRangesPh = {
+  /**
+     * @minimum 0
+     * @maximum 14
+     */
+  min: number;
+  /**
+     * @minimum 0
+     * @maximum 14
+     */
+  max: number;
+};
+
+export type HotTubOperatingRangesSanitiser = {
+  /** @minimum 0 */
+  min: number;
+  /** @minimum 0 */
+  max: number;
+};
+
+export type HotTubOperatingRangesTemperature = {
+  /**
+     * @maximum 40
+     * @exclusiveMinimum 0
+     */
+  max: number;
+};
+
+export interface HotTubOperatingRanges {
+  ph: HotTubOperatingRangesPh;
+  sanitiser: HotTubOperatingRangesSanitiser;
+  temperature: HotTubOperatingRangesTemperature;
+}
+
+export interface HotTubConfig {
+  siteId: number | null;
+  operatingRanges: HotTubOperatingRanges;
+  controlProfile?: HotTubConfigControlProfile;
+  disclaimer: string;
+}
+
+export interface HotTubConfigUpdate {
+  operatingRanges?: HotTubOperatingRanges;
 }
 
 export interface BikeTrackConfig {
@@ -862,6 +1047,9 @@ export const LegionellaCheckType = {
   outlet_flush: 'outlet_flush',
 } as const;
 
+/**
+ * New records use pass or fail; historical action_required records remain readable.
+ */
 export type LegionellaCheckResult = typeof LegionellaCheckResult[keyof typeof LegionellaCheckResult];
 
 
@@ -877,6 +1065,7 @@ export interface LegionellaCheck {
   siteId?: number | null;
   checkType: LegionellaCheckType;
   checkDate: string;
+  /** New records use pass or fail; historical action_required records remain readable. */
   result: LegionellaCheckResult;
   temperature?: string | null;
   location?: string | null;
@@ -892,10 +1081,12 @@ export type CreateLegionellaCheckRequestResult = typeof CreateLegionellaCheckReq
 export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
-  action_required: 'action_required',
 } as const;
 
-export interface CreateLegionellaCheckRequest {
+/**
+ * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+ */
+export type CreateLegionellaCheckRequest = unknown & ({
   checkType: LegionellaCheckType;
   checkDate: string;
   result: CreateLegionellaCheckRequestResult;
@@ -904,7 +1095,7 @@ export interface CreateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
-}
+});
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
 
@@ -912,9 +1103,11 @@ export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckReq
 export const UpdateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
-  action_required: 'action_required',
 } as const;
 
+/**
+ * For an existing temperature check, temperature is required. New results use pass or fail.
+ */
 export interface UpdateLegionellaCheckRequest {
   checkDate?: string;
   result?: UpdateLegionellaCheckRequestResult;
@@ -1040,6 +1233,25 @@ export type UpdateLegionellaConfigParams = {
  * Save the site-specific LegionellaTrack control profile.
  */
 siteId?: number;
+};
+
+export type ListHotTubChecksParams = {
+checkType?: HotTubCheckType;
+siteId?: number;
+};
+
+export type GetHotTubConfigParams = {
+/**
+ * Return the site-specific HotTubTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateHotTubConfigParams = {
+/**
+ * Save the site-specific HotTubTrack control profile.
+ */
+siteId: number;
 };
 
 export type ListPATTestsParams = {

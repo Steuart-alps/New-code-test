@@ -8,12 +8,12 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
 export interface CheckAlert {
-  module: "fire" | "legionella" | "pool";
+  module: "fire" | "legionella" | "pool" | "hot_tub";
   moduleLabel: string;
   modulePath: string;
   checkType: string;
   checkLabel: string;
-  status: "overdue" | "due_soon" | "never";
+  status: "overdue" | "due_soon" | "never" | "action_required";
   lastDate: string | null;
   dueDate: string | null;
   /** Positive = overdue by N days. Zero = due today. Negative = N days remaining. */
@@ -124,7 +124,7 @@ function frequencyHoursLabel(hours: number): string {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
+export async function getCheckAlerts(clientId: number, scope: { siteId?: number | null; accessibleSiteIds?: number[] | null } = {}): Promise<CheckAlert[]> {
   const alerts: CheckAlert[] = [];
   const MS_DAY = 24 * 60 * 60 * 1000;
 
@@ -132,13 +132,20 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
   const todayIso = now.toISOString().slice(0, 10);
   const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_DAY);
   const todayDays = toUtcDays(todayIso);
+  const siteClause = scope.siteId != null
+    ? sql`AND site_id = ${scope.siteId}`
+    : scope.accessibleSiteIds != null
+    ? scope.accessibleSiteIds.length
+      ? sql`AND (site_id IS NULL OR site_id IN (${sql.join(scope.accessibleSiteIds.map(id => sql`${id}`), sql`, `)}))`
+      : sql`AND site_id IS NULL`
+    : sql``;
 
   // ── Fire safety ──────────────────────────────────────────────────────────
   try {
     const fireRows = await db.execute(sql`
       SELECT check_type, MAX(check_date) AS last_date
       FROM fire_safety_checks
-      WHERE client_id = ${clientId}
+      WHERE client_id = ${clientId} ${siteClause}
       GROUP BY check_type
     `);
     const fireByType = new Map<string, string>(
@@ -177,9 +184,14 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
   // ── Legionella ───────────────────────────────────────────────────────────
   try {
     const legRows = await db.execute(sql`
-      SELECT check_type, MAX(check_date) AS last_date
-      FROM legionella_checks
-      WHERE client_id = ${clientId}
+      SELECT check_type, MIN(check_date) AS last_date
+      FROM (
+        SELECT DISTINCT ON (site_id, check_type, COALESCE(outlet_id, 0))
+          site_id, check_type, outlet_id, check_date
+        FROM legionella_checks
+        WHERE client_id = ${clientId} ${siteClause}
+        ORDER BY site_id, check_type, COALESCE(outlet_id, 0), check_date DESC, id DESC
+      ) latest_units
       GROUP BY check_type
     `);
     const legByType = new Map<string, string>(
@@ -261,6 +273,34 @@ export async function getCheckAlerts(clientId: number): Promise<CheckAlert[]> {
     }
   } catch {
     // table may not exist yet; skip
+  }
+
+  // The latest observation for each site/check type is the same persisted
+  // server-evaluated result used by the dashboard and check forms. Keep
+  // unsafe results actionable even when the next scheduled check is not due.
+  for (const source of [
+    { table: sql`legionella_checks`, group: sql`COALESCE(outlet_id, 0)`, module: "legionella" as const, label: "Water Safety (Legionella)", path: "/legionella" },
+    { table: sql`hot_tub_checks`, group: sql`COALESCE(hot_tub_id, 0)`, module: "hot_tub" as const, label: "HotTubTrack", path: "/hot-tub" },
+  ]) {
+    try {
+      const latest = await db.execute(sql`
+        SELECT check_type, check_date, result, location FROM (
+          SELECT DISTINCT ON (site_id, check_type, ${source.group}) check_type, check_date, result, location
+          FROM ${source.table} WHERE client_id = ${clientId} ${siteClause}
+          ORDER BY site_id, check_type, ${source.group}, check_date DESC, id DESC
+        ) recent WHERE result IN ('fail', 'action_required')
+      `);
+      for (const row of (latest.rows ?? []) as { check_type: string; check_date: string; location: string | null }[]) {
+        alerts.push({
+          module: source.module, moduleLabel: source.label, modulePath: source.path,
+          checkType: row.check_type, checkLabel: `${row.check_type.replace(/_/g, " ")}${row.location ? ` — ${row.location}` : ""}`,
+          status: "action_required", lastDate: row.check_date, dueDate: null,
+          daysUntilDue: null, frequencyLabel: "Recorded result requires follow-up",
+        });
+      }
+    } catch {
+      // The reminder should remain available on installations predating a module.
+    }
   }
 
   return alerts;
