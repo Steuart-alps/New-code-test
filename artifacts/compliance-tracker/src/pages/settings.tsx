@@ -1968,6 +1968,7 @@ export default function SettingsPage() {
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
+    accountTimezone: "Europe/London",
   });
 
   const [testEmail, setTestEmail] = useState("");
@@ -1986,6 +1987,7 @@ export default function SettingsPage() {
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
+        accountTimezone: settings.accountTimezone || "Europe/London",
       });
       setTrackSummaryRouting((settings as any).trackSummaryRouting || "");
     }
@@ -2041,6 +2043,19 @@ export default function SettingsPage() {
                   <Label>Default Reminder Lead Time (Days)</Label>
                   <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
                   <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
+                </div>
+                <div className="space-y-1.5 col-span-2">
+                  <Label>Account Timezone</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
+                  </p>
+                  <Input
+                    name="accountTimezone"
+                    value={formData.accountTimezone}
+                    onChange={handleChange}
+                    placeholder="Europe/London"
+                    autoComplete="off"
+                  />
                 </div>
               </div>
             </CardContent>

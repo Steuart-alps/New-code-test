@@ -11,6 +11,10 @@ import {
   MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
   parseContractorComplianceLeadDays,
 } from "../lib/contractorComplianceReminders";
+import {
+  ACCOUNT_TIMEZONE_SETTING,
+  isValidAccountTimezone,
+} from "../middleware/dailyEntryCutoff";
 
 const router: IRouter = Router();
 
@@ -42,6 +46,7 @@ const SETTING_KEYS = [
   "trackSummaryRouting",
   // Account-level warning only; reaching it never blocks or deletes uploads.
   "storageWarningThresholdBytes",
+  ACCOUNT_TIMEZONE_SETTING,
 ] as const;
 
 async function validateTrackSummaryRouting(
@@ -177,6 +182,19 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
       return;
     }
     rawBody.storageWarningThresholdBytes = String(threshold);
+    }
+  }
+  if (rawBody[ACCOUNT_TIMEZONE_SETTING] !== undefined) {
+    const rawTimezone = rawBody[ACCOUNT_TIMEZONE_SETTING];
+    if (rawTimezone === null || rawTimezone.trim() === "") {
+      rawBody[ACCOUNT_TIMEZONE_SETTING] = null;
+    } else if (!isValidAccountTimezone(rawTimezone)) {
+      res.status(400).json({
+        error: "Account timezone must be a valid IANA timezone such as Europe/London",
+      });
+      return;
+    } else {
+      rawBody[ACCOUNT_TIMEZONE_SETTING] = rawTimezone.trim();
     }
   }
 

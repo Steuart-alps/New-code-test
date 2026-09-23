@@ -16,6 +16,7 @@ export interface AppSettings {
   defaultLeadTimeDays?: string | null;
   contractorComplianceLeadTimeDays?: string | null;
   companyName?: string | null;
+  accountTimezone?: string | null;
   /** @pattern ^[0-9]+$ */
   storageWarningThresholdBytes?: string | null;
 }

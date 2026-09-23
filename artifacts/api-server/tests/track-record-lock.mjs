@@ -115,5 +115,45 @@ assert.equal(
   true,
   'the lock follows local calendar days across daylight-saving changes',
 );
+assert.equal(
+  getDailyEntryCutoffDecision(
+    request({ recordDate: '2026-09-21' }),
+    staff,
+    new Date('2026-09-23T01:30:00.000Z'),
+    'America/Los_Angeles',
+  ).blocked,
+  false,
+  'the account timezone controls the local cutoff date',
+);
+assert.equal(
+  getDailyEntryCutoffDecision(
+    request({ recordDate: '2026-09-20' }),
+    staff,
+    new Date('2026-09-23T01:30:00.000Z'),
+    'America/Los_Angeles',
+  ).blocked,
+  true,
+  'account-local dates still lock after the correction window',
+);
+assert.equal(
+  getDailyEntryCutoffDecision(
+    request({ recordDate: '2026-09-21' }),
+    staff,
+    now,
+    'not/a-real-timezone',
+  ).blocked,
+  true,
+  'invalid timezone values safely fall back to the UK timezone',
+);
+assert.equal(
+  getDailyEntryCutoffDecision(
+    request({ recordDate: '2026-09-21' }),
+    staff,
+    now,
+    '+05:00',
+  ).blocked,
+  true,
+  'fixed offsets are not accepted as account timezones',
+);
 
 console.log('Track record 24-hour lock tests passed.');

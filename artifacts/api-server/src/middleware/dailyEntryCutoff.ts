@@ -79,7 +79,31 @@ const ENTRY_DATE_FIELDS = [
   "targetDate",
 ] as const;
 
-const ACCOUNT_TIMEZONE = process.env.COMPLYTRACK_TIMEZONE ?? "Europe/London";
+export const DEFAULT_ACCOUNT_TIMEZONE = "Europe/London";
+export const ACCOUNT_TIMEZONE_SETTING = "accountTimezone";
+const SUPPORTED_IANA_TIMEZONES = new Set(
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("timeZone")
+    : [],
+);
+
+/**
+ * Validate through the runtime's IANA timezone database rather than keeping a
+ * partial application-owned allowlist. This accepts regional zones such as
+ * Europe/London and America/New_York while rejecting arbitrary offsets and
+ * invalid names.
+ */
+export function isValidAccountTimezone(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim() === "") return false;
+  const timeZone = value.trim();
+  // UTC is an IANA identifier but is omitted by supportedValuesOf because it
+  // is the database's canonical zero-offset alias.
+  return timeZone === "UTC" || SUPPORTED_IANA_TIMEZONES.has(timeZone);
+}
+
+export function normalizeAccountTimezone(value: unknown): string {
+  return isValidAccountTimezone(value) ? value.trim() : DEFAULT_ACCOUNT_TIMEZONE;
+}
 
 type LocalClock = {
   date: string;
@@ -159,7 +183,10 @@ function storedDateLookup(path: string) {
   return STORED_DATE_LOOKUPS.find(lookup => lookup.path.test(path));
 }
 
-async function findStoredEntryDate(req: Request): Promise<string | null | "missing" | "forbidden"> {
+async function findStoredEntryDate(
+  req: Request,
+  timeZone: string,
+): Promise<string | null | "missing" | "forbidden"> {
   // Lazy imports keep the pure decision helper usable by lightweight clients
   // and tooling that evaluates this module without a database connection.
   const [{ db }, { getClientId, getActiveDepartmentId }, { sql }] = await Promise.all([
@@ -199,8 +226,29 @@ async function findStoredEntryDate(req: Request): Promise<string | null | "missi
   }
   if (!row.entry_date) return null;
   return row.entry_date instanceof Date
-    ? localClock(row.entry_date, ACCOUNT_TIMEZONE).date
+    ? localClock(row.entry_date, timeZone).date
     : String(row.entry_date).slice(0, 10);
+}
+
+async function findAccountTimezone(req: Request): Promise<string> {
+  const [{ db }, { appSettingsTable }, { and, eq }, { getClientId }] = await Promise.all([
+    import("@workspace/db"),
+    import("@workspace/db/schema"),
+    import("drizzle-orm"),
+    import("./requireAuth"),
+  ]);
+  const clientId = getClientId(req);
+  if (!clientId) return DEFAULT_ACCOUNT_TIMEZONE;
+
+  const rows = await db
+    .select({ value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(and(
+      eq(appSettingsTable.clientId, clientId),
+      eq(appSettingsTable.key, ACCOUNT_TIMEZONE_SETTING),
+    ));
+  const setting = rows[0];
+  return normalizeAccountTimezone(setting?.value);
 }
 
 function findEntryDate(value: unknown, depth = 0): string | null {
@@ -238,14 +286,14 @@ export function getDailyEntryCutoffDecision(
   req: Pick<Request, "method" | "path" | "body"> & { query?: unknown },
   user: { role?: string } | null | undefined,
   now = new Date(),
-  timeZone = ACCOUNT_TIMEZONE,
+  timeZone = DEFAULT_ACCOUNT_TIMEZONE,
 ): { blocked: boolean; today: string; reason?: string } {
   if (!isTrackWrite(req as Request)) return { blocked: false, today: "" };
   if (user?.role === "client_admin" || user?.role === "consultant") {
     return { blocked: false, today: "" };
   }
 
-  const clock = localClock(now, timeZone);
+  const clock = localClock(now, normalizeAccountTimezone(timeZone));
   const entryDate = findEntryDate(req.body) ?? findEntryDate(req.query) ?? findPathDate(req.path);
   const isPastGraceWindow = entryDate != null
     && calendarDay(clock.date) - calendarDay(entryDate) > 1;
@@ -262,54 +310,61 @@ export function getDailyEntryCutoffDecision(
 
 export async function enforceDailyEntryCutoff(req: Request, res: Response, next: NextFunction) {
   const lookup = storedDateLookup(req.path);
-  if (isTrackWrite(req) && lookup && req.currentUser
-    && req.currentUser.role !== "client_admin" && req.currentUser.role !== "consultant") {
+  const staffTrackWrite = isTrackWrite(req) && req.currentUser
+    && req.currentUser.role !== "client_admin"
+    && req.currentUser.role !== "consultant";
+  let timeZone = DEFAULT_ACCOUNT_TIMEZONE;
+  if (staffTrackWrite) {
     try {
-      const storedDate = await findStoredEntryDate(req);
-      if (storedDate === "missing") {
-        res.status(404).json({ error: "Record not found" });
-        return;
-      }
-      if (storedDate === "forbidden") {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
-      // A mapped record with a NULL date fails closed; never fall back to a
-      // date supplied by the client. Unmapped metadata routes continue to the
-      // route's existing authorization and validation.
-      if (storedDate) {
-        const decision = getDailyEntryCutoffDecision(
-          { method: req.method, path: req.path, body: { recordDate: storedDate } },
-          req.currentUser,
-          new Date(),
-        );
-        if (decision.blocked) {
+      timeZone = await findAccountTimezone(req);
+      if (lookup) {
+        const storedDate = await findStoredEntryDate(req, timeZone);
+        if (storedDate === "missing") {
+          res.status(404).json({ error: "Record not found" });
+          return;
+        }
+        if (storedDate === "forbidden") {
+          res.status(403).json({ error: "Forbidden" });
+          return;
+        }
+        // A mapped record with a NULL date fails closed; never fall back to a
+        // date supplied by the client. Unmapped metadata routes continue to the
+        // route's existing authorization and validation.
+        if (storedDate) {
+          const decision = getDailyEntryCutoffDecision(
+            { method: req.method, path: req.path, body: { recordDate: storedDate } },
+            req.currentUser,
+            new Date(),
+            timeZone,
+          );
+          if (decision.blocked) {
+            res.status(423).json({
+              error: "This record is locked because its 24-hour correction window has closed",
+              code: "TRACK_RECORD_LOCKED",
+              lockAfterHours: 24,
+              cutoffDate: decision.today,
+              requiresAdministratorOverride: true,
+            });
+            return;
+          }
+          // Also retain the existing check on requested dates: a current record
+          // cannot be moved to a historical day by submitting a backdated body.
+        }
+        if (storedDate === null) {
           res.status(423).json({
-            error: "This record is locked because its 24-hour correction window has closed",
+            error: "Record has no stored date and cannot be modified by staff",
             code: "TRACK_RECORD_LOCKED",
-            lockAfterHours: 24,
-            cutoffDate: decision.today,
             requiresAdministratorOverride: true,
           });
           return;
         }
-        // Also retain the existing check on requested dates: a current record
-        // cannot be moved to a historical day by submitting a backdated body.
-      }
-      if (storedDate === null) {
-        res.status(423).json({
-          error: "Record has no stored date and cannot be modified by staff",
-          code: "TRACK_RECORD_LOCKED",
-          requiresAdministratorOverride: true,
-        });
-        return;
       }
     } catch {
-      res.status(500).json({ error: "Unable to verify record date" });
+      res.status(500).json({ error: lookup ? "Unable to verify record date" : "Unable to verify account timezone" });
       return;
     }
   }
-  const decision = getDailyEntryCutoffDecision(req, req.currentUser, new Date());
+  const decision = getDailyEntryCutoffDecision(req, req.currentUser, new Date(), timeZone);
   if (!decision.blocked) {
     next();
     return;

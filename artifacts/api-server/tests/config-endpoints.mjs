@@ -791,6 +791,46 @@ async function testPushToken(admin, other, ts) {
 async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
   console.log("\n── storage usage ──");
 
+  const initialSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  expectOk("account timezone: settings are readable", initialSettings.status);
+  check(
+    "account timezone: existing accounts use the UK fallback",
+    initialSettings.data?.accountTimezone === null,
+    `got ${initialSettings.data?.accountTimezone}`,
+  );
+  expectOk(
+    "account timezone: save a valid IANA zone",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "America/New_York",
+    })).status,
+  );
+  const configuredSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  check(
+    "account timezone: saved value is returned",
+    configuredSettings.data?.accountTimezone === "America/New_York",
+    `got ${configuredSettings.data?.accountTimezone}`,
+  );
+  expectStatus(
+    "account timezone: fixed offset is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "+05:00",
+    })).status,
+    400,
+  );
+  expectStatus(
+    "account timezone: unknown IANA name is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "Not/AZone",
+    })).status,
+    400,
+  );
+  expectOk(
+    "account timezone: null resets to the UK fallback",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: null,
+    })).status,
+  );
+
   const anon = makeSession();
   expectStatus(
     "storage usage: anonymous request → 401",

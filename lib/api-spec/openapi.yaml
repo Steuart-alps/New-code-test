@@ -2409,6 +2409,9 @@ components:
         companyName:
           type: string
           nullable: true
+        accountTimezone:
+          type: string
+          nullable: true
         storageWarningThresholdBytes:
           type: string
           pattern: "^[0-9]+$"
