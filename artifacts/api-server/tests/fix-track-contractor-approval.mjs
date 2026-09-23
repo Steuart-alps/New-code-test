@@ -288,6 +288,19 @@ async function main() {
 
   check("calendar cancellation enters the manager approval queue",
     (await owner("POST", `/fix-track/issues/${calendarId}/request-cancellation`)).status === 202);
+  const cancellationEdit = await owner("PUT", `/fix-track/issues/${calendarId}`, { targetDate: "2030-02-13" });
+  check("pending calendar cancellation rejects contractor-facing edits",
+    cancellationEdit.status === 409 &&
+      cancellationEdit.data?.error?.includes("calendar cancellation awaits manager approval"),
+    JSON.stringify(cancellationEdit));
+  const cancellationIssueAfterEdit = await owner("GET", `/fix-track/issues/${calendarId}`);
+  check("rejected cancellation edit leaves the calendar date unchanged",
+    cancellationIssueAfterEdit.data?.targetDate?.slice(0, 10) === "2030-02-12",
+    JSON.stringify(cancellationIssueAfterEdit.data));
+  check("non-contractor notes remain editable during cancellation approval",
+    (await owner("POST", `/fix-track/issues/${calendarId}/notes`, {
+      note: "Internal cancellation review note",
+    })).status === 200);
   check("queued calendar cancellation cannot be deleted before delivery",
     (await owner("DELETE", `/fix-track/issues/${calendarId}`)).status === 409);
   const repeatedCancellation = await owner("POST", `/fix-track/issues/${calendarId}/request-cancellation`);

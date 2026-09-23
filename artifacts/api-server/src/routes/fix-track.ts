@@ -579,6 +579,19 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       updateData.emailSentBy = null;
       updateData.emailSentAt = null;
     }
+    if (approvalInvalidated) {
+      const [pendingDraft] = await tx.execute(sql`
+        SELECT q.email_type
+        FROM contractor_email_queue q
+        WHERE q.entity_id=${id} AND q.client_id=${clientId}
+          AND q.entity_type='fix_track' AND q.status IN ('pending','approved')
+        ORDER BY q.created_at DESC, q.id DESC
+        LIMIT 1
+      `).then(result => (result.rows as any[]));
+      if (pendingDraft?.email_type === "cancellation") {
+        return { kind: "cancellation_content_locked" as const };
+      }
+    }
     // Make approval invalidation race safely against dispatch: the update can
     // only win while the row is still approved; a claimed `sending` row is
     // never mutated underneath the provider call.
@@ -635,9 +648,6 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         WHERE i.id=${id} AND i.client_id=${clientId} ORDER BY q.created_at DESC LIMIT 1`);
       const draft = (draftResult.rows as any[])[0];
       if (draft?.contractor_email) {
-        if (draft.email_type === "cancellation") {
-          return { kind: "cancellation_content_locked" as const };
-        }
         const siteDocuments = await siteDocumentsForContractorEmail(draft.site_id, clientId);
         let tokenPayload: Record<string, string> = draft.encrypted_token_payload
           ? decryptTokenPayload(draft.encrypted_token_payload)
