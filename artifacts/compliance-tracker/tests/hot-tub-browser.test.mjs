@@ -74,7 +74,11 @@ try {
     executablePath: browserExecutablePath,
   });
   page = await browser.newPage();
-  page.on("console", message => console.error(`[browser:${message.type()}] ${message.text()}`));
+  page.on("console", message => {
+    if (message.type() === "warning" || message.type() === "error") {
+      console.error(`[browser:${message.type()}] ${message.text()}`);
+    }
+  });
   page.on("pageerror", error => console.error(`[browser:error] ${error.message}`));
   const tubRequests = [];
 
@@ -167,8 +171,11 @@ try {
 
   console.log(`HotTub activity filter ${browserName} browser checks passed.`);
 } catch (error) {
-  if (/Executable doesn't exist|browserType\.launch:.*executable/i.test(String(error))) {
-    console.log(`HotTub activity filter ${browserName} browser check skipped: browser binary is unavailable.`);
+  if (
+    /Executable doesn't exist|browserType\.launch:.*executable|Host system is missing dependencies|Missing libraries/i
+      .test(String(error))
+  ) {
+    console.log(`HotTub activity filter ${browserName} browser check skipped: browser runtime is unavailable.`);
   } else {
     if (page) {
       console.error("HotTub browser URL at failure:", page.url());
