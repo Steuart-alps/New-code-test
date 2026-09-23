@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,10 @@ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollV
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
 import { DEFAULT_DIARY_SITE, kitchenDiaryScope } from './kitchen-diary-scope';
+import {
+  requestDiaryScopeChange,
+  shouldHydrateDiaryDraft,
+} from './kitchen-diary-draft-logic';
 import {
   canSaveTemperatureForm,
   hasAnyValue,
@@ -149,6 +153,17 @@ export function KitchenTemperatureForm() {
   const [correctives, setCorrectives] = useState('');
   const [initialCorrectives, setInitialCorrectives] = useState<string | null>(null);
   const [loadedRecordId, setLoadedRecordId] = useState<number | null | undefined>(undefined);
+  const [isDirty, setIsDirty] = useState(false);
+  const dirtyRef = useRef(false);
+
+  const markDirty = () => {
+    dirtyRef.current = true;
+    setIsDirty(true);
+  };
+  const clearDirty = () => {
+    dirtyRef.current = false;
+    setIsDirty(false);
+  };
 
   const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -176,7 +191,11 @@ export function KitchenTemperatureForm() {
   });
 
   useEffect(() => {
-    if (!config || existingRecord === undefined) return;
+    if (
+      !config
+      || existingRecord === undefined
+      || !shouldHydrateDiaryDraft(dirtyRef.current)
+    ) return;
     const nextColdFood = units.map((unit) => {
       const saved = existingRecord?.coldFood?.find((row) => row.unit === unit.name);
       return saved ?? {
@@ -201,6 +220,7 @@ export function KitchenTemperatureForm() {
     setCorrectives(existingRecord?.correctives ?? '');
     setInitialCorrectives(existingRecord?.correctives ?? null);
     setLoadedRecordId(existingRecord?.id ?? null);
+    clearDirty();
   }, [config, existingRecord, units]);
 
   const saveMutation = useMutation({
@@ -250,6 +270,7 @@ export function KitchenTemperatureForm() {
       );
     },
     onSuccess: async () => {
+      clearDirty();
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await queryClient.invalidateQueries({ queryKey: ['food-safety'] });
       Alert.alert('Saved', 'Today’s KitchenTrack temperatures have been saved.', [
@@ -273,6 +294,33 @@ export function KitchenTemperatureForm() {
       reheating: config?.food_show_reheating !== 'false',
     },
   );
+
+  const switchSite = (nextSiteId: number | null) => {
+    clearDirty();
+    setLoadedRecordId(undefined);
+    setSiteId(nextSiteId);
+  };
+
+  const requestSiteChange = (nextSiteId: number | null) => {
+    const decision = requestDiaryScopeChange(siteId, nextSiteId, isDirty || dirtyRef.current, saveMutation.isPending);
+    if (decision.kind === 'ignore') return;
+    if (decision.kind === 'switch') {
+      switchSite(decision.siteId);
+      return;
+    }
+    Alert.alert(
+      'Discard unsaved readings?',
+      'Switching sites will discard the readings entered for this diary.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        {
+          text: 'Discard changes',
+          style: 'destructive',
+          onPress: () => switchSite(decision.siteId),
+        },
+      ],
+    );
+  };
 
   if (configError || recordError) {
     return (
@@ -328,10 +376,9 @@ export function KitchenTemperatureForm() {
                   backgroundColor: siteId === null ? colors.primary + '1a' : colors.card,
                 },
               ]}
+              disabled={saveMutation.isPending}
               onPress={() => {
-                if (siteId === null) return;
-                setLoadedRecordId(undefined);
-                setSiteId(null);
+                requestSiteChange(null);
               }}
             >
               <Text style={[styles.siteChipText, { color: siteId === null ? colors.primary : colors.mutedForeground }]}>
@@ -348,10 +395,9 @@ export function KitchenTemperatureForm() {
                     backgroundColor: siteId === site.id ? colors.primary + '1a' : colors.card,
                   },
                 ]}
+                disabled={saveMutation.isPending}
                 onPress={() => {
-                  if (siteId === site.id) return;
-                  setLoadedRecordId(undefined);
-                  setSiteId(site.id);
+                  requestSiteChange(site.id);
                 }}
               >
                 <Text style={[styles.siteChipText, { color: siteId === site.id ? colors.primary : colors.mutedForeground }]}>
@@ -382,16 +428,22 @@ export function KitchenTemperatureForm() {
             <TemperatureInput
               label="AM °C"
               value={reading.tempAm}
-              onChange={(value) => setColdFood((rows) => rows.map((row, rowIndex) =>
-                rowIndex === index ? { ...row, tempAm: value } : row
-              ))}
+              onChange={(value) => {
+                markDirty();
+                setColdFood((rows) => rows.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, tempAm: value } : row
+                ));
+              }}
             />
             <TemperatureInput
               label="PM °C"
               value={reading.tempPm}
-              onChange={(value) => setColdFood((rows) => rows.map((row, rowIndex) =>
-                rowIndex === index ? { ...row, tempPm: value } : row
-              ))}
+              onChange={(value) => {
+                markDirty();
+                setColdFood((rows) => rows.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, tempPm: value } : row
+                ));
+              }}
             />
           </View>
         </View>
@@ -403,10 +455,10 @@ export function KitchenTemperatureForm() {
         <>
       <SectionTitle icon="sun" title="Hot holding" color={colors.foreground} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <TextInputField label="Food item" value={hotHolding.item} onChange={(item) => setHotHolding((row) => ({ ...row, item }))} />
+        <TextInputField label="Food item" value={hotHolding.item} onChange={(item) => { markDirty(); setHotHolding((row) => ({ ...row, item })); }} />
         <View style={styles.inputRow}>
-          <TemperatureInput label="Core °C" value={hotHolding.coreTemp} onChange={(coreTemp) => setHotHolding((row) => ({ ...row, coreTemp }))} />
-          <TextInputField label="Time" value={hotHolding.timeOfCheck} onChange={(timeOfCheck) => setHotHolding((row) => ({ ...row, timeOfCheck }))} placeholder="HH:mm" compact />
+          <TemperatureInput label="Core °C" value={hotHolding.coreTemp} onChange={(coreTemp) => { markDirty(); setHotHolding((row) => ({ ...row, coreTemp })); }} />
+          <TextInputField label="Time" value={hotHolding.timeOfCheck} onChange={(timeOfCheck) => { markDirty(); setHotHolding((row) => ({ ...row, timeOfCheck })); }} placeholder="HH:mm" compact />
         </View>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>
           Target: {config?.food_hot_holding_limit ?? 'Above 63°C'}
@@ -419,31 +471,31 @@ export function KitchenTemperatureForm() {
         <>
       <SectionTitle icon="truck" title="Delivery check" color={colors.foreground} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <TextInputField label="Supplier" value={delivery.supplier} onChange={(supplier) => setDelivery((row) => ({ ...row, supplier }))} />
-        <TextInputField label="Items" value={delivery.items} onChange={(items) => setDelivery((row) => ({ ...row, items }))} />
+        <TextInputField label="Supplier" value={delivery.supplier} onChange={(supplier) => { markDirty(); setDelivery((row) => ({ ...row, supplier })); }} />
+        <TextInputField label="Items" value={delivery.items} onChange={(items) => { markDirty(); setDelivery((row) => ({ ...row, items })); }} />
         <View style={styles.inputRow}>
-          <TemperatureInput label="Chilled °C" value={delivery.tempChilled} onChange={(tempChilled) => setDelivery((row) => ({ ...row, tempChilled }))} />
-          <TemperatureInput label="Frozen °C" value={delivery.tempFrozen} onChange={(tempFrozen) => setDelivery((row) => ({ ...row, tempFrozen }))} />
+          <TemperatureInput label="Chilled °C" value={delivery.tempChilled} onChange={(tempChilled) => { markDirty(); setDelivery((row) => ({ ...row, tempChilled })); }} />
+          <TemperatureInput label="Frozen °C" value={delivery.tempFrozen} onChange={(tempFrozen) => { markDirty(); setDelivery((row) => ({ ...row, tempFrozen })); }} />
         </View>
       </View>
         </>
       ) : null}
 
       {config?.food_show_hot_temperature !== 'false' ? (
-        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={setCooking} />
+        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }} />
       ) : null}
       {config?.food_show_cooling !== 'false' ? (
-        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={setCooling} />
+        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
       ) : null}
       {config?.food_show_reheating !== 'false' ? (
-        <CoreTemperatureCard title="Reheating" icon="rotate-cw" value={reheating} onChange={setReheating} />
+        <CoreTemperatureCard title="Reheating" icon="rotate-cw" value={reheating} onChange={(value) => { markDirty(); setReheating(value); }} />
       ) : null}
 
       <SectionTitle icon="tool" title="Corrective actions" color={colors.foreground} />
       <TextInput
         style={[styles.textArea, { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.border }]}
         value={correctives}
-        onChangeText={setCorrectives}
+        onChangeText={(value) => { markDirty(); setCorrectives(value); }}
         placeholder="Record any action taken for readings outside safe limits"
         placeholderTextColor={colors.mutedForeground}
         multiline
