@@ -163,6 +163,57 @@ async function main() {
         adminWeeklyMove.data?.site_id === betaSite.data.id,
         JSON.stringify(adminWeeklyMove.data));
     }
+
+    const scopedTrain = await admin("POST", "/train-track/records", {
+      recordType: "certificate", staffName: "Lock Fixture", trainingType: "Other",
+      provider: "Lock Fixture", completedDate: today, expiryDate: iso(30),
+      siteId: alphaSite.data.id, notes: "current scoped training",
+    });
+    expect("seed current scoped TrainTrack record", scopedTrain, [201]);
+    if (scopedTrain.status === 201) {
+      const trainPath = `/train-track/records/${scopedTrain.data?.id}`;
+      expect("scoped staff can PATCH current TrainTrack record",
+        await scopedStaff("PATCH", trainPath, { notes: "scoped staff edit" }), [200]);
+      const staffTrainMove = await scopedStaff("PATCH", trainPath, { siteId: betaSite.data.id });
+      check("scoped staff cannot PATCH TrainTrack site",
+        staffTrainMove.status === 403,
+        `${staffTrainMove.status} ${JSON.stringify(staffTrainMove.data)}`);
+      const trainAfterMove = await admin("GET", "/train-track/records");
+      const trainRecordAfterMove = trainAfterMove.data?.find?.(row => row.id === scopedTrain.data.id);
+      check("rejected TrainTrack move keeps original site",
+        trainRecordAfterMove?.site_id === alphaSite.data.id,
+        JSON.stringify(trainRecordAfterMove));
+      const adminTrainMove = await admin("PATCH", trainPath, { siteId: betaSite.data.id });
+      expect("admin can PATCH TrainTrack site", adminTrainMove, [200]);
+      check("admin TrainTrack move changes site",
+        adminTrainMove.data?.site_id === betaSite.data.id,
+        JSON.stringify(adminTrainMove.data));
+    }
+
+    const scopedAction = await admin("POST", "/track-actions", {
+      module: "fire", title: "Scoped PATCH move fixture", severity: "monitor",
+      siteId: alphaSite.data.id,
+    });
+    expect("seed current scoped track action", scopedAction, [201]);
+    if (scopedAction.status === 201) {
+      const actionPath = `/track-actions/${scopedAction.data?.id}`;
+      expect("scoped staff can PATCH current track action",
+        await scopedStaff("PATCH", actionPath, { ownerName: "Scoped Staff" }), [200]);
+      const staffActionMove = await scopedStaff("PATCH", actionPath, { siteId: betaSite.data.id });
+      check("scoped staff cannot PATCH track action site",
+        staffActionMove.status === 403,
+        `${staffActionMove.status} ${JSON.stringify(staffActionMove.data)}`);
+      const actionsAfterMove = await admin("GET", "/track-actions?module=fire");
+      const actionAfterMove = actionsAfterMove.data?.find?.(row => row.id === scopedAction.data.id);
+      check("rejected track action move keeps original site",
+        (actionAfterMove?.siteId ?? actionAfterMove?.site_id) === alphaSite.data.id,
+        JSON.stringify(actionAfterMove));
+      const adminActionMove = await admin("PATCH", actionPath, { siteId: betaSite.data.id });
+      expect("admin can PATCH track action site", adminActionMove, [200]);
+      check("admin track action move changes site",
+        (adminActionMove.data?.siteId ?? adminActionMove.data?.site_id) === betaSite.data.id,
+        JSON.stringify(adminActionMove.data));
+    }
   }
 
   // Food-safety also supplies the metadata/config regression assertion.

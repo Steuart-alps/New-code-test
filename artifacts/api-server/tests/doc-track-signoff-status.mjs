@@ -78,6 +78,12 @@ async function main() {
     name: "DocTrack other site", departmentId: kitchenDepartment.data?.id,
   });
   requireSuccess("create other site", otherSite, 201);
+  const otherDepartment = await request("POST", "/departments", { name: "DocTrack other department" });
+  requireSuccess("create other department", otherDepartment, 201);
+  const otherDepartmentSite = await request("POST", "/sites", {
+    name: "DocTrack other department site", departmentId: otherDepartment.data?.id,
+  });
+  requireSuccess("create other department site", otherDepartmentSite, 201);
   const staff = await request("POST", "/staff-roster", {
     name: "Alex Staff", email: `doc-active-${Date.now()}@test.local`,
     siteId: primarySite.data?.id, department: "Kitchen",
@@ -270,6 +276,31 @@ async function main() {
     (await request("PATCH", `/train-track/records/${manualTrainRecord.data?.id}`, { notes: "forged" })).status === 403);
   check("viewer cannot acknowledge a DocTrack document",
     (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "Viewer" })).status === 403);
+
+  // DocTrack is a site-scoped PATCH handler: department-scoped staff may edit
+  // metadata on an in-scope document, but cannot move it into another dept.
+  cookie = managerCookie;
+  requireSuccess("log in as site-scoped DocTrack staff", await request("POST", "/auth/login", {
+    email: otherSiteStaff.data?.email, password: "password-123",
+  }), 200);
+  const staffDocPatch = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    description: "Scoped staff metadata edit",
+  });
+  check("scoped staff can PATCH current DocTrack document", staffDocPatch.status === 200);
+  const staffDocMove = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    siteId: otherDepartmentSite.data?.id,
+  });
+  check("scoped staff cannot PATCH DocTrack site", staffDocMove.status === 403);
+  cookie = managerCookie;
+  const documentAfterMove = await request("GET", "/doc-track/documents");
+  check("rejected DocTrack move keeps original site",
+    documentAfterMove.data?.some?.((row) =>
+      row.id === document.data?.id && row.site_id === primarySite.data?.id));
+  const managerDocMove = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    siteId: otherDepartmentSite.data?.id,
+  });
+  check("admin can PATCH DocTrack site", managerDocMove.status === 200);
+  check("admin DocTrack move changes site", managerDocMove.data?.site_id === otherDepartmentSite.data?.id);
 
   // A record ID from another account must neither be visible nor mutable.
   cookie = "";
