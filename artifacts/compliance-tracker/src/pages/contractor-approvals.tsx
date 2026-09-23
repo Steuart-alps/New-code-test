@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { 
   CheckCircle2, Search, Building, MapPin,
-  ChevronDown, ChevronRight, Loader2, Pencil, Send
+  ChevronDown, ChevronRight, Loader2, Pencil, Send, CalendarX2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -92,21 +92,27 @@ export default function ContractorApprovalsPage() {
     setExpandedSites(next);
   }
 
-  async function handleApprove(id: number, modifiedPreview?: { subject: string; text: string }) {
-    setSubmittingId(id);
+  async function handleApprove(item: EmailQueueItem, modifiedPreview?: { subject: string; text: string }) {
+    const isCancellation = item.emailType === "cancellation";
+    if (isCancellation && !confirm(
+      "Approve this calendar cancellation? It will send the contractor a cancellation notice and remove the previously sent calendar event."
+    )) return;
+    setSubmittingId(item.id);
     try {
       const endpoint = modifiedPreview ? "edit-and-send" : "approve-and-send";
       const payload = modifiedPreview
         ? { subject: modifiedPreview.subject, bodyText: modifiedPreview.text }
         : {};
-      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${id}/${endpoint}`, {
+      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${item.id}/${endpoint}`, {
         method: "POST",
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error("Failed to approve email");
-      toast({ title: "Email approved and sent" });
+      toast({
+        title: isCancellation ? "Calendar cancellation approved and sent" : "Email approved and sent",
+      });
       setEditingId(null);
-      setItems(prev => prev.filter(i => i.id !== id));
+      setItems(prev => prev.filter(i => i.id !== item.id));
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
@@ -114,16 +120,21 @@ export default function ContractorApprovalsPage() {
     }
   }
 
-  async function handleCancel(id: number) {
-    if (!confirm("Are you sure you want to cancel this email request?")) return;
-    setSubmittingId(id);
+  async function handleCancel(item: EmailQueueItem) {
+    const isCancellation = item.emailType === "cancellation";
+    if (!confirm(
+      isCancellation
+        ? "Dismiss this calendar cancellation? Nothing will be sent and the existing calendar event will remain in place."
+        : "Are you sure you want to cancel this email request?"
+    )) return;
+    setSubmittingId(item.id);
     try {
-      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${id}/cancel`, {
+      const res = await clientApiFetch(`/fix-track/contractor-email-queue/${item.id}/cancel`, {
         method: "POST"
       });
       if (!res.ok) throw new Error("Failed to cancel email");
-      toast({ title: "Email cancelled" });
-      setItems(prev => prev.filter(i => i.id !== id));
+      toast({ title: isCancellation ? "Calendar cancellation dismissed" : "Email cancelled" });
+      setItems(prev => prev.filter(i => i.id !== item.id));
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
     } finally {
@@ -195,6 +206,7 @@ export default function ContractorApprovalsPage() {
                   <div className="divide-y border-t">
                     {siteItems.map(item => {
                       const isEditing = editingId === item.id;
+                       const isCancellation = item.emailType === "cancellation";
                       const preview = item.emailPreviewJson || {};
                       
                       return (
@@ -203,9 +215,19 @@ export default function ContractorApprovalsPage() {
                             <div>
                               <div className="flex items-center gap-2 mb-1">
                                 <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border", 
-                                  item.emailType === "quote_request" ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-blue-50 text-blue-700 border-blue-200"
+                                  isCancellation
+                                    ? "bg-amber-50 text-amber-800 border-amber-300"
+                                    : item.emailType === "quote_request"
+                                      ? "bg-violet-50 text-violet-700 border-violet-200"
+                                      : "bg-blue-50 text-blue-700 border-blue-200"
                                 )}>
-                                  {item.emailType === "quote_request" ? "Requesting Quote" : item.emailType === "reminder" ? "Reminder" : "Assigning Job"}
+                                  {isCancellation
+                                    ? "Calendar Cancellation"
+                                    : item.emailType === "quote_request"
+                                      ? "Requesting Quote"
+                                      : item.emailType === "reminder"
+                                        ? "Reminder"
+                                        : "Assigning Job"}
                                 </span>
                                 <span className="text-xs text-muted-foreground">
                                   {format(new Date(item.createdAt), "dd MMM, HH:mm")}
@@ -227,11 +249,11 @@ export default function ContractorApprovalsPage() {
                               <div className="flex items-center gap-2 shrink-0">
                                 <Button
                                   variant="outline" size="sm"
-                                  onClick={() => handleCancel(item.id)}
+                                   onClick={() => handleCancel(item)}
                                   disabled={submittingId === item.id}
                                   className="h-8"
                                 >
-                                  Cancel
+                                   {isCancellation ? "Dismiss" : "Cancel"}
                                 </Button>
                                 <Button
                                   variant="outline" size="sm"
@@ -243,12 +265,21 @@ export default function ContractorApprovalsPage() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  onClick={() => handleApprove(item.id)}
+                                   onClick={() => handleApprove(item)}
                                   disabled={submittingId === item.id}
-                                  className="h-8 bg-blue-600 hover:bg-blue-700 text-white"
+                                   className={cn(
+                                     "h-8 text-white",
+                                     isCancellation
+                                       ? "bg-amber-600 hover:bg-amber-700"
+                                       : "bg-blue-600 hover:bg-blue-700"
+                                   )}
                                 >
-                                  {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-                                  Approve & Send
+                                   {submittingId === item.id
+                                     ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                     : isCancellation
+                                       ? <CalendarX2 className="w-3.5 h-3.5 mr-1" />
+                                       : <Send className="w-3.5 h-3.5 mr-1" />}
+                                   {isCancellation ? "Approve Cancellation" : "Approve & Send"}
                                 </Button>
                               </div>
                             )}
@@ -257,6 +288,17 @@ export default function ContractorApprovalsPage() {
                           <div className="bg-muted/30 border rounded-md p-3 text-sm font-mono whitespace-pre-wrap text-foreground/80">
                             {isEditing ? (
                               <div className="space-y-3 font-sans">
+                                 {isCancellation && (
+                                   <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950">
+                                     <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                     <div>
+                                       <p className="font-semibold">This cancels an existing calendar event</p>
+                                       <p className="mt-0.5 text-xs text-amber-900/80">
+                                         Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
+                                       </p>
+                                     </div>
+                                   </div>
+                                 )}
                                 <div>
                                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Subject</label>
                                   <Input 
@@ -277,14 +319,30 @@ export default function ContractorApprovalsPage() {
                                   <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} disabled={submittingId === item.id}>
                                     Cancel Edit
                                   </Button>
-                                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleApprove(item.id, { subject: editSubject, text: editText })} disabled={submittingId === item.id}>
+                                   <Button
+                                     size="sm"
+                                     className={isCancellation ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}
+                                     onClick={() => handleApprove(item, { subject: editSubject, text: editText })}
+                                     disabled={submittingId === item.id}
+                                   >
                                     {submittingId === item.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-                                    Save & Send
+                                     {isCancellation ? "Save & Send Cancellation" : "Save & Send"}
                                   </Button>
                                 </div>
                               </div>
                             ) : (
                               <>
+                                 {isCancellation && (
+                                   <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 font-sans text-amber-950">
+                                     <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+                                     <div>
+                                       <p className="font-semibold">This cancels an existing calendar event</p>
+                                       <p className="mt-0.5 text-xs text-amber-900/80">
+                                         Approving sends the contractor a cancellation notice and removes the previously sent assignment from their calendar.
+                                       </p>
+                                     </div>
+                                   </div>
+                                 )}
                                 <div className="font-semibold text-foreground mb-2">Subject: {preview.subject}</div>
                                 {preview.text}
                               </>
