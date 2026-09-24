@@ -763,6 +763,7 @@ export async function runRuntimeMigrations() {
         "completed_date"   timestamp,
         "expiry_date"      timestamp,
         "notes"            text,
+        "portal_created"   boolean NOT NULL DEFAULT false,
         "created_at"       timestamp NOT NULL DEFAULT now(),
         "updated_at"       timestamp NOT NULL DEFAULT now()
       )
@@ -797,10 +798,15 @@ export async function runRuntimeMigrations() {
       ALTER TABLE "contractor_certificates"
         ADD COLUMN IF NOT EXISTS "object_path" text
     `);
+    // Legacy and manager-created records are never deletable through a portal
+    // link. Only the portal insert may explicitly set this provenance to true.
+    await db.execute(sql`
+      ALTER TABLE "contractor_certificates"
+        ADD COLUMN IF NOT EXISTS "portal_created" boolean NOT NULL DEFAULT false
+    `);
 
-    // Contractor self-service portal tokens. One active token per contractor
-    // (UNIQUE on contractor_id). The token is refreshed each time a reminder
-    // fires so the link in the latest email is always valid.
+    // Canonical contractor issuance: only explicit manager reissue rotates it.
+    // Reminder tokens retain independent lifetimes under this issuance anchor.
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "contractor_portal_tokens" (
         "id"            serial PRIMARY KEY,
@@ -830,6 +836,16 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`
       CREATE INDEX IF NOT EXISTS "IDX_contractor_portal_tokens_token_hash"
       ON "contractor_portal_tokens" ("token_hash")
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS contractor_portal_reminder_tokens (
+        id serial PRIMARY KEY,
+        portal_token_id integer NOT NULL REFERENCES contractor_portal_tokens(id) ON DELETE CASCADE,
+        issuance_hash text NOT NULL,
+        token_hash text NOT NULL UNIQUE,
+        expires_at timestamp NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
     `);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "contractor_portal_audit_log" (

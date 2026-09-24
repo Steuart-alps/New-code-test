@@ -128,7 +128,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
-  if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;
+  if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
   if (location === "/kiosk") return <KioskPage />;
   if (location === "/staff/set-pin") return <StaffSetPinPage />;

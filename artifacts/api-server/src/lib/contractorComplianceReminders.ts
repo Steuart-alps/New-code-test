@@ -232,30 +232,6 @@ function kindLabel(kind: ContractorComplianceAlert["kind"]): string {
   return "Certificate";
 }
 
-/**
- * Generate (or refresh) a 90-day self-service portal token for a contractor.
- * One token per contractor — refreshed on each reminder so the link in the
- * latest email is always valid.
- */
-export async function generateOrRefreshPortalToken(
-  clientId: number,
-  contractorId: number,
-): Promise<string> {
-  const token = newBearerToken();
-  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-  await db.execute(sql`
-    INSERT INTO contractor_portal_tokens (client_id, contractor_id, token, token_hash, expires_at)
-    VALUES (${clientId}, ${contractorId}, NULL, ${digestBearerToken(token)}, ${expiresAt})
-    ON CONFLICT (contractor_id) DO UPDATE SET
-      token      = NULL,
-      token_hash = EXCLUDED.token_hash,
-      expires_at = EXCLUDED.expires_at,
-      revoked_at = NULL,
-      created_at = now()
-  `);
-  return token;
-}
-
 /** Manager-facing digest: lists all contractor compliance alerts for a client. */
 function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): string {
   const rows = alerts
@@ -365,6 +341,209 @@ function buildContractorEmailHtml(
 </html>`;
 }
 
+/**
+ * Portal reminders have their own 60/30-day clock, independent of the
+ * manager's configurable insurance digest and of manager email availability.
+ */
+async function queuePortalReminders(clientId: number, clientName: string, now: Date, appUrl: string): Promise<void> {
+  const alerts = await getContractorComplianceAlerts(clientId, now, 60);
+  const portalAlerts = alerts.flatMap((alert) => {
+    let item: string | null = null;
+    let expiry: string | null = null;
+    if (alert.kind === "insurance") {
+      expiry = alert.milestone.slice("insurance:".length);
+      item = "insurance";
+    } else if (alert.kind === "cert") {
+      const match = /^cert:(\d+):(\d{4}-\d{2}-\d{2}):(60|30)$/.exec(alert.milestone);
+      if (match) {
+        item = `cert:${match[1]}`;
+        expiry = match[2];
+      }
+    } else if (alert.kind === "dbs" && alert.milestone.startsWith("dbs-expiry:")) {
+      expiry = alert.milestone.split(":")[1];
+      item = "dbs";
+    }
+    if (!item || !expiry || !alert.contractorEmail) return [];
+    const bucket = expiryReminderBucket(expiry, now);
+    if (bucket === null) return [];
+    return [{ ...alert, milestone: `portal-${bucket}d:${item}:${expiry}`, bucket, item, expiry }];
+  });
+  const byContractor = new Map<number, typeof portalAlerts>();
+  for (const alert of portalAlerts) {
+    const group = byContractor.get(alert.contractorId) ?? [];
+    group.push(alert);
+    byContractor.set(alert.contractorId, group);
+  }
+  // A renewed/deleted item can remove its contractor from the alert scan
+  // entirely. Still inspect pending drafts before they can be approved later.
+  const pendingOwners = await db.execute(sql`
+    SELECT DISTINCT contractor_id FROM contractor_email_queue
+    WHERE client_id=${clientId} AND entity_type='contractor_compliance' AND status='pending'
+  `);
+  for (const row of pendingOwners.rows) {
+    const id = Number(row.contractor_id);
+    if (!byContractor.has(id)) byContractor.set(id, []);
+  }
+
+  for (const [contractorId, group] of byContractor) {
+    // Lock the parent before looking at prior claims, including concurrent job
+    // runs. A failed insert, encryption or token write rolls back every claim.
+    await db.transaction(async (tx) => {
+      const contractor = (await tx.execute(sql`
+        SELECT updated_at, email, public_liability_expiry, dbs_type,
+          dbs_expiry_date::date::text AS dbs_expiry_date
+        FROM contractors
+        WHERE client_id=${clientId} AND id=${contractorId} FOR UPDATE
+      `)).rows[0] as {
+        updated_at: Date; email: string; public_liability_expiry: Date | null;
+        dbs_type: string | null; dbs_expiry_date: string | null;
+      } | undefined;
+      if (!contractor?.email) return;
+      // Manager reissue/revoke UPDATE this same canonical row. Hold its lock
+      // through draft creation, and never resurrect an explicitly revoked link.
+      const canonical = (await tx.execute(sql`
+        SELECT id, token_hash, revoked_at FROM contractor_portal_tokens
+        WHERE contractor_id=${contractorId} FOR UPDATE
+      `)).rows[0] as { id: number; token_hash: string; revoked_at: Date | null } | undefined;
+      if (canonical?.revoked_at) return;
+      // Lock *all* active drafts before deciding to revoke any of them. The
+      // approval endpoint changes pending -> sending via UPDATE, which must
+      // contend for this same row lock. If approval won, defer replacement.
+      const activeDrafts = await tx.execute(sql`
+        SELECT id, status, idempotency_key, email_preview_json FROM contractor_email_queue
+        WHERE client_id=${clientId} AND contractor_id=${contractorId}
+          AND entity_type='contractor_compliance' AND status IN ('pending','approved','sending')
+        ORDER BY id FOR UPDATE
+      `);
+      if (activeDrafts.rows.some(row => row.status === "approved" || row.status === "sending")) return;
+      for (const draft of activeDrafts.rows) {
+        const preview = draft.email_preview_json as { complianceItems?: { item: string; expiry: string }[] } | null;
+        // Legacy drafts recorded claimed items in the idempotency key. New
+        // drafts record every item in their full summary, not only new claims.
+        const items = preview?.complianceItems ?? Array.from(
+          String(draft.idempotency_key).matchAll(/portal-(?:60|30)d:(insurance|dbs|cert:\d+):(\d{4}-\d{2}-\d{2})/g),
+          match => ({ item: match[1], expiry: match[2] }),
+        );
+        let stale = false;
+        for (const item of items) {
+          let expiry: string | null = null;
+          if (item.item === "insurance") {
+            expiry = contractor.public_liability_expiry
+              ? new Date(contractor.public_liability_expiry).toISOString().slice(0, 10) : null;
+          } else if (item.item === "dbs") {
+            expiry = contractor.dbs_type === "None" ? null : contractor.dbs_expiry_date;
+          } else if (/^cert:\d+$/.test(item.item)) {
+            const cert = (await tx.execute(sql`
+              SELECT expiry_date::date::text AS expiry_date FROM contractor_certificates
+              WHERE client_id=${clientId} AND contractor_id=${contractorId}
+                AND id=${Number(item.item.slice(5))} FOR UPDATE
+            `)).rows[0];
+            expiry = (cert?.expiry_date as string | null) ?? null;
+          }
+          if (expiry !== item.expiry || expiryReminderBucket(item.expiry, now) === null) {
+            stale = true;
+            break;
+          }
+        }
+        if (stale) {
+          await tx.execute(sql`
+            UPDATE contractor_email_queue SET status='cancelled',
+              last_error='Compliance item renewed, removed or no longer due', updated_at=now()
+            WHERE id=${draft.id} AND status='pending'
+          `);
+        }
+      }
+      const claimed: typeof group = [];
+      const currentAlerts: typeof group = [];
+      for (const alert of group) {
+        // Candidates were scanned outside the transaction. A renewal or
+        // deletion while we waited for the parent lock must not queue an old
+        // expiry. Lock certificate rows too before checking their date.
+        let currentExpiry: string | null = null;
+        if (alert.item === "insurance") {
+          const insurance = contractor.public_liability_expiry
+            ? new Date(contractor.public_liability_expiry) : null;
+          currentExpiry = insurance && !Number.isNaN(insurance.getTime())
+            ? insurance.toISOString().slice(0, 10) : null;
+        } else if (alert.item === "dbs") {
+          currentExpiry = contractor.dbs_type === "None" ? null : contractor.dbs_expiry_date;
+        } else if (alert.item.startsWith("cert:")) {
+          const certId = Number(alert.item.slice("cert:".length));
+          const cert = (await tx.execute(sql`
+            SELECT expiry_date::date::text AS expiry_date FROM contractor_certificates
+            WHERE client_id=${clientId} AND contractor_id=${contractorId}
+              AND id=${certId} FOR UPDATE
+          `)).rows[0] as { expiry_date: string | null } | undefined;
+          currentExpiry = cert?.expiry_date ?? null;
+        }
+        if (currentExpiry !== alert.expiry) continue;
+        currentAlerts.push(alert);
+        if (alert.bucket === 30) {
+          const previous = (await tx.execute(sql`
+            SELECT sent_at FROM contractor_compliance_reminder_log
+            WHERE client_id=${clientId} AND contractor_id=${contractorId}
+              AND milestone=${`portal-60d:${alert.item}:${alert.expiry}`}
+          `)).rows[0] as { sent_at: Date } | undefined;
+          // With no earlier claim the 30-day run is a legitimate catch-up.
+          if (previous && new Date(contractor.updated_at) > new Date(previous.sent_at)) continue;
+        }
+        const claim = await tx.execute(sql`
+          INSERT INTO contractor_compliance_reminder_log (client_id,contractor_id,milestone,sent_at)
+          VALUES (${clientId},${contractorId},${alert.milestone},${now})
+          ON CONFLICT (client_id,contractor_id,milestone) DO NOTHING RETURNING id
+        `);
+        if (claim.rows.length) claimed.push(alert);
+      }
+      if (!claimed.length) return; // Dedupe must never rotate a valid token.
+
+      // The queue's active-draft index allows only one pending entry per
+      // contractor. Cancel stale pending compliance drafts in the same commit
+      // that creates the replacement, without invalidating delivered links.
+      await tx.execute(sql`
+        UPDATE contractor_email_queue SET status='cancelled',
+          last_error='Superseded by newer compliance reminder', updated_at=now()
+        WHERE client_id=${clientId} AND contractor_id=${contractorId}
+          AND entity_type='contractor_compliance' AND status='pending'
+      `);
+      const token = newBearerToken();
+      const portalUrl = `${appUrl}/contractor-portal/${token}`;
+      const html = buildContractorEmailHtml(
+        group[0].contractorName, currentAlerts, clientName, portalUrl,
+      ).replaceAll(portalUrl, "{{PORTAL_URL}}");
+      const encryptedPortal = encryptTokenPayload({ portal: portalUrl });
+      const subject = "Compliance renewal reminder — please update your details";
+      const key = `contractor-portal-${clientId}-${contractorId}-${claimed.map(a => a.milestone).sort().join("-")}`;
+      const queued = await tx.execute(sql`
+        INSERT INTO contractor_email_queue
+          (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,
+           subject,body_html,email_preview_json,encrypted_token_payload,idempotency_key)
+        VALUES (${clientId},'contractor_compliance',${contractorId},${contractorId},
+          'reminder','assign',${contractor.email},${subject},${html},
+          ${JSON.stringify({ subject, html, text: "", complianceItems: currentAlerts.map(({ item, expiry }) => ({ item, expiry })) })}::jsonb,${encryptedPortal},${key})
+        RETURNING id
+      `);
+      if (!queued.rows.length) throw new Error("Contractor portal reminder was not queued");
+      if (canonical) {
+        await tx.execute(sql`
+          INSERT INTO contractor_portal_reminder_tokens
+            (portal_token_id, issuance_hash, token_hash, expires_at)
+          VALUES (${canonical.id},${canonical.token_hash},${digestBearerToken(token)},
+            ${new Date(now.getTime() + 90 * 86_400_000)})
+        `);
+      } else {
+        // A first scheduler issuance remains compatible with manager issuance.
+        // A concurrent manager INSERT wins safely: rollback/retry rather than
+        // overwrite its token or revocation state.
+        await tx.execute(sql`
+        INSERT INTO contractor_portal_tokens (client_id,contractor_id,token,token_hash,expires_at)
+        VALUES (${clientId},${contractorId},NULL,${digestBearerToken(token)},
+          ${new Date(now.getTime() + 90 * 86_400_000)})
+      `);
+      }
+    });
+  }
+}
+
 export interface ContractorComplianceJobResult {
   clientsChecked: number;
   clientsAlerted: number;
@@ -398,6 +577,14 @@ export async function runContractorComplianceReminderJob(
   for (const client of clients) {
     result.clientsChecked++;
     try {
+      // Contractor drafts are independent of both the manager's lead-time
+      // setting and the presence of any manager notification recipients.
+      try {
+        await queuePortalReminders(client.id, client.name, now, appUrl);
+      } catch (portalErr) {
+        result.errors++;
+        logger.error({ err: portalErr, clientId: client.id }, "Contractor portal reminder queue failed");
+      }
       const leadDays = await getClientContractorComplianceLeadDays(client.id);
       const candidates = await getContractorComplianceAlerts(client.id, now, leadDays);
       if (candidates.length === 0) continue;
@@ -437,45 +624,6 @@ export async function runContractorComplianceReminderJob(
         await send({ to: emails, subject, html: buildManagerEmailHtml(claimed, appUrl) });
         sent = true;
 
-        // Also email each contractor directly about their own expiring items.
-        // Group by contractor so each gets one email covering all their alerts.
-        const byContractor = new Map<number, ContractorComplianceAlert[]>();
-        for (const a of claimed) {
-          if (!byContractor.has(a.contractorId)) byContractor.set(a.contractorId, []);
-          byContractor.get(a.contractorId)!.push(a);
-        }
-        for (const [contractorId, contractorAlerts] of byContractor) {
-          const { contractorName, contractorEmail } = contractorAlerts[0];
-          if (!contractorEmail) continue;
-          // Generate / refresh the contractor's self-service portal token.
-          let portalUrl: string | undefined;
-          try {
-            const portalToken = await generateOrRefreshPortalToken(client.id, contractorId);
-            portalUrl = `${appUrl}/contractor-portal/${portalToken}`;
-          } catch (tokenErr) {
-            logger.warn({ err: tokenErr, contractorId }, "Failed to generate contractor portal token — sending email without link");
-          }
-           const rawHtml = buildContractorEmailHtml(contractorName, contractorAlerts, client.name, portalUrl);
-           const html = portalUrl
-             ? rawHtml.replaceAll(portalUrl, "{{PORTAL_URL}}")
-             : rawHtml;
-           const encryptedPortal = portalUrl ? encryptTokenPayload({ portal: portalUrl }) : null;
-          if (!html) continue;
-          try {
-            await db.execute(sql`INSERT INTO contractor_email_queue
-              (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,email_preview_json,encrypted_token_payload,idempotency_key)
-              VALUES (${client.id},'contractor_compliance',${contractorId},${contractorId},'reminder','assign',
-                ${contractorEmail},'Compliance renewal reminder — please update your details',${html},
-                 ${JSON.stringify({ subject: "Compliance renewal reminder — please update your details", html, text: "" })}::jsonb,
-                 ${encryptedPortal},
-                ${`contractor-compliance-${client.id}-${contractorId}-${contractorAlerts.map(a => a.milestone).sort().join("-")}`})
-              ON CONFLICT (idempotency_key) DO NOTHING`);
-          } catch (ctrErr) {
-            // Best-effort: never fail the whole job because a contractor email bounced.
-            logger.warn({ err: ctrErr, contractorEmail }, "Failed to queue contractor compliance reminder");
-          }
-        }
-
         // Push managers a matching alert (best-effort; never blocks the job).
         await sendPush(userIds, {
           title: "Contractor compliance expiring",
@@ -486,7 +634,7 @@ export async function runContractorComplianceReminderJob(
         result.clientsAlerted++;
         result.emailsSent += emails.length;
         logger.info(
-          { clientId: client.id, alerts: claimed.length, emails: emails.length, contractorEmails: byContractor.size },
+          { clientId: client.id, alerts: claimed.length, emails: emails.length },
           "Manager alerts sent and contractor reminders queued for approval",
         );
       } catch (innerErr) {
