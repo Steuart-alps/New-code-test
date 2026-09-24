@@ -297,3 +297,4 @@ TWILIO_VERIFY_SERVICE_SID = "VAa8456cf2efe3b6e6acf2d5a61c447820"
 
 [userenv.production]
 PUBLIC_APP_URL = "https://complytrack.alpsconsultancy.co.uk"
+ADMIN_EMAIL = "info@alpsconsultancy.co.uk"
