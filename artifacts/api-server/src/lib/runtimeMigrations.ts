@@ -1110,6 +1110,29 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "dbs_expiry_date" date`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "public_liability_expiry" date`);
     await db.execute(sql`ALTER TABLE "contractors" ADD COLUMN IF NOT EXISTS "gas_safe_registration" text`);
+    // Keep the meaning of previously saved labels when switching to the
+    // compact contractor-only DBS/PVG choices. Unknown historical values stay
+    // untouched rather than being silently replaced with "None".
+    await db.execute(sql`
+      UPDATE "contractors" SET "dbs_type" = CASE "dbs_type"
+        WHEN 'DBS Check (Basic)' THEN 'Basic'
+        WHEN 'DBS Check (Standard)' THEN 'Standard'
+        WHEN 'DBS Check (Enhanced)' THEN 'Enhanced'
+        WHEN 'PVG Scheme (Scotland)' THEN 'PVG Scheme'
+      END
+      WHERE "dbs_type" IN ('DBS Check (Basic)', 'DBS Check (Standard)',
+                           'DBS Check (Enhanced)', 'PVG Scheme (Scotland)')
+    `);
+    await db.execute(sql`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conrelid = 'contractors'::regclass
+                         AND conname = 'CHK_contractors_dbs_type') THEN
+          ALTER TABLE "contractors" ADD CONSTRAINT "CHK_contractors_dbs_type"
+            CHECK ("dbs_type" IN ('Basic', 'Standard', 'Enhanced', 'PVG Scheme', 'None')) NOT VALID;
+        END IF;
+      END $$
+    `);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "staff_training_records" (

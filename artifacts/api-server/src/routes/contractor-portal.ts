@@ -13,6 +13,7 @@ import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
+import { CONTRACTOR_DBS_TYPES, normalizeContractorDbsType } from "../lib/contractorDbsTypes";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const objectStorageService = new ObjectStorageService();
@@ -41,7 +42,7 @@ const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a YYYY-MM-DD date"
     const parsed = new Date(Date.UTC(year, month - 1, day));
     return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
   }, "Invalid date");
-const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"] as const;
+const DBS_TYPES = CONTRACTOR_DBS_TYPES;
 const ALLOWED_CERTIFICATE_TYPES: ReadonlySet<AllowedUploadType> = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 async function audit(row: TokenRow, eventType: string, details: Record<string, unknown> = {}) {
@@ -130,7 +131,7 @@ const updateSchema = z.object({
   phone:           z.string().max(30).nullish(),
   address:         z.string().max(500).nullish(),
   insuranceExpiry: DATE.nullish(),
-  dbsType:         z.enum(DBS_TYPES).nullish(),
+  dbsType:         z.preprocess(normalizeContractorDbsType, z.enum(DBS_TYPES).nullish()),
   dbsExpiryDate:   DATE.nullish(),
   gasSafeNumber:   z.string().max(50).nullish(),
 });
@@ -148,7 +149,7 @@ router.put("/:token", async (req, res) => {
         address             = ${data.address ?? null},
         public_liability_expiry = ${data.insuranceExpiry ? new Date(data.insuranceExpiry) : null},
         dbs_type            = ${data.dbsType ?? null},
-        dbs_expiry_date     = ${data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
+        dbs_expiry_date     = ${data.dbsType === "None" ? null : data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
         gas_safe_number     = ${data.gasSafeNumber ?? null},
         updated_at          = now()
       WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}

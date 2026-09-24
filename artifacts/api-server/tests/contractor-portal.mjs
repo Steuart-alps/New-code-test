@@ -65,6 +65,7 @@ try {
 
   const created = await owner.request("POST", "/contractors", {
     name: "Portal Owner Contractor", email: `owner-contractor-${Date.now()}@test.local`,
+    dbsType: "DBS Check (Basic)", dbsIssueDate: "2026-01-01", dbsExpiryDate: "2028-01-01",
   });
   const second = await owner.request("POST", "/contractors", {
     name: "Other Owner Contractor", email: `other-contractor-${Date.now()}@test.local`,
@@ -74,6 +75,10 @@ try {
   });
   const contractorId = created.data?.id, secondId = second.data?.id, foreignId = foreignContractor.data?.id;
   check("contractors created", [contractorId, secondId, foreignId].every(Number.isInteger));
+  check("manager records use canonical DBS types and dates",
+    created.data?.dbsType === "Basic"
+    && String(created.data?.dbsIssueDate).startsWith("2026-01-01")
+    && String(created.data?.dbsExpiryDate).startsWith("2028-01-01"));
 
   check("anonymous cannot issue", (await publicRequest("POST", `/contractors/${contractorId}/portal-link`, {})).status === 401);
   const viewerEmail = `portal-viewer-${Date.now()}@test.local`;
@@ -92,6 +97,7 @@ try {
   check("manager issue returns plaintext token once", issue1.status === 201 && typeof token1 === "string" && token1.length === 64);
   const view1 = await publicRequest("GET", `/contractor-portal/${token1}`);
   check("token sees only bound contractor", view1.status === 200 && view1.data?.name === created.data.name && !("notes" in view1.data));
+  check("contractor portal reads the canonical DBS value", view1.data?.dbsType === "Basic");
   const [portalEvidence] = (await db.execute(sql`
     SELECT id FROM public_link_access_evidence
     WHERE client_id = ${owner.clientId} AND link_type = 'contractor_portal'
@@ -116,6 +122,21 @@ try {
   check("token/client inconsistency rejected", (await publicRequest("GET", `/contractor-portal/${token3}`)).status === 404);
   await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${owner.clientId} WHERE token_hash = ${digest(token3)}`);
 
+  const portalDbsChange = await publicRequest("PUT", `/contractor-portal/${token3}`, {
+    dbsType: "PVG Scheme", dbsExpiryDate: "2028-03-01",
+  });
+  const portalDbsView = await publicRequest("GET", `/contractor-portal/${token3}`);
+  check("contractor can update PVG expiry with a canonical type",
+    portalDbsChange.status === 200 && portalDbsView.data?.dbsType === "PVG Scheme"
+      && String(portalDbsView.data?.dbsExpiryDate).startsWith("2028-03-01"));
+  const portalNone = await publicRequest("PUT", `/contractor-portal/${token3}`, {
+    dbsType: "None", dbsExpiryDate: "2028-03-01",
+  });
+  const clearedDbs = await publicRequest("GET", `/contractor-portal/${token3}`);
+  check("choosing None clears a previously saved DBS expiry",
+    portalNone.status === 200 && clearedDbs.data?.dbsType === "None"
+      && clearedDbs.data?.dbsExpiryDate === null);
+
   const managerCert = await owner.request("POST", `/contractors/${contractorId}/certificates`, {
     certificateName: "Manager certificate", issuer: "Issuer", notes: "manager-only-note",
   });
@@ -128,6 +149,32 @@ try {
   check("manager notes never disclosed", visible.some(c => c.id === managerCert.data.id) && visible.every(c => !("notes" in c)));
   check("certificate object paths are never exposed by the portal", visible.every(c => !("object_path" in c)));
   check("other contractor certificate excluded", !visible.some(c => c.id === foreignCert.data.id));
+  const certUrl = `/contractors/${contractorId}/certificates`;
+  check("manager certificate list includes the created certificate",
+    (await owner.request("GET", certUrl)).data?.some(c => c.id === managerCert.data.id));
+  const changedCert = await owner.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+    certificateName: "Updated licence", issuer: "New issuer",
+    completedDate: "2026-01-01", expiryDate: "2027-01-01", notes: "Updated by manager",
+  });
+  check("manager can edit certificate dates and notes", changedCert.status === 200
+    && changedCert.data?.certificate_name === "Updated licence"
+    && changedCert.data?.notes === "Updated by manager");
+  check("certificate completion cannot be later than expiry",
+    (await owner.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+      certificateName: "Invalid", completedDate: "2027-01-01", expiryDate: "2026-01-01",
+    })).status === 400);
+  check("another client cannot list certificates",
+    (await foreign.request("GET", certUrl)).status === 404);
+  check("another client cannot edit certificates",
+    (await foreign.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+      certificateName: "Foreign edit",
+    })).status === 404);
+  check("another client cannot delete certificates",
+    (await foreign.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 404);
+  check("manager can delete a certificate",
+    (await owner.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 204);
+  check("deleting an absent certificate returns 404",
+    (await owner.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 404);
   const portalCreate = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
     certificateName: "Portal certificate", notes: "must-not-be-accepted",
   });

@@ -13,11 +13,10 @@ import { randomUUID } from "node:crypto";
 import { filterName } from "../lib/contentFilter";
 import { digestBearerToken, newBearerToken } from "../lib/bearerTokens";
 import { getEffectiveOptionList } from "../lib/formOptions";
+import { CONTRACTOR_DBS_TYPES, normalizeContractorDbsType } from "../lib/contractorDbsTypes";
 
 // Local schemas that coerce ISO date strings (the OpenAPI-generated zod schemas
 // use `z.date()` which does NOT coerce strings, breaking JSON request bodies).
-const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"] as const;
-
 const CreateContractorBody = z.object({
   name:                        z.string().min(1),
   company:                     z.string().nullish(),
@@ -30,7 +29,7 @@ const CreateContractorBody = z.object({
   publicLiabilityExpiry:       z.coerce.date().nullish(),
   dbsCheckDate:                z.coerce.date().nullish(),
   dbsIssueDate:                z.coerce.date().nullish(),
-  dbsType:                     z.enum(DBS_TYPES).nullish(),
+  dbsType:                     z.preprocess(normalizeContractorDbsType, z.enum(CONTRACTOR_DBS_TYPES).nullish()),
   dbsExpiryDate:               z.coerce.date().nullish(),
 });
 
@@ -40,7 +39,10 @@ const CertificateBody = z.object({
   completedDate:   z.coerce.date().nullish(),
   expiryDate:      z.coerce.date().nullish(),
   notes:           z.string().max(2000).nullish(),
-});
+}).refine(
+  body => !body.completedDate || !body.expiryDate || body.expiryDate >= body.completedDate,
+  { message: "Expiry date must be on or after completion date", path: ["expiryDate"] },
+);
 
 const UpdateContractorBody = CreateContractorBody;
 
@@ -141,7 +143,11 @@ router.post("/contractors", requireAuth, requireClientAdmin, async (req, res) =>
   }
   const [contractor] = await db
     .insert(contractorsTable)
-    .values({ ...body, clientId, trades, updatedAt: new Date() })
+    .values({
+      ...body, clientId, trades, updatedAt: new Date(),
+      dbsIssueDate: body.dbsType === "None" ? null : body.dbsIssueDate,
+      dbsExpiryDate: body.dbsType === "None" ? null : body.dbsExpiryDate,
+    })
     .returning();
   res.status(201).json(contractor);
 });
@@ -195,6 +201,10 @@ router.put("/contractors/:id", requireAuth, requireClientAdmin, async (req, res)
 
   // Merge trades only when explicitly supplied in the request body
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
+  if (body.dbsType === "None") {
+    updateData.dbsIssueDate = null;
+    updateData.dbsExpiryDate = null;
+  }
   if ("trades" in req.body) {
     const trades = await validateTrades(clientId, req.body.trades, existing[0].trades ?? []);
     if (!trades) {
@@ -363,10 +373,15 @@ router.delete("/contractors/:id/certificates/:certId", requireAuth, requireClien
     res.status(404).json({ error: "Contractor not found" });
     return;
   }
-  await db.execute(sql`
+  const deleted = await db.execute(sql`
     DELETE FROM contractor_certificates
     WHERE id = ${certId} AND contractor_id = ${contractorId} AND client_id = ${existing.clientId}
+    RETURNING id
   `);
+  if (!deleted.rows?.length) {
+    res.status(404).json({ error: "Certificate not found" });
+    return;
+  }
   res.status(204).send();
 });
 

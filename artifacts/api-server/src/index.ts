@@ -146,8 +146,8 @@ function startScheduler() {
   });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
 
-  // Alert managers when contractor insurance is expiring/expired or a DBS
-  // check is out of date (daily at 08:55; each contractor+milestone once).
+  // Alert managers about contractor insurance, DBS/PVG and certificates.
+  // Run at 08:55 London time so 60/30-day date boundaries stay predictable.
   cron.schedule("55 8 * * *", async () => {
     logger.info("Running contractor compliance reminder job...");
     try {
@@ -156,7 +156,7 @@ function startScheduler() {
     } catch (err) {
       logger.error({ err }, "Contractor compliance reminder job failed");
     }
-  });
+  }, { timezone: "Europe/London" });
   logger.info("Contractor compliance reminder scheduler started (daily at 08:55)");
 
   // Alert managers when staff training certificates are expiring within 30 days

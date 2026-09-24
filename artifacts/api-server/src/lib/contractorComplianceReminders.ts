@@ -4,7 +4,8 @@
  * For each active client, alerts the client's managers (client_admin users and
  * maintenance managers) when a contractor's:
  *   - public liability insurance expires within the client's configured lead time or has already expired, or
- *   - DBS check is older than 3 years (or missing a renewal for that long).
+ *   - entered DBS/PVG expiry or certificate expiry is within 60 or 30 days, or
+ *   - a legacy DBS check without an expiry is older than 3 years.
  *
  * Sends an email digest (Resend-based, mirroring fixTrackOverdueAlerts) plus a
  * best-effort mobile push (route hint /contractors).
@@ -13,7 +14,8 @@
  * contractor_compliance_reminder_log. The milestone encodes the exact date the
  * reminder was raised against (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
  * so a renewed insurance/DBS date produces a new milestone and re-alerts, while
- * the same milestone is never re-sent. Rows are claimed BEFORE sending so
+  * the same milestone is never re-sent. DBS/PVG and certificate expiry dates
+  * have separate :60 and :30 claims. Rows are claimed BEFORE sending so
  * concurrent runs can't double-send; the claim is released if the send fails.
  */
 
@@ -35,6 +37,15 @@ export const INSURANCE_LEAD_DAYS = DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS;
 /** DBS checks older than this many years are flagged for re-check. */
 export const DBS_MAX_AGE_YEARS = 3;
 export const CONTRACTOR_COMPLIANCE_LEAD_TIME_SETTING = "contractorComplianceLeadTimeDays";
+
+/** Date-only reminder buckets: late runs catch up without sending both at once. */
+function expiryReminderBucket(expiryDate: string, now: Date): 60 | 30 | null {
+  const expiry = Date.parse(`${expiryDate.slice(0, 10)}T00:00:00Z`);
+  const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(expiry)) return null;
+  const daysLeft = Math.round((expiry - today) / 86_400_000);
+  return daysLeft > 60 ? null : daysLeft > 30 ? 60 : 30;
+}
 
 export function parseContractorComplianceLeadDays(value: unknown): number | null {
   const normalized = typeof value === "number" ? value : String(value ?? "").trim();
@@ -111,7 +122,7 @@ export async function getContractorComplianceAlerts(
   const contractorResult = await db.execute(sql`
     SELECT id, name, email, company,
            public_liability_expiry,
-           dbs_check_date, dbs_type, dbs_expiry_date
+            dbs_check_date, dbs_type, dbs_expiry_date::date::text AS dbs_expiry_date
     FROM contractors
     WHERE client_id = ${clientId}
     ORDER BY name ASC
@@ -120,10 +131,11 @@ export async function getContractorComplianceAlerts(
 
   // Also pull contractor certificates with their contractor info joined.
   const certResult = await db.execute(sql`
-    SELECT cc.id, cc.contractor_id, cc.certificate_name, cc.expiry_date,
+    SELECT cc.id, cc.contractor_id, cc.certificate_name,
+           cc.expiry_date::date::text AS expiry_date,
            c.name AS contractor_name, c.email AS contractor_email, c.company AS contractor_company
     FROM contractor_certificates cc
-    JOIN contractors c ON c.id = cc.contractor_id
+    JOIN contractors c ON c.id = cc.contractor_id AND c.client_id = cc.client_id
     WHERE cc.client_id = ${clientId}
       AND cc.expiry_date IS NOT NULL
     ORDER BY cc.expiry_date ASC
@@ -155,21 +167,23 @@ export async function getContractorComplianceAlerts(
 
     // Prefer an explicit DBS/PVG expiry date. For older records without one,
     // retain the original rule and alert once the check date reaches 3 years.
-    if (c.dbs_expiry_date) {
-      const expiry = new Date(c.dbs_expiry_date);
-      if (!Number.isNaN(expiry.getTime()) && expiry <= insuranceThreshold) {
-        const expired = expiry < now;
+    if (c.dbs_type !== "None" && c.dbs_expiry_date) {
+      const expiryDate = String(c.dbs_expiry_date).slice(0, 10);
+      const bucket = expiryReminderBucket(expiryDate, now);
+      if (bucket !== null) {
+        const expiry = new Date(`${expiryDate}T00:00:00Z`);
+        const expired = expiryDate < now.toISOString().slice(0, 10);
         const label = c.dbs_type ?? "DBS/PVG check";
         alerts.push({
           contractorId: c.id, contractorName: c.name, contractorEmail: c.email, company: c.company,
           kind: "dbs",
-          milestone: `dbs-expiry:${expiry.toISOString().slice(0, 10)}`,
+          milestone: `dbs-expiry:${expiryDate}:${bucket}`,
           detail: expired
             ? `${label} expired on ${fmtDate(expiry)}`
             : `${label} expires on ${fmtDate(expiry)}`,
         });
       }
-    } else if (c.dbs_check_date) {
+    } else if (c.dbs_type !== "None" && !c.dbs_expiry_date && c.dbs_check_date) {
       const checkDate = new Date(c.dbs_check_date);
       if (!Number.isNaN(checkDate.getTime())) {
         const staleAt = new Date(checkDate);
@@ -190,16 +204,18 @@ export async function getContractorComplianceAlerts(
   // Contractor certificates.
   for (const cert of certRows) {
     if (!cert.expiry_date) continue;
-    const expiry = new Date(cert.expiry_date);
-    if (Number.isNaN(expiry.getTime()) || expiry > insuranceThreshold) continue;
-    const expired = expiry < now;
+    const expiryDate = String(cert.expiry_date).slice(0, 10);
+    const bucket = expiryReminderBucket(expiryDate, now);
+    if (bucket === null) continue;
+    const expiry = new Date(`${expiryDate}T00:00:00Z`);
+    const expired = expiryDate < now.toISOString().slice(0, 10);
     alerts.push({
       contractorId: cert.contractor_id,
       contractorName: cert.contractor_name,
       contractorEmail: cert.contractor_email,
       company: cert.contractor_company,
       kind: "cert",
-      milestone: `cert:${cert.id}:${expiry.toISOString().slice(0, 10)}`,
+      milestone: `cert:${cert.id}:${expiryDate}:${bucket}`,
       detail: expired
         ? `${cert.certificate_name} certificate expired on ${fmtDate(expiry)}`
         : `${cert.certificate_name} certificate expires on ${fmtDate(expiry)}`,
@@ -269,7 +285,7 @@ function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: stri
     </div>
     <div style="padding:32px 40px;">
       <p style="font-size:15px;color:#334155;margin:0 0 20px;">
-        ${alerts.length} contractor compliance item${alerts.length !== 1 ? "s need" : " needs"} attention — insurance is expiring or a DBS check is out of date. Please chase renewals or update the records in ComplyTrack.
+         ${alerts.length} contractor compliance item${alerts.length !== 1 ? "s need" : " needs"} attention — an insurance policy, DBS/PVG check or certificate needs review. Please chase renewals or update the records in ComplyTrack.
       </p>
       <table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:12px;overflow:hidden;">
         <tbody>${rows}</tbody>
@@ -363,6 +379,7 @@ type PushSender = typeof sendPushToUsers;
 export async function runContractorComplianceReminderJob(
   send: EmailSender = sendEmail,
   sendPush: PushSender = sendPushToUsers,
+  now: Date = new Date(),
 ): Promise<ContractorComplianceJobResult> {
   const result: ContractorComplianceJobResult = {
     clientsChecked: 0,
@@ -372,7 +389,6 @@ export async function runContractorComplianceReminderJob(
     errors: 0,
   };
   const appUrl = getPublicAppUrl();
-  const now = new Date();
 
   const clients = await db
     .select({ id: clientsTable.id, name: clientsTable.name })

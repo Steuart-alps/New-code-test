@@ -30,7 +30,7 @@ function ExpiryChip({ date }: { date: string | null }) {
   return <span className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 rounded-full px-2.5 py-0.5 font-medium"><CheckCircle2 className="w-3 h-3" /> Valid until {format(d, "d MMM yyyy")}</span>;
 }
 
-const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"];
+const DBS_TYPES = ["Basic", "Standard", "Enhanced", "PVG Scheme", "None"];
 
 interface Cert {
   id: number;
@@ -264,7 +264,10 @@ export default function ContractorPortalPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Check type</label>
-              <select value={dbsType} onChange={e => setDbsType(e.target.value)}
+              <select value={dbsType} onChange={e => {
+                setDbsType(e.target.value);
+                if (e.target.value === "None") setDbsExpiryDate("");
+              }}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
                 <option value="">— Select —</option>
                 {DBS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, jsonb, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -16,8 +16,12 @@ export const contractorsTable = pgTable("contractors", {
   notes: text("notes"),
   trades: jsonb("trades").default([]).$type<string[]>(),
   gasSafeNumber: text("gas_safe_number"),
+  gasSafeRegistration: text("gas_safe_registration"),
   publicLiabilityExpiry: timestamp("public_liability_expiry"),
   dbsCheckDate: timestamp("dbs_check_date"),
+  dbsIssueDate: date("dbs_issue_date", { mode: "date" }),
+  dbsType: text("dbs_type"),
+  dbsExpiryDate: timestamp("dbs_expiry_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -380,9 +380,9 @@ export default function ContractorDetailPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">Time-limited certificates held by this contractor</p>
               </div>
-              <Button size="sm" onClick={openAddCert} className="shadow-sm">
+              {canResend && <Button size="sm" onClick={openAddCert} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Certificate
-              </Button>
+              </Button>}
             </div>
             <div>
               {loadingCerts ? (
@@ -410,14 +410,14 @@ export default function ContractorDetailPage() {
                             : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex justify-end gap-1">
+                          {canResend && <div className="flex justify-end gap-1">
                             <Button variant="ghost" size="icon" onClick={() => openEditCert(cert)}>
                               <Pencil className="w-3.5 h-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteCertId(cert.id)}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
-                          </div>
+                          </div>}
                         </td>
                       </tr>
                     ))}

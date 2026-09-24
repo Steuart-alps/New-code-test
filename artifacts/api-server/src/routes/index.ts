@@ -68,6 +68,9 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use("/billing", billingRouter);
+// Public contractor self-service portal — token-protected, not login-protected.
+// Mount before root-level routers that install requireAuth for all later paths.
+router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -135,7 +138,4 @@ router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/track-actions", trackActionsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
-// Public contractor self-service portal — no auth, token-protected
-router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
-
 export default router;

@@ -8,7 +8,7 @@
 - [Testing internal jobs](job-testing-pattern.md) — test cron-style jobs by injecting deps + esbuild-bundling a TS entry; neutralize/restore real dev rows around table-scanning jobs.
 - [Validation steps setup](validation-steps.md) — test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
-- [API route middleware](api-route-middleware.md) — admin guard in routes is `requireClientAdmin` from `requireAuth.ts`; no separate middleware file; `requireCanAdmin` does not exist.
+- [API route middleware](api-route-middleware.md) — admin guards live in requireAuth; root-mounted auth middleware intercepts later public routes, so mount public routers first.
 - [Mobile app plan](mobile-app-plan.md) — Expo SDK 54 app built; screens, API calls, design tokens, known gaps (KitchenTrack, 2FA, push notifs) documented.
 - [Mobile auth architecture](mobile-auth-architecture.md) — bearer token auth via mobile_sessions table; loadUser checks both session cookie and Authorization: Bearer header.
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.

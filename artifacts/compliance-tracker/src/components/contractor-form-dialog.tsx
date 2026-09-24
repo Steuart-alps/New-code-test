@@ -39,10 +39,11 @@ const TRADE_OPTIONS = [
 // ── Form schema ───────────────────────────────────────────────────────────────
 
 const DBS_TYPE_OPTIONS = [
-  "DBS Check (Basic)",
-  "DBS Check (Standard)",
-  "DBS Check (Enhanced)",
-  "PVG Scheme (Scotland)",
+  "Basic",
+  "Standard",
+  "Enhanced",
+  "PVG Scheme",
+  "None",
 ] as const;
 
 const formSchema = z.object({
@@ -259,10 +260,15 @@ export function ContractorFormDialog({
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
                 <Label htmlFor="dbsType">DBS / PVG Check Type</Label>
-                <Select value={form.watch("dbsType") || ""} onValueChange={v => form.setValue("dbsType", v === "_none" ? "" : v)}>
-                  <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="None" /></SelectTrigger>
+                 <Select value={form.watch("dbsType") || ""} onValueChange={v => {
+                   form.setValue("dbsType", v);
+                   if (v === "None") {
+                     form.setValue("dbsIssueDate", "");
+                     form.setValue("dbsExpiryDate", "");
+                   }
+                 }}>
+                   <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="Not set" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="_none">None</SelectItem>
                     {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>

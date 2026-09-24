@@ -376,6 +376,55 @@ async function main() {
       r3.remindersClaimed === 1 && sent.length === 1,
       `claimed=${r3.remindersClaimed}, captured=${sent.length}`,
     );
+
+    // Explicit DBS expiry and each contractor certificate get separate 60-
+    // and 30-day milestones; a rerun within either window must be idempotent.
+    const today = new Date();
+    const expiry55 = daysFromNow(55);
+    const dbsDue = await seedContractor("dbs-due", {
+      dbsType: "Enhanced", dbsExpiryDate: expiry55,
+    });
+    await seedContractor("dbs-none", { dbsType: "None", dbsExpiryDate: expiry55 });
+    const certOwner = await seedContractor("cert-due", {});
+    const insertedCert = await db.execute(sql`
+      INSERT INTO contractor_certificates
+        (client_id, contractor_id, certificate_name, issuer, completed_date, expiry_date, notes)
+      VALUES (${clientId}, ${certOwner.id}, 'IPAF', 'Test issuer', ${daysFromNow(-100)}, ${expiry55}, 'Test')
+      RETURNING id
+    `);
+    const certId = insertedCert.rows[0].id;
+    const initialAlerts = await getContractorComplianceAlerts(clientId, today, 90);
+    check("DBS expiry enters 60-day window", initialAlerts.some(a =>
+      a.contractorId === dbsDue.id && a.milestone.endsWith(":60")), "DBS 60-day reminder missing");
+    check("certificate expiry enters 60-day window", initialAlerts.some(a =>
+      a.contractorId === certOwner.id && a.milestone === `cert:${certId}:${expiry55.toISOString().slice(0, 10)}:60`),
+    "certificate 60-day reminder missing");
+    check("DBS type None does not alert", !initialAlerts.some(a =>
+      a.contractorName.includes("dbs-none")), "None was treated as a DBS check");
+
+    sent.length = 0;
+    const at60 = await runContractorComplianceReminderJob(fakeSend, fakePush, today);
+    check("60-day manager digest includes DBS and certificate", at60.remindersClaimed === 2
+      && sent[0]?.html.includes(dbsDue.name) && sent[0]?.html.includes("IPAF"),
+    `claimed=${at60.remindersClaimed}`);
+    const again60 = await runContractorComplianceReminderJob(fakeSend, fakePush, today);
+    check("60-day milestone is deduplicated", again60.remindersClaimed === 0,
+      `claimed=${again60.remindersClaimed}`);
+    const thirtyDayRun = new Date(today.getTime() + 25 * 86_400_000);
+    const at30 = await runContractorComplianceReminderJob(fakeSend, fakePush, thirtyDayRun);
+    check("30-day DBS and certificate reminders are distinct", at30.remindersClaimed === 2,
+      `claimed=${at30.remindersClaimed}`);
+    const again30 = await runContractorComplianceReminderJob(fakeSend, fakePush, thirtyDayRun);
+    check("30-day milestone is deduplicated", again30.remindersClaimed === 0,
+      `claimed=${again30.remindersClaimed}`);
+    const milestones = (await db.execute(sql`
+      SELECT milestone FROM contractor_compliance_reminder_log
+      WHERE client_id=${clientId} AND contractor_id IN (${dbsDue.id}, ${certOwner.id})
+    `)).rows.map(row => row.milestone);
+    check("dedupe log retains both dates for each item", milestones.length === 4
+      && milestones.some(m => m.startsWith("dbs-expiry:") && m.endsWith(":30"))
+      && milestones.some(m => m.startsWith("cert:") && m.endsWith(":30")),
+    JSON.stringify(milestones));
   } finally {
     try {
       if (clientId != null) {
