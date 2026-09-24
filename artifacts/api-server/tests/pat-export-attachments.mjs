@@ -145,12 +145,15 @@ async function main() {
     assert("manifest records included attachments", manifest.includes(",included,"));
     assert("manifest excludes foreign tenant document", !manifest.includes(foreignDocument.document.objectPath));
 
-    const alphaEntry = entries.find((entry) => entry.startsWith("attachments/doc-track/") && entry.includes(`PAT alpha evidence ${stamp}`));
-    const betaEntry = entries.find((entry) => entry.startsWith("attachments/doc-track/") && entry.includes(`PAT beta evidence ${stamp}`));
+    const alphaEntry = entries.find((entry) => entry.startsWith("files/doc-track/") && entry.includes(`PAT alpha evidence ${stamp}`));
+    const betaEntry = entries.find((entry) => entry.startsWith("files/doc-track/") && entry.includes(`PAT beta evidence ${stamp}`));
     assert("ZIP contains alpha document", typeof alphaEntry === "string");
     assert("ZIP contains beta document", typeof betaEntry === "string");
     assert("ZIP alpha document retains content", execFileSync("unzip", ["-p", exportPath, alphaEntry], { encoding: "utf8" }) === alpha.content);
     assert("ZIP beta document retains content", execFileSync("unzip", ["-p", exportPath, betaEntry], { encoding: "utf8" }) === beta.content);
+    const documentCsv = execFileSync("unzip", ["-p", exportPath, "doc-track/documents.csv"], { encoding: "utf8" });
+    assert("CSV points to included archive file", documentCsv.includes(alphaEntry) && documentCsv.includes(betaEntry));
+    assert("CSV does not expose private storage paths", !documentCsv.includes(alpha.document.objectPath) && !documentCsv.includes(beta.document.objectPath));
     assert("ZIP excludes foreign document name", !entries.some((entry) => entry.includes(`PAT foreign evidence ${stamp}`)));
   } finally {
     await rm(exportPath, { force: true });
