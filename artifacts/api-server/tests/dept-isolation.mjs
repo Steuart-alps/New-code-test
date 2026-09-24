@@ -151,7 +151,7 @@ async function main() {
 
   const fireBeta = await admin("POST", "/fire-safety", {
     checkType: "alarm",
-    checkDate: uniqueDate(2),
+    checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteBetaId,
   });
@@ -162,6 +162,8 @@ async function main() {
     checkType: "calorifier_temp",
     checkDate: uniqueDate(1),
     result: "pass",
+    temperature: 60,
+    performedBy: "Dept Test Admin",
     siteId: siteAlphaId,
   });
   const legAlphaId = [200, 201].includes(legAlpha.status) ? legAlpha.data?.id : null;
@@ -169,12 +171,26 @@ async function main() {
 
   const legBeta = await admin("POST", "/legionella", {
     checkType: "calorifier_temp",
-    checkDate: uniqueDate(2),
+    checkDate: uniqueDate(0),
     result: "pass",
+    temperature: 60,
+    performedBy: "Dept Test Admin",
     siteId: siteBetaId,
   });
   const legBetaId = [200, 201].includes(legBeta.status) ? legBeta.data?.id : null;
   check("admin: create beta legionella check", legBetaId != null, `status=${legBeta.status}`);
+
+  // Put one module record in the most recently completed month. A trend must
+  // return its count without leaking the record to another department.
+  const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
+    .toISOString().slice(0, 10);
+  const priorMonthCheck = await admin("POST", "/fire-safety", {
+    checkType: "alarm",
+    checkDate: lastMonthDate,
+    result: "pass",
+    siteId: siteAlphaId,
+  });
+  expectOk("admin: create prior-month module record", priorMonthCheck.status, [200, 201]);
 
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────
   const staffEmail = `dept-staff-alpha-${ts}@test.local`;
@@ -239,6 +255,34 @@ async function main() {
     "staff: compliance report excludes beta site",
     !(staffCompliance.data?.sites ?? []).some((site) => site.id === siteBetaId),
     "beta site appeared in active-department report",
+  );
+  const trend = await staff("GET", "/reports/compliance-trend?months=3");
+  expectOk("staff: GET /reports/compliance-trend (active department)", trend.status);
+  check(
+    "staff: trend excludes beta site",
+    !(trend.data?.series ?? []).some((series) => series.siteId === siteBetaId),
+    "beta site appeared in active-department trend",
+  );
+  check(
+    "staff: trend has three complete months",
+    (trend.data?.months ?? []).length === 3
+      && trend.data.to === new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 0)).toISOString().slice(0, 10),
+    `months=${JSON.stringify(trend.data?.months)}, to=${trend.data?.to}`,
+  );
+  check(
+    "staff: trend counts prior-month module record",
+    (trend.data?.series ?? []).find((series) => series.siteId === siteAlphaId)
+      ?.data.some((point) => point.month === lastMonthDate.slice(0, 7) && point.moduleRecordCount >= 1),
+    "prior-month record missing from trend",
+  );
+  const priorMonthCount = trend.data?.series?.find((series) => series.siteId === siteAlphaId)
+    ?.data.find((point) => point.month === lastMonthDate.slice(0, 7))?.moduleRecordCount;
+  check(
+    "staff: monthly module total matches visible sites",
+    priorMonthCount >= 1
+      && trend.data?.monthlyTotals?.find((total) => total.month === lastMonthDate.slice(0, 7))
+        ?.moduleRecordCount === priorMonthCount,
+    `monthly total did not match scoped series`,
   );
   for (const [label, path] of [
     ["compliance department override", `/reports/compliance?from=${reportFrom}&to=${reportTo}&departmentId=${deptBetaId}`],

@@ -76,6 +76,7 @@ interface ReportData {
 interface TrendPoint {
   month: string; daysInMonth: number;
   amSubmitted: number; pmSubmitted: number;
+  moduleRecordCount: number;
   amPct: number; pmPct: number; combinedPct: number;
 }
 interface TrendSeries { siteId: number; siteName: string; data: TrendPoint[]; }
@@ -83,6 +84,7 @@ interface TrendData {
   from: string; to: string; months: string[];
   sites: Site[];
   series: TrendSeries[];
+  monthlyTotals: Array<{ month: string; moduleRecordCount: number }>;
 }
 
 interface RiskReportData {
@@ -162,10 +164,10 @@ function exportComplianceCsv(data: ReportData) {
 function exportTrendCsv(data: TrendData) {
   const lines: string[] = [];
   lines.push("COMPLIANCE TREND");
-  lines.push(`Site,Month,AM %,PM %,Combined %,Days in Month`);
+  lines.push(`Site,Month,AM %,PM %,Combined %,Days in Month,Module records`);
   for (const s of data.series) {
     for (const p of s.data) {
-      lines.push(`"${s.siteName}",${p.month},${p.amPct}%,${p.pmPct}%,${p.combinedPct}%,${p.daysInMonth}`);
+      lines.push(`"${s.siteName.replace(/"/g, '""')}",${p.month},${p.amPct}%,${p.pmPct}%,${p.combinedPct}%,${p.daysInMonth},${p.moduleRecordCount}`);
     }
   }
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
@@ -697,7 +699,7 @@ function TrendTab({
             <CardHeader>
               <CardTitle className="text-base">Daily Checklist Compliance — {metricLabel} Trend</CardTitle>
               <p className="text-xs text-muted-foreground">
-                {data.months.length}-month view ending {fmtMonth(data.months[data.months.length - 1] ?? "")}.
+                {data.months.length} completed months ending {fmtMonth(data.months[data.months.length - 1] ?? "")}.
                 Each point is the % of days in that month with a submitted checklist.
               </p>
             </CardHeader>
@@ -731,6 +733,7 @@ function TrendTab({
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Monthly Breakdown</CardTitle>
+              <p className="text-xs text-muted-foreground">Checklist completion by site; module records count activity across the other tracked modules.</p>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -764,6 +767,14 @@ function TrendTab({
                         })}
                       </tr>
                     ))}
+                    <tr className="border-b bg-muted/20">
+                      <td className="py-2 pr-4 font-medium sticky left-0 bg-muted/20">Module records (shown sites)</td>
+                      {data.months.map(month => (
+                        <td key={month} className="py-2 px-3 text-right tabular-nums">
+                          {data.monthlyTotals.find(total => total.month === month)?.moduleRecordCount ?? 0}
+                        </td>
+                      ))}
+                    </tr>
                   </tbody>
                 </table>
               </div>

@@ -11,3 +11,7 @@ description: How the automated test validation steps are wired and platform quir
 
 **Duplicate test workflows race:** `trial-reminders` and `test-trial-reminders` run the same suite; when both fire concurrently (e.g. after a restart-all), their seeded rows cross-contaminate and one fails with swapped email expectations. Re-run one alone to confirm; ignore paired failures.
 - Build validation steps: `build-api-server` and `build-web`. The vite config hard-requires `PORT` and `BASE_PATH` env vars (normally injected by the artifact service), so the `build-web` command must inline `PORT=5000 BASE_PATH=/`.
+
+**Broad completion-check contention:** automatic completion validation starts many API integration suites together. Their shared lock waiters can time out, and the suite holding the lock can miss its readiness deadline under the concurrent load even when its assertions pass in isolation.
+- **Why:** a parallel completion run reported lock timeouts and module-server readiness failure while the same module suite passed when rerun alone.
+- **How to apply:** inspect failure logs for lock/readiness symptoms, run the affected suite serially to separate infrastructure contention from a real regression, and avoid broad retries that reproduce the same contention.
