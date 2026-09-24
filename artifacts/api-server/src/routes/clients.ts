@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
@@ -148,6 +148,18 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
   const id = Number(req.params.id);
   if (!canAccessClient(req, id)) {
     res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const holdCheck = await db.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM privacy_retention_schedules
+      WHERE client_id = ${id}
+        AND active = true
+        AND (legal_hold_active = true OR deletion_exception = true)
+    ) AS blocked
+  `);
+  if ((holdCheck.rows[0] as { blocked?: boolean } | undefined)?.blocked) {
+    res.status(409).json({ error: "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
     return;
   }
   await db.delete(clientsTable).where(eq(clientsTable.id, id));

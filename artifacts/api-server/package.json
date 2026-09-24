@@ -24,6 +24,7 @@
     "test:stored-track-lock": "bash tests/run-stored-track-lock.sh",
     "test:config": "bash tests/run-db-workflow.sh tests/config-endpoints.mjs",
     "test:config:ci": "bash tests/run-config-endpoints.sh",
+    "test:privacy-governance:ci": "bash tests/run-privacy-governance.sh",
     "test:training-expiry": "bash tests/run-db-workflow.sh tests/training-expiry-reminders.mjs",
     "test:staff-roster-reconciliation": "bash tests/run-staff-roster-reconciliation.sh",
     "test:staff-pin": "bash tests/run-staff-pin.sh",

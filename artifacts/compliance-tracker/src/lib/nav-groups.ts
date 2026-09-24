@@ -107,7 +107,10 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   }
 
   if (canAdmin) {
-    groups.find(g => g.id === "admin")?.items.push({ href: "/settings", label: "Settings", icon: Settings });
+    groups.find(g => g.id === "admin")?.items.push(
+      { href: "/privacy-governance", label: "Privacy Centre", icon: ShieldCheck },
+      { href: "/settings", label: "Settings", icon: Settings }
+    );
   }
 
   return groups.filter(g => g.items.length > 0);

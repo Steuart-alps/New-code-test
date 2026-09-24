@@ -571,6 +571,28 @@ router.get(
       const staffRows = await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`);
       archive.append(rawToCsv(staffRows.rows), { name: "staff-roster/staff.csv" });
 
+      // Privacy governance contains the customer's own operational records,
+      // rights-request evidence and timers. Keep it in the tenant export so
+      // administrators can retain a portable copy before offboarding.
+      const [privacyProgram, privacyActivities, privacyRequests, privacyRetention, privacyVerifications, privacyProcessors, privacyBreaches] = await Promise.all([
+        db.execute(sql`SELECT * FROM privacy_programs WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_processing_activities WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_rights_requests WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_retention_schedules WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_retention_verifications WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_processors WHERE client_id = ${cid} ORDER BY id`),
+        db.execute(sql`SELECT * FROM privacy_breaches WHERE client_id = ${cid} ORDER BY id`),
+      ]);
+      archive.append(JSON.stringify({
+        program: privacyProgram.rows,
+        processingActivities: privacyActivities.rows,
+        rightsRequests: privacyRequests.rows,
+        retentionSchedules: privacyRetention.rows,
+        retentionVerifications: privacyVerifications.rows,
+        processorsAndTransfers: privacyProcessors.rows,
+        breachAssessments: privacyBreaches.rows,
+      }, null, 2), { name: "privacy-governance.json" });
+
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Export query error", err);

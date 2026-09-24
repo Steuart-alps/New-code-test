@@ -6,6 +6,7 @@ export * from './generated/types';
 // If codegen introduces a new collision, the root typecheck will flag it —
 // add the name here, preferring the ./generated/api copy.
 export {
+  AddPrivacyRetentionVerificationParams,
   GetFoodSafetyRecordByDateParams,
   GetStorageUsageResponse,
   RequestUploadUrlBody,
@@ -13,4 +14,5 @@ export {
   SavePATPresetTemplateBody,
   SendRemindersResponse,
   TestEmailResponse,
+  UpdatePrivacyRecordParams,
 } from "./generated/api";

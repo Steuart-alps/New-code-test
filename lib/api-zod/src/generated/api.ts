@@ -775,6 +775,892 @@ export const UpdateSettingsResponse = zod.object({
 
 
 /**
+ * @summary Get the current client's privacy-governance records
+ */
+export const GetPrivacyGovernanceQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const getPrivacyGovernanceResponseBreachesItemOneAffectedSubjectsEstimateMin = 0;
+
+export const getPrivacyGovernanceResponseBreachesItemOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const GetPrivacyGovernanceResponse = zod.object({
+  "program": zod.union([zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})),zod.null()]),
+  "activities": zod.array(zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+}))),
+  "rightsRequests": zod.array(zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+}))),
+  "retentionSchedules": zod.array(zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+}))),
+  "retentionVerifications": zod.array(zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "scheduleId": zod.number(),
+  "verifiedBy": zod.number().nullable(),
+  "verifiedAt": zod.date()
+}))),
+  "processors": zod.array(zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+}))),
+  "breaches": zod.array(zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(getPrivacyGovernanceResponseBreachesItemOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(getPrivacyGovernanceResponseBreachesItemOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+})))
+})
+
+
+/**
+ * @summary Save the client's controller and processor responsibilities
+ */
+export const SavePrivacyProgramQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const SavePrivacyProgramBody = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+})
+
+export const SavePrivacyProgramResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Add a processing, rights, retention, processor or breach record
+ */
+export const CreatePrivacyRecordQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const createPrivacyRecordBodyFiveAffectedSubjectsEstimateMin = 0;
+
+export const createPrivacyRecordBodyFiveAffectedRecordsEstimateMin = 0;
+
+
+
+export const CreatePrivacyRecordBody = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(createPrivacyRecordBodyFiveAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(createPrivacyRecordBodyFiveAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+})])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const createPrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin = 0;
+
+export const createPrivacyRecordResponseFiveOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const CreatePrivacyRecordResponse = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+})),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+})),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+})),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+})),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(createPrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(createPrivacyRecordResponseFiveOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+}))])
+
+
+/**
+ * @summary Update a privacy record without changing its tenant
+ */
+
+
+
+export const UpdatePrivacyRecordParams = zod.object({
+  "kind": zod.enum(['activity', 'rights_request', 'retention', 'processor', 'breach']),
+  "id": zod.coerce.number().min(1)
+})
+
+export const UpdatePrivacyRecordQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const updatePrivacyRecordBodyFiveAffectedSubjectsEstimateMin = 0;
+
+export const updatePrivacyRecordBodyFiveAffectedRecordsEstimateMin = 0;
+
+
+
+export const UpdatePrivacyRecordBody = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(updatePrivacyRecordBodyFiveAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(updatePrivacyRecordBodyFiveAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+})])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const updatePrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin = 0;
+
+export const updatePrivacyRecordResponseFiveOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const UpdatePrivacyRecordResponse = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+})),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+})),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+})),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+})),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(updatePrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(updatePrivacyRecordResponseFiveOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+}))])
+
+
+/**
+ * @summary Record evidence of deletion, an active legal hold or a deletion exception
+ */
+
+
+
+export const AddPrivacyRetentionVerificationParams = zod.object({
+  "id": zod.coerce.number().min(1)
+})
+
+export const AddPrivacyRetentionVerificationQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+export const AddPrivacyRetentionVerificationBody = zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+})
+
+
+
+
+
+
+export const AddPrivacyRetentionVerificationResponse = zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "scheduleId": zod.number(),
+  "verifiedBy": zod.number().nullable(),
+  "verifiedAt": zod.date()
+}))
+
+
+/**
  * @summary Get storage usage for the current account
  */
 export const getStorageUsageResponseUsedBytesMin = 0;

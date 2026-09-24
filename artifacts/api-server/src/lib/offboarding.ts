@@ -549,6 +549,18 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
 
   for (const client of due) {
     try {
+      const privacyHold = await db.execute(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM privacy_retention_schedules
+          WHERE client_id = ${client.id}
+            AND active = true
+            AND (legal_hold_active = true OR deletion_exception = true)
+        ) AS blocked
+      `);
+      if ((privacyHold.rows[0] as { blocked?: boolean } | undefined)?.blocked) {
+        logger.warn({ clientId: client.id }, "Scheduled deletion skipped because a privacy hold or exception is active");
+        continue;
+      }
       logger.info({ clientId: client.id }, "Starting data deletion for client");
       await deleteAllClientData(client.id);
 
@@ -585,6 +597,16 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
  * missing table (schema drift) never aborts the whole deletion run.
  */
 async function deleteAllClientData(cid: number): Promise<void> {
+  // Remove the tenant's privacy records only after the scheduled-delete guard
+  // above confirms there is no active legal hold or recorded exception.
+  await db.execute(sql`DELETE FROM privacy_retention_verifications WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_rights_requests WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_breaches WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_retention_schedules WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_processors WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_processing_activities WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_programs WHERE client_id = ${cid}`).catch(() => {});
+
   // ─ Swim track (surveillance_checks refs sessions) ──────────────────────────
   await db.execute(sql`DELETE FROM swim_surveillance_checks WHERE client_id = ${cid}`).catch(() => {});
   await db.execute(sql`DELETE FROM swim_incidents             WHERE client_id = ${cid}`).catch(() => {});

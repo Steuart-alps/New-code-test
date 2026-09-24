@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AddPrivacyRetentionVerificationParams,
   AppSettings,
   BikeTrackConfig,
   Category,
@@ -38,6 +39,7 @@ import type {
   CreatePATApplianceRequest,
   CreatePATTestRequest,
   CreatePremisesInspectionRequest,
+  CreatePrivacyRecordParams,
   CreateSiteRequest,
   DashboardStats,
   ErrorResponse,
@@ -59,6 +61,7 @@ import type {
   GetLegionellaConfigParams,
   GetLegionellaStatusParams,
   GetPATPresetTemplates200,
+  GetPrivacyGovernanceParams,
   GreenTrackConfig,
   HealthStatus,
   HotTubCheck,
@@ -83,10 +86,18 @@ import type {
   PoolTrackConfig,
   PremisesInspection,
   PremisesTrackSummary,
+  PrivacyGovernanceResponse,
+  PrivacyProgram,
+  PrivacyProgramInput,
+  PrivacyRecord,
+  PrivacyRecordInput,
+  PrivacyRetentionVerification,
+  PrivacyRetentionVerificationInput,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResetFoodSafetyConfigParams,
   SavePATPresetTemplateBody,
+  SavePrivacyProgramParams,
   SendRemindersResponse,
   Site,
   StorageUsage,
@@ -103,6 +114,7 @@ import type {
   UpdateHotTubConfigParams,
   UpdateLegionellaCheckRequest,
   UpdateLegionellaConfigParams,
+  UpdatePrivacyRecordParams,
   UpdateSiteRequest,
   UpdateStatusRequest
 } from './api.schemas';
@@ -2577,6 +2589,412 @@ export const useUpdateSettings = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateSettingsMutationOptions(options));
+    }
+
+export const getGetPrivacyGovernanceUrl = (params?: GetPrivacyGovernanceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance?${stringifiedParams}` : `/api/privacy-governance`
+}
+
+/**
+ * @summary Get the current client's privacy-governance records
+ */
+export const getPrivacyGovernance = async (params?: GetPrivacyGovernanceParams, options?: RequestInit): Promise<PrivacyGovernanceResponse> => {
+
+  return customFetch<PrivacyGovernanceResponse>(getGetPrivacyGovernanceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPrivacyGovernanceQueryKey = (params?: GetPrivacyGovernanceParams,) => {
+    return [
+    `/api/privacy-governance`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPrivacyGovernanceQueryOptions = <TData = Awaited<ReturnType<typeof getPrivacyGovernance>>, TError = ErrorType<unknown>>(params?: GetPrivacyGovernanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrivacyGovernance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPrivacyGovernanceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPrivacyGovernance>>> = ({ signal }) => getPrivacyGovernance(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPrivacyGovernance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPrivacyGovernanceQueryResult = NonNullable<Awaited<ReturnType<typeof getPrivacyGovernance>>>
+export type GetPrivacyGovernanceQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current client's privacy-governance records
+ */
+
+export function useGetPrivacyGovernance<TData = Awaited<ReturnType<typeof getPrivacyGovernance>>, TError = ErrorType<unknown>>(
+ params?: GetPrivacyGovernanceParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrivacyGovernance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPrivacyGovernanceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSavePrivacyProgramUrl = (params?: SavePrivacyProgramParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/program?${stringifiedParams}` : `/api/privacy-governance/program`
+}
+
+/**
+ * @summary Save the client's controller and processor responsibilities
+ */
+export const savePrivacyProgram = async (privacyProgramInput: PrivacyProgramInput,
+    params?: SavePrivacyProgramParams, options?: RequestInit): Promise<PrivacyProgram> => {
+
+  return customFetch<PrivacyProgram>(getSavePrivacyProgramUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyProgramInput)
+  }
+);}
+
+
+
+
+
+export const getSavePrivacyProgramMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePrivacyProgram>>, TError,{data: BodyType<PrivacyProgramInput>;params?: SavePrivacyProgramParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof savePrivacyProgram>>, TError,{data: BodyType<PrivacyProgramInput>;params?: SavePrivacyProgramParams}, TContext> => {
+
+const mutationKey = ['savePrivacyProgram'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof savePrivacyProgram>>, {data: BodyType<PrivacyProgramInput>;params?: SavePrivacyProgramParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  savePrivacyProgram(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SavePrivacyProgramMutationResult = NonNullable<Awaited<ReturnType<typeof savePrivacyProgram>>>
+    export type SavePrivacyProgramMutationBody = BodyType<PrivacyProgramInput>
+    export type SavePrivacyProgramMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Save the client's controller and processor responsibilities
+ */
+export const useSavePrivacyProgram = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePrivacyProgram>>, TError,{data: BodyType<PrivacyProgramInput>;params?: SavePrivacyProgramParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof savePrivacyProgram>>,
+        TError,
+        {data: BodyType<PrivacyProgramInput>;params?: SavePrivacyProgramParams},
+        TContext
+      > => {
+      return useMutation(getSavePrivacyProgramMutationOptions(options));
+    }
+
+export const getCreatePrivacyRecordUrl = (params?: CreatePrivacyRecordParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/records?${stringifiedParams}` : `/api/privacy-governance/records`
+}
+
+/**
+ * @summary Add a processing, rights, retention, processor or breach record
+ */
+export const createPrivacyRecord = async (privacyRecordInput: PrivacyRecordInput,
+    params?: CreatePrivacyRecordParams, options?: RequestInit): Promise<PrivacyRecord> => {
+
+  return customFetch<PrivacyRecord>(getCreatePrivacyRecordUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyRecordInput)
+  }
+);}
+
+
+
+
+
+export const getCreatePrivacyRecordMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPrivacyRecord>>, TError,{data: BodyType<PrivacyRecordInput>;params?: CreatePrivacyRecordParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPrivacyRecord>>, TError,{data: BodyType<PrivacyRecordInput>;params?: CreatePrivacyRecordParams}, TContext> => {
+
+const mutationKey = ['createPrivacyRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPrivacyRecord>>, {data: BodyType<PrivacyRecordInput>;params?: CreatePrivacyRecordParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  createPrivacyRecord(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePrivacyRecordMutationResult = NonNullable<Awaited<ReturnType<typeof createPrivacyRecord>>>
+    export type CreatePrivacyRecordMutationBody = BodyType<PrivacyRecordInput>
+    export type CreatePrivacyRecordMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add a processing, rights, retention, processor or breach record
+ */
+export const useCreatePrivacyRecord = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPrivacyRecord>>, TError,{data: BodyType<PrivacyRecordInput>;params?: CreatePrivacyRecordParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPrivacyRecord>>,
+        TError,
+        {data: BodyType<PrivacyRecordInput>;params?: CreatePrivacyRecordParams},
+        TContext
+      > => {
+      return useMutation(getCreatePrivacyRecordMutationOptions(options));
+    }
+
+export const getUpdatePrivacyRecordUrl = (kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach',
+    id: number,
+    params?: UpdatePrivacyRecordParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/records/${kind}/${id}?${stringifiedParams}` : `/api/privacy-governance/records/${kind}/${id}`
+}
+
+/**
+ * @summary Update a privacy record without changing its tenant
+ */
+export const updatePrivacyRecord = async (kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach',
+    id: number,
+    privacyRecordInput: PrivacyRecordInput,
+    params?: UpdatePrivacyRecordParams, options?: RequestInit): Promise<PrivacyRecord> => {
+
+  return customFetch<PrivacyRecord>(getUpdatePrivacyRecordUrl(kind,id,params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyRecordInput)
+  }
+);}
+
+
+
+
+
+export const getUpdatePrivacyRecordMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePrivacyRecord>>, TError,{kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach';id: number;data: BodyType<PrivacyRecordInput>;params?: UpdatePrivacyRecordParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePrivacyRecord>>, TError,{kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach';id: number;data: BodyType<PrivacyRecordInput>;params?: UpdatePrivacyRecordParams}, TContext> => {
+
+const mutationKey = ['updatePrivacyRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePrivacyRecord>>, {kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach';id: number;data: BodyType<PrivacyRecordInput>;params?: UpdatePrivacyRecordParams}> = (props) => {
+          const {kind,id,data,params} = props ?? {};
+
+          return  updatePrivacyRecord(kind,id,data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePrivacyRecordMutationResult = NonNullable<Awaited<ReturnType<typeof updatePrivacyRecord>>>
+    export type UpdatePrivacyRecordMutationBody = BodyType<PrivacyRecordInput>
+    export type UpdatePrivacyRecordMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a privacy record without changing its tenant
+ */
+export const useUpdatePrivacyRecord = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePrivacyRecord>>, TError,{kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach';id: number;data: BodyType<PrivacyRecordInput>;params?: UpdatePrivacyRecordParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePrivacyRecord>>,
+        TError,
+        {kind: 'activity' | 'rights_request' | 'retention' | 'processor' | 'breach';id: number;data: BodyType<PrivacyRecordInput>;params?: UpdatePrivacyRecordParams},
+        TContext
+      > => {
+      return useMutation(getUpdatePrivacyRecordMutationOptions(options));
+    }
+
+export const getAddPrivacyRetentionVerificationUrl = (id: number,
+    params?: AddPrivacyRetentionVerificationParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/privacy-governance/retention-schedules/${id}/verifications?${stringifiedParams}` : `/api/privacy-governance/retention-schedules/${id}/verifications`
+}
+
+/**
+ * @summary Record evidence of deletion, an active legal hold or a deletion exception
+ */
+export const addPrivacyRetentionVerification = async (id: number,
+    privacyRetentionVerificationInput: PrivacyRetentionVerificationInput,
+    params?: AddPrivacyRetentionVerificationParams, options?: RequestInit): Promise<PrivacyRetentionVerification> => {
+
+  return customFetch<PrivacyRetentionVerification>(getAddPrivacyRetentionVerificationUrl(id,params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privacyRetentionVerificationInput)
+  }
+);}
+
+
+
+
+
+export const getAddPrivacyRetentionVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPrivacyRetentionVerification>>, TError,{id: number;data: BodyType<PrivacyRetentionVerificationInput>;params?: AddPrivacyRetentionVerificationParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof addPrivacyRetentionVerification>>, TError,{id: number;data: BodyType<PrivacyRetentionVerificationInput>;params?: AddPrivacyRetentionVerificationParams}, TContext> => {
+
+const mutationKey = ['addPrivacyRetentionVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addPrivacyRetentionVerification>>, {id: number;data: BodyType<PrivacyRetentionVerificationInput>;params?: AddPrivacyRetentionVerificationParams}> = (props) => {
+          const {id,data,params} = props ?? {};
+
+          return  addPrivacyRetentionVerification(id,data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddPrivacyRetentionVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof addPrivacyRetentionVerification>>>
+    export type AddPrivacyRetentionVerificationMutationBody = BodyType<PrivacyRetentionVerificationInput>
+    export type AddPrivacyRetentionVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record evidence of deletion, an active legal hold or a deletion exception
+ */
+export const useAddPrivacyRetentionVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPrivacyRetentionVerification>>, TError,{id: number;data: BodyType<PrivacyRetentionVerificationInput>;params?: AddPrivacyRetentionVerificationParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof addPrivacyRetentionVerification>>,
+        TError,
+        {id: number;data: BodyType<PrivacyRetentionVerificationInput>;params?: AddPrivacyRetentionVerificationParams},
+        TContext
+      > => {
+      return useMutation(getAddPrivacyRetentionVerificationMutationOptions(options));
     }
 
 export const getGetStorageUsageUrl = () => {

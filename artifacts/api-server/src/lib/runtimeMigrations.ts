@@ -46,6 +46,195 @@ export async function runRuntimeMigrations() {
     // Validate even on a new database with no encrypted rows, so a broken key
     // rotation cannot let the service report ready and fail only at dispatch.
     validateTokenEncryptionConfig();
+
+    // ---- Customer privacy-governance records ----
+    // These records support operational accountability; they do not determine
+    // whether a customer's processing is lawful or compliant.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_programs" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL UNIQUE REFERENCES "clients"("id") ON DELETE CASCADE,
+        "customer_role" text NOT NULL DEFAULT 'controller',
+        "controller_name" text,
+        "controller_contact" text,
+        "dpo_contact" text,
+        "notice_url" text,
+        "notice_version" text,
+        "notice_reviewed_at" timestamptz,
+        "processor_agreement_status" text NOT NULL DEFAULT 'not_assessed',
+        "processor_agreement_reviewed_at" timestamptz,
+        "responsibilities_notes" text,
+        "privacy_owner" text,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_program_customer_role" CHECK ("customer_role" IN ('controller','joint_controller','processor','mixed')),
+        CONSTRAINT "CHK_privacy_program_agreement_status" CHECK ("processor_agreement_status" IN ('not_assessed','in_place','pending','not_required'))
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_processing_activities" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "name" text NOT NULL,
+        "purpose" text NOT NULL,
+        "data_subjects" text NOT NULL,
+        "data_categories" text NOT NULL,
+        "article_6_basis" text NOT NULL,
+        "article_6_rationale" text,
+        "special_category_data" boolean NOT NULL DEFAULT false,
+        "article_9_condition" text,
+        "article_9_rationale" text,
+        "recipients" text,
+        "transfer_details" text,
+        "retention_criteria" text NOT NULL,
+        "security_measures" text,
+        "dpia_classification" text NOT NULL DEFAULT 'not_screened',
+        "dpia_rationale" text,
+        "dpia_completed_at" timestamptz,
+        "owner" text,
+        "review_due_at" timestamptz,
+        "active" boolean NOT NULL DEFAULT true,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_activity_dpia" CHECK ("dpia_classification" IN ('not_screened','not_required','required','in_progress','completed'))
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_rights_requests" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "request_type" text NOT NULL,
+        "subject_name" text NOT NULL,
+        "subject_contact" text,
+        "scope_description" text NOT NULL,
+        "received_at" timestamptz NOT NULL DEFAULT now(),
+        "due_at" timestamptz NOT NULL,
+        "extended_due_at" timestamptz,
+        "extension_reason" text,
+        "identity_status" text NOT NULL DEFAULT 'not_started',
+        "identity_method" text,
+        "identity_evidence" text,
+        "identity_verified_at" timestamptz,
+        "identity_verified_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "status" text NOT NULL DEFAULT 'received',
+        "decision" text,
+        "decision_rationale" text,
+        "decided_at" timestamptz,
+        "decided_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "response_sent_at" timestamptz,
+        "response_evidence" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_request_type" CHECK ("request_type" IN ('access','rectification','erasure','restriction','portability','objection','other')),
+        CONSTRAINT "CHK_privacy_request_identity" CHECK ("identity_status" IN ('not_started','in_progress','verified','failed')),
+        CONSTRAINT "CHK_privacy_request_status" CHECK ("status" IN ('received','in_progress','waiting_for_information','completed','refused','withdrawn')),
+        CONSTRAINT "CHK_privacy_request_decision" CHECK ("decision" IS NULL OR "decision" IN ('granted','partially_granted','refused','not_applicable'))
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_rights_requests_client_due" ON "privacy_rights_requests" ("client_id", "due_at")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_category" text NOT NULL,
+        "scope_description" text NOT NULL,
+        "retention_period" text NOT NULL,
+        "retention_trigger" text NOT NULL,
+        "justification" text NOT NULL,
+        "legal_hold_active" boolean NOT NULL DEFAULT false,
+        "legal_hold_reason" text,
+        "deletion_exception" boolean NOT NULL DEFAULT false,
+        "deletion_exception_reason" text,
+        "review_due_at" timestamptz,
+        "active" boolean NOT NULL DEFAULT true,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_retention_schedules_holds" ON "privacy_retention_schedules" ("client_id", "active", "legal_hold_active", "deletion_exception")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_retention_verifications" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "schedule_id" integer NOT NULL REFERENCES "privacy_retention_schedules"("id") ON DELETE CASCADE,
+        "outcome" text NOT NULL,
+        "records_reviewed" text NOT NULL,
+        "verification_method" text NOT NULL,
+        "evidence" text NOT NULL,
+        "verified_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "verified_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_retention_verification_outcome" CHECK ("outcome" IN ('deletion_verified','legal_hold_confirmed','exception_confirmed'))
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_processors" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "organization_name" text NOT NULL,
+        "role" text NOT NULL DEFAULT 'processor',
+        "parent_processor" text,
+        "service_description" text NOT NULL,
+        "data_categories" text NOT NULL,
+        "processing_countries" text NOT NULL,
+        "transfer_mechanism" text NOT NULL DEFAULT 'not_assessed',
+        "transfer_safeguards" text,
+        "transfer_assessment" text,
+        "agreement_status" text NOT NULL DEFAULT 'not_assessed',
+        "agreement_reviewed_at" timestamptz,
+        "transfer_reviewed_at" timestamptz,
+        "review_due_at" timestamptz,
+        "active" boolean NOT NULL DEFAULT true,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_processor_role" CHECK ("role" IN ('processor','subprocessor')),
+        CONSTRAINT "CHK_privacy_processor_transfer" CHECK ("transfer_mechanism" IN ('not_assessed','no_restricted_transfer','adequacy','uk_idta','eu_scc','uk_addendum','other')),
+        CONSTRAINT "CHK_privacy_processor_agreement" CHECK ("agreement_status" IN ('not_assessed','in_place','pending','not_required'))
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "privacy_breaches" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "discovered_at" timestamptz NOT NULL DEFAULT now(),
+        "occurred_from" timestamptz,
+        "occurred_to" timestamptz,
+        "description" text NOT NULL,
+        "data_categories" text NOT NULL,
+        "affected_subjects_estimate" integer,
+        "affected_records_estimate" integer,
+        "risk_level" text NOT NULL DEFAULT 'under_assessment',
+        "assessment_status" text NOT NULL DEFAULT 'assessing',
+        "assessment_rationale" text,
+        "containment_steps" text,
+        "authority_notification_required" boolean,
+        "authority_notification_due_at" timestamptz NOT NULL,
+        "authority_notified_at" timestamptz,
+        "authority_notification_reference" text,
+        "individual_notification_required" boolean,
+        "individual_notification_due_at" timestamptz,
+        "individuals_notified_at" timestamptz,
+        "evidence" text,
+        "assessed_at" timestamptz,
+        "assessed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "closed_at" timestamptz,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "updated_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "CHK_privacy_breach_risk" CHECK ("risk_level" IN ('under_assessment','unlikely','risk','high_risk')),
+        CONSTRAINT "CHK_privacy_breach_status" CHECK ("assessment_status" IN ('assessing','contained','closed'))
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_breaches_client_timer" ON "privacy_breaches" ("client_id", "authority_notification_due_at")`);
     // ---- Session store table (connect-pg-simple) ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "sessions" (
@@ -1651,6 +1840,22 @@ async function migrateStaffRoster() {
   await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT ''`);
   await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "first_name" text`);
   await db.execute(sql`ALTER TABLE "staff_roster" ADD COLUMN IF NOT EXISTS "last_name" text`);
+  // Existing installations may have the earlier PIN-only roster shape. Bring
+  // its portable roster fields up to the canonical table shape before exports
+  // or compliance screens select them.
+  await db.execute(sql`
+    ALTER TABLE "staff_roster"
+      ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS "job_title" text,
+      ADD COLUMN IF NOT EXISTS "department" text,
+      ADD COLUMN IF NOT EXISTS "email" text,
+      ADD COLUMN IF NOT EXISTS "phone" text,
+      ADD COLUMN IF NOT EXISTS "start_date" date,
+      ADD COLUMN IF NOT EXISTS "notes" text,
+      ADD COLUMN IF NOT EXISTS "active" boolean NOT NULL DEFAULT true,
+      ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now(),
+      ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()
+  `);
   await db.execute(sql`
     ALTER TABLE "staff_roster"
       ALTER COLUMN "first_name" DROP NOT NULL,

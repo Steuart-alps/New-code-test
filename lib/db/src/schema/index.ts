@@ -112,3 +112,5 @@ export * from "./green-track"
 ;
 export * from "./storage-usage"
 ;
+
+export * from "./privacy-governance";

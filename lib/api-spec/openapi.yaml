@@ -35,6 +35,8 @@ tags:
     description: PAT testing register operations (appliance inventory and test results)
   - name: premises-track
     description: PremisesTrack premises safety inspection operations
+  - name: privacy-governance
+    description: Customer privacy-governance records and rights workflows
 paths:
   /healthz:
     get:
@@ -705,6 +707,143 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppSettings"
+
+  /privacy-governance:
+    get:
+      operationId: getPrivacyGovernance
+      tags: [privacy-governance]
+      summary: Get the current client's privacy-governance records
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Privacy profile, processing records, rights requests and incident records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyGovernanceResponse"
+
+  /privacy-governance/program:
+    put:
+      operationId: savePrivacyProgram
+      tags: [privacy-governance]
+      summary: Save the client's controller and processor responsibilities
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyProgramInput"
+      responses:
+        "200":
+          description: Saved privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-governance/records:
+    post:
+      operationId: createPrivacyRecord
+      tags: [privacy-governance]
+      summary: Add a processing, rights, retention, processor or breach record
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "201":
+          description: Created privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/records/{kind}/{id}:
+    put:
+      operationId: updatePrivacyRecord
+      tags: [privacy-governance]
+      summary: Update a privacy record without changing its tenant
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [activity, rights_request, retention, processor, breach]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "200":
+          description: Updated privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/retention-schedules/{id}/verifications:
+    post:
+      operationId: addPrivacyRetentionVerification
+      tags: [privacy-governance]
+      summary: Record evidence of deletion, an active legal hold or a deletion exception
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+      responses:
+        "201":
+          description: Recorded verification evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRetentionVerification"
 
   /storage/usage:
     get:
@@ -2378,6 +2517,605 @@ components:
         - completionRate
         - contractorsCount
         - certificatesExpiringSoon
+
+    PrivacyProgramInput:
+      type: object
+      properties:
+        customerRole:
+          type: string
+          enum: [controller, joint_controller, processor, mixed]
+        controllerName:
+          type: string
+          nullable: true
+        controllerContact:
+          type: string
+          nullable: true
+        dpoContact:
+          type: string
+          nullable: true
+        noticeUrl:
+          type: string
+          nullable: true
+        noticeVersion:
+          type: string
+          nullable: true
+        noticeReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        processorAgreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        processorAgreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        responsibilitiesNotes:
+          type: string
+          nullable: true
+        privacyOwner:
+          type: string
+          nullable: true
+      required:
+        - customerRole
+        - controllerName
+        - controllerContact
+        - dpoContact
+        - noticeUrl
+        - noticeVersion
+        - noticeReviewedAt
+        - processorAgreementStatus
+        - processorAgreementReviewedAt
+        - responsibilitiesNotes
+        - privacyOwner
+
+    PrivacyProgram:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProgramInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessingActivityInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [activity]
+        name:
+          type: string
+          minLength: 1
+        purpose:
+          type: string
+          minLength: 1
+        dataSubjects:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        article6Basis:
+          type: string
+          enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests, other]
+        article6Rationale:
+          type: string
+          nullable: true
+        specialCategoryData:
+          type: boolean
+        article9Condition:
+          type: string
+          nullable: true
+        article9Rationale:
+          type: string
+          nullable: true
+        recipients:
+          type: string
+          nullable: true
+        transferDetails:
+          type: string
+          nullable: true
+        retentionCriteria:
+          type: string
+          minLength: 1
+        securityMeasures:
+          type: string
+          nullable: true
+        dpiaClassification:
+          type: string
+          enum: [not_screened, not_required, required, in_progress, completed]
+        dpiaRationale:
+          type: string
+          nullable: true
+        dpiaCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, name, purpose, dataSubjects, dataCategories, article6Basis, article6Rationale, specialCategoryData, article9Condition, article9Rationale, recipients, transferDetails, retentionCriteria, securityMeasures, dpiaClassification, dpiaRationale, dpiaCompletedAt, owner, reviewDueAt, active]
+
+    PrivacyProcessingActivity:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRightsRequestInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [rights_request]
+        requestType:
+          type: string
+          enum: [access, rectification, erasure, restriction, portability, objection, other]
+        subjectName:
+          type: string
+          minLength: 1
+        subjectContact:
+          type: string
+          nullable: true
+        scopeDescription:
+          type: string
+          minLength: 1
+        receivedAt:
+          type: string
+          format: date-time
+        extendedDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        extensionReason:
+          type: string
+          nullable: true
+        identityStatus:
+          type: string
+          enum: [not_started, in_progress, verified, failed]
+        identityMethod:
+          type: string
+          nullable: true
+        identityEvidence:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [received, in_progress, waiting_for_information, completed, refused, withdrawn]
+        decision:
+          type: string
+          enum: [granted, partially_granted, refused, not_applicable]
+          nullable: true
+        decisionRationale:
+          type: string
+          nullable: true
+        responseSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        responseEvidence:
+          type: string
+          nullable: true
+      required: [kind, requestType, subjectName, subjectContact, scopeDescription, receivedAt, extendedDueAt, extensionReason, identityStatus, identityMethod, identityEvidence, status, decision, decisionRationale, responseSentAt, responseEvidence]
+
+    PrivacyRightsRequest:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            dueAt:
+              type: string
+              format: date-time
+            identityVerifiedAt:
+              type: string
+              format: date-time
+              nullable: true
+            identityVerifiedBy:
+              type: integer
+              nullable: true
+            decidedAt:
+              type: string
+              format: date-time
+              nullable: true
+            decidedBy:
+              type: integer
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, dueAt, identityVerifiedAt, identityVerifiedBy, decidedAt, decidedBy, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRetentionScheduleInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [retention]
+        recordCategory:
+          type: string
+          minLength: 1
+        scopeDescription:
+          type: string
+          minLength: 1
+        retentionPeriod:
+          type: string
+          minLength: 1
+        retentionTrigger:
+          type: string
+          minLength: 1
+        justification:
+          type: string
+          minLength: 1
+        legalHoldActive:
+          type: boolean
+        legalHoldReason:
+          type: string
+          nullable: true
+        deletionException:
+          type: boolean
+        deletionExceptionReason:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, recordCategory, scopeDescription, retentionPeriod, retentionTrigger, justification, legalHoldActive, legalHoldReason, deletionException, deletionExceptionReason, reviewDueAt, active]
+
+    PrivacyRetentionSchedule:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessorInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [processor]
+        organizationName:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [processor, subprocessor]
+        parentProcessor:
+          type: string
+          nullable: true
+        serviceDescription:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        processingCountries:
+          type: string
+          minLength: 1
+        transferMechanism:
+          type: string
+          enum: [not_assessed, no_restricted_transfer, adequacy, uk_idta, eu_scc, uk_addendum, other]
+        transferSafeguards:
+          type: string
+          nullable: true
+        transferAssessment:
+          type: string
+          nullable: true
+        agreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        agreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        transferReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, organizationName, role, parentProcessor, serviceDescription, dataCategories, processingCountries, transferMechanism, transferSafeguards, transferAssessment, agreementStatus, agreementReviewedAt, transferReviewedAt, reviewDueAt, active]
+
+    PrivacyProcessor:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyBreachInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [breach]
+        discoveredAt:
+          type: string
+          format: date-time
+        occurredFrom:
+          type: string
+          format: date-time
+          nullable: true
+        occurredTo:
+          type: string
+          format: date-time
+          nullable: true
+        description:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        affectedSubjectsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        affectedRecordsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        riskLevel:
+          type: string
+          enum: [under_assessment, unlikely, risk, high_risk]
+        assessmentStatus:
+          type: string
+          enum: [assessing, contained, closed]
+        assessmentRationale:
+          type: string
+          nullable: true
+        containmentSteps:
+          type: string
+          nullable: true
+        authorityNotificationRequired:
+          type: boolean
+          nullable: true
+        authorityNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        authorityNotificationReference:
+          type: string
+          nullable: true
+        individualNotificationRequired:
+          type: boolean
+          nullable: true
+        individualNotificationDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        individualsNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        evidence:
+          type: string
+          nullable: true
+      required: [kind, discoveredAt, occurredFrom, occurredTo, description, dataCategories, affectedSubjectsEstimate, affectedRecordsEstimate, riskLevel, assessmentStatus, assessmentRationale, containmentSteps, authorityNotificationRequired, authorityNotifiedAt, authorityNotificationReference, individualNotificationRequired, individualNotificationDueAt, individualsNotifiedAt, evidence]
+
+    PrivacyBreach:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            authorityNotificationDueAt:
+              type: string
+              format: date-time
+            assessedAt:
+              type: string
+              format: date-time
+              nullable: true
+            assessedBy:
+              type: integer
+              nullable: true
+            closedAt:
+              type: string
+              format: date-time
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, authorityNotificationDueAt, assessedAt, assessedBy, closedAt, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRecordInput:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivityInput"
+          rights_request: "#/components/schemas/PrivacyRightsRequestInput"
+          retention: "#/components/schemas/PrivacyRetentionScheduleInput"
+          processor: "#/components/schemas/PrivacyProcessorInput"
+          breach: "#/components/schemas/PrivacyBreachInput"
+
+    PrivacyRecord:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivity"
+        - $ref: "#/components/schemas/PrivacyRightsRequest"
+        - $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        - $ref: "#/components/schemas/PrivacyProcessor"
+        - $ref: "#/components/schemas/PrivacyBreach"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivity"
+          rights_request: "#/components/schemas/PrivacyRightsRequest"
+          retention: "#/components/schemas/PrivacyRetentionSchedule"
+          processor: "#/components/schemas/PrivacyProcessor"
+          breach: "#/components/schemas/PrivacyBreach"
+
+    PrivacyRetentionVerificationInput:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum: [deletion_verified, legal_hold_confirmed, exception_confirmed]
+        recordsReviewed:
+          type: string
+          minLength: 1
+        verificationMethod:
+          type: string
+          minLength: 1
+        evidence:
+          type: string
+          minLength: 1
+      required: [outcome, recordsReviewed, verificationMethod, evidence]
+
+    PrivacyRetentionVerification:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            scheduleId:
+              type: integer
+            verifiedBy:
+              type: integer
+              nullable: true
+            verifiedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, scheduleId, verifiedBy, verifiedAt]
+
+    PrivacyGovernanceResponse:
+      type: object
+      properties:
+        program:
+          anyOf:
+            - $ref: "#/components/schemas/PrivacyProgram"
+            - type: "null"
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessingActivity"
+        rightsRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRightsRequest"
+        retentionSchedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        retentionVerifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionVerification"
+        processors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessor"
+        breaches:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyBreach"
+      required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches]
 
     AppSettings:
       type: object

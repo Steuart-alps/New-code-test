@@ -25,6 +25,7 @@ import MandatoryTwoFactorPage from "@/pages/mandatory-two-factor";
 import TrialEndedPage from "@/pages/trial-ended";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
+import PrivacyGovernancePage from "@/pages/privacy-governance";
 import VerifyEmailPage from "@/pages/verify-email";
 import SchedulePage from "@/pages/schedule";
 import ItemDetailPage from "@/pages/item-detail";
@@ -207,6 +208,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
+      {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>

@@ -245,6 +245,454 @@ export interface DashboardStats {
   certificatesExpiringSoon: number;
 }
 
+export type PrivacyProgramInputCustomerRole = typeof PrivacyProgramInputCustomerRole[keyof typeof PrivacyProgramInputCustomerRole];
+
+
+export const PrivacyProgramInputCustomerRole = {
+  controller: 'controller',
+  joint_controller: 'joint_controller',
+  processor: 'processor',
+  mixed: 'mixed',
+} as const;
+
+export type PrivacyProgramInputProcessorAgreementStatus = typeof PrivacyProgramInputProcessorAgreementStatus[keyof typeof PrivacyProgramInputProcessorAgreementStatus];
+
+
+export const PrivacyProgramInputProcessorAgreementStatus = {
+  not_assessed: 'not_assessed',
+  in_place: 'in_place',
+  pending: 'pending',
+  not_required: 'not_required',
+} as const;
+
+export interface PrivacyProgramInput {
+  customerRole: PrivacyProgramInputCustomerRole;
+  controllerName: string | null;
+  controllerContact: string | null;
+  dpoContact: string | null;
+  noticeUrl: string | null;
+  noticeVersion: string | null;
+  noticeReviewedAt: string | null;
+  processorAgreementStatus: PrivacyProgramInputProcessorAgreementStatus;
+  processorAgreementReviewedAt: string | null;
+  responsibilitiesNotes: string | null;
+  privacyOwner: string | null;
+}
+
+export type PrivacyProgram = PrivacyProgramInput & ({
+  id: number;
+  clientId: number;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyProcessingActivityInputKind = typeof PrivacyProcessingActivityInputKind[keyof typeof PrivacyProcessingActivityInputKind];
+
+
+export const PrivacyProcessingActivityInputKind = {
+  activity: 'activity',
+} as const;
+
+export type PrivacyProcessingActivityInputArticle6Basis = typeof PrivacyProcessingActivityInputArticle6Basis[keyof typeof PrivacyProcessingActivityInputArticle6Basis];
+
+
+export const PrivacyProcessingActivityInputArticle6Basis = {
+  consent: 'consent',
+  contract: 'contract',
+  legal_obligation: 'legal_obligation',
+  vital_interests: 'vital_interests',
+  public_task: 'public_task',
+  legitimate_interests: 'legitimate_interests',
+  other: 'other',
+} as const;
+
+export type PrivacyProcessingActivityInputDpiaClassification = typeof PrivacyProcessingActivityInputDpiaClassification[keyof typeof PrivacyProcessingActivityInputDpiaClassification];
+
+
+export const PrivacyProcessingActivityInputDpiaClassification = {
+  not_screened: 'not_screened',
+  not_required: 'not_required',
+  required: 'required',
+  in_progress: 'in_progress',
+  completed: 'completed',
+} as const;
+
+export interface PrivacyProcessingActivityInput {
+  kind: PrivacyProcessingActivityInputKind;
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 1 */
+  purpose: string;
+  /** @minLength 1 */
+  dataSubjects: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  article6Basis: PrivacyProcessingActivityInputArticle6Basis;
+  article6Rationale: string | null;
+  specialCategoryData: boolean;
+  article9Condition: string | null;
+  article9Rationale: string | null;
+  recipients: string | null;
+  transferDetails: string | null;
+  /** @minLength 1 */
+  retentionCriteria: string;
+  securityMeasures: string | null;
+  dpiaClassification: PrivacyProcessingActivityInputDpiaClassification;
+  dpiaRationale: string | null;
+  dpiaCompletedAt: string | null;
+  owner: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyProcessingActivityKind = typeof PrivacyProcessingActivityKind[keyof typeof PrivacyProcessingActivityKind];
+
+
+export const PrivacyProcessingActivityKind = {
+  activity: 'activity',
+} as const;
+
+export type PrivacyProcessingActivity = PrivacyProcessingActivityInput & ({
+  kind: PrivacyProcessingActivityKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRightsRequestInputKind = typeof PrivacyRightsRequestInputKind[keyof typeof PrivacyRightsRequestInputKind];
+
+
+export const PrivacyRightsRequestInputKind = {
+  rights_request: 'rights_request',
+} as const;
+
+export type PrivacyRightsRequestInputRequestType = typeof PrivacyRightsRequestInputRequestType[keyof typeof PrivacyRightsRequestInputRequestType];
+
+
+export const PrivacyRightsRequestInputRequestType = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export type PrivacyRightsRequestInputIdentityStatus = typeof PrivacyRightsRequestInputIdentityStatus[keyof typeof PrivacyRightsRequestInputIdentityStatus];
+
+
+export const PrivacyRightsRequestInputIdentityStatus = {
+  not_started: 'not_started',
+  in_progress: 'in_progress',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
+export type PrivacyRightsRequestInputStatus = typeof PrivacyRightsRequestInputStatus[keyof typeof PrivacyRightsRequestInputStatus];
+
+
+export const PrivacyRightsRequestInputStatus = {
+  received: 'received',
+  in_progress: 'in_progress',
+  waiting_for_information: 'waiting_for_information',
+  completed: 'completed',
+  refused: 'refused',
+  withdrawn: 'withdrawn',
+} as const;
+
+export type PrivacyRightsRequestInputDecision = typeof PrivacyRightsRequestInputDecision[keyof typeof PrivacyRightsRequestInputDecision] | null;
+
+
+export const PrivacyRightsRequestInputDecision = {
+  granted: 'granted',
+  partially_granted: 'partially_granted',
+  refused: 'refused',
+  not_applicable: 'not_applicable',
+} as const;
+
+export interface PrivacyRightsRequestInput {
+  kind: PrivacyRightsRequestInputKind;
+  requestType: PrivacyRightsRequestInputRequestType;
+  /** @minLength 1 */
+  subjectName: string;
+  subjectContact: string | null;
+  /** @minLength 1 */
+  scopeDescription: string;
+  receivedAt: string;
+  extendedDueAt: string | null;
+  extensionReason: string | null;
+  identityStatus: PrivacyRightsRequestInputIdentityStatus;
+  identityMethod: string | null;
+  identityEvidence: string | null;
+  status: PrivacyRightsRequestInputStatus;
+  decision: PrivacyRightsRequestInputDecision;
+  decisionRationale: string | null;
+  responseSentAt: string | null;
+  responseEvidence: string | null;
+}
+
+export type PrivacyRightsRequestKind = typeof PrivacyRightsRequestKind[keyof typeof PrivacyRightsRequestKind];
+
+
+export const PrivacyRightsRequestKind = {
+  rights_request: 'rights_request',
+} as const;
+
+export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
+  kind: PrivacyRightsRequestKind;
+  id: number;
+  clientId: number;
+  dueAt: string;
+  identityVerifiedAt: string | null;
+  identityVerifiedBy: number | null;
+  decidedAt: string | null;
+  decidedBy: number | null;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRetentionScheduleInputKind = typeof PrivacyRetentionScheduleInputKind[keyof typeof PrivacyRetentionScheduleInputKind];
+
+
+export const PrivacyRetentionScheduleInputKind = {
+  retention: 'retention',
+} as const;
+
+export interface PrivacyRetentionScheduleInput {
+  kind: PrivacyRetentionScheduleInputKind;
+  /** @minLength 1 */
+  recordCategory: string;
+  /** @minLength 1 */
+  scopeDescription: string;
+  /** @minLength 1 */
+  retentionPeriod: string;
+  /** @minLength 1 */
+  retentionTrigger: string;
+  /** @minLength 1 */
+  justification: string;
+  legalHoldActive: boolean;
+  legalHoldReason: string | null;
+  deletionException: boolean;
+  deletionExceptionReason: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyRetentionScheduleKind = typeof PrivacyRetentionScheduleKind[keyof typeof PrivacyRetentionScheduleKind];
+
+
+export const PrivacyRetentionScheduleKind = {
+  retention: 'retention',
+} as const;
+
+export type PrivacyRetentionSchedule = PrivacyRetentionScheduleInput & ({
+  kind: PrivacyRetentionScheduleKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyProcessorInputKind = typeof PrivacyProcessorInputKind[keyof typeof PrivacyProcessorInputKind];
+
+
+export const PrivacyProcessorInputKind = {
+  processor: 'processor',
+} as const;
+
+export type PrivacyProcessorInputRole = typeof PrivacyProcessorInputRole[keyof typeof PrivacyProcessorInputRole];
+
+
+export const PrivacyProcessorInputRole = {
+  processor: 'processor',
+  subprocessor: 'subprocessor',
+} as const;
+
+export type PrivacyProcessorInputTransferMechanism = typeof PrivacyProcessorInputTransferMechanism[keyof typeof PrivacyProcessorInputTransferMechanism];
+
+
+export const PrivacyProcessorInputTransferMechanism = {
+  not_assessed: 'not_assessed',
+  no_restricted_transfer: 'no_restricted_transfer',
+  adequacy: 'adequacy',
+  uk_idta: 'uk_idta',
+  eu_scc: 'eu_scc',
+  uk_addendum: 'uk_addendum',
+  other: 'other',
+} as const;
+
+export type PrivacyProcessorInputAgreementStatus = typeof PrivacyProcessorInputAgreementStatus[keyof typeof PrivacyProcessorInputAgreementStatus];
+
+
+export const PrivacyProcessorInputAgreementStatus = {
+  not_assessed: 'not_assessed',
+  in_place: 'in_place',
+  pending: 'pending',
+  not_required: 'not_required',
+} as const;
+
+export interface PrivacyProcessorInput {
+  kind: PrivacyProcessorInputKind;
+  /** @minLength 1 */
+  organizationName: string;
+  role: PrivacyProcessorInputRole;
+  parentProcessor: string | null;
+  /** @minLength 1 */
+  serviceDescription: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  /** @minLength 1 */
+  processingCountries: string;
+  transferMechanism: PrivacyProcessorInputTransferMechanism;
+  transferSafeguards: string | null;
+  transferAssessment: string | null;
+  agreementStatus: PrivacyProcessorInputAgreementStatus;
+  agreementReviewedAt: string | null;
+  transferReviewedAt: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyProcessorKind = typeof PrivacyProcessorKind[keyof typeof PrivacyProcessorKind];
+
+
+export const PrivacyProcessorKind = {
+  processor: 'processor',
+} as const;
+
+export type PrivacyProcessor = PrivacyProcessorInput & ({
+  kind: PrivacyProcessorKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyBreachInputKind = typeof PrivacyBreachInputKind[keyof typeof PrivacyBreachInputKind];
+
+
+export const PrivacyBreachInputKind = {
+  breach: 'breach',
+} as const;
+
+export type PrivacyBreachInputRiskLevel = typeof PrivacyBreachInputRiskLevel[keyof typeof PrivacyBreachInputRiskLevel];
+
+
+export const PrivacyBreachInputRiskLevel = {
+  under_assessment: 'under_assessment',
+  unlikely: 'unlikely',
+  risk: 'risk',
+  high_risk: 'high_risk',
+} as const;
+
+export type PrivacyBreachInputAssessmentStatus = typeof PrivacyBreachInputAssessmentStatus[keyof typeof PrivacyBreachInputAssessmentStatus];
+
+
+export const PrivacyBreachInputAssessmentStatus = {
+  assessing: 'assessing',
+  contained: 'contained',
+  closed: 'closed',
+} as const;
+
+export interface PrivacyBreachInput {
+  kind: PrivacyBreachInputKind;
+  discoveredAt: string;
+  occurredFrom: string | null;
+  occurredTo: string | null;
+  /** @minLength 1 */
+  description: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  /** @minimum 0 */
+  affectedSubjectsEstimate: number | null;
+  /** @minimum 0 */
+  affectedRecordsEstimate: number | null;
+  riskLevel: PrivacyBreachInputRiskLevel;
+  assessmentStatus: PrivacyBreachInputAssessmentStatus;
+  assessmentRationale: string | null;
+  containmentSteps: string | null;
+  authorityNotificationRequired: boolean | null;
+  authorityNotifiedAt: string | null;
+  authorityNotificationReference: string | null;
+  individualNotificationRequired: boolean | null;
+  individualNotificationDueAt: string | null;
+  individualsNotifiedAt: string | null;
+  evidence: string | null;
+}
+
+export type PrivacyBreachKind = typeof PrivacyBreachKind[keyof typeof PrivacyBreachKind];
+
+
+export const PrivacyBreachKind = {
+  breach: 'breach',
+} as const;
+
+export type PrivacyBreach = PrivacyBreachInput & ({
+  kind: PrivacyBreachKind;
+  id: number;
+  clientId: number;
+  authorityNotificationDueAt: string;
+  assessedAt: string | null;
+  assessedBy: number | null;
+  closedAt: string | null;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRecordInput = PrivacyProcessingActivityInput | PrivacyRightsRequestInput | PrivacyRetentionScheduleInput | PrivacyProcessorInput | PrivacyBreachInput;
+
+export type PrivacyRecord = PrivacyProcessingActivity | PrivacyRightsRequest | PrivacyRetentionSchedule | PrivacyProcessor | PrivacyBreach;
+
+export type PrivacyRetentionVerificationInputOutcome = typeof PrivacyRetentionVerificationInputOutcome[keyof typeof PrivacyRetentionVerificationInputOutcome];
+
+
+export const PrivacyRetentionVerificationInputOutcome = {
+  deletion_verified: 'deletion_verified',
+  legal_hold_confirmed: 'legal_hold_confirmed',
+  exception_confirmed: 'exception_confirmed',
+} as const;
+
+export interface PrivacyRetentionVerificationInput {
+  outcome: PrivacyRetentionVerificationInputOutcome;
+  /** @minLength 1 */
+  recordsReviewed: string;
+  /** @minLength 1 */
+  verificationMethod: string;
+  /** @minLength 1 */
+  evidence: string;
+}
+
+export type PrivacyRetentionVerification = PrivacyRetentionVerificationInput & ({
+  id: number;
+  clientId: number;
+  scheduleId: number;
+  verifiedBy: number | null;
+  verifiedAt: string;
+});
+
+export interface PrivacyGovernanceResponse {
+  program: PrivacyProgram | null;
+  activities: PrivacyProcessingActivity[];
+  rightsRequests: PrivacyRightsRequest[];
+  retentionSchedules: PrivacyRetentionSchedule[];
+  retentionVerifications: PrivacyRetentionVerification[];
+  processors: PrivacyProcessor[];
+  breaches: PrivacyBreach[];
+}
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -1212,6 +1660,26 @@ export const ListComplianceItemsPriority = {
   high: 'high',
   critical: 'critical',
 } as const;
+
+export type GetPrivacyGovernanceParams = {
+clientId?: number;
+};
+
+export type SavePrivacyProgramParams = {
+clientId?: number;
+};
+
+export type CreatePrivacyRecordParams = {
+clientId?: number;
+};
+
+export type UpdatePrivacyRecordParams = {
+clientId?: number;
+};
+
+export type AddPrivacyRetentionVerificationParams = {
+clientId?: number;
+};
 
 export type ListFireSafetyChecksParams = {
 checkType?: FireCheckType;
