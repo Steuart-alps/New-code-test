@@ -356,8 +356,8 @@ async function runBillingReconciliation() {
 async function notifyAdminOfBillingDrift(corrections: QuantityCorrection[]) {
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   if (!adminEmail) {
-    logger.info(
-      "ADMIN_EMAIL not configured — skipping billing drift notification email",
+    logger.error(
+      "ADMIN_EMAIL not configured — billing drift notification email was not sent",
     );
     return;
   }
@@ -455,6 +455,9 @@ app.listen(port, async (err?: any) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+  if (process.env.NODE_ENV === "production" && !process.env.ADMIN_EMAIL?.trim()) {
+    logger.warn("ADMIN_EMAIL not configured — internal billing and data-deletion notices cannot be delivered");
+  }
   await runRuntimeMigrations();
   const readinessBlocker = await initStripe();
   markApplicationReady(readinessBlocker);

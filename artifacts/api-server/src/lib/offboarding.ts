@@ -589,7 +589,7 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
       logger.info({ clientId: client.id }, "Client data permanently deleted");
 
       // Notify system admin.
-      const adminEmail = process.env.ADMIN_EMAIL;
+      const adminEmail = process.env.ADMIN_EMAIL?.trim();
       if (adminEmail) {
         const safeCompany = escapeHtml(client.name);
         await sendSystemEmail({
@@ -598,6 +598,8 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
           html: `<p>All compliance records for <strong>${safeCompany}</strong> (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.</p>`,
           text: `All compliance records for ${client.name} (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.`,
         }).catch((err) => logger.error({ err }, "Deletion confirmation email failed"));
+      } else {
+        logger.error({ clientId: client.id }, "ADMIN_EMAIL not configured — data-deletion confirmation email was not sent");
       }
     } catch (err) {
       logger.error({ err, clientId: client.id }, "Data deletion failed for client — will retry tomorrow");
