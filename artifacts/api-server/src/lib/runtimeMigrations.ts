@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { ensureRuntimeBaseline } from "./runtimeBaseline";
 import {
   digestBearerToken,
   encryptTokenPayload,
@@ -43,6 +44,8 @@ export async function reencryptQueuedTokenPayloads(queueId?: number): Promise<nu
  */
 export async function runRuntimeMigrations() {
   try {
+    await ensureRuntimeBaseline();
+
     // Validate even on a new database with no encrypted rows, so a broken key
     // rotation cannot let the service report ready and fail only at dispatch.
     validateTokenEncryptionConfig();
@@ -388,19 +391,39 @@ export async function runRuntimeMigrations() {
         "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
         "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
         "record_date" date NOT NULL,
-        "fridge1_temp" numeric(4, 1),
-        "fridge2_temp" numeric(4, 1),
-        "fridge3_temp" numeric(4, 1),
-        "freezer1_temp" numeric(4, 1),
-        "freezer2_temp" numeric(4, 1),
-        "hot_holding_temp" numeric(4, 1),
-        "probe_cleaned" boolean,
-        "notes" text,
+        "deliveries" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "cold_food" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "hot_temperature" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "cooling" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "reheating" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "hot_holding" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "sous_vide" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "cooking_limit" text NOT NULL DEFAULT 'Above 75°C (10 seconds)',
+        "cooling_limit" text NOT NULL DEFAULT '8°C within 90 minutes',
+        "reheating_limit" text NOT NULL DEFAULT 'Above 82°C',
+        "hot_holding_limit" text NOT NULL DEFAULT 'Above 63°C',
+        "correctives" text,
+        "manager_signature" text,
         "performed_by" text,
+        "submitted_at" timestamp,
         "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "food_safety_records"
+        ADD COLUMN IF NOT EXISTS "deliveries" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS "cold_food" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS "hot_temperature" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS "hot_holding" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS "cooking_limit" text NOT NULL DEFAULT 'Above 75°C (10 seconds)',
+        ADD COLUMN IF NOT EXISTS "cooling_limit" text NOT NULL DEFAULT '8°C within 90 minutes',
+        ADD COLUMN IF NOT EXISTS "reheating_limit" text NOT NULL DEFAULT 'Above 82°C',
+        ADD COLUMN IF NOT EXISTS "hot_holding_limit" text NOT NULL DEFAULT 'Above 63°C',
+        ADD COLUMN IF NOT EXISTS "correctives" text,
+        ADD COLUMN IF NOT EXISTS "manager_signature" text,
+        ADD COLUMN IF NOT EXISTS "submitted_at" timestamp
     `);
     await db.execute(
       sql`CREATE INDEX IF NOT EXISTS "IDX_food_safety_client_date" ON "food_safety_records" ("client_id", "record_date")`
@@ -417,18 +440,21 @@ export async function runRuntimeMigrations() {
         "id" serial PRIMARY KEY,
         "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
         "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
-        "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL,
         "check_type" text NOT NULL,
         "check_date" date NOT NULL,
         "result" text NOT NULL DEFAULT 'pass',
+        "temperature" numeric(5, 2),
         "location" text,
-        "temperature_c" numeric(4, 1),
         "notes" text,
         "performed_by" text,
         "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "legionella_checks"
+      ADD COLUMN IF NOT EXISTS "temperature" numeric(5, 2)
     `);
     await db.execute(
       sql`CREATE INDEX IF NOT EXISTS "IDX_legionella_client_type_date" ON "legionella_checks" ("client_id", "check_type", "check_date")`
@@ -520,18 +546,31 @@ export async function runRuntimeMigrations() {
         "id" serial PRIMARY KEY,
         "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
         "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
-        "department_id" integer REFERENCES "departments"("id") ON DELETE SET NULL,
         "title" text NOT NULL,
+        "issue_type" text NOT NULL DEFAULT 'general',
+        "location" text NOT NULL,
         "description" text,
-        "status" text NOT NULL DEFAULT 'open',
         "priority" text NOT NULL DEFAULT 'medium',
-        "category" text,
-        "reported_by" text,
+        "status" text NOT NULL DEFAULT 'reported',
+        "reported_by" text NOT NULL,
+        "reported_date" date NOT NULL,
         "assigned_to" text,
-        "due_date" date,
-        "resolved_at" timestamp,
-        "resolution_notes" text,
-        "media_urls" text[] DEFAULT '{}',
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE SET NULL,
+        "target_date" date,
+        "resolved_date" date,
+        "resolved_by_name" text,
+        "resolver_signature" text,
+        "solution_notes" text,
+        "email_request_mode" text,
+        "email_requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "email_requested_at" timestamp,
+        "email_request_status" text,
+        "email_approved_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "email_approved_at" timestamp,
+        "email_sent_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "email_sent_at" timestamp,
+        "media_urls" jsonb DEFAULT '[]'::jsonb,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()
       )
@@ -550,6 +589,12 @@ export async function runRuntimeMigrations() {
         "file_name" text,
         "file_size" integer,
         "mime_type" text,
+        "object_path" text,
+        "uploaded_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "requires_acknowledgement" boolean NOT NULL DEFAULT false,
+        "annual_acknowledgement" boolean NOT NULL DEFAULT false,
+        "department" text,
         "description" text,
         "expiry_date" date,
         "reviewed_by" text,
@@ -559,6 +604,12 @@ export async function runRuntimeMigrations() {
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()
       )
+    `);
+    await db.execute(sql`
+      ALTER TABLE "doc_track_documents"
+        ADD COLUMN IF NOT EXISTS "uploaded_by" text,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS "department" text
     `);
 
     // ---- Hot tub checks ----
@@ -610,6 +661,7 @@ export async function runRuntimeMigrations() {
     await migrateIncidents();
     await migrateComplianceAuditTrail();
     await migrateSousVide();
+    await migrateFoodSafetySiteScoping();
     await migratePATtrack();
     await migratePestTrack();
     await migratePremisesTrack();
@@ -620,6 +672,10 @@ export async function runRuntimeMigrations() {
     await migrateRoomTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
+    // Creates kitchen_probe_checks, which the performer-attribution loop below
+    // augments. Run it after its DocTrack/TrainTrack dependencies and before
+    // the dynamic ALTER list.
+    await migrateAuditFixes2026_08();
     // Performer attribution is additive so existing records remain readable.
     // The roster id is tenant-scoped and the accompanying display name remains
     // an immutable snapshot on the record.
@@ -787,7 +843,6 @@ export async function runRuntimeMigrations() {
       ON "training_expiry_reminder_log" ("client_id")
     `);
 
-    await migrateAuditFixes2026_08();
     await migrateOffboardingColumns();
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "monthly_compliance_batches" (
@@ -1673,11 +1728,9 @@ async function migrateBikeTrack() {
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
       "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
-      "name" text NOT NULL,
-      "bike_type" text NOT NULL DEFAULT 'standard',
-      "serial_number" text,
-      "colour" text,
-      "size" text,
+      "ref" text NOT NULL,
+      "name" text,
+      "type" text NOT NULL DEFAULT 'hybrid',
       "status" text NOT NULL DEFAULT 'available',
       "notes" text,
       "active" boolean NOT NULL DEFAULT true,
@@ -1691,18 +1744,21 @@ async function migrateBikeTrack() {
     CREATE TABLE IF NOT EXISTS "bike_hire_records" (
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
-      "bike_id" integer NOT NULL REFERENCES "bikes"("id") ON DELETE CASCADE,
-      "hirer_name" text NOT NULL,
-      "hirer_contact" text,
-      "hire_start" timestamp NOT NULL DEFAULT now(),
-      "expected_return" timestamp,
-      "actual_return" timestamp,
-      "pre_check_passed" boolean NOT NULL DEFAULT true,
-      "post_check_passed" boolean,
-      "hire_fee" numeric(8,2),
-      "deposit_taken" numeric(8,2),
-      "notes" text,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "bike_id" integer NOT NULL REFERENCES "bikes"("id") ON DELETE RESTRICT,
+      "guest_name" text NOT NULL,
+      "guest_contact" text,
+      "hire_date" date NOT NULL,
+      "return_date_expected" date,
+      "return_date_actual" date,
+      "deposit_pence" integer,
+      "deposit_returned" boolean NOT NULL DEFAULT false,
       "status" text NOT NULL DEFAULT 'active',
+      "overdue_notified_at" timestamp,
+      "overdue_notification_claim_token" text,
+      "overdue_notification_claimed_at" timestamp,
+      "notes" text,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
       "created_at" timestamp NOT NULL DEFAULT now(),
       "updated_at" timestamp NOT NULL DEFAULT now()
     )
@@ -1720,15 +1776,28 @@ async function migrateBikeTrack() {
     CREATE TABLE IF NOT EXISTS "bike_checks" (
       "id" serial PRIMARY KEY,
       "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
-      "bike_id" integer NOT NULL REFERENCES "bikes"("id") ON DELETE CASCADE,
       "hire_record_id" integer REFERENCES "bike_hire_records"("id") ON DELETE SET NULL,
-      "check_type" text NOT NULL DEFAULT 'pre_hire',
-      "check_date" timestamp NOT NULL DEFAULT now(),
+      "bike_id" integer NOT NULL REFERENCES "bikes"("id") ON DELETE RESTRICT,
+      "check_type" text NOT NULL,
+      "check_date" date NOT NULL,
       "performed_by" text,
-      "items_checked" jsonb,
-      "result" text NOT NULL DEFAULT 'pass',
+      "overall_result" text NOT NULL DEFAULT 'pass',
+      "brakes_front" text,
+      "brakes_rear" text,
+      "tyre_front" text,
+      "tyre_rear" text,
+      "chain_gears" text,
+      "lights_front" text,
+      "lights_rear" text,
+      "frame" text,
+      "saddle_seatpost" text,
+      "handlebars" text,
+      "pedals" text,
+      "helmet_provided" text,
       "notes" text,
-      "created_at" timestamp NOT NULL DEFAULT now()
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_bike_checks_bike" ON "bike_checks" ("bike_id")`);

@@ -12,3 +12,9 @@ Rule: never trust the `CREATE TABLE IF NOT EXISTS` definitions in the api-server
 **Dropping legacy indexes safely:** never match candidates with `pg_get_indexdef LIKE '%...%'` — a wider unique index (e.g. same cols + one more) matches too and gets silently dropped. Resolve exact key attnums via `pg_index.indkey` (require exact column set, no expressions, no predicate).
 
 **Route coverage:** a Drizzle table definition can exist without a runtime-created table. Add a fresh-database route test whenever a new route depends on a table, so missing runtime migrations fail before launch.
+
+**Blank-database checks:** Build the schema exclusively from explicit runtime DDL, including the core baseline. Never generate the test baseline from current Drizzle definitions or copy the development database.
+
+**Why:** Either shortcut silently supplies precisely the missing columns the check is meant to detect. A real blank run exposed migration-order dependencies and stale BikeTrack, FixTrack, water-temperature and kitchen-diary definitions that ordinary shared-dev tests could not reveal.
+
+**How to apply:** Use a disposable local PostgreSQL cluster with a scrubbed child environment, wait for readiness, and run migrations twice. Stub external storage only at its boundary; keep route validation and database writes real. Do not inherit application database or service credentials.
