@@ -8,7 +8,8 @@ import {
   DeleteContractorParams,
 } from "@workspace/api-zod";
 import { z } from "zod";
-import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
+import { randomUUID } from "node:crypto";
 import { filterName } from "../lib/contentFilter";
 import { digestBearerToken, newBearerToken } from "../lib/bearerTokens";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -367,6 +368,57 @@ router.delete("/contractors/:id/certificates/:certId", requireAuth, requireClien
     WHERE id = ${certId} AND contractor_id = ${contractorId} AND client_id = ${existing.clientId}
   `);
   res.status(204).send();
+});
+
+// Resends remain approval drafts, preserving the exact calendar event and
+// encrypted credential payload from the most recently dispatched reminder.
+router.post("/contractors/:id/reminders/:itemId/resend", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  const contractorId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  if (!clientId || !Number.isSafeInteger(contractorId) || contractorId <= 0 || !Number.isSafeInteger(itemId) || itemId <= 0) {
+    return res.status(400).json({ error: "Invalid contractor or requirement" });
+  }
+  const departmentId = getActiveDepartmentId(req);
+  const result = await db.transaction(async tx => {
+    // Serialize repeated clicks without changing the original delivery record.
+    const contractors = await tx.execute(sql`SELECT id, email FROM contractors
+      WHERE id=${contractorId} AND client_id=${clientId} FOR UPDATE`);
+    if (!contractors.rows.length) return { status: 404, error: "Contractor not found" };
+    const items = await tx.execute(sql`SELECT ci.id, COALESCE(ci.department_id, s.department_id) AS department_id FROM compliance_items ci
+      LEFT JOIN sites s ON s.id=ci.site_id AND s.client_id=ci.client_id
+      WHERE ci.id=${itemId} AND ci.client_id=${clientId} AND ci.contractor_id=${contractorId}
+        AND ci.status <> 'completed'
+        AND (${departmentId}::integer IS NULL OR ci.department_id IS NULL OR ci.department_id=${departmentId})
+        AND (${departmentId}::integer IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})
+      FOR UPDATE OF ci`);
+    if (!items.rows.length) return { status: 404, error: "Active requirement not found" };
+    const pending = await tx.execute(sql`SELECT id FROM contractor_email_queue
+      WHERE client_id=${clientId} AND contractor_id=${contractorId} AND entity_type='compliance'
+        AND entity_id=${itemId} AND email_type='reminder' AND status IN ('pending','approved','sending') LIMIT 1`);
+    if (pending.rows.length) return { status: 409, error: "A reminder is already awaiting approval or being sent" };
+    const copied = await tx.execute(sql`INSERT INTO contractor_email_queue
+      (client_id, entity_type, entity_id, department_id, contractor_id, mode, email_type,
+       to_email, subject, body_html, body_text, cc_json, ics_content, ics_filename,
+       email_preview_json, encrypted_token_payload, requested_by, idempotency_key)
+      SELECT client_id, entity_type, entity_id, ${items.rows[0].department_id}::integer, contractor_id, mode, email_type,
+        to_email, subject, body_html, body_text, cc_json, ics_content, ics_filename,
+        email_preview_json, encrypted_token_payload, ${req.currentUser!.id}, ${`reminder-resend-${randomUUID()}`}
+      FROM contractor_email_queue
+      WHERE client_id=${clientId} AND contractor_id=${contractorId} AND entity_type='compliance'
+        AND entity_id=${itemId} AND email_type='reminder' AND status='sent'
+        AND id=(SELECT id FROM contractor_email_queue
+          WHERE client_id=${clientId} AND contractor_id=${contractorId} AND entity_type='compliance'
+            AND entity_id=${itemId} AND email_type='reminder' AND status='sent'
+          ORDER BY sent_at DESC NULLS LAST, id DESC LIMIT 1)
+        AND lower(to_email)=lower(${contractors.rows[0].email}::text)
+        AND (${departmentId}::integer IS NULL OR department_id IS NULL OR department_id=${departmentId})
+      ORDER BY sent_at DESC NULLS LAST, id DESC LIMIT 1 RETURNING id`);
+    if (!copied.rows.length) return { status: 404, error: "No previously sent reminder is available to resend" };
+    return { status: 202, queueId: copied.rows[0].id };
+  });
+  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  return res.status(202).json({ queueId: result.queueId, message: "Latest reminder queued for manager approval, including its calendar attachment where available." });
 });
 
 // ── Legacy contractor reminder endpoint ─────────────────────────────────────

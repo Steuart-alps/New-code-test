@@ -118,7 +118,8 @@ export default function ContractorDetailPage() {
   const params = useParams();
   const id = parseInt(params.id || "0");
   const qc = useQueryClient();
-  const { activeClientId } = useAuth();
+  const { activeClientId, user } = useAuth();
+  const canResend = user?.role === "consultant" || user?.role === "client_admin";
   const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();
@@ -161,6 +162,19 @@ export default function ContractorDetailPage() {
       onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
       onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
     },
+  });
+  const resendReminder = useMutation({
+    mutationFn: async (itemId: number) => {
+      const response = await clientApiFetch(`/contractors/${id}/reminders/${itemId}/resend`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Unable to resend reminder");
+      return data;
+    },
+    onSuccess: data => {
+      toast.success(data.message);
+      qc.invalidateQueries({ queryKey: ["contractor-email-queue"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
@@ -451,8 +465,18 @@ export default function ContractorDetailPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                        {item.dueDate && contractor.email && (
+                      <div className="flex flex-wrap gap-2" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                        {canResend && item.notificationSentAt && item.status !== "completed" && contractor.email && (
+                          <Button variant="outline" size="sm" data-testid={`resend-reminder-${item.id}`}
+                            disabled={resendReminder.isPending}
+                            title="Queue the latest sent reminder for manager approval"
+                            onClick={() => {
+                              if (window.confirm("Queue the latest sent reminder for manager approval? Any existing calendar attachment will be included.")) resendReminder.mutate(item.id);
+                            }}>
+                            <Mail className="w-4 h-4 mr-1" /> {resendReminder.isPending ? "Queuing…" : "Resend email"}
+                          </Button>
+                        )}
+                        {canResend && item.dueDate && contractor.email && (
                           <Button variant="ghost" size="icon" title="Resend reminder" disabled={sendReminder.isPending}
                             onClick={() => sendReminder.mutate({ itemId: item.id })}>
                             <Send className="w-4 h-4" />

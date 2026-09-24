@@ -85,6 +85,8 @@ try {
   check("viewer cannot issue", (await viewer("POST", `/contractors/${contractorId}/portal-link`, {})).status === 403);
   check("foreign manager cannot issue", (await foreign.request("POST", `/contractors/${contractorId}/portal-link`, {})).status === 404);
 
+  // Allow reminder coverage to run independently of public portal fixtures.
+  if (process.env.CONTRACTOR_RESEND_ONLY !== "1") {
   const issue1 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, { expiresInDays: 2 });
   const token1 = issue1.data?.token;
   check("manager issue returns plaintext token once", issue1.status === 201 && typeof token1 === "string" && token1.length === 64);
@@ -168,6 +170,34 @@ try {
   `)).rows;
   check("plaintext token only in issuance response",
     !JSON.stringify(contractorView.data).includes(token3) && !JSON.stringify(auditRows).includes(token3));
+
+  }
+  // Resends preserve the latest dispatched snapshot and never send directly.
+  const item = (await db.execute(sql`INSERT INTO compliance_items (client_id, contractor_id, title)
+    VALUES (${owner.clientId}, ${contractorId}, 'Resend fixture') RETURNING id`)).rows[0];
+  const resendPath = `/contractors/${contractorId}/reminders/${item.id}/resend`;
+  check("resend requires prior delivery", (await owner.request("POST", resendPath)).status === 404);
+  check("viewer cannot resend", (await viewer("POST", resendPath)).status === 403);
+  check("foreign tenant cannot resend", (await foreign.request("POST", resendPath)).status === 404);
+  check("anonymous cannot resend", (await publicRequest("POST", resendPath)).status === 401);
+  const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:resend-fixture\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  await db.execute(sql`INSERT INTO contractor_email_queue
+    (client_id, contractor_id, entity_type, entity_id, mode, email_type, status, to_email,
+     subject, body_html, body_text, ics_content, ics_filename, idempotency_key, sent_at)
+    VALUES (${owner.clientId}, ${contractorId}, 'compliance', ${item.id}, 'assign', 'reminder', 'sent',
+     ${created.data.email}, 'Latest reminder', '<p>Latest reminder</p>', 'Latest reminder',
+     ${ics}, 'visit.ics', ${crypto.randomUUID()}, now())`);
+  const attempts = await Promise.all([owner.request("POST", resendPath), owner.request("POST", resendPath)]);
+  check("concurrent resends create only one approval", attempts.map(r => r.status).sort().join(",") === "202,409");
+  const draft = (await db.execute(sql`SELECT * FROM contractor_email_queue
+    WHERE client_id=${owner.clientId} AND entity_id=${item.id} AND status='pending'`)).rows[0];
+  check("resend preserves content and calendar", draft?.subject === "Latest reminder"
+    && draft?.ics_content === ics && draft?.ics_filename === "visit.ics" && draft?.sent_at == null);
+  check("resend records requesting manager", Number.isInteger(draft?.requested_by));
+  check("wrong contractor cannot resend item",
+    (await owner.request("POST", `/contractors/${secondId}/reminders/${item.id}/resend`)).status === 404);
+  await db.execute(sql`UPDATE compliance_items SET status='completed' WHERE id=${item.id}`);
+  check("completed requirement cannot resend", (await owner.request("POST", resendPath)).status === 404);
 
   console.log(`${passed} contractor portal route checks passed, ${failures} failed`);
 } finally {
