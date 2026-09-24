@@ -536,37 +536,55 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
   let clientsDeleted = 0;
   const now = new Date();
 
-  const due = await db
-    .select()
-    .from(clientsTable)
-    .where(
-      and(
-        isNotNull(clientsTable.dataDeletionScheduledAt),
-        lte(clientsTable.dataDeletionScheduledAt, now),
-        isNull(clientsTable.dataDeletedAt),
-      ),
-    );
+  const due = await db.execute(sql`
+    SELECT c.id, c.name FROM clients c
+    WHERE c.data_deleted_at IS NULL
+      AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
+        OR EXISTS (
+          SELECT 1 FROM client_data_deletion_requests r
+          WHERE r.client_id = c.id AND r.status = 'approved'
+            AND r.earliest_deletion_at <= now()
+        ))
+  `);
 
-  for (const client of due) {
+  for (const client of due.rows as Array<{ id: number; name: string }>) {
     try {
-      const privacyHold = await db.execute(sql`
-        SELECT EXISTS (
-          SELECT 1 FROM privacy_retention_schedules
-          WHERE client_id = ${client.id}
-            AND active = true
-            AND (legal_hold_active = true OR deletion_exception = true)
-        ) AS blocked
-      `);
-      if ((privacyHold.rows[0] as { blocked?: boolean } | undefined)?.blocked) {
-        logger.warn({ clientId: client.id }, "Scheduled deletion skipped because a privacy hold or exception is active");
+      // Submission and direct client deletion use the same per-client lock.
+      // Recheck both the 30-day window and legal holds after acquiring it,
+      // then hold the lock until the deletion and completion marker finish.
+      const deleted = await db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${client.id})`);
+        const guard = await tx.execute(sql`
+          SELECT c.id FROM clients c WHERE c.id = ${client.id}
+            AND c.data_deleted_at IS NULL
+            AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
+              OR EXISTS (SELECT 1 FROM client_data_deletion_requests r
+                WHERE r.client_id = c.id AND r.status = 'approved'
+                  AND r.earliest_deletion_at <= now()))
+            AND NOT EXISTS (SELECT 1 FROM client_data_deletion_requests r
+              WHERE r.client_id = c.id
+                AND (r.status = 'pending' OR (r.status = 'approved' AND r.earliest_deletion_at > now())))
+            AND NOT EXISTS (SELECT 1 FROM privacy_retention_schedules h
+              WHERE h.client_id = c.id AND h.active = true
+                AND (h.legal_hold_active = true OR h.deletion_exception = true))
+        `);
+        if (guard.rows.length === 0) return false;
+        logger.info({ clientId: client.id }, "Starting data deletion for client");
+        await deleteAllClientData(client.id);
+        await tx.execute(sql`
+          UPDATE clients SET data_deleted_at = ${now}, updated_at = ${now}
+          WHERE id = ${client.id}
+        `);
+        await tx.execute(sql`
+          UPDATE client_data_deletion_requests SET status = 'completed'
+          WHERE client_id = ${client.id} AND status = 'approved'
+        `);
+        return true;
+      });
+      if (!deleted) {
+        logger.info({ clientId: client.id }, "Scheduled deletion deferred for review, retention window or legal hold");
         continue;
       }
-      logger.info({ clientId: client.id }, "Starting data deletion for client");
-      await deleteAllClientData(client.id);
-
-      await db.execute(sql`
-        UPDATE clients SET data_deleted_at = ${now}, updated_at = ${now} WHERE id = ${client.id}
-      `);
       clientsDeleted++;
       logger.info({ clientId: client.id }, "Client data permanently deleted");
 

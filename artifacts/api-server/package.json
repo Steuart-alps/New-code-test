@@ -14,6 +14,7 @@
     "test:isolation:ci": "bash tests/run-tenant-isolation.sh",
     "test:trial-reminders": "bash tests/run-db-workflow.sh tests/trial-reminders.mjs",
     "test:cancellation-warnings": "bash tests/run-db-workflow.sh tests/cancellation-warning.mjs",
+    "test:data-deletion-request": "bash tests/run-data-deletion-request.sh",
     "test:modules": "bash tests/run-db-workflow.sh tests/module-routes.mjs",
     "test:modules:ci": "bash tests/run-module-routes.sh",
     "test:dept-isolation": "bash tests/run-db-workflow.sh tests/dept-isolation.mjs",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -449,6 +450,13 @@ export default function TrialEndedPage() {
 
         {/* Actions */}
         <div className="px-6 pb-4 pt-4 relative z-10 space-y-3">
+          {(user?.role === "client_admin" || user?.role === "consultant") && (
+            <p className="text-center text-sm text-muted-foreground">
+              If your subscription was cancelled, you can{" "}
+              <Link href="/settings" className="underline underline-offset-2">request data deletion</Link>.
+              {user.role === "consultant" && <> You can also <Link href="/clients" className="underline underline-offset-2">view pending requests</Link>.</>}
+            </p>
+          )}
           {canPay && (
             <Button className="w-full h-12 bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" onClick={startCheckout} disabled={checkingOut}>
               <CreditCard className="mr-2 h-4 w-4" />

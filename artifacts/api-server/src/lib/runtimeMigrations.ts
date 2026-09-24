@@ -141,6 +141,31 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_privacy_rights_requests_client_due" ON "privacy_rights_requests" ("client_id", "due_at")`);
     await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "client_data_deletion_requests" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "requested_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "requested_at" timestamptz NOT NULL DEFAULT now(),
+        "earliest_deletion_at" timestamptz NOT NULL,
+        "status" text NOT NULL DEFAULT 'pending',
+        "email_sent_at" timestamptz,
+        "notification_state" text NOT NULL DEFAULT 'pending',
+        "reviewed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "reviewed_at" timestamptz,
+        "review_note" text,
+        CONSTRAINT "CHK_client_deletion_status" CHECK ("status" IN ('pending','approved','refused','completed')),
+        CONSTRAINT "CHK_client_deletion_notification" CHECK ("notification_state" IN ('pending','sending','sent'))
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_requests" ADD COLUMN IF NOT EXISTS "reviewed_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_requests" ADD COLUMN IF NOT EXISTS "reviewed_at" timestamptz`);
+    await db.execute(sql`ALTER TABLE "client_data_deletion_requests" ADD COLUMN IF NOT EXISTS "review_note" text`);
+    await db.execute(sql`DROP INDEX IF EXISTS "UIDX_client_data_deletion_pending"`);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UIDX_client_data_deletion_active"
+        ON "client_data_deletion_requests" ("client_id") WHERE "status" IN ('pending','approved')
+    `);
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "privacy_retention_schedules" (
         "id" serial PRIMARY KEY,
         "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,

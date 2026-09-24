@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 // Route prefixes (relative to the /api mount) that stay reachable while a
 // client is billing-locked: auth (login/logout/me), everything under billing
 // (config, checkout, portal, invoices — the paths needed to pay), and health.
-const ALLOWED_PREFIXES = ["/auth", "/billing", "/healthz"];
+const ALLOWED_PREFIXES = ["/auth", "/billing", "/healthz", "/data-deletion", "/admin/data-deletion-requests"];
 
 /**
  * Global guard mounted on the API router: once a client's free trial has

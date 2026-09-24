@@ -80,6 +80,21 @@ export const privacyRightsRequestsTable = pgTable("privacy_rights_requests", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Account-level requests, distinct from rights requests for an individual data subject. */
+export const clientDataDeletionRequestsTable = pgTable("client_data_deletion_requests", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  requestedBy: integer("requested_by").references(() => usersTable.id, { onDelete: "set null" }),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+  earliestDeletionAt: timestamp("earliest_deletion_at", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("pending"),
+  emailSentAt: timestamp("email_sent_at", { withTimezone: true }),
+  notificationState: text("notification_state").notNull().default("pending"),
+  reviewedBy: integer("reviewed_by").references(() => usersTable.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewNote: text("review_note"),
+});
+
 export const privacyRetentionSchedulesTable = pgTable("privacy_retention_schedules", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),

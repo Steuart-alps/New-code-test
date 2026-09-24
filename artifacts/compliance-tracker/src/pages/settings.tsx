@@ -16,6 +16,7 @@ import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Co
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation } from "@/lib/analytics";
+import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -2020,6 +2021,11 @@ export default function SettingsPage() {
     await triggerTestEmail.mutateAsync({ data: { to: testEmail } });
   };
 
+  if (billingLocked) return (
+    <AppLayout title="Settings">
+      <div className="max-w-4xl"><DataDeletionRequestCard /></div>
+    </AppLayout>
+  );
   if (isLoading) return <AppLayout title="Settings"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mt-10" /></AppLayout>;
 
   return (
@@ -2029,6 +2035,7 @@ export default function SettingsPage() {
         <InvoicesCard />
         {canAdmin && <StorageUsageCard />}
         <DataExportCard />
+        <DataDeletionRequestCard />
         <DepartmentsCard />
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackSummaryRoutingCard

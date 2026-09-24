@@ -15,7 +15,7 @@ import SitesPage from "@/pages/sites";
 import SiteDetailPage from "@/pages/site-detail";
 import SettingsPage from "@/pages/settings";
 import UsersPage from "@/pages/users";
-import ClientsPage from "@/pages/clients";
+import ClientsPage, { LockedClientsPage } from "@/pages/clients";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -154,6 +154,12 @@ function ProtectedRoutes() {
   // Trial expired without a subscription: the whole app is replaced by the
   // billing-required screen (which lets consultants pay and everyone log out).
   if (billingLocked) {
+    if (location === "/settings" && (user.role === "consultant" || user.role === "client_admin")) {
+      return <SettingsPage />;
+    }
+    if (location === "/clients" && user.role === "consultant") {
+      return <LockedClientsPage />;
+    }
     return <TrialEndedPage />;
   }
 
