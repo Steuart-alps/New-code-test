@@ -281,6 +281,7 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
     insulationMohms:     d.insulationMohms ?? null,
     operatingCurrent:    d.operatingCurrent ?? null,
     notes:               d.notes ?? null,
+    createdBy:            req.currentUser!.id,
   }).returning();
   res.status(201).json(row);
 });

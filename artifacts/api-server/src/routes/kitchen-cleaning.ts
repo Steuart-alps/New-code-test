@@ -286,7 +286,7 @@ router.post("/logs", requireAuth, denyViewers, async (req, res) => {
   const siteMatch = scope.siteId === null
     ? sql`site_id IS NULL`
     : sql`site_id = ${scope.siteId}`;
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser!.id;
   const completionsJson = JSON.stringify(completions);
 
   const existing = await db.execute(sql`

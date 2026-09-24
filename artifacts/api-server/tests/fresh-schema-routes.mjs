@@ -100,6 +100,20 @@ async function main() {
   expect("POST", sitePath, site, Number.isInteger(site.data?.id), "site creation must return an integer id");
   const siteId = site.data.id;
 
+  const department = await request("POST", "/departments", { name: `Fresh Department ${stamp}` });
+  expectStatus("POST", "/departments", department, 201);
+  const day = new Date().toISOString().slice(0, 10);
+  const departmentReportPath = `/reports/compliance?from=${day}&to=${day}&departmentId=${department.data.id}&siteId=${siteId}`;
+  const departmentReport = await request("GET", departmentReportPath);
+  expectStatus("GET", departmentReportPath, departmentReport, 200);
+  expect(
+    "GET", departmentReportPath, departmentReport,
+    departmentReport.data?.sites?.length === 1
+      && Array.isArray(departmentReport.data?.dailyChecklists)
+      && Array.isArray(departmentReport.data?.moduleActivity),
+    "department report must work on a freshly migrated schema",
+  );
+
   // Staff roster
   const rosterPath = "/staff-roster";
   const emptyRoster = await request("GET", `${rosterPath}?siteId=${siteId}`);

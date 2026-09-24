@@ -55,7 +55,7 @@ router.post("/sessions", denyViewers, async (req, res) => {
       INSERT INTO swim_sessions (
         client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
         open_time, close_time, max_bathers, bather_count_peak,
-        pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result
+        pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by
       ) VALUES (
         ${clientId}, ${siteId ?? null}, ${sessionDate},
          ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
@@ -63,7 +63,7 @@ router.post("/sessions", denyViewers, async (req, res) => {
         ${maxBathers ?? null}, ${batherCountPeak ?? null},
         ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
         ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
-        ${notes?.trim() ?? null}, ${canonicalResult}
+        ${notes?.trim() ?? null}, ${canonicalResult}, ${req.currentUser!.id}
       )
       RETURNING *
     `);

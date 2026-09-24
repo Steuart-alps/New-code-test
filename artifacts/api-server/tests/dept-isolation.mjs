@@ -216,6 +216,59 @@ async function main() {
   });
   expectOk("staff: login", staffLogin.status, [200, 201]);
 
+  const staffFire = await staff("POST", "/fire-safety", {
+    checkType: "alarm",
+    checkDate: uniqueDate(0),
+    result: "pass",
+    siteId: siteAlphaId,
+  });
+  expectOk("staff: create attributed fire check", staffFire.status, [200, 201]);
+  const staffDaily = await staff("POST", `/daily-checklists/${siteAlphaId}/${uniqueDate(0)}/am`, {
+    answers: [{ question: "Opening check", checked: true }],
+  });
+  expectOk("staff: submit attributed daily checklist", staffDaily.status, [201]);
+  const staffLegacyDaily = await staff("POST", "/daily-track-am", {
+    siteId: siteAlphaId,
+    checklistType: "kitchen_opening",
+    checkDate: uniqueDate(1),
+    items: [],
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("staff: submit legacy AM checklist", staffLegacyDaily.status, [201]);
+
+  const departmentReport = await admin(
+    "GET", `/reports/compliance?from=${uniqueDate(2)}&to=${uniqueDate(0)}&departmentId=${deptAlphaId}`,
+  );
+  expectOk("admin: creator-scoped department report", departmentReport.status);
+  check(
+    "admin: report labels selected department",
+    departmentReport.data?.departmentName === "Dept Alpha"
+      && departmentReport.data?.dailyChecklists?.every(row => row.departmentName === "Dept Alpha"),
+    "department label missing from report",
+  );
+  check(
+    "admin: only staff-authored FireTrack records counted",
+    departmentReport.data?.moduleActivity?.find(row =>
+      row.module === "FireTrack" && row.siteId === siteAlphaId)?.count === 1,
+    "admin-authored fire check was included or staff check missing",
+  );
+  check(
+    "admin: current and legacy AM submissions counted",
+    departmentReport.data?.dailyChecklists?.find(row =>
+      row.siteId === siteAlphaId && row.type === "am")?.submitted === 2,
+    "current or legacy daily submission missing from department report",
+  );
+  const crossSiteDepartment = await admin(
+    "GET", `/reports/compliance?from=${uniqueDate(2)}&to=${uniqueDate(0)}&departmentId=${deptAlphaId}&siteId=${siteBetaId}`,
+  );
+  expectOk("admin: can filter department at a different site", crossSiteDepartment.status);
+  check(
+    "admin: different-site department filter excludes other authors",
+    crossSiteDepartment.data?.moduleActivity?.length === 0
+      && crossSiteDepartment.data?.sites?.length === 1,
+    "site-only department attribution leaked unrelated records",
+  );
+
   // ── 6. Staff site access ─────────────────────────────────────────────────────
 
   // List — Alpha site visible, Beta site NOT visible.

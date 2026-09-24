@@ -235,7 +235,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       notes: data.notes ?? null,
        performedBy: performer.performedBy,
        staffRosterId: performer.staffRosterId,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
     })
     .returning();
 

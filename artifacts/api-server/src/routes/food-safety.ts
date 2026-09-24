@@ -818,7 +818,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       performedBy: performer.performedBy,
       staffRosterId: performer.staffRosterId,
       submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
     })
     .onConflictDoNothing()
     .returning();

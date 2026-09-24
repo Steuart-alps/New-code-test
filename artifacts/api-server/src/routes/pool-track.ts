@@ -89,7 +89,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
        client_id, site_id, check_date, check_time, check_type, staff_roster_id,
       ph_level, free_chlorine, combined_chlorine,
       water_temp_c, air_temp_c, turbidity,
-      pool_open, performed_by, actions_taken, result, notes
+      pool_open, performed_by, actions_taken, result, notes, created_by
     ) VALUES (
       ${clientId},
       ${body.siteId ?? null},
@@ -106,7 +106,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
        ${performer.performedBy},
       ${body.actionsTaken ?? null},
       ${body.result},
-      ${body.notes ?? null}
+      ${body.notes ?? null},
+      ${req.currentUser!.id}
     )
     RETURNING *
   `);

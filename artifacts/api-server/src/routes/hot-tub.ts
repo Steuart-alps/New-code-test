@@ -419,7 +419,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
        performedBy: performer.performedBy,
        staffRosterId: performer.staffRosterId,
       notes: data.notes ?? null,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
     }).returning();
     if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
     return row;

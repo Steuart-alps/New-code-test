@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { z } from "zod";
 import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
+import { getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -57,6 +58,7 @@ async function resolveReportScope(
   clientId: number,
   requestedSiteId: number | undefined,
   requestedDepartmentId: number | undefined,
+  allowCrossDepartmentSite = false,
 ): Promise<ReportScope | null> {
   const activeDepartmentId = getActiveDepartmentId(req);
   if (
@@ -100,7 +102,8 @@ async function resolveReportScope(
       res.status(400).json({ error: "Site not found" });
       return null;
     }
-    if (departmentId !== undefined && Number(site.department_id) !== departmentId) {
+    if (departmentId !== undefined && Number(site.department_id) !== departmentId
+        && !(allowCrossDepartmentSite && activeDepartmentId === null)) {
       res.status(403).json({ error: "Site is outside the selected department scope" });
       return null;
     }
@@ -317,9 +320,18 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
   ) + 1;
   if (totalDays > 366) return res.status(400).json({ error: "Date range cannot exceed 366 days" });
 
-  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
+  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId, true);
   if (!scope) return;
-  const { siteId, departmentId } = scope;
+  const { siteId, departmentId, departmentName } = scope;
+
+  if (departmentId !== undefined) {
+    return res.json(await getDepartmentComplianceReport({
+      clientId, from, to, totalDays, siteId,
+      departmentId: departmentId!,
+      departmentName: departmentName!,
+      restrictSitesToDepartment: getActiveDepartmentId(req) !== null,
+    }));
+  }
 
   if (siteId === undefined && departmentId === undefined) {
     return res.json(await getUnscopedComplianceReport(clientId, from, to));

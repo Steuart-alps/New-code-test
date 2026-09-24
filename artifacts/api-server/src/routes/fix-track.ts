@@ -503,7 +503,7 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   }
 
   const [row] = await db.insert(fixTrackIssuesTable)
-    .values({ ...data, contractorId, clientId, createdBy: (req.session as any).userId ?? null })
+    .values({ ...data, contractorId, clientId, createdBy: req.currentUser!.id })
     .returning();
   await db.insert(fixTrackIssueActivityTable).values({
     clientId,

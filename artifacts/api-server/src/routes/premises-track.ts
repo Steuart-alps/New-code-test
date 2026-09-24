@@ -179,7 +179,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     status:         d.status,
     inspectedBy:    performer.performedBy,
     staffRosterId:  performer.staffRosterId,
-    createdBy:      (req as any).user?.id ?? null,
+    createdBy:      req.currentUser!.id,
   } as any).returning();
   res.status(201).json(row);
 });

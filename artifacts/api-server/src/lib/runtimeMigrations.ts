@@ -1689,6 +1689,7 @@ async function migrateSafeHandbook() {
 async function migrateHotTub() {
   await db.execute(sql`ALTER TABLE "hot_tub_checks" ADD COLUMN IF NOT EXISTS "hot_tub_id" integer`);
   await db.execute(sql`ALTER TABLE "hot_tub_checks" ADD COLUMN IF NOT EXISTS "session" text CHECK ("session" IN ('morning', 'midday', 'evening'))`);
+  await db.execute(sql`ALTER TABLE "hot_tub_checks" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
 }
 
 async function migrateHotTubRegistry() {
@@ -1744,7 +1745,30 @@ async function migrateTreeTrack() {
   // rows used result for both concepts; leave those values untouched.
   await db.execute(sql`
     ALTER TABLE "tree_inspections"
-    ADD COLUMN IF NOT EXISTS "action_severity" text
+    ADD COLUMN IF NOT EXISTS "action_severity" text,
+    ADD COLUMN IF NOT EXISTS "check_date" date,
+    ADD COLUMN IF NOT EXISTS "inspector" text,
+    ADD COLUMN IF NOT EXISTS "follow_up_date" date,
+    ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+  `);
+  // The first runtime schema used inspection_date and required tree_ref.
+  // Bring it in line with the current writer without discarding old entries.
+  await db.execute(sql`
+    UPDATE "tree_inspections"
+    SET "check_date" = (to_jsonb("tree_inspections")->>'inspection_date')::date
+    WHERE "check_date" IS NULL
+      AND to_jsonb("tree_inspections")->>'inspection_date' IS NOT NULL
+  `);
+  await db.execute(sql`ALTER TABLE "tree_inspections" ALTER COLUMN "tree_ref" DROP NOT NULL`);
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tree_inspections' AND column_name = 'inspection_date'
+      ) THEN
+        ALTER TABLE "tree_inspections" ALTER COLUMN "inspection_date" DROP NOT NULL;
+      END IF;
+    END $$
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tree_inspections_client" ON "tree_inspections" ("client_id")`);
 }
@@ -2219,10 +2243,12 @@ async function migratePoolTrack() {
       "actions_taken"      text,
       "result"             text NOT NULL DEFAULT 'pass',
       "notes"              text,
+      "created_by"         integer REFERENCES "users"("id") ON DELETE SET NULL,
       "created_at"         timestamp NOT NULL DEFAULT now(),
       "updated_at"         timestamp NOT NULL DEFAULT now()
     )
   `);
+  await db.execute(sql`ALTER TABLE "pool_checks" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_pool_checks_client_date"
     ON "pool_checks" ("client_id", "check_date")
@@ -2408,10 +2434,12 @@ async function migrateSwimTrack() {
       "closure_reason"      text,
       "notes"               text,
       "result"              text NOT NULL DEFAULT 'pass',
+      "created_by"          integer REFERENCES "users"("id") ON DELETE SET NULL,
       "created_at"          timestamp NOT NULL DEFAULT now(),
       "updated_at"          timestamp NOT NULL DEFAULT now()
     )
   `);
+  await db.execute(sql`ALTER TABLE "swim_sessions" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_swim_sessions_client_date"
     ON "swim_sessions" ("client_id", "session_date")

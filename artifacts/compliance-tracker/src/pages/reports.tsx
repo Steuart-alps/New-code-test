@@ -62,12 +62,14 @@ interface Department { id: number; name: string; }
 
 interface DailyRow {
   siteId: number; siteName: string;
+  departmentName?: string;
   type: "am" | "pm";
   submitted: number; expected: number; missed: number; pct: number;
 }
-interface ModuleRow { module: string; siteId: number; siteName: string; count: number; }
+interface ModuleRow { module: string; siteId: number; siteName: string; departmentName?: string; count: number; }
 interface ReportData {
   from: string; to: string; totalDays: number;
+  departmentName?: string;
   sites: Site[];
   dailyChecklists: DailyRow[];
   moduleActivity: ModuleRow[];
@@ -137,22 +139,20 @@ interface RiskReportData {
 
 function exportComplianceCsv(data: ReportData) {
   const lines: string[] = [];
+  const csv = (text: string) => `"${text.replace(/"/g, '""')}"`;
   lines.push("DAILY CHECKLISTS COMPLIANCE");
-  lines.push("Site,Type,Expected,Submitted,Missed,%");
+  lines.push("Department,Site,Type,Expected,Submitted,Missed,%");
   for (const r of data.dailyChecklists) {
-    lines.push(`"${r.siteName}",${r.type.toUpperCase()},${r.expected},${r.submitted},${r.missed},${r.pct}%`);
+    lines.push(`${csv(r.departmentName ?? "")},${csv(r.siteName)},${r.type.toUpperCase()},${r.expected},${r.submitted},${r.missed},${r.pct}%`);
   }
   lines.push("");
   lines.push("MODULE ACTIVITY");
   const modules = [...new Set(data.moduleActivity.map(r => r.module))].sort();
-  const siteNames = [...new Set(data.moduleActivity.map(r => r.siteName))].sort();
-  lines.push(`Site,${modules.join(",")}`);
+  lines.push(`Department,Site,${modules.map(csv).join(",")}`);
   const lookup = new Map(data.moduleActivity.map(r => [`${r.siteId}::${r.module}`, r.count]));
-  for (const siteName of siteNames) {
-    const site = data.sites.find(s => s.name === siteName);
-    if (!site) continue;
+  for (const site of data.sites) {
     const vals = modules.map(m => lookup.get(`${site.id}::${m}`) ?? 0);
-    lines.push(`"${siteName}",${vals.join(",")}`);
+    lines.push(`${csv(data.departmentName ?? "")},${csv(site.name)},${vals.join(",")}`);
   }
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const url  = URL.createObjectURL(blob);
@@ -318,23 +318,6 @@ function ComplianceTab({
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string | null>(null);
   const [data,         setData]         = useState<ReportData | null>(null);
-  const filteredSites = useMemo(
-    () => departmentId === "all"
-      ? sites
-      : sites.filter(site => site.departmentId === Number(departmentId)),
-    [sites, departmentId],
-  );
-
-  const selectDepartment = useCallback((value: string) => {
-    setDepartmentId(value);
-    if (
-      value !== "all"
-      && siteId !== "all"
-      && sites.find(site => site.id === Number(siteId))?.departmentId !== Number(value)
-    ) {
-      setSiteId("all");
-    }
-  }, [siteId, sites]);
 
   const runReport = useCallback(async () => {
     setError(null); setLoading(true);
@@ -368,13 +351,11 @@ function ComplianceTab({
     if (!data) return { modules: [], pivotSites: [] };
     const modulesSet  = new Set(data.moduleActivity.map(r => r.module));
     const mods        = [...modulesSet].sort();
-    const siteNames   = [...new Set(data.moduleActivity.map(r => r.siteName))].sort();
     const lookup      = new Map(data.moduleActivity.map(r => [`${r.siteId}::${r.module}`, r.count]));
-    const pivotSites  = siteNames.map(siteName => {
-      const site   = data.sites.find(s => s.name === siteName);
+    const pivotSites  = data.sites.map(site => {
       const counts: Record<string, number> = {};
-      for (const m of mods) counts[m] = site ? (lookup.get(`${site.id}::${m}`) ?? 0) : 0;
-      return { siteName, counts };
+      for (const m of mods) counts[m] = lookup.get(`${site.id}::${m}`) ?? 0;
+      return { siteId: site.id, siteName: site.name, counts };
     });
     return { modules: mods, pivotSites };
   })();
@@ -387,8 +368,8 @@ function ComplianceTab({
     <>
       <FilterBar
         from={from} to={to} siteId={siteId} departmentId={departmentId}
-        sites={filteredSites} departments={departments}
-        onFrom={setFrom} onTo={setTo} onSite={setSiteId} onDept={selectDepartment}
+        sites={sites} departments={departments}
+        onFrom={setFrom} onTo={setTo} onSite={setSiteId} onDept={setDepartmentId}
         onLoadSites={() => {}} onLoadDepts={() => {}}
         onRun={runReport} loading={loading}
         extra={data ? (
@@ -417,14 +398,22 @@ function ComplianceTab({
           <p className="text-sm text-muted-foreground mb-6">
             Showing data for <span className="font-medium text-foreground">{dateLabel}</span>
             {" "}({data.totalDays} days, {data.sites.length} site{data.sites.length !== 1 ? "s" : ""})
+            {data.departmentName && <> · Department: <span className="font-medium text-foreground">{data.departmentName}</span></>}
           </p>
+          {data.departmentName && (
+            <p className="mb-4 text-xs text-muted-foreground">
+              Counts use the submitting account’s current department assignment. Records without
+              an identifiable submitting account are excluded; sites with no attributed records
+              are omitted unless a site is selected.
+            </p>
+          )}
 
           {/* Daily checklists */}
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="text-base">Daily Checklists — AM &amp; PM Compliance</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Percentage of days in the period where a checklist was submitted per site.
+                Percentage of days in the period where a checklist was submitted per site{data.departmentName ? " by a member of the selected department" : ""}.
                 Green ≥ 90 % · Amber ≥ 70 % · Red &lt; 70 %
               </p>
             </CardHeader>
@@ -450,6 +439,7 @@ function ComplianceTab({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
+                      {data.departmentName && <th className="pb-2 pr-4 font-medium">Department</th>}
                       <th className="pb-2 pr-4 font-medium">Site</th>
                       <th className="pb-2 pr-4 font-medium">Type</th>
                       <th className="pb-2 pr-4 font-medium text-right">Expected</th>
@@ -460,9 +450,10 @@ function ComplianceTab({
                   </thead>
                   <tbody>
                     {data.dailyChecklists.length === 0 ? (
-                      <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">No daily checklist data for this period</td></tr>
+                      <tr><td colSpan={data.departmentName ? 7 : 6} className="py-6 text-center text-muted-foreground">No daily checklist data for this period</td></tr>
                     ) : data.dailyChecklists.map((r, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
+                        {data.departmentName && <td className="py-2 pr-4">{r.departmentName}</td>}
                         <td className="py-2 pr-4 font-medium">{r.siteName}</td>
                         <td className="py-2 pr-4 uppercase text-xs font-semibold tracking-wide text-muted-foreground">{r.type}</td>
                         <td className="py-2 pr-4 text-right tabular-nums">{r.expected}</td>
@@ -488,7 +479,7 @@ function ComplianceTab({
           {/* Module activity pivot */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Module Activity by Site</CardTitle>
+              <CardTitle className="text-base">Module Activity by {data.departmentName ? "Department and Site" : "Site"}</CardTitle>
               <p className="text-xs text-muted-foreground">
                 Count of records logged per module during the period. Zero means no records were entered.
               </p>
@@ -501,6 +492,7 @@ function ComplianceTab({
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
+                        {data.departmentName && <th className="pb-2 pr-4 font-medium">Department</th>}
                         <th className="pb-2 pr-4 font-medium sticky left-0 bg-background">Site</th>
                         {modules.map(m => (
                           <th key={m} className="pb-2 px-3 font-medium text-right whitespace-nowrap">{m}</th>
@@ -508,8 +500,9 @@ function ComplianceTab({
                       </tr>
                     </thead>
                     <tbody>
-                      {pivotSites.map((row, i) => (
-                        <tr key={i} className="border-b last:border-0 hover:bg-muted/30">
+                      {pivotSites.map(row => (
+                        <tr key={row.siteId} className="border-b last:border-0 hover:bg-muted/30">
+                          {data.departmentName && <td className="py-2 pr-4">{data.departmentName}</td>}
                           <td className="py-2 pr-4 font-medium sticky left-0 bg-background">{row.siteName}</td>
                           {modules.map(m => {
                             const n = row.counts[m] ?? 0;

@@ -277,7 +277,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       temperature: data.temperature != null ? String(data.temperature) : null,
       siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
       performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
     }).returning();
     if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
     return row;

@@ -11,7 +11,11 @@ Rule: never trust the `CREATE TABLE IF NOT EXISTS` definitions in the api-server
 
 **Dropping legacy indexes safely:** never match candidates with `pg_get_indexdef LIKE '%...%'` — a wider unique index (e.g. same cols + one more) matches too and gets silently dropped. Resolve exact key attnums via `pg_index.indkey` (require exact column set, no expressions, no predicate).
 
-**Route coverage:** a Drizzle table definition can exist without a runtime-created table. Add a fresh-database route test whenever a new route depends on a table, so missing runtime migrations fail before launch.
+**Route coverage:** a Drizzle table definition can exist without a runtime-created table. Add a fresh-database route test whenever a new route depends on a table. For multi-module reports, request the *filtered branch* explicitly, not just the default page or an empty boot.
+
+**Why:** a live database can have creator/date columns absent from a fresh runtime-created table. Typechecking and successful startup do not execute the SQL UNION, so only a fresh-schema HTTP request catches this kind of report failure.
+
+**How to apply:** smoke-test each conditional report query on a blank runtime-migrated database with a valid filter, even when no records exist yet.
 
 **Blank-database checks:** Build the schema exclusively from explicit runtime DDL, including the core baseline. Never generate the test baseline from current Drizzle definitions or copy the development database.
 
