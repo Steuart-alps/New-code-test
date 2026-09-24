@@ -45,7 +45,7 @@ for _ in $(seq 1 120); do
 done
 [ "$ready" = "1" ] || { echo "Fresh-schema API did not become ready" >&2; exit 1; }
 NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/fresh-schema-routes.mjs
-API_BASE="http://127.0.0.1:$port/api" node tests/module-routes.mjs
+DATABASE_URL="$url" API_BASE="http://127.0.0.1:$port/api" node tests/module-routes.mjs
 if grep -Eq '42P01|42703|relation .* does not exist|column .* does not exist|Runtime migrations failed' "$temp/server.log"; then
   echo "Missing database table/column detected in API logs" >&2
   exit 1

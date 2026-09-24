@@ -1521,6 +1521,9 @@ async function migrateAuditFixes2026_08() {
   // TrainTrack: record_type (certificate/signoff/internal) is distinct from training_type,
   // plus every other column the current route reads/writes that older installs may lack.
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "record_type" text NOT NULL DEFAULT 'internal'`);
+  // Document sign-offs use document_title/document_type instead of training_type.
+  // Older installations required this column even after record_type was added.
+  await db.execute(sql`ALTER TABLE "train_track_records" ALTER COLUMN "training_type" DROP NOT NULL`);
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "document_title" text`);
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "document_type" text`);
   await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "provider" text`);

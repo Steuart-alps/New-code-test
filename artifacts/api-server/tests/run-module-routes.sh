@@ -8,6 +8,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source tests/api-integration-lock.sh
+command -v psql >/dev/null || { echo "psql is required for the isolated DocTrack document fixture" >&2; exit 1; }
 
 # Pick a free ephemeral port if none is set. Falls back to 19090 if python3
 # is unavailable (unlikely in this environment).
@@ -18,7 +19,7 @@ TEST_PORT="${TEST_PORT:-$(_free_port)}"
 export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
 
 healthy() {
-  curl -sf -m 2 "${API_BASE}/healthz" >/dev/null 2>&1
+  curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1
 }
 
 SERVER_PID=""
@@ -35,7 +36,7 @@ if ! healthy; then
   pnpm run build
   NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 120); do
     if healthy; then break; fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
       echo "API server process exited before becoming healthy" >&2
@@ -44,7 +45,7 @@ if ! healthy; then
     sleep 1
   done
   if ! healthy; then
-    echo "API server did not become healthy at ${API_BASE} within 30s" >&2
+    echo "API server did not become ready at ${API_BASE} within 120s" >&2
     exit 1
   fi
 fi

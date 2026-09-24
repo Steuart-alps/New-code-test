@@ -10,6 +10,7 @@
 //
 // Usage: node tests/module-routes.mjs
 // Exits 0 when all checks pass, 1 otherwise.
+import { testDocTrainFlows } from "./doc-train-flows.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -827,6 +828,14 @@ async function main() {
   await testFoodSafety(req);
   await testSiteFiltering(req, siteId);
   await testCleaningSiteFiltering(req, siteId, secondSiteId);
+  await testDocTrainFlows({
+    managerReq: req,
+    makeSession,
+    check,
+    expectOk,
+    siteId,
+    isoDate,
+  });
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {
