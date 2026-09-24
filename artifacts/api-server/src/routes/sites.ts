@@ -21,10 +21,15 @@ const storage = new ObjectStorageService();
 
 const router: IRouter = Router();
 
+function parsePositiveSafeInteger(raw: unknown): number | null {
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 async function validateDepartmentForClient(rawDepartmentId: unknown, clientId: number): Promise<number | null | "invalid"> {
   if (rawDepartmentId === undefined || rawDepartmentId === null || rawDepartmentId === "") return null;
   const departmentId = Number(rawDepartmentId);
-  if (!Number.isInteger(departmentId) || departmentId <= 0) return "invalid";
+  if (!Number.isSafeInteger(departmentId) || departmentId <= 0) return "invalid";
   const [department] = await db.select({ id: departmentsTable.id })
     .from(departmentsTable)
     .where(and(eq(departmentsTable.id, departmentId), eq(departmentsTable.clientId, clientId)))
@@ -57,7 +62,11 @@ router.get("/sites", requireAuth, async (req, res) => {
 });
 
 router.get("/sites/:id", requireAuth, async (req, res) => {
-  const id = Number(req.params.id);
+  const id = parsePositiveSafeInteger(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "Invalid site id" });
+    return;
+  }
   const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
   if (!site) {
     res.status(404).json({ error: "Site not found" });
@@ -130,7 +139,11 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
 });
 
 router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const id = Number(req.params.id);
+  const id = parsePositiveSafeInteger(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "Invalid site id" });
+    return;
+  }
   const [existing] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
   if (!existing) {
     res.status(404).json({ error: "Site not found" });
@@ -155,12 +168,17 @@ router.patch("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => 
   // Allow tagging / un-tagging a site to a department
   if ("departmentId" in req.body) updates.departmentId = departmentId;
 
-  const [updated] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
+  const [updated] = await db.update(sitesTable).set(updates)
+    .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId))).returning();
   res.json(updated);
 });
 
 router.delete("/sites/:id", requireAuth, requireClientAdmin, async (req, res) => {
-  const id = Number(req.params.id);
+  const id = parsePositiveSafeInteger(req.params.id);
+  if (id === null) {
+    res.status(400).json({ error: "Invalid site id" });
+    return;
+  }
   const [existing] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
   if (!existing) {
     res.status(404).json({ error: "Site not found" });
@@ -170,7 +188,8 @@ router.delete("/sites/:id", requireAuth, requireClientAdmin, async (req, res) =>
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  await db.delete(sitesTable).where(eq(sitesTable.id, id));
+  await db.delete(sitesTable)
+    .where(and(eq(sitesTable.id, id), eq(sitesTable.clientId, existing.clientId)));
 
   // Per-site billing: removing a site decreases the subscription quantity
   // at the next renewal (no refund or credit for the remainder of the month).
@@ -195,8 +214,8 @@ async function getSiteForClient(siteId: number, clientId: number) {
 router.get("/sites/:id/documents", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const siteId = Number(req.params.id);
-  if (!isFinite(siteId)) return res.status(400).json({ error: "Invalid site id" });
+  const siteId = parsePositiveSafeInteger(req.params.id);
+  if (siteId === null) return res.status(400).json({ error: "Invalid site id" });
 
   const site = await getSiteForClient(siteId, clientId);
   if (!site) return res.status(404).json({ error: "Site not found" });
@@ -217,8 +236,8 @@ router.get("/sites/:id/documents", requireAuth, async (req, res) => {
 router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const siteId = Number(req.params.id);
-  if (!isFinite(siteId)) return res.status(400).json({ error: "Invalid site id" });
+  const siteId = parsePositiveSafeInteger(req.params.id);
+  if (siteId === null) return res.status(400).json({ error: "Invalid site id" });
 
   const site = await getSiteForClient(siteId, clientId);
   if (!site) return res.status(404).json({ error: "Site not found" });
@@ -236,8 +255,8 @@ router.post("/sites/:id/documents/request-upload", requireAuth, requireClientAdm
 router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const siteId = Number(req.params.id);
-  if (!isFinite(siteId)) return res.status(400).json({ error: "Invalid site id" });
+  const siteId = parsePositiveSafeInteger(req.params.id);
+  if (siteId === null) return res.status(400).json({ error: "Invalid site id" });
 
   const site = await getSiteForClient(siteId, clientId);
   if (!site) return res.status(404).json({ error: "Site not found" });
@@ -268,9 +287,9 @@ router.post("/sites/:id/documents", requireAuth, requireClientAdmin, async (req,
 router.delete("/sites/:id/documents/:docId", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const siteId = Number(req.params.id);
-  const docId  = Number(req.params.docId);
-  if (!isFinite(siteId) || !isFinite(docId)) return res.status(400).json({ error: "Invalid id" });
+  const siteId = parsePositiveSafeInteger(req.params.id);
+  const docId = parsePositiveSafeInteger(req.params.docId);
+  if (siteId === null || docId === null) return res.status(400).json({ error: "Invalid id" });
 
   const site = await getSiteForClient(siteId, clientId);
   if (!site) return res.status(404).json({ error: "Site not found" });

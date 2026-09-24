@@ -162,6 +162,13 @@ async function main() {
   if (quoteTokenMatch) {
     const quotePage = await fetch(`${BASE}/fix-track/quotes/public/${quoteTokenMatch[1]}`);
     check("hashed quote token resolves before submission", quotePage.status === 200, String(quotePage.status));
+    const quoteFingerprint = createHash("sha256").update(quoteTokenMatch[1]).digest("hex");
+    const quoteEvidence = await execFile("psql", [
+      process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+      `SELECT count(*) FROM public_link_access_evidence WHERE client_id=${Number(ownerClientId)} AND link_type='fix_track_quote' AND token_fingerprint='${quoteFingerprint}'`,
+    ]);
+    check("valid FixTrack quote access leaves hashed evidence",
+      Number(quoteEvidence.stdout.trim()) >= 1, quoteEvidence.stdout.trim());
     const submittedQuote = await fetch(`${BASE}/fix-track/quotes/public/${quoteTokenMatch[1]}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -225,7 +232,21 @@ async function main() {
   check("assignment email contains a high-entropy contractor action link", !!bookedMatch);
   if (bookedMatch) {
     const firstAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
+    const firstActionHtml = await firstAction.text();
     check("hashed contractor action token resolves", firstAction.status === 200, String(firstAction.status));
+    check("GET only displays an explicit booking confirmation", firstActionHtml.includes("Confirm booking"));
+    const unchangedIssue = await owner("GET", `/fix-track/issues/${retryId}`);
+    check("email scanner GET leaves the issue reported", unchangedIssue.data?.status === "reported",
+      JSON.stringify(unchangedIssue.data));
+    const fingerprint = createHash("sha256").update(bookedMatch[1]).digest("hex");
+    const evidence = await execFile("psql", [
+      process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+      `SELECT count(*) FROM public_link_access_evidence WHERE client_id=${Number(ownerClientId)} AND link_type='fix_track_action' AND token_fingerprint='${fingerprint}'`,
+    ]);
+    check("valid FixTrack link access leaves hashed evidence",
+      Number(evidence.stdout.trim()) >= 1, evidence.stdout.trim());
+    const booked = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}/booked`, { method: "POST" });
+    check("explicit contractor POST confirms booking", booked.status === 200 && (await booked.json())?.ok === true);
     const repeatedAction = await fetch(`${BASE}/fix-track/action/${bookedMatch[1]}`);
     check("contractor action token remains one-time", repeatedAction.status === 200 &&
       (await repeatedAction.text()).includes("Already recorded"));
@@ -311,7 +332,7 @@ async function main() {
     (await owner("POST", `/fix-track/issues/${calendarId}/request-send`, { mode: "assign", force: true })).status === 200);
   if (firstCalendarToken) {
     const invalidated = await fetch(`${BASE}/fix-track/action/${firstCalendarToken}`);
-    check("forced resend invalidates old contractor action links", invalidated.status === 410, String(invalidated.status));
+    check("forced resend revokes old contractor action links", invalidated.status === 404, String(invalidated.status));
   } else {
     check("forced resend fixture contains original action token", false);
   }
@@ -425,6 +446,13 @@ async function main() {
   const concurrentToken = calendarOutbox.at(-1)?.html?.match(/\/api\/fix-track\/action\/([a-f0-9]{64})/)?.[1];
   check("surviving concurrent resend keeps its own action tokens active",
     !!concurrentToken && (await fetch(`${BASE}/fix-track/action/${concurrentToken}`)).status === 200);
+  if (concurrentToken) {
+    const actionHash = createHash("sha256").update(concurrentToken).digest("hex");
+    await execFile("psql", [process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+      `UPDATE fix_track_action_tokens SET expires_at=now()-interval '1 minute' WHERE token_hash='${actionHash}'`]);
+    check("expired contractor action link is rejected",
+      (await fetch(`${BASE}/fix-track/action/${concurrentToken}`)).status === 410);
+  }
 
   const expiredQuoteId = await contractorIssue(owner, "expired-quote");
   check("expired quote test request queues",

@@ -10,6 +10,7 @@ import { getPublicAppUrl } from "../lib/email";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { digestBearerToken } from "../lib/bearerTokens";
+import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const router = Router();
 export const fixTrackQuoteRouter = Router();
@@ -18,7 +19,7 @@ const storage = new ObjectStorageService();
 // Quote links are deliberately separate from action links: they remain valid
 // only for quote queue entries and cannot mutate an issue directly.
 fixTrackQuoteRouter.get("/:token", async (req, res) => {
-  const result = await db.execute(sql`SELECT q.id, q.quote_token, q.status, i.title,
+  const result = await db.execute(sql`SELECT q.id, q.client_id, q.quote_token, q.status, i.title,
     i.description, i.location, i.issue_type, i.priority, s.name AS site_name,
     c.name AS contractor_name
     FROM contractor_email_queue q
@@ -30,6 +31,9 @@ fixTrackQuoteRouter.get("/:token", async (req, res) => {
       AND q.status IN ('sent','approved') LIMIT 1`);
   const q = (result.rows as any[])[0];
   if (!q) return res.status(404).json({ error: "Quote link not found or expired" });
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_quote", clientId: q.client_id, token: req.params.token,
+  });
   res.json({ job: { title: q.title, description: q.description, location: q.location,
     issueType: q.issue_type, priority: q.priority, siteName: q.site_name },
     contractorName: q.contractor_name, submitted: q.status === "approved" });
@@ -47,6 +51,9 @@ fixTrackQuoteRouter.post("/:token", async (req, res) => {
       AND q.status IN ('sent','approved') LIMIT 1`);
   const q = (result.rows as any[])[0];
   if (!q) return res.status(404).json({ error: "Quote link not found or expired" });
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_quote", clientId: q.client_id, token: req.params.token,
+  });
   const pence = Math.round(price * 100);
   const inserted = await db.execute(sql`INSERT INTO fix_track_quote_submissions
     (queue_id, client_id, contractor_id, price_pence, pounds_price, notes)
@@ -109,10 +116,11 @@ async function lookupToken(token: string): Promise<TokenRow | null> {
       ,c.name        AS contractor_name
     FROM   fix_track_action_tokens t
     JOIN   fix_track_issues fi ON fi.id = t.issue_id AND fi.client_id = t.client_id
-    LEFT   JOIN sites       s  ON s.id   = fi.site_id
+    LEFT   JOIN sites       s  ON s.id   = fi.site_id AND s.client_id = t.client_id
     JOIN   clients          cl ON cl.id  = t.client_id
     LEFT   JOIN contractors c  ON c.id   = t.contractor_id AND c.client_id = t.client_id
     WHERE  t.token_hash = ${digestBearerToken(token)}
+      AND t.revoked_at IS NULL
     LIMIT  1
   `);
   return ((result.rows as any[])[0] as TokenRow) ?? null;
@@ -205,6 +213,9 @@ router.get("/:token", async (req, res) => {
        <div class="ssub">This link is invalid or has expired. Ask the manager to resend.</div>`
     ));
   }
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_action", clientId: t.client_id, token: req.params.token,
+  });
 
   if (t.used_at) {
     return res.send(shell("Already Actioned",
@@ -221,62 +232,32 @@ router.get("/:token", async (req, res) => {
     ));
   }
 
-  // ── Booked: act immediately ───────────────────────────────────────────────
+  // ── Booked: require an explicit POST confirmation. Email security scanners
+  // routinely follow GET links, so GET must never change issue state.
 
   if (t.action === "booked") {
-    let outcome: "updated" | "used" | "invalid" = "used";
-    try {
-      outcome = await db.transaction(async (tx) => {
-        const tokenClaim = await tx.execute(sql`
-          UPDATE fix_track_action_tokens
-          SET used_at = now()
-          WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now()
-          RETURNING id
-        `);
-        if (!(tokenClaim.rows as any[])[0]) return "used" as const;
-
-        const issueUpdate = await tx.execute(sql`
-          UPDATE fix_track_issues
-          SET status = 'in_progress', updated_at = now()
-          WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'reported'
-          RETURNING id
-        `);
-        if (!(issueUpdate.rows as any[])[0]) throw new Error("INVALID_TRANSITION");
-
-        await tx.execute(sql`
-          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
-          VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
-        `);
-        await tx.execute(sql`
-          INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
-          VALUES (
-            ${t.client_id},
-            ${t.issue_id},
-            'note',
-            ${`Marked as booked by ${t.contractor_name ?? "contractor"} via email`},
-            now()
-          )
-        `);
-        return "updated" as const;
-      });
-    } catch (err: any) {
-      if (err?.message === "INVALID_TRANSITION") outcome = "invalid";
-      else throw err;
-    }
-    if (outcome === "used") {
-      return res.status(409).send(shell("Already Actioned",
-        `<div class="stitle">Already recorded</div><div class="ssub">This link has already been used.</div>`));
-    }
-    if (outcome === "invalid") {
-      return res.status(409).send(shell("Status Changed",
-        `<div class="stitle">Job cannot be booked</div><div class="ssub">The issue has already moved to another status.</div>`));
-    }
-    return res.send(shell("Job Booked",
-      `<div class="big">📅</div>
-       <div class="stitle">Job marked as Booked</div>
-       <div class="ssub" style="margin-bottom:20px">${esc(t.company_name)} has been notified that you've confirmed the booking.</div>
-       ${issueBlock(t)}`
-    ));
+    const tok = esc(req.params.token);
+    return res.send(shell("Confirm Job Booking", `
+      <h1>Confirm job booking</h1>
+      <p class="sub">Confirm that you accept this job. Opening this page does not change the job status.</p>
+      ${issueBlock(t)}
+      <button class="btn" id="confirm" type="button">Confirm booking</button>
+      <div id="msg"></div>
+      <script>
+        const btn=document.getElementById('confirm'),msg=document.getElementById('msg');
+        btn.addEventListener('click',async()=>{
+          btn.disabled=true;btn.textContent='Saving…';
+          try {
+            const response=await fetch('/api/fix-track/action/${tok}/booked',{method:'POST'});
+            if(!response.ok)throw new Error(await response.text());
+            window.location.reload();
+          } catch(error) {
+            msg.className='msg err';msg.textContent=error.message||'Please try again';
+            btn.disabled=false;btn.textContent='Confirm booking';
+          }
+        });
+      </script>
+    `));
   }
 
   // ── Completed: show form ──────────────────────────────────────────────────
@@ -344,11 +325,61 @@ btn.addEventListener('click',async()=>{
 
 // ── POST /:token — handle completed form submission ───────────────────────────
 
+router.post("/:token/booked", async (req, res) => {
+  let t: TokenRow | null = null;
+  try { t = await lookupToken(req.params.token); } catch { /* db error */ }
+  if (!t || t.action !== "booked") return res.status(400).send("Invalid token");
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_action", clientId: t.client_id, token: req.params.token,
+  });
+  if (t.used_at) return res.status(409).send("Already actioned");
+  if (new Date(t.expires_at) < new Date()) return res.status(410).send("Link expired");
+
+  let outcome: "updated" | "used" | "invalid" = "used";
+  try {
+    outcome = await db.transaction(async (tx) => {
+      const tokenClaim = await tx.execute(sql`
+        UPDATE fix_track_action_tokens
+        SET used_at = now()
+        WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now() AND revoked_at IS NULL
+        RETURNING id
+      `);
+      if (!(tokenClaim.rows as any[])[0]) return "used" as const;
+      const issueUpdate = await tx.execute(sql`
+        UPDATE fix_track_issues
+        SET status = 'in_progress', updated_at = now()
+        WHERE id = ${t.issue_id} AND client_id = ${t.client_id} AND status = 'reported'
+        RETURNING id
+      `);
+      if (!(issueUpdate.rows as any[])[0]) throw new Error("INVALID_TRANSITION");
+      await tx.execute(sql`
+        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_at)
+        VALUES (${t.client_id}, ${t.issue_id}, 'status', 'in_progress', now())
+      `);
+      await tx.execute(sql`
+        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, note, created_at)
+        VALUES (${t.client_id}, ${t.issue_id}, 'note',
+          ${`Marked as booked by ${t.contractor_name ?? "contractor"} via email`}, now())
+      `);
+      return "updated" as const;
+    });
+  } catch (err: any) {
+    if (err?.message === "INVALID_TRANSITION") outcome = "invalid";
+    else throw err;
+  }
+  if (outcome === "used") return res.status(409).send("Already actioned");
+  if (outcome === "invalid") return res.status(409).send("Job cannot be booked; its status has changed");
+  res.status(200).json({ ok: true });
+});
+
 router.post("/:token", async (req, res) => {
   let t: TokenRow | null = null;
   try { t = await lookupToken(req.params.token); } catch { /* db error */ }
 
   if (!t || t.action !== "completed")  return res.status(400).send("Invalid token");
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_action", clientId: t.client_id, token: req.params.token,
+  });
   if (t.used_at)                        return res.status(409).send("Already actioned");
   if (new Date(t.expires_at) < new Date()) return res.status(410).send("Link expired");
 
@@ -371,7 +402,7 @@ router.post("/:token", async (req, res) => {
       const tokenClaim = await tx.execute(sql`
         UPDATE fix_track_action_tokens
         SET used_at = now(), completion_notes = ${notes}, completion_object_path = ${completionObjectPath}
-        WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now()
+        WHERE id = ${t.id} AND used_at IS NULL AND expires_at > now() AND revoked_at IS NULL
         RETURNING id
       `);
       if (!(tokenClaim.rows as any[])[0]) return "used" as const;
@@ -429,6 +460,9 @@ router.post("/:token/upload-url", async (req, res) => {
   if (!t || t.action !== "completed" || t.used_at) {
     return res.status(400).json({ error: "Invalid or expired token" });
   }
+  await recordPublicLinkAccess(req, {
+    kind: "fix_track_action", clientId: t.client_id, token: req.params.token,
+  });
   if (new Date(t.expires_at) < new Date()) return res.status(410).json({ error: "Link expired" });
 
   try {

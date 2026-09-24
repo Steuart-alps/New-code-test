@@ -1,8 +1,12 @@
 // End-to-end coverage for DocTrack's current acknowledgement status and the
 // Pest Control PAT preset's tenant-scoped template API.
+import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const execFile = promisify(execFileCallback);
 let cookie = "";
 let failures = 0;
 
@@ -67,6 +71,83 @@ async function main() {
   const me = await request("GET", "/auth/me");
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   check("manager has client context", clientId != null);
+
+  const allowedOrigin = "http://localhost:5173";
+  const allowedPreflight = await fetch(`${BASE}/sites`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: allowedOrigin,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  check("CORS permits the exact configured origin",
+    allowedPreflight.headers.get("access-control-allow-origin") === allowedOrigin);
+  const foreignOrigin = "http://localhost:5173.attacker.invalid";
+  const blockedPreflight = await fetch(`${BASE}/sites`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: foreignOrigin,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  check("CORS does not accept an origin that only shares a hostname prefix",
+    blockedPreflight.headers.get("access-control-allow-origin") !== foreignOrigin);
+
+  const issueSignOff = () => request("POST", "/doc-track/sign-off-info");
+  const signOffCreated = await issueSignOff();
+  requireSuccess("manager creates an expiring sign-off link", signOffCreated, 201);
+  const firstSignOffToken = signOffCreated.data?.token;
+  check("sign-off token has high entropy", /^[a-f0-9]{64}$/.test(firstSignOffToken ?? ""));
+  check("sign-off link expires in the future", new Date(signOffCreated.data?.expiresAt).getTime() > Date.now());
+  const publicInfo = await request("GET", `/sign-off/${firstSignOffToken}/info`);
+  requireSuccess("active sign-off token resolves with the manager's session cookie", publicInfo, 200);
+
+  const fingerprint = createHash("sha256").update(firstSignOffToken).digest("hex");
+  const evidence = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT count(*) FROM public_link_access_evidence WHERE client_id=${Number(clientId)} AND link_type='sign_off' AND token_fingerprint='${fingerprint}'`,
+  ]);
+  check("valid public sign-off access leaves a hashed access-evidence row",
+    Number(evidence.stdout.trim()) >= 1, evidence.stdout.trim());
+
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `UPDATE clients SET sign_off_token_expires_at=now()-interval '1 minute' WHERE id=${Number(clientId)} AND sign_off_token='${firstSignOffToken}'`,
+  ]);
+  check("expired sign-off token is rejected",
+    (await request("GET", `/sign-off/${firstSignOffToken}/info`)).status === 404);
+
+  const renewedSignOff = await issueSignOff();
+  requireSuccess("manager can renew an expired sign-off link", renewedSignOff, 201);
+  check("renewal rotates the bearer token", renewedSignOff.data?.token !== firstSignOffToken);
+  check("replaced token is invalid immediately",
+    (await request("GET", `/sign-off/${firstSignOffToken}/info`)).status === 404);
+  requireSuccess("renewed token resolves", await request("GET", `/sign-off/${renewedSignOff.data?.token}/info`), 200);
+
+  const rateLimitLink = await issueSignOff();
+  requireSuccess("manager can rotate a sign-off link again", rateLimitLink, 201);
+  let rateLimitRequestsPassed = true;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const attemptResponse = await request("GET", `/sign-off/${rateLimitLink.data?.token}/info`);
+    if (attemptResponse.status !== 200) rateLimitRequestsPassed = false;
+  }
+  check("public sign-off link permits requests up to its per-token limit", rateLimitRequestsPassed);
+  check("public sign-off link is rate-limited after 60 requests",
+    (await request("GET", `/sign-off/${rateLimitLink.data?.token}/info`)).status === 429);
+
+  const finalSignOff = await issueSignOff();
+  requireSuccess("manager can renew after a rate-limited token", finalSignOff, 201);
+  const rotatedTokenLookup = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT count(*) FROM clients WHERE id=${Number(clientId)} AND sign_off_token='${rateLimitLink.data?.token}'`,
+  ]);
+  check("rotation replaces the prior bearer token",
+    Number(rotatedTokenLookup.stdout.trim()) === 0);
+  requireSuccess("manager revokes the renewed link", await request("DELETE", "/doc-track/sign-off-info"), 204);
+  check("revoked sign-off token is rejected",
+    (await request("GET", `/sign-off/${finalSignOff.data?.token}/info`)).status === 404);
 
   const kitchenDepartment = await request("POST", "/departments", { name: "Kitchen" });
   requireSuccess("create Kitchen department", kitchenDepartment, 201);

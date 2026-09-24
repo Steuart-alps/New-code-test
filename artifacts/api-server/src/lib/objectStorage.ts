@@ -475,7 +475,12 @@ export class ObjectStorageService {
    * getObjectEntityUploadURL / normalizeObjectEntityPath.
    * objectPath must start with /objects/  (e.g. /objects/uploads/<uuid>).
    */
-  async getSignedDownloadURL(objectPath: string, ttlSec = 900, allowedTypes?: ReadonlySet<AllowedUploadType>): Promise<string> {
+  async getSignedDownloadURL(
+    objectPath: string,
+    ttlSec = 900,
+    allowedTypes?: ReadonlySet<AllowedUploadType>,
+    expectedTenantId?: number | string,
+  ): Promise<string> {
     // Resolve through getObjectEntityFile so callers cannot get a signed URL
     // for a nonexistent private object.
     const objectFile = await this.getObjectEntityFile(objectPath);
@@ -493,7 +498,21 @@ export class ObjectStorageService {
     if (acl?.visibility !== "private" || !Number.isSafeInteger(clientId) || clientId <= 0) {
       throw new ObjectOwnershipError("Private object has no tenant owner");
     }
+    if (expectedTenantId !== undefined && acl.owner !== String(expectedTenantId)) {
+      throw new ObjectOwnershipError("Object does not belong to the record's tenant");
+    }
     return createDownloadToken(objectPath, clientId, ttlSec);
+  }
+
+  /** Require the stored object ACL owner to match the tenant on its DB record. */
+  async assertTenantObjectOwnership(
+    objectFile: File,
+    tenantId: number | string,
+  ): Promise<void> {
+    const acl = await getObjectAclPolicy(objectFile);
+    if (acl?.visibility !== "private" || acl.owner !== String(tenantId)) {
+      throw new ObjectOwnershipError("Object does not belong to the record's tenant");
+    }
   }
 
   async canAccessObjectEntity({

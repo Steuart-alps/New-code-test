@@ -90,6 +90,13 @@ try {
   check("manager issue returns plaintext token once", issue1.status === 201 && typeof token1 === "string" && token1.length === 64);
   const view1 = await publicRequest("GET", `/contractor-portal/${token1}`);
   check("token sees only bound contractor", view1.status === 200 && view1.data?.name === created.data.name && !("notes" in view1.data));
+  const [portalEvidence] = (await db.execute(sql`
+    SELECT id FROM public_link_access_evidence
+    WHERE client_id = ${owner.clientId} AND link_type = 'contractor_portal'
+      AND token_fingerprint = ${digest(token1)}
+    LIMIT 1
+  `)).rows;
+  check("valid contractor portal access leaves access evidence", portalEvidence?.id != null);
 
   const issue2 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
   const token2 = issue2.data?.token;
@@ -117,6 +124,7 @@ try {
   const portalAfterCert = await publicRequest("GET", `/contractor-portal/${token3}`);
   const visible = portalAfterCert.data?.certificates ?? [];
   check("manager notes never disclosed", visible.some(c => c.id === managerCert.data.id) && visible.every(c => !("notes" in c)));
+  check("certificate object paths are never exposed by the portal", visible.every(c => !("object_path" in c)));
   check("other contractor certificate excluded", !visible.some(c => c.id === foreignCert.data.id));
   const portalCreate = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
     certificateName: "Portal certificate", notes: "must-not-be-accepted",
@@ -125,10 +133,10 @@ try {
   check("portal notes ignored rather than accepted", portalCreate.status === 201 && stored?.notes == null);
   check("token cannot delete other contractor certificate",
     (await publicRequest("DELETE", `/contractor-portal/${token3}/certificates/${foreignCert.data.id}`)).status === 404);
-  check("missing object rejected",
-    (await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
-      certificateName: "Missing upload", objectPath: `/objects/uploads/tenant-${owner.clientId}/does-not-exist`,
-    })).status === 404);
+  const missingUpload = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
+    certificateName: "Missing upload", objectPath: `/objects/uploads/tenant-${owner.clientId}/does-not-exist`,
+  });
+  check("missing or inaccessible object rejected", [403, 404].includes(missingUpload.status), String(missingUpload.status));
   check("foreign object path rejected",
     (await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
       certificateName: "Foreign upload", objectPath: `/objects/uploads/tenant-${foreign.clientId}/foreign`,

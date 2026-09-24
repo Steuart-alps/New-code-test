@@ -7,6 +7,7 @@ import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage"
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { createAcknowledgementRegisterPdf } from "../lib/acknowledgementRegisterPdf";
+import { newBearerToken } from "../lib/bearerTokens";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -652,17 +653,54 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
 
 // ── Get sign-off link token ───────────────────────────────────────────────────
 
-router.get("/sign-off-info", requireAuth, async (req, res) => {
+router.get("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const result = await db.execute(sql`
-    SELECT sign_off_token FROM clients WHERE id = ${clientId} LIMIT 1
+    SELECT sign_off_token, sign_off_token_expires_at, sign_off_token_revoked_at
+    FROM clients WHERE id = ${clientId} LIMIT 1
   `);
   const row = (result.rows ?? [])[0] as any;
-  if (!row?.sign_off_token) return res.status(404).json({ error: "No sign-off token found" });
+  if (!row?.sign_off_token || row.sign_off_token_revoked_at ||
+      !row.sign_off_token_expires_at || new Date(row.sign_off_token_expires_at) <= new Date()) {
+    return res.status(404).json({ error: "No active sign-off link. Create a new link to continue." });
+  }
 
-  res.json({ token: row.sign_off_token });
+  res.json({ token: row.sign_off_token, expiresAt: row.sign_off_token_expires_at });
+});
+
+router.post("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const token = newBearerToken();
+  const updated = await db.execute(sql`
+    UPDATE clients
+    SET sign_off_token = ${token},
+        sign_off_token_expires_at = now() + interval '90 days',
+        sign_off_token_revoked_at = NULL
+    WHERE id = ${clientId}
+    RETURNING sign_off_token_expires_at
+  `);
+  const expiresAt = (updated.rows ?? [])[0] as { sign_off_token_expires_at?: Date } | undefined;
+  if (!expiresAt) return res.status(404).json({ error: "Client not found" });
+  res.status(201).json({ token, expiresAt: expiresAt.sign_off_token_expires_at });
+});
+
+router.delete("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const revoked = await db.execute(sql`
+    UPDATE clients
+    SET sign_off_token = NULL,
+        sign_off_token_expires_at = NULL,
+        sign_off_token_revoked_at = now()
+    WHERE id = ${clientId} AND sign_off_token IS NOT NULL
+    RETURNING id
+  `);
+  if (!(revoked.rows ?? []).length) return res.status(404).json({ error: "No active sign-off link" });
+  res.status(204).end();
 });
 
 // ── Request presigned upload URL ──────────────────────────────────────────────

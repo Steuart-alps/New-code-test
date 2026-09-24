@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { digestBearerToken } from "./bearerTokens";
 
 type Entry = { count: number; resetAt: number };
 
@@ -108,6 +109,18 @@ export const publicLinkRateLimit = makeLoginRateLimit({
   windowMs: 60 * 1000,
   max: 120,
   namespace: "public-link",
+});
+
+/** Bound repeated use of any one public-link credential, across source IPs. */
+export const publicLinkTokenRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  namespace: "public-link-token",
+  key: (req) => {
+    const firstPathSegment = req.path.split("/").filter(Boolean)[0];
+    if (firstPathSegment) return `token:${digestBearerToken(firstPathSegment)}`;
+    return `ip:${clientIp(req)}`;
+  },
 });
 
 /** Test-only helper: reset all counters. */

@@ -77,6 +77,10 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
       res.status(403).json({ error: "Object does not belong to this client" });
       return;
     }
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded object not found" });
+      return;
+    }
     req.log.error({ err }, "Could not finalize document upload");
     res.status(400).json({ error: "Uploaded file could not be verified" });
     return;
@@ -206,6 +210,7 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
 
   try {
     const file = await storage.getObjectEntityFile(doc.objectPath);
+    await storage.assertTenantObjectOwnership(file, clientId);
     const canRead = await storage.canAccessObjectEntity({
       userId: String(clientId),
       objectFile: file,

@@ -1089,7 +1089,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
       WHERE id=${id} AND client_id=${clientId} FOR UPDATE`);
     if ((locked.rows as any[])[0]?.email_request_status === "sending") {
       if (parsed.data.mode === "assign") {
-        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now()
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now(), revoked_at=now()
           WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
             AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
       }
@@ -1108,6 +1108,11 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
             WHEN token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})
               THEN now() + interval '30 days'
             ELSE now()
+          END,
+          revoked_at=CASE
+            WHEN token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})
+              THEN NULL
+            ELSE COALESCE(revoked_at, now())
           END
           WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
         `);
@@ -1117,7 +1122,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
             AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
       }
     } else if (force) {
-      await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now()
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now(), revoked_at=now()
         WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL`);
     }
     await tx.update(fixTrackIssuesTable).set({

@@ -70,6 +70,7 @@
     "test:staff-invitations": "bash tests/run-staff-invitations.sh",
     "test:welcome-email": "bash tests/run-welcome-email.sh",
     "test:viewer-route-policy": "node tests/viewer-route-policy.mjs",
+    "test:csrf-origin-policy": "esbuild tests/csrf-origin-policy.ts --bundle --platform=node --format=esm --outfile=/tmp/csrf-origin-policy.mjs && node /tmp/csrf-origin-policy.mjs",
     "test:contractor-upload-signatures": "bash tests/run-db-workflow.sh tests/contractor-upload-signatures.mjs",
     "test:contractor-compliance-reminders": "bash tests/run-db-workflow.sh tests/contractor-compliance-reminders.mjs",
     "test:fix-track-history": "bash tests/run-fix-track-history.sh",

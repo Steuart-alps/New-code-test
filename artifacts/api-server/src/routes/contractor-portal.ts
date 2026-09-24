@@ -13,6 +13,7 @@ import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
+import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -67,7 +68,7 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function validateToken(token: string): Promise<TokenRow | null> {
+async function validateToken(token: string, req: import("express").Request): Promise<TokenRow | null> {
   const result = await db.execute(sql`
     SELECT
       cpt.client_id, cpt.contractor_id,
@@ -81,18 +82,22 @@ async function validateToken(token: string): Promise<TokenRow | null> {
       AND cpt.client_id = c.client_id
   `);
   const rows = (result.rows ?? []) as unknown as TokenRow[];
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (row) {
+    await recordPublicLinkAccess(req, { kind: "contractor_portal", clientId: row.client_id, token });
+  }
+  return row;
 }
 
 // ── GET /:token — contractor's current details + certificates ──────────────
 
 router.get("/:token", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid. Please ask your client to resend a reminder." });
 
     const certs = await db.execute(sql`
-      SELECT id, certificate_name, issuer, completed_date, expiry_date, object_path
+      SELECT id, certificate_name, issuer, completed_date, expiry_date
       FROM contractor_certificates
       WHERE contractor_id = ${row.contractor_id}
         AND client_id = ${row.client_id}
@@ -132,7 +137,7 @@ const updateSchema = z.object({
 
 router.put("/:token", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const data = updateSchema.parse(req.body);
@@ -163,7 +168,7 @@ router.put("/:token", async (req, res) => {
 // ── POST /:token/upload-url — presigned URL for a certificate document ─────
 
 router.post("/:token/upload-url", async (req, res) => {
-  const row = await validateToken(req.params.token);
+  const row = await validateToken(req.params.token, req);
   if (!row) return res.status(404).json({ error: "Link expired or invalid" });
   const parsed = z.object({
     contentType: z.string().max(100),
@@ -198,7 +203,7 @@ const certCreateSchema = z.object({
 
 router.post("/:token/certificates", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const data = certCreateSchema.parse(req.body);
@@ -254,7 +259,7 @@ router.post("/:token/certificates", async (req, res) => {
 // the already tenant- and contractor-scoped certificate row first.
 router.get("/:token/certificates/:certId/download", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
     const certId = Number(req.params.certId);
     if (!Number.isInteger(certId) || certId <= 0) return res.status(400).json({ error: "Invalid certificate ID" });
@@ -265,7 +270,9 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     `);
     const objectPath = (certs.rows?.[0] as { object_path?: string } | undefined)?.object_path;
     if (!objectPath) return res.status(404).json({ error: "Certificate file not found" });
-    const downloadUrl = await objectStorageService.getSignedDownloadURL(objectPath, 900, ALLOWED_CERTIFICATE_TYPES);
+    const downloadUrl = await objectStorageService.getSignedDownloadURL(
+      objectPath, 900, ALLOWED_CERTIFICATE_TYPES, row.client_id,
+    );
     return res.json({ downloadUrl });
   } catch (err: any) {
     if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Certificate file not found" });
@@ -280,7 +287,7 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
 
 router.delete("/:token/certificates/:certId", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const certId = parseInt(req.params.certId, 10);

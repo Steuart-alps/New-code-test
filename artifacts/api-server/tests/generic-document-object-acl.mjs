@@ -122,6 +122,6 @@ response = await owner("POST", "/documents", {
   objectPath: objectPath.replace(/\/[^/]+$/, "/does-not-exist"),
   mimeType: "application/pdf",
 });
-assert.equal(response.status, 400, "missing object registration is rejected");
+assert.equal(response.status, 404, "missing object registration is rejected");
 
 console.log("Generic document object ACL coverage passed");

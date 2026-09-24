@@ -61,9 +61,9 @@ const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
   .split(",")
   .map(d => d.trim())
   .filter(Boolean)
-  .flatMap(d => [`https://${d}`, `http://${d}`]);
+  .map(d => `https://${d}`);
 const replitDevOrigins = process.env.REPLIT_DEV_DOMAIN
-  ? [`https://${process.env.REPLIT_DEV_DOMAIN}`, `http://${process.env.REPLIT_DEV_DOMAIN}`]
+  ? [`https://${process.env.REPLIT_DEV_DOMAIN.trim()}`]
   : [];
 
 const allowedOrigins = [

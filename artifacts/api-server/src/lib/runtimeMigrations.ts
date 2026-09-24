@@ -1862,6 +1862,38 @@ async function migrateDocDepartment() {
       END IF;
     END $$
   `);
+
+  // Public staff sign-off links are bearer credentials. Give existing links a
+  // finite migration grace period and support explicit rotation/revocation.
+  await db.execute(sql`
+    ALTER TABLE "clients"
+      ADD COLUMN IF NOT EXISTS "sign_off_token_expires_at" timestamptz,
+      ADD COLUMN IF NOT EXISTS "sign_off_token_revoked_at" timestamptz
+  `);
+  await db.execute(sql`
+    UPDATE "clients"
+    SET "sign_off_token_expires_at" = now() + interval '90 days'
+    WHERE "sign_off_token" IS NOT NULL AND "sign_off_token_expires_at" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "public_link_access_evidence" (
+      "id" bigserial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "link_type" text NOT NULL CHECK ("link_type" IN
+        ('sign_off','contractor_portal','fix_track_action','fix_track_quote')),
+      "token_fingerprint" text NOT NULL,
+      "action" text NOT NULL,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_public_link_access_client_created"
+    ON "public_link_access_evidence" ("client_id", "created_at" DESC)
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_public_link_access_fingerprint_created"
+    ON "public_link_access_evidence" ("token_fingerprint", "created_at" DESC)
+  `);
 }
 
 // ---- Pool Track ----
@@ -2466,6 +2498,7 @@ async function migrateFixTrackV2() {
     )
   `);
   await db.execute(sql`ALTER TABLE "fix_track_action_tokens" ADD COLUMN IF NOT EXISTS "token_hash" text`);
+  await db.execute(sql`ALTER TABLE "fix_track_action_tokens" ADD COLUMN IF NOT EXISTS "revoked_at" timestamptz`);
   await db.execute(sql`ALTER TABLE "fix_track_action_tokens" ALTER COLUMN "token" DROP NOT NULL`);
   const actionLegacy = await db.execute(sql`SELECT id, token FROM fix_track_action_tokens WHERE token IS NOT NULL`);
   for (const row of (actionLegacy.rows as any[])) {

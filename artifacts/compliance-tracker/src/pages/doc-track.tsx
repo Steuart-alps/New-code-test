@@ -918,6 +918,8 @@ export default function DocTrackPage() {
   const [ackDoc, setAckDoc] = useState<Doc | null>(null);
   const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [signOffToken, setSignOffToken] = useState<string | null>(null);
+  const [signOffExpiresAt, setSignOffExpiresAt] = useState<string | null>(null);
+  const [signOffLinkBusy, setSignOffLinkBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -934,8 +936,13 @@ export default function DocTrackPage() {
     if (!activeClientId) return;
     load();
     apiFetch("/sites").then(r => r.ok ? r.json() : []).then(setSites);
+    setSignOffToken(null);
+    setSignOffExpiresAt(null);
     apiFetch("/doc-track/sign-off-info").then(r => r.ok ? r.json() : null).then(d => {
-      if (d?.token) setSignOffToken(d.token);
+      if (d?.token) {
+        setSignOffToken(d.token);
+        setSignOffExpiresAt(d.expiresAt ?? null);
+      }
     });
   }, [activeClientId, load]);
 
@@ -949,6 +956,44 @@ export default function DocTrackPage() {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2500);
     });
+  }
+
+  async function createSignOffLink() {
+    setSignOffLinkBusy(true);
+    try {
+      const response = await apiFetch("/doc-track/sign-off-info", { method: "POST" });
+      if (!response.ok) throw new Error("Could not create a sign-off link");
+      const data = await response.json();
+      setSignOffToken(data.token);
+      setSignOffExpiresAt(data.expiresAt ?? null);
+      toast({ title: "Staff sign-off link created" });
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "Could not create a sign-off link",
+        variant: "destructive",
+      });
+    } finally {
+      setSignOffLinkBusy(false);
+    }
+  }
+
+  async function revokeSignOffLink() {
+    if (!window.confirm("Revoke this staff sign-off link? Anyone using it will lose access immediately.")) return;
+    setSignOffLinkBusy(true);
+    try {
+      const response = await apiFetch("/doc-track/sign-off-info", { method: "DELETE" });
+      if (!response.ok && response.status !== 204) throw new Error("Could not revoke the sign-off link");
+      setSignOffToken(null);
+      setSignOffExpiresAt(null);
+      toast({ title: "Staff sign-off link revoked" });
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "Could not revoke the sign-off link",
+        variant: "destructive",
+      });
+    } finally {
+      setSignOffLinkBusy(false);
+    }
   }
 
   // Unique departments from existing docs (for autocomplete in upload dialog)
@@ -1052,22 +1097,68 @@ export default function DocTrackPage() {
       {pageView === "library" && (
         <>
           {/* Staff self-sign link */}
-          {signOffUrl && (
+          {isManager && (
             <div className="flex items-center gap-3 mb-6 p-3.5 rounded-xl border bg-amber-50 border-amber-200">
               <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-amber-900">Staff self-sign link</p>
-                <p className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+                {signOffUrl ? (
+                  <>
+                    <p data-testid="text-sign-off-link" className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+                    <p data-testid="text-sign-off-expiry" className="text-xs text-amber-800 mt-1">
+                      Expires {signOffExpiresAt ? new Date(signOffExpiresAt).toLocaleDateString("en-GB") : "in 90 days"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-amber-800 mt-0.5">No active link. Create one to let staff sign required documents.</p>
+                )}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
-                onClick={copySignOffLink}
-              >
-                {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {linkCopied ? "Copied!" : "Copy link"}
-              </Button>
+              {signOffUrl ? (
+                <>
+                  <Button
+                    data-testid="button-copy-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
+                    onClick={copySignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {linkCopied ? "Copied!" : "Copy link"}
+                  </Button>
+                  <Button
+                    data-testid="button-renew-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 h-8"
+                    onClick={createSignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    Renew
+                  </Button>
+                  <Button
+                    data-testid="button-revoke-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 h-8 text-destructive"
+                    onClick={revokeSignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    Revoke
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  data-testid="button-create-sign-off-link"
+                  size="sm"
+                  variant="outline"
+                  className="flex-shrink-0 h-8 border-amber-300 text-amber-800 hover:bg-amber-100"
+                  onClick={createSignOffLink}
+                  disabled={signOffLinkBusy}
+                >
+                  {signOffLinkBusy ? "Creating…" : "Create link"}
+                </Button>
+              )}
             </div>
           )}
 
