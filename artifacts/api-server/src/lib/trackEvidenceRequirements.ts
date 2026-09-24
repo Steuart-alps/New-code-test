@@ -83,7 +83,7 @@ export async function missingEvidenceForAction(clientId: number, action: {
     );
     const usable = requirement.reviewRequired
       ? matching.filter(item => item.reviewStatus === "verified")
-      : matching;
+      : matching.filter(item => item.reviewStatus !== "rejected");
     return usable.length < requirement.minimumCount;
   });
 }

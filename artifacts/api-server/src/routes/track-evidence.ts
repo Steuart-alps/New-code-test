@@ -96,13 +96,16 @@ router.get("/requirements", requireAuth, async (req, res) => {
       item.requirementKey === requirement.requirementKey && item.evidenceType === requirement.evidenceType,
     );
     const verifiedCount = matching.filter(item => item.reviewStatus === "verified").length;
-    const recordedCount = matching.length;
-    const satisfiedCount = requirement.reviewRequired ? verifiedCount : recordedCount;
+    const recordedCount = matching.filter(item => item.reviewStatus === "recorded").length;
+    const rejectedCount = matching.filter(item => item.reviewStatus === "rejected").length;
+    const satisfiedCount = requirement.reviewRequired ? verifiedCount : recordedCount + verifiedCount;
     return {
       ...requirement,
       recordedCount,
       verifiedCount,
+      rejectedCount,
       satisfied: satisfiedCount >= requirement.minimumCount,
+      missingCount: Math.max(0, requirement.minimumCount - satisfiedCount),
     };
   }));
 });
