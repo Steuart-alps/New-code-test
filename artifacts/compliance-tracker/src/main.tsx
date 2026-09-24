@@ -12,7 +12,36 @@ if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN as string,
     environment: import.meta.env.MODE,
+    sendDefaultPii: false,
     integrations: [Sentry.browserTracingIntegration()],
+    beforeSend(event) {
+      // Links and API calls may include short-lived bearer tokens in their
+      // path or query string. Do not send them to an external error service.
+      const redactUrl = (value: string) => {
+        try {
+          const url = new URL(value, window.location.origin);
+          return `${url.origin}${url.pathname}`.replace(
+            /(\/(?:sign-off|contractor-portal|fix-track\/action|fix-track\/quotes\/public)\/)[^/]+/g,
+            "$1[redacted]",
+          );
+        } catch {
+          return "[redacted]";
+        }
+      };
+      if (event.request) {
+        delete event.request.data;
+        delete event.request.cookies;
+        delete event.request.headers;
+        delete event.request.query_string;
+        if (event.request.url) event.request.url = redactUrl(event.request.url);
+      }
+      event.breadcrumbs?.forEach(breadcrumb => {
+        if (typeof breadcrumb.data?.url === "string") {
+          breadcrumb.data.url = redactUrl(breadcrumb.data.url);
+        }
+      });
+      return event;
+    },
     // Capture 10 % of page-load / navigation transactions for performance.
     tracesSampleRate: 0.1,
   });

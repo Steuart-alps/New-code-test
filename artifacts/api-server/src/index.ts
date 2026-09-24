@@ -1,8 +1,3 @@
-// Sentry must be initialised before anything else so all auto-instrumentation
-// (Express, http, DB calls) is active from the very first request.
-import { initSentry } from "./lib/sentry";
-initSentry();
-
 import app, { markApplicationReady } from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
