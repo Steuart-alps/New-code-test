@@ -1545,6 +1545,15 @@ function DataExportCard() {
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
+  useEffect(() => {
+    if (canAdmin && window.location.hash === "#data-export") {
+      const frame = window.requestAnimationFrame(() => {
+        document.getElementById("data-export")?.scrollIntoView({ block: "start" });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    return undefined;
+  }, [canAdmin]);
   if (!canAdmin) return null;
 
   async function handleExport() {
@@ -1573,7 +1582,7 @@ function DataExportCard() {
   }
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card">
+    <Card id="data-export" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Download className="w-5 h-5 text-primary" />
@@ -1587,7 +1596,7 @@ function DataExportCard() {
         <div className="flex items-start gap-4">
           <div className="flex-1 text-sm text-muted-foreground space-y-1">
             <p>The export includes every record scoped to your account: sites, departments, staff, all compliance logs and contractor records.</p>
-            <p className="text-xs">File attachments (PDFs, photos) are referenced by URL in the CSV — they are not bundled into the ZIP.</p>
+            <p className="text-xs">Available private file attachments (PDFs, photos) are included in the ZIP. Check its manifest for any files that could not be bundled.</p>
           </div>
           <Button onClick={handleExport} disabled={busy} className="shrink-0 gap-2">
             {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}

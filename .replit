@@ -294,3 +294,6 @@ CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "2026-09-01"
 GCS_PROJECT_ID = "project-ea358f54-678e-42e7-814"
 GCS_BUCKET_NAME = "alpscomplytrack"
 TWILIO_VERIFY_SERVICE_SID = "VAa8456cf2efe3b6e6acf2d5a61c447820"
+
+[userenv.production]
+PUBLIC_APP_URL = "https://complytrack.alpsconsultancy.co.uk"

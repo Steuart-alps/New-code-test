@@ -211,7 +211,7 @@ export async function sendCancellationWarningEmail(opts: {
   // supplies a period end.
   if (!accessEndsDate || accessEndsDate.getTime() <= Date.now()) return { emailsSent: 0 };
   const accessEndsStr = accessEndsDate.toLocaleDateString(
-    "en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" },
+    "en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "Europe/London" },
   );
   // A changed cutoff warrants a fresh notice; otherwise the same recipient is
   // sent at most once. This key is intentionally stable for a missing Stripe
@@ -219,7 +219,7 @@ export async function sendCancellationWarningEmail(opts: {
   const cutoffKey = accessEndsDate.toISOString();
 
   const appUrl = deps.getAppUrl?.() ?? getPublicAppUrl();
-  const settingsUrl = `${appUrl}/settings`;
+  const settingsUrl = `${appUrl}/settings#data-export`;
   const billingUrl = `${appUrl}/billing`;
   const safeCompany = escapeHtml(client.name);
   const subject = "Your ComplyTrack access is ending — export your records";

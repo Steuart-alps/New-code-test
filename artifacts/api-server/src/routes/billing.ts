@@ -40,6 +40,38 @@ import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers 
 
 const router = Router();
 
+// Keep this lightweight for the app-wide offboarding banner. Read the synced
+// Stripe state on each request so reversing a cancellation hides the warning.
+router.get("/cancellation-status", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  try {
+    const [client] = await db.select({ customerId: clientsTable.stripeCustomerId })
+      .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+    if (!client?.customerId) return res.json({ accessEndsAt: null });
+    const result = await db.execute(sql`
+      SELECT COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+      FROM stripe.subscriptions s
+      WHERE s.customer = ${client.customerId}
+        AND s.cancel_at_period_end = true
+        AND s.status IN ('active', 'trialing', 'past_due')
+        AND COALESCE(s.cancel_at, s.current_period_end) > now()
+        AND NOT EXISTS (
+          SELECT 1 FROM stripe.subscriptions live
+          WHERE live.customer = s.customer
+            AND live.status IN ('active', 'trialing', 'past_due')
+            AND COALESCE(live.cancel_at_period_end, false) = false
+        )
+      ORDER BY s.current_period_end DESC NULLS LAST
+      LIMIT 1
+    `);
+    res.json({ accessEndsAt: (result.rows[0] as { access_ends_at: Date | string } | undefined)?.access_ends_at ?? null });
+  } catch (error) {
+    req.log.error({ err: error, clientId }, "Could not load cancellation status");
+    res.status(503).json({ error: "Cancellation status unavailable" });
+  }
+});
+
 // GET /api/billing/config — returns publishable key + current plan info
 router.get("/config", requireAuth, async (req, res) => {
   try {
