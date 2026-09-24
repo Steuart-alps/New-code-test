@@ -185,6 +185,75 @@ async function main() {
     siteId: primarySite.data?.id, department: "Housekeeping",
   });
   requireSuccess("create other-department roster staff", otherDepartmentStaff, 201);
+
+  // This fixture does not depend on object storage, so personal-signoff
+  // regressions still run in environments where upload signing is unavailable.
+  const staffEmail = staff.data?.email;
+  requireSuccess("create linked staff account", await request("POST", "/users", {
+    name: "A different account display name", email: staffEmail,
+    password: "password-123", role: "client_staff", clientId,
+    departmentId: kitchenDepartment.data?.id,
+  }), 201);
+  const fixtureResult = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement,department)
+     VALUES (${Number(clientId)},${Number(primarySite.data?.id)},'Staff signoff fixture','policy','fixture.pdf','application/pdf','fixtures/staff-signoff.pdf',true,true,'Kitchen')
+     RETURNING id`,
+  ]);
+  const fixtureId = Number(fixtureResult.stdout.trim().split("\n")[0]);
+  check("fixture document inserted", Number.isInteger(fixtureId) && fixtureId > 0);
+  cookie = "";
+  requireSuccess("log in linked staff", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  let personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("personal list shows only eligible pending documents, despite a different display name",
+    personal.status === 200 && personal.data?.rosterLinked === true
+      && personal.data?.pending?.some((d) => d.id === fixtureId));
+  const signed = await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, {
+    self: true, signature: "Typed signature", staffRosterId: otherSiteStaff.data?.id,
+    staffName: "Forged name",
+  });
+  check("self sign-off cannot impersonate another roster entry",
+    signed.status === 201 && signed.data?.created === 1
+      && signed.data?.records?.[0]?.staff_roster_id === staff.data?.id);
+  check("repeat self sign-off is idempotent",
+    (await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, { self: true })).data?.created === 0);
+  personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("completed list contains the acknowledgement date",
+    personal.data?.pending?.every((d) => d.id !== fixtureId)
+      && !!personal.data?.completed?.find((d) => d.id === fixtureId)?.acknowledged_at);
+  cookie = managerCookie;
+  const managerList = await request("GET", "/doc-track/documents");
+  check("manager acknowledgement totals use the self sign-off evidence",
+    Number(managerList.data?.find((d) => d.id === fixtureId)?.acknowledged_count) === 1);
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `UPDATE train_track_records SET expiry_date=CURRENT_DATE-1
+     WHERE id=${Number(signed.data?.records?.[0]?.train_track_record_id)}`,
+  ]);
+  cookie = "";
+  requireSuccess("log in linked staff after expiry", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("expired annual sign-off returns to the pending list",
+    personal.data?.pending?.some((d) => d.id === fixtureId));
+  const renewedFixture = await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, { self: true });
+  check("staff can renew an expired annual acknowledgement",
+    renewedFixture.status === 201 && renewedFixture.data?.created === 1);
+  cookie = managerCookie;
+  check("manager without a matching roster sees an unlinked personal view",
+    (await request("GET", "/doc-track/acknowledgements/my")).data?.rosterLinked === false);
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `DELETE FROM doc_track_documents WHERE id=${fixtureId} AND client_id=${Number(clientId)};
+     DELETE FROM train_track_records WHERE id IN
+       (${Number(signed.data?.records?.[0]?.train_track_record_id)},
+        ${Number(renewedFixture.data?.records?.[0]?.train_track_record_id)}) AND client_id=${Number(clientId)}`,
+  ]);
+
   const uploadRequest = await request("POST", "/doc-track/documents/request-upload", {
     name: "annual-safety-policy.pdf",
     contentType: "application/pdf",
@@ -245,6 +314,9 @@ async function main() {
     }), 200);
     check(`${label} staff self acknowledgement is denied`,
       (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "forged" })).status === 403);
+    const privateList = await request("GET", "/doc-track/acknowledgements/my");
+    check(`${label} staff cannot see an ineligible document in their personal list`,
+      privateList.status === 200 && !privateList.data?.pending?.some((item) => item.id === document.data?.id));
     cookie = managerCookie;
   }
 
@@ -305,10 +377,31 @@ async function main() {
   let overviewRow = overview.data?.documents?.find((item) => item.id === document.data?.id);
   check("expired annual sign-off appears outstanding", overviewRow?.outstanding?.some((item) => item.id === staff.data?.id));
 
+  cookie = "";
+  requireSuccess("log in linked staff", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  const pendingMine = await request("GET", "/doc-track/acknowledgements/my");
+  check("personal list shows only the expired in-scope annual document",
+    pendingMine.status === 200 && pendingMine.data?.rosterLinked === true
+      && pendingMine.data?.pending?.some((item) => item.id === document.data?.id)
+      && !pendingMine.data?.completed?.some((item) => item.id === document.data?.id));
   const renewed = await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
-    acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "Alex Staff" }],
+    self: true, signature: "Typed staff signature", staffRosterId: otherSiteStaff.data?.id,
+    staffName: "Forged name",
   });
-  check("renew expired annual acknowledgement", renewed.status === 201 && renewed.data?.created === 1);
+  check("linked staff renews only their own expired acknowledgement", renewed.status === 201 && renewed.data?.created === 1
+    && renewed.data.records[0]?.staff_roster_id === staff.data?.id);
+  const completedMine = await request("GET", "/doc-track/acknowledgements/my");
+  check("renewal moves document to completed with its acknowledgement date",
+    completedMine.status === 200
+      && !completedMine.data?.pending?.some((item) => item.id === document.data?.id)
+      && !!completedMine.data?.completed?.find((item) => item.id === document.data?.id)?.acknowledged_at);
+  check("repeat self sign-off is idempotent",
+    (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { self: true })).data?.created === 0);
+  cookie = managerCookie;
+  check("manager without a linked roster sees no personal records",
+    (await request("GET", "/doc-track/acknowledgements/my")).data?.rosterLinked === false);
   check(
     "renewal creates a replacement TrainTrack sign-off",
     typeof renewed.data?.records?.[0]?.train_track_record_id === "number"
@@ -330,17 +423,17 @@ async function main() {
   const pdfText = managerExport.bytes?.toString() ?? "";
   check("PDF contains document and acknowledged staff", pdfText.includes("Annual safety policy") && pdfText.includes("Alex Staff"));
 
-  const staffEmail = `doc-export-staff-${Date.now()}@test.local`;
+  const exportStaffEmail = `doc-export-staff-${Date.now()}@test.local`;
   const viewerEmail = `doc-export-viewer-${Date.now()}@test.local`;
   requireSuccess("create staff user", await request("POST", "/users", {
-    name: "Export Staff", email: staffEmail, password: "password-123", role: "client_staff", clientId,
+    name: "Export Staff", email: exportStaffEmail, password: "password-123", role: "client_staff", clientId,
   }), 201);
   requireSuccess("create viewer user", await request("POST", "/users", {
     name: "Export Viewer", email: viewerEmail, password: "password-123", role: "client_viewer", clientId,
   }), 201);
 
   cookie = "";
-  requireSuccess("log in as staff", await request("POST", "/auth/login", { email: staffEmail, password: "password-123" }), 200);
+  requireSuccess("log in as staff", await request("POST", "/auth/login", { email: exportStaffEmail, password: "password-123" }), 200);
   check("staff cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
 
@@ -408,6 +501,8 @@ async function main() {
     (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
       acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "forged" }],
     })).status === 404);
+  check("other tenant's personal list cannot reveal the first tenant's documents",
+    !(await request("GET", "/doc-track/acknowledgements/my")).data?.pending?.some((item) => item.id === document.data?.id));
 
   cookie = managerCookie;
   const preset = await request("PUT", "/pat-track/preset-templates/pest-control", {

@@ -94,7 +94,8 @@ router.get("/documents", requireAuth, async (req, res) => {
         ) AS pending_count,
         COUNT(*) FILTER (
           WHERE a.id IS NOT NULL
-            AND (a.train_track_record_id IS NULL OR tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
+            AND (a.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+            AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
         ) AS acknowledged_count,
         COUNT(*) FILTER (
           WHERE tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE
@@ -379,6 +380,56 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
 });
 
 // ── Outstanding acknowledgements overview (managers) ────────────────────────
+// Resolve a login to exactly one active roster record. Display names are not
+// identities: multiple staff can share a name (or even a reused email).
+async function findMyRoster(clientId: number, email: string | null | undefined) {
+  if (!email?.trim()) return [];
+  const rows = await db.execute(sql`
+    SELECT id, name, department, site_id FROM staff_roster
+    WHERE client_id = ${clientId} AND active = true
+      AND email IS NOT NULL AND lower(btrim(email)) = lower(${email.trim()})
+    LIMIT 2
+  `);
+  return (rows.rows ?? []) as Array<{ id: number; name: string; department: string | null; site_id: number | null }>;
+}
+
+router.get("/acknowledgements/my", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const matches = await findMyRoster(clientId, req.currentUser!.email);
+  if (matches.length > 1) return res.status(409).json({ error: "More than one active staff record uses your email. Ask an administrator to resolve this before signing." });
+  if (matches.length === 0) return res.json({ rosterLinked: false, pending: [], completed: [] });
+  const roster = matches[0];
+  const result = await db.execute(sql`
+    SELECT d.id, d.title, d.category, d.description, d.file_name, d.mime_type,
+           d.department, s.name AS site_name, a.acknowledged_at, a.signature,
+           CASE WHEN a.id IS NOT NULL
+             AND (a.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+             AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
+             THEN true ELSE false END AS is_current
+    FROM doc_track_documents d
+    LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
+    LEFT JOIN doc_acknowledgements a ON a.document_id = d.id
+      AND a.client_id = d.client_id AND a.staff_roster_id = ${roster.id}
+    LEFT JOIN train_track_records tr ON tr.id = a.train_track_record_id
+      AND tr.client_id = d.client_id
+    WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      AND (d.department IS NULL OR d.department = ${roster.department})
+      AND (d.site_id IS NULL OR d.site_id = ${roster.site_id})
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+    ORDER BY d.created_at DESC
+  `);
+  const rows = (result.rows ?? []) as Array<Record<string, unknown> & { is_current: boolean }>;
+  const toDocument = ({ is_current: _current, ...document }: typeof rows[number]) => document;
+  res.json({
+    rosterLinked: true,
+    pending: rows.filter(row => !row.is_current).map(toDocument),
+    completed: rows.filter(row => row.is_current).map(toDocument),
+  });
+});
+
+// ── Outstanding acknowledgements overview (managers) ────────────────────────
 // For every document that requires acknowledgement, list the roster staff who
 // have NOT yet acknowledged it.
 router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
@@ -538,7 +589,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   // only ever acknowledge as themselves, regardless of request body.
   let toCreate: ResolvedAck[] = [];
 
-  if (isManager) {
+  if (isManager && req.body?.self !== true) {
     const parsed = ackBulkCreate.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
@@ -555,14 +606,18 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   } else {
     // Self-acknowledgement — derive identity from the authenticated user.
     const parsed = ackSelfCreate.safeParse(req.body ?? {});
-    const signature = parsed.success ? (parsed.data.signature ?? null) : null;
+    if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+    const signature = parsed.data.signature?.trim() || null;
 
-    // staff_roster has no user_id column, so email is the authoritative link.
-    // Unlike the legacy fallback, an unmatched/ineligible user cannot create
-    // acknowledgement evidence with an unlinked display name.
-    const roster = await findEligibleRosterMember(clientId, doc, undefined, user.email);
+    // staff_roster has no user_id column: require one unambiguous active
+    // email match, then check the document's site/department eligibility.
+    const matches = await findMyRoster(clientId, user.email);
+    if (matches.length > 1) return res.status(409).json({ error: "More than one active staff record uses your email. Ask an administrator to resolve this before signing." });
+    const roster = matches.length === 1
+      ? await findEligibleRosterMember(clientId, doc, matches[0].id)
+      : null;
     if (!roster) return res.status(403).json({ error: "No eligible active staff roster entry for this document" });
-    toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature: signature ?? roster.name }];
+    toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature }];
   }
 
   const today = new Date().toISOString().split("T")[0];

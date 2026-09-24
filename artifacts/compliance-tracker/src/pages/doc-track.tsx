@@ -23,6 +23,7 @@ import {
   CheckCircle2, Clock, Link2, Copy, Check, Printer, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MyDocumentsView } from "@/components/my-documents-view";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -781,121 +782,6 @@ function UploadDialog({
   );
 }
 
-// ─── My Documents (personal view for non-manager staff) ──────────────────────
-
-interface MyDoc {
-  id: number;
-  title: string;
-  category: string;
-  department: string | null;
-  staffRosterId: number;
-}
-
-function MyDocumentsView({ staffName }: { staffName: string }) {
-  const { toast } = useToast();
-  const [myDocs, setMyDocs] = useState<MyDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [acknowledging, setAcknowledging] = useState<number | null>(null);
-
-  function load() {
-    setLoading(true);
-    apiFetch("/doc-track/acknowledgements/outstanding")
-      .then(r => r.ok ? r.json() : { documents: [] })
-      .then(d => {
-        const docs: OutstandingDoc[] = d.documents ?? [];
-        // Filter to only docs where the current user appears in outstanding list (matched by name)
-        const mine: MyDoc[] = docs
-          .filter(doc => doc.outstanding.some(s => s.name === staffName))
-          .map(doc => {
-            const staffEntry = doc.outstanding.find(s => s.name === staffName)!;
-            return { id: doc.id, title: doc.title, category: doc.category, department: doc.department, staffRosterId: staffEntry.id };
-          });
-        setMyDocs(mine);
-      })
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => { load(); }, [staffName]);
-
-  async function handleAcknowledge(docId: number, docTitle: string) {
-    setAcknowledging(docId);
-    try {
-      const res = await apiFetch(`/doc-track/documents/${docId}/acknowledge`, {
-        method: "POST",
-        // Staff identity is resolved by the API from their authenticated email;
-        // never submit a roster identity that could be forged in the client.
-        body: JSON.stringify({ signature: staffName }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      toast({ title: "Acknowledged", description: `"${docTitle}" marked as read.` });
-      load();
-    } catch {
-      toast({ title: "Acknowledgement failed", variant: "destructive" });
-    } finally {
-      setAcknowledging(null);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (myDocs.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
-        <div className="p-4 bg-emerald-50 rounded-2xl">
-          <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-        </div>
-        <div>
-          <p className="font-medium text-base">You&apos;re all caught up!</p>
-          <p className="text-sm text-muted-foreground mt-1">No documents require your acknowledgement right now.</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-        {myDocs.length} document{myDocs.length !== 1 ? "s" : ""} require your acknowledgement. Please read each one and click &ldquo;Acknowledge&rdquo; to confirm you have read it.
-      </p>
-      {myDocs.map(doc => {
-        const cat = CATEGORY_META[doc.category] ?? CATEGORY_META.other;
-        return (
-          <div key={doc.id} className="flex items-center gap-4 p-4 border rounded-lg bg-card">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm">{doc.title}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border", cat.bg, cat.color)}>
-                  {cat.label}
-                </span>
-                {doc.department && (
-                  <span className="text-[11px] text-muted-foreground">{doc.department}</span>
-                )}
-              </div>
-            </div>
-            <Button
-              size="sm"
-              className="flex-shrink-0 gap-1.5"
-              onClick={() => handleAcknowledge(doc.id, doc.title)}
-              disabled={acknowledging === doc.id}
-            >
-              {acknowledging === doc.id
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <CheckSquare className="w-3.5 h-3.5" />}
-              Acknowledge
-            </Button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DocTrackPage() {
@@ -910,7 +796,9 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs">("library");
+  const [pageView, setPageView] = useState<"library" | "my-docs">(
+    user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
+  );
   const [search, setSearch] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
@@ -1060,11 +948,10 @@ export default function DocTrackPage() {
         </div>
       </div>
 
-      {/* Page view switcher — show for non-manager staff */}
-      {!isManager && (
-        <div className="flex gap-1 mb-6 border-b border-border">
+      {/* Personal sign-offs are available to every account with a roster match. */}
+      <div className="flex gap-1 mb-6 border-b border-border">
           <button
-            onClick={() => setPageView("library")}
+            onClick={() => { setPageView("library"); load(); }}
             className={cn(
               "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
               pageView === "library"
@@ -1085,12 +972,11 @@ export default function DocTrackPage() {
           >
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
-        </div>
-      )}
+      </div>
 
       {/* My Documents personal view */}
-      {pageView === "my-docs" && !isManager && user?.name && (
-        <MyDocumentsView staffName={user.name} />
+      {pageView === "my-docs" && (
+        <MyDocumentsView key={activeClientId ?? "none"} canAcknowledge={canMutate} />
       )}
 
       {/* Library view */}

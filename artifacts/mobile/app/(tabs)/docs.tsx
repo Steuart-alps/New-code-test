@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -15,25 +17,34 @@ import { Feather } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
-import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 
-type Tab = 'documents' | 'training';
+type Tab = 'my-documents' | 'documents' | 'training';
 
 interface DocFile {
   id: number;
   title: string;
   category: string | null;
-  requires_acknowledgement?: boolean;
   created_at: string;
 }
 
-interface Acknowledgement {
+interface MyDoc {
   id: number;
-  document_id: number;
-  staff_roster_id: number | null;
-  staff_name: string;
-  acknowledged_at: string;
+  title: string;
+  category: string | null;
+  description: string | null;
+  file_name: string | null;
+  mime_type: string | null;
+  site_name: string | null;
+  department: string | null;
+  acknowledged_at: string | null;
+  signature: string | null;
+}
+
+interface MyAcknowledgements {
+  rosterLinked: boolean;
+  pending: MyDoc[];
+  completed: MyDoc[];
 }
 
 interface TrainingRecord {
@@ -58,102 +69,115 @@ function formatCategory(category: string | null): string {
     .join(' ');
 }
 
-function DocRow({ doc }: { doc: DocFile }) {
+function MyDocumentRow({
+  doc,
+  completed = false,
+  onRead,
+  onAcknowledge,
+  isOpening,
+  canAcknowledge = false,
+  signature,
+  onSignatureChange,
+  isSaving,
+}: {
+  doc: MyDoc;
+  completed?: boolean;
+  onRead: (doc: MyDoc) => void;
+  onAcknowledge?: (doc: MyDoc) => void;
+  isOpening: boolean;
+  canAcknowledge?: boolean;
+  signature?: string;
+  onSignatureChange?: (doc: MyDoc, value: string) => void;
+  isSaving?: boolean;
+}) {
   const colors = useColors();
-  const qc = useQueryClient();
-  const { user } = useAuth();
-
-  const requiresAck = !!doc.requires_acknowledgement;
-
-  const { data: acks = [] } = useQuery<Acknowledgement[]>({
-    queryKey: ['doc-acks', doc.id],
-    enabled: requiresAck,
-    queryFn: () =>
-      apiFetch<Acknowledgement[]>(
-        `/api/doc-track/documents/${doc.id}/acknowledgements`,
-      ).catch(() => []),
-  });
-
-  // Identity is derived server-side; the client no longer picks a roster entry.
-  // Determine whether *this* user has already acknowledged by matching the
-  // recorded staff_name (case-insensitive) against the signed-in user's name.
-  const alreadyAcknowledged = !!user && acks.some(
-    (a) => a.staff_name.trim().toLowerCase() === user.name.trim().toLowerCase(),
-  );
-
-  const { mutate: acknowledge, isPending } = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/doc-track/documents/${doc.id}/acknowledge`, {
-        method: 'POST',
-        // Acknowledge as self — the server resolves identity from the session
-        // and only honors an optional signature.
-        body: JSON.stringify({ signature: user?.name ?? null }),
-      }),
-    onSuccess: async () => {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['doc-acks', doc.id] });
-    },
-    onError: (err: Error) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message);
-    },
-  });
-
-  function handleAcknowledge() {
-    Alert.alert(
-      'Acknowledge document',
-      `Confirm you have read and understood "${doc.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Acknowledge', onPress: () => acknowledge() },
-      ],
-    );
-  }
-
   return (
-    <View
-      style={[
-        styles.row,
-        { backgroundColor: colors.card, borderColor: colors.border },
-      ]}
-    >
+    <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={[styles.rowIcon, { backgroundColor: colors.primary + '1a' }]}>
         <Feather name="file-text" size={18} color={colors.primary} />
       </View>
       <View style={styles.rowBody}>
-        <Text style={[styles.rowTitle, { color: colors.foreground }]}>
-          {doc.title}
-        </Text>
+        <Text style={[styles.rowTitle, { color: colors.foreground }]}>{doc.title}</Text>
         {!!doc.category && (
           <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>
             {formatCategory(doc.category)}
           </Text>
         )}
-        {requiresAck &&
-          (alreadyAcknowledged ? (
-            <View style={styles.ackDone}>
-              <Feather name="check-circle" size={13} color={colors.success} />
-              <Text style={[styles.ackDoneText, { color: colors.success }]}>
-                Acknowledged
-              </Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[styles.ackBtn, { backgroundColor: colors.navy }]}
-              onPress={handleAcknowledge}
-              disabled={isPending}
-              activeOpacity={0.8}
-            >
-              {isPending ? (
-                <ActivityIndicator color="#ffffff" size="small" />
-              ) : (
-                <>
-                  <Feather name="check" size={13} color="#ffffff" />
-                  <Text style={styles.ackBtnText}>Acknowledge</Text>
-                </>
+        {(doc.site_name || doc.department) && (
+          <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>
+            {[doc.site_name, doc.department].filter(Boolean).join(' · ')}
+          </Text>
+        )}
+        <Text style={[styles.rowSub, { color: completed ? colors.success : colors.warning, marginTop: 5 }]}>
+          {completed && doc.acknowledged_at
+            ? `Acknowledged ${new Date(doc.acknowledged_at).toLocaleDateString()}`
+            : 'Awaiting your acknowledgement'}
+        </Text>
+        {!completed && onAcknowledge && (
+          <View style={styles.signatureField}>
+            <Text style={[styles.signatureLabel, { color: colors.mutedForeground }]}>
+              Typed signature (optional)
+            </Text>
+            <TextInput
+              value={signature ?? ''}
+              onChangeText={(value) => onSignatureChange?.(doc, value)}
+              placeholder="Enter your signature"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="words"
+              returnKeyType="done"
+              style={[
+                styles.signatureInput,
+                { color: colors.foreground, borderColor: colors.border },
+              ]}
+            />
+          </View>
+        )}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.ackBtn, { backgroundColor: colors.primary }]}
+            onPress={() => onRead(doc)}
+            disabled={isOpening}
+            activeOpacity={0.8}
+          >
+            {isOpening ? <ActivityIndicator color="#ffffff" size="small" /> : (
+              <>
+                <Feather name="book-open" size={13} color="#ffffff" />
+                <Text style={styles.ackBtnText}>Open / read</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          {!completed && onAcknowledge && (
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.ackBtn,
+                  {
+                    backgroundColor: canAcknowledge && !isSaving
+                      ? colors.navy
+                      : colors.mutedForeground,
+                  },
+                ]}
+                onPress={() => onAcknowledge(doc)}
+                disabled={!canAcknowledge || !!isSaving}
+                activeOpacity={0.8}
+              >
+                {isSaving
+                  ? <ActivityIndicator color="#ffffff" size="small" />
+                  : (
+                    <>
+                      <Feather name="check" size={13} color="#ffffff" />
+                      <Text style={styles.ackBtnText}>Acknowledge</Text>
+                    </>
+                  )}
+              </TouchableOpacity>
+              {!canAcknowledge && (
+                <Text style={[styles.ackHelp, { color: colors.mutedForeground }]}>
+                  Open and read this document before acknowledging it.
+                </Text>
               )}
-            </TouchableOpacity>
-          ))}
+            </>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -203,36 +227,112 @@ function TrainingRow({ record }: { record: TrainingRecord }) {
 export default function DocsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>('documents');
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<Tab>('my-documents');
+  const [signatures, setSignatures] = useState<Record<number, string>>({});
+  const [openingDocId, setOpeningDocId] = useState<number | null>(null);
+  const [openedDocIds, setOpenedDocIds] = useState<Set<number>>(() => new Set());
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+
+  const {
+    data: myAcknowledgements,
+    isLoading: myDocsLoading,
+    isError: myDocsError,
+    error: myDocsErrorValue,
+    refetch: refetchMyDocs,
+    isRefetching: myDocsRefetching,
+  } = useQuery<MyAcknowledgements>({
+    queryKey: ['doc-track-my-acknowledgements'],
+    queryFn: () => apiFetch<MyAcknowledgements>('/api/doc-track/acknowledgements/my'),
+  });
 
   const {
     data: docs = [],
     isLoading: docsLoading,
+    isError: docsError,
+    error: docsErrorValue,
     refetch: refetchDocs,
     isRefetching: docsRefetching,
   } = useQuery<DocFile[]>({
     queryKey: ['doctrack-documents'],
-    queryFn: () =>
-      apiFetch<DocFile[]>('/api/doc-track/documents').catch(() => []),
+    queryFn: () => apiFetch<DocFile[]>('/api/doc-track/documents'),
   });
 
   const {
     data: training = [],
     isLoading: trainingLoading,
+    isError: trainingError,
+    error: trainingErrorValue,
     refetch: refetchTraining,
     isRefetching: trainingRefetching,
   } = useQuery<TrainingRecord[]>({
     queryKey: ['traintrack-records'],
-    queryFn: () =>
-      apiFetch<TrainingRecord[]>('/api/traintrack/staff').catch(() => []),
+    queryFn: () => apiFetch<TrainingRecord[]>('/api/traintrack/staff'),
   });
 
-  const isLoading = tab === 'documents' ? docsLoading : trainingLoading;
+  const acknowledgeMutation = useMutation({
+    mutationFn: ({ doc, signature }: { doc: MyDoc; signature: string }) =>
+      apiFetch<{ created: number; records: unknown[] }>(
+        `/api/doc-track/documents/${doc.id}/acknowledge`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ self: true, signature: signature.trim() || null }),
+        },
+      ),
+    onSuccess: async (_result, { doc }) => {
+      setSignatures((current) => {
+        const next = { ...current };
+        delete next[doc.id];
+        return next;
+      });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['doc-track-my-acknowledgements'] }),
+        qc.invalidateQueries({ queryKey: ['doctrack-documents'] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Could not acknowledge document', error.message);
+    },
+  });
+
+  async function openDocument(doc: MyDoc) {
+    try {
+      setOpeningDocId(doc.id);
+      const response = await apiFetch<{ downloadUrl: string }>(
+        `/api/doc-track/documents/${doc.id}/download-url`,
+      );
+      await Linking.openURL(response.downloadUrl);
+      setOpenedDocIds((current) => new Set(current).add(doc.id));
+    } catch (error) {
+      Alert.alert(
+        'Could not open document',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setOpeningDocId(null);
+    }
+  }
+
+  const isLoading =
+    tab === 'my-documents' ? myDocsLoading : tab === 'documents' ? docsLoading : trainingLoading;
   const isRefreshing =
-    tab === 'documents' ? docsRefetching : trainingRefetching;
+    tab === 'my-documents' ? myDocsRefetching : tab === 'documents' ? docsRefetching : trainingRefetching;
   const onRefresh =
-    tab === 'documents' ? refetchDocs : refetchTraining;
+    tab === 'my-documents' ? refetchMyDocs : tab === 'documents' ? refetchDocs : refetchTraining;
+  const currentError =
+    tab === 'my-documents' ? myDocsErrorValue : tab === 'documents' ? docsErrorValue : trainingErrorValue;
+  const hasError =
+    tab === 'my-documents' ? myDocsError : tab === 'documents' ? docsError : trainingError;
+
+  const showEmpty = (icon: React.ComponentProps<typeof Feather>['name'], title: string, message: string) => (
+    <View style={[styles.empty, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Feather name={icon} size={32} color={colors.mutedForeground} />
+      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>{title}</Text>
+      <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>{message}</Text>
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -249,7 +349,7 @@ export default function DocsScreen() {
         <View
           style={[styles.tabBar, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
         >
-          {(['documents', 'training'] as Tab[]).map((t) => (
+          {(['my-documents', 'documents', 'training'] as Tab[]).map((t) => (
             <TouchableOpacity
               key={t}
               style={[
@@ -267,7 +367,7 @@ export default function DocsScreen() {
                   },
                 ]}
               >
-                {t === 'documents' ? 'Documents' : 'Training'}
+                {t === 'my-documents' ? 'My Documents' : t === 'documents' ? 'Documents' : 'Training'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -293,50 +393,85 @@ export default function DocsScreen() {
             color={colors.primary}
             style={{ marginTop: 48 }}
           />
-        ) : tab === 'documents' ? (
-          docs.length === 0 ? (
-            <View
-              style={[
-                styles.empty,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Feather name="folder" size={32} color={colors.mutedForeground} />
-              <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-                No documents
-              </Text>
-              <Text
-                style={[styles.emptyText, { color: colors.mutedForeground }]}
-              >
-                Upload documents in DocTrack on the web app
-              </Text>
-            </View>
-          ) : (
-            docs.map((doc) => (
-              <DocRow key={doc.id} doc={doc} />
-            ))
-          )
-        ) : training.length === 0 ? (
-          <View
-            style={[
-              styles.empty,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <Feather name="book-open" size={32} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-              No training records
+        ) : hasError ? (
+          <View style={[styles.error, { backgroundColor: colors.card, borderColor: colors.destructive }]}>
+            <Feather name="alert-circle" size={24} color={colors.destructive} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Could not load {tab === 'my-documents' ? 'your documents' : tab}</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              {currentError instanceof Error ? currentError.message : 'Please try again.'}
             </Text>
-            <Text
-              style={[styles.emptyText, { color: colors.mutedForeground }]}
-            >
-              Add training records in TrainTrack on the web app
-            </Text>
+            <TouchableOpacity style={[styles.retryBtn, { backgroundColor: colors.navy }]} onPress={() => { onRefresh(); }}>
+              <Text style={styles.ackBtnText}>Try again</Text>
+            </TouchableOpacity>
           </View>
-        ) : (
-          training.map((r) => <TrainingRow key={r.id} record={r} />)
-        )}
+        ) : tab === 'my-documents' ? (
+          !myAcknowledgements?.rosterLinked ? (
+            showEmpty('link-2', 'Staff record not linked', 'Your account is not linked to an active staff roster record. Ask a manager to check your roster email before signing off documents.')
+          ) : (
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pending</Text>
+                <Text style={[styles.sectionCount, { color: colors.warning }]}>{myAcknowledgements.pending.length}</Text>
+              </View>
+              {myAcknowledgements.pending.length
+                ? myAcknowledgements.pending.map((doc) => (
+                  <MyDocumentRow
+                    key={`pending-${doc.id}`}
+                    doc={doc}
+                    onRead={openDocument}
+                    onAcknowledge={(selected) =>
+                      acknowledgeMutation.mutate({
+                        doc: selected,
+                        signature: signatures[selected.id] ?? '',
+                      })
+                    }
+                    signature={signatures[doc.id] ?? ''}
+                    onSignatureChange={(selected, value) =>
+                      setSignatures((current) => ({ ...current, [selected.id]: value }))
+                    }
+                    isSaving={acknowledgeMutation.isPending}
+                    canAcknowledge={openedDocIds.has(doc.id)}
+                    isOpening={openingDocId === doc.id}
+                  />
+                ))
+                : showEmpty('check-circle', 'All caught up', 'You have no documents waiting for acknowledgement.')}
+              <View style={[styles.sectionHeader, { marginTop: 16 }]}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Completed</Text>
+                <Text style={[styles.sectionCount, { color: colors.success }]}>{myAcknowledgements.completed.length}</Text>
+              </View>
+              {myAcknowledgements.completed.length
+                ? myAcknowledgements.completed.map((doc) => (
+                  <MyDocumentRow
+                    key={`completed-${doc.id}`}
+                    doc={doc}
+                    completed
+                    onRead={openDocument}
+                    isOpening={openingDocId === doc.id}
+                  />
+                ))
+                : showEmpty('file-text', 'No completed documents', 'Documents you acknowledge will appear here.')}
+            </>
+          )
+        ) : tab === 'documents' ? (
+          docs.length === 0
+            ? showEmpty('folder', 'No documents', 'Upload documents in DocTrack on the web app.')
+            : docs.map((doc) => (
+              <View key={doc.id} style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.rowIcon, { backgroundColor: colors.primary + '1a' }]}>
+                  <Feather name="file-text" size={18} color={colors.primary} />
+                </View>
+                <View style={styles.rowBody}>
+                  <Text style={[styles.rowTitle, { color: colors.foreground }]}>{doc.title}</Text>
+                  {!!doc.category && <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>{formatCategory(doc.category)}</Text>}
+                  <Text style={[styles.rowSub, { color: colors.mutedForeground }]}>{new Date(doc.created_at).toLocaleDateString()}</Text>
+                </View>
+              </View>
+            ))
+        ) : training.length === 0
+          ? showEmpty('book-open', 'No training records', 'Add training records in TrainTrack on the web app.')
+          : training.map((r) => <TrainingRow key={r.id} record={r} />)}
       </ScrollView>
+
     </View>
   );
 }
@@ -362,6 +497,15 @@ const styles = StyleSheet.create({
   },
   tabText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   list: { padding: 16, gap: 8 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  sectionTitle: { fontSize: 17, fontFamily: 'Inter_700Bold' },
+  sectionCount: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -381,6 +525,9 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1 },
   rowTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginBottom: 2 },
   rowSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  signatureField: { marginTop: 10 },
+  signatureLabel: { fontSize: 12, fontFamily: 'Inter_500Medium', marginBottom: 5 },
   ackBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -393,6 +540,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   ackBtnText: { color: '#ffffff', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  ackHelp: { flexBasis: '100%', fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 1 },
   ackDone: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -420,5 +568,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
+  },
+  error: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 24,
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  retryBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  signatureInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
   },
 });
