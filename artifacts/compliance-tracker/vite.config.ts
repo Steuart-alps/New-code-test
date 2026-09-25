@@ -13,7 +13,7 @@ function siteUrlHtmlPlugin() {
     name: "site-url-html",
     transformIndexHtml(html: string) {
       const { baseUrl, source } = resolveBaseUrl();
-      assertCanonicalForProduction(source);
+      assertCanonicalForProduction(baseUrl, source);
       return html.replaceAll("__SITE_URL__", baseUrl);
     },
   };

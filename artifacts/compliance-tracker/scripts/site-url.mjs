@@ -2,8 +2,11 @@
 //
 // Resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. https://<first REPLIT_DOMAINS entry>   (the deployment's own address)
-//   3. local dev fallback
+//   2. the verified production custom domain
+// REPLIT_DOMAINS is intentionally ignored because it is a temporary .replit.dev
+// address in workspace builds, not the public canonical URL.
+const PRODUCTION_SITE_URL = "https://complytrack.alpsconsultancy.co.uk";
+
 export function resolveBaseUrl() {
   if (process.env.PUBLIC_SITE_URL) {
     return {
@@ -11,22 +14,22 @@ export function resolveBaseUrl() {
       source: "PUBLIC_SITE_URL",
     };
   }
-  const domains = (process.env.REPLIT_DOMAINS ?? "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
-  if (domains.length > 0) {
-    return { baseUrl: `https://${domains[0]}`, source: "REPLIT_DOMAINS" };
-  }
-  return { baseUrl: "http://localhost:21186", source: "localhost-fallback" };
+  return { baseUrl: PRODUCTION_SITE_URL, source: "verified-production-url" };
 }
 
 // Never ship a production build with a non-canonical (localhost) host.
-export function assertCanonicalForProduction(source) {
-  if (source === "localhost-fallback" && process.env.NODE_ENV === "production") {
+export function assertCanonicalForProduction(baseUrl, source) {
+  let url;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new Error(`[seo] Invalid canonical site URL from ${source}: ${baseUrl}`);
+  }
+  const unsafeHost = ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+    || url.hostname.endsWith(".replit.dev");
+  if (process.env.NODE_ENV === "production" && (url.protocol !== "https:" || unsafeHost)) {
     throw new Error(
-      "[seo] No canonical site URL available for production build. " +
-        "Set PUBLIC_SITE_URL (custom domain) or ensure REPLIT_DOMAINS is present.",
+      `[seo] Production canonical URL must be a public HTTPS address, received ${baseUrl} from ${source}.`,
     );
   }
 }
