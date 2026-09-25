@@ -9,6 +9,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: audit-log
+    description: Compliance change history
   - name: compliance-items
     description: Compliance item operations
   - name: categories
@@ -50,6 +52,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /audit-log:
+    get:
+      operationId: listAuditLog
+      tags: [audit-log]
+      summary: List the latest changes in a compliance module
+      description: Returns at most 50 changes, newest first.
+      parameters:
+        - in: query
+          name: module
+          required: true
+          schema:
+            type: string
+            enum: [fire, legionella, kitchen, fix, safe, train, doc, incidents]
+      responses:
+        "200":
+          description: Most recent changes in the selected module
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
 
   /categories:
     get:
@@ -2067,6 +2093,38 @@ components:
           type: string
       required:
         - status
+
+    AuditLogEntry:
+      type: object
+      required: [id, tableName, rowId, action, changedBy, changedAt, diff, actorName]
+      properties:
+        id:
+          type: integer
+        tableName:
+          type: string
+        rowId:
+          type: integer
+        action:
+          type: string
+          enum: [create, update, delete]
+        changedBy:
+          type: [integer, "null"]
+        changedAt:
+          type: string
+          format: date-time
+        diff:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AuditFieldChange"
+        actorName:
+          type: [string, "null"]
+
+    AuditFieldChange:
+      type: object
+      required: [before, after]
+      properties:
+        before: {}
+        after: {}
 
     ErrorResponse:
       type: object

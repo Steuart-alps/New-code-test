@@ -32,7 +32,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { AuditLog } from "@/components/audit-log";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -236,13 +237,14 @@ function ActionsCell({ onEdit, onDelete, onPrint }: { onEdit?: () => void; onDel
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function TrainTrackPage() {
+  const canAdmin = useCanAdmin();
   const { toast } = useToast();
   const { activeClientId, client, user } = useAuth();
   const canMutate = user?.role !== "client_viewer";
   const qc = useQueryClient();
   const apiFetch = useTrainTrackApi();
 
-  const [tab, setTab]           = useState<RecordType>("certificate");
+  const [tab, setTab]           = useState<RecordType | "audit">("certificate");
   const [siteFilter, setSite]   = useState("all");
   const [search, setSearch]     = useState("");
   const [certStatus, setCertStatus] = useState<"all" | CertStatus>("all");
@@ -729,7 +731,9 @@ ${rows.map(r => `<tr>
             )}>{count}</span>
           </button>
         ))}
+        {canAdmin && <button type="button" data-testid="tab-train-audit" onClick={() => setTab("audit")} className={cn("flex items-center px-5 py-3 text-sm font-medium border-b-2 -mb-px", tab === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
       </div>
+      {canAdmin && tab === "audit" && <AuditLog module="train" />}
 
       {/* ── CERTIFICATES TAB ── */}
       {tab === "certificate" && (

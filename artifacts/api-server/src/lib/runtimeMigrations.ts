@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
+import { migrateAuditLog } from "./auditLogMigration";
 import {
   digestBearerToken,
   encryptTokenPayload,
@@ -685,6 +686,7 @@ export async function runRuntimeMigrations() {
     await migrateMobileLoginChallenges();
     await migrateIncidents();
     await migrateComplianceAuditTrail();
+    await migrateAuditLog();
     await migrateSousVide();
     await migrateFoodSafetySiteScoping();
     await migratePATtrack();

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
@@ -274,10 +275,11 @@ function IncidentConfigDialog() {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="shrink-0 w-full grid grid-cols-3">
+          <TabsList className="shrink-0 w-full grid grid-cols-4">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
             <TabsTrigger value="locations">Locations</TabsTrigger>
             <TabsTrigger value="depts">Departments</TabsTrigger>
+            <TabsTrigger value="audit" data-testid="tab-incidents-audit">Audit log</TabsTrigger>
           </TabsList>
 
           <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
@@ -309,6 +311,7 @@ function IncidentConfigDialog() {
             </p>
             <StringListEditor items={departments} onChange={setDepartments} placeholder='e.g. "Front of house"' />
           </TabsContent>
+          <TabsContent value="audit" className="flex-1 overflow-y-auto pt-4 px-1"><AuditLog module="incidents" /></TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">

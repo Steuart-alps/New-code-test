@@ -40,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { AuditLog } from "@/components/audit-log";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -384,12 +385,13 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-           <TabsList className="shrink-0 w-full grid grid-cols-5">
+           <TabsList className="shrink-0 w-full grid grid-cols-3 sm:grid-cols-6 h-auto">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
             <TabsTrigger value="routes">Escape Routes</TabsTrigger>
             <TabsTrigger value="zones">Alarm Zones</TabsTrigger>
             <TabsTrigger value="ext">Extinguishers</TabsTrigger>
              <TabsTrigger value="controls">Controls</TabsTrigger>
+             <TabsTrigger value="audit" data-testid="tab-fire-audit">Audit log</TabsTrigger>
           </TabsList>
 
           <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
@@ -484,6 +486,7 @@ function FireConfigDialog({ siteId }: { siteId?: number }) {
             </p>
             <StringListEditor items={extinguisherPoints} onChange={setExtinguisherPoints} placeholder='e.g. "Reception — CO₂"' />
           </TabsContent>
+          <TabsContent value="audit" className="flex-1 overflow-y-auto pt-4 px-1"><AuditLog module="fire" /></TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuditLog } from "@/components/audit-log";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useListSites } from "@workspace/api-client-react";
@@ -794,7 +795,7 @@ export default function SafeTrackPage() {
   } as const;
 
   type TabKey = keyof typeof tabConfig;
-  const currentTab = tabConfig[tab as TabKey];
+  const currentTab = tabConfig[tab as TabKey] ?? tabConfig.risk;
 
   // Photo entity type keyed by tab — follows the shared photos API convention
   // (recordType + recordId), matching KitchenTrack/BikeTrack usage.
@@ -833,7 +834,9 @@ export default function SafeTrackPage() {
               <cfg.icon className="w-3.5 h-3.5" />{cfg.label}
             </TabsTrigger>
           ))}
+          {canAdmin && <TabsTrigger value="audit" data-testid="tab-safe-audit">Audit log</TabsTrigger>}
         </TabsList>
+        {canAdmin && <TabsContent value="audit"><AuditLog module="safe" /></TabsContent>}
 
         {Object.keys(tabConfig).map(key => {
           const cfg = tabConfig[key as TabKey];

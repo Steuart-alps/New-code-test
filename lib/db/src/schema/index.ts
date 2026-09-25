@@ -114,3 +114,4 @@ export * from "./storage-usage"
 ;
 
 export * from "./privacy-governance";
+export * from "./audit-log";

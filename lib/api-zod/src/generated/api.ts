@@ -17,6 +17,30 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Returns at most 50 changes, newest first.
+ * @summary List the latest changes in a compliance module
+ */
+export const ListAuditLogQueryParams = zod.object({
+  "module": zod.enum(['fire', 'legionella', 'kitchen', 'fix', 'safe', 'train', 'doc', 'incidents'])
+})
+
+export const ListAuditLogResponseItem = zod.object({
+  "id": zod.number(),
+  "tableName": zod.string(),
+  "rowId": zod.number(),
+  "action": zod.enum(['create', 'update', 'delete']),
+  "changedBy": zod.number().nullable(),
+  "changedAt": zod.date(),
+  "diff": zod.record(zod.string(), zod.object({
+  "before": zod.unknown(),
+  "after": zod.unknown()
+})),
+  "actorName": zod.string().nullable()
+})
+export const ListAuditLogResponse = zod.array(ListAuditLogResponseItem).max(50)
+
+
+/**
  * @summary List all categories
  */
 export const ListCategoriesResponseItem = zod.object({

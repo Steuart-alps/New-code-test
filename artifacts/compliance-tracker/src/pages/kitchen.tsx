@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { UtensilsCrossed, Settings, Plus, Trash2, CheckCircle2, Calendar, Save, Lock, ClipboardList, Thermometer, GripVertical, Sparkles, AlertTriangle, CheckCircle, CheckSquare, Square, Sunrise, Sunset, Building2, RotateCcw, Settings2, Loader2 } from "lucide-react";
@@ -364,11 +365,12 @@ function ConfigDialog() {
         )}
 
         <Tabs defaultValue="sections" className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="shrink-0 w-full grid grid-cols-4">
+          <TabsList className="shrink-0 w-full grid grid-cols-3 sm:grid-cols-5 h-auto">
             <TabsTrigger value="sections">Sections</TabsTrigger>
             <TabsTrigger value="cold">Cold Storage</TabsTrigger>
             <TabsTrigger value="items">Default Items</TabsTrigger>
             <TabsTrigger value="limits">Limits</TabsTrigger>
+            <TabsTrigger value="audit" data-testid="tab-kitchen-audit">Audit log</TabsTrigger>
           </TabsList>
 
           {/* ── Sections tab ── */}
@@ -521,6 +523,7 @@ function ConfigDialog() {
               <p className="text-xs text-muted-foreground">Confirm your hot-holding controls, permitted tolerances and corrective action in the HACCP system.</p>
             </div>
           </TabsContent>
+          <TabsContent value="audit" className="flex-1 overflow-y-auto pt-4 px-1"><AuditLog module="kitchen" /></TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2 sm:justify-between">

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { AuditLog } from "@/components/audit-log";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -731,6 +732,7 @@ export default function FixTrackPage() {
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"timing" | "audit">("timing");
   const [staleDays, setStaleDays] = useState(7);
   const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
@@ -763,6 +765,7 @@ export default function FixTrackPage() {
   }, [hasFixtrack, activeClientId]);
 
   async function openAlertSettings() {
+    setSettingsTab("timing");
     setAlertSettingsOpen(true);
     try {
       const res = await clientApiFetch("/fix-track/alert-settings");
@@ -771,7 +774,6 @@ export default function FixTrackPage() {
       setStaleDays(data.staleDays);
     } catch (err: any) {
       toast({ title: "Could not load alert settings", description: err.message, variant: "destructive" });
-      setAlertSettingsOpen(false);
     }
   }
 
@@ -1057,9 +1059,16 @@ export default function FixTrackPage() {
         </div>
 
         <Dialog open={alertSettingsOpen} onOpenChange={setAlertSettingsOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Urgent job alert timing</DialogTitle>
+              <DialogTitle>FixTrack settings</DialogTitle>
+            </DialogHeader>
+            <div className="flex gap-2 border-b border-border">
+              <Button type="button" variant={settingsTab === "timing" ? "secondary" : "ghost"} onClick={() => setSettingsTab("timing")} data-testid="tab-fix-timing">Alert timing</Button>
+              {clientCanAdmin && <Button type="button" variant={settingsTab === "audit" ? "secondary" : "ghost"} onClick={() => setSettingsTab("audit")} data-testid="tab-fix-audit">Audit log</Button>}
+            </div>
+            {settingsTab === "audit" && clientCanAdmin ? <AuditLog module="fix" /> : <>
+            <DialogHeader>
               <DialogDescription>
                 Choose how long an urgent maintenance job can go without an update before managers are alerted. Jobs past their target date are alerted regardless of this setting.
               </DialogDescription>
@@ -1087,6 +1096,7 @@ export default function FixTrackPage() {
                 {savingAlertSettings ? "Saving…" : "Save timing"}
               </Button>
             </DialogFooter>
+            </>}
           </DialogContent>
         </Dialog>
 

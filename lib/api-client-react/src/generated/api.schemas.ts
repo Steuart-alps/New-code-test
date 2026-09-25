@@ -9,6 +9,35 @@ export interface HealthStatus {
   status: string;
 }
 
+export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
+
+
+export const AuditLogEntryAction = {
+  create: 'create',
+  update: 'update',
+  delete: 'delete',
+} as const;
+
+export interface AuditFieldChange {
+  before: unknown;
+  after: unknown;
+}
+
+export type AuditLogEntryDiff = {[key: string]: AuditFieldChange};
+
+export interface AuditLogEntry {
+  id: number;
+  tableName: string;
+  rowId: number;
+  action: AuditLogEntryAction;
+  /** @nullable */
+  changedBy: number | null;
+  changedAt: string;
+  diff: AuditLogEntryDiff;
+  /** @nullable */
+  actorName: string | null;
+}
+
 export interface ErrorResponse {
   error: string;
 }
@@ -1633,6 +1662,24 @@ export interface LegionellaStatus {
   dueDate?: string | null;
   status: LegionellaStatusStatus;
 }
+
+export type ListAuditLogParams = {
+module: ListAuditLogModule;
+};
+
+export type ListAuditLogModule = typeof ListAuditLogModule[keyof typeof ListAuditLogModule];
+
+
+export const ListAuditLogModule = {
+  fire: 'fire',
+  legionella: 'legionella',
+  kitchen: 'kitchen',
+  fix: 'fix',
+  safe: 'safe',
+  train: 'train',
+  doc: 'doc',
+  incidents: 'incidents',
+} as const;
 
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;

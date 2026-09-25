@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert } from "lucide-react";
@@ -271,6 +272,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
             <TabsTrigger value="nonsent">Non-sentinel</TabsTrigger>
              <TabsTrigger value="controls">Controls</TabsTrigger>
+             <TabsTrigger value="audit" data-testid="tab-legionella-audit">Audit log</TabsTrigger>
           </TabsList>
 
           <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
@@ -363,6 +365,7 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
                </Select>
              </div>
            </TabsContent>
+          <TabsContent value="audit" className="flex-1 overflow-y-auto pt-4 px-1"><AuditLog module="legionella" /></TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">

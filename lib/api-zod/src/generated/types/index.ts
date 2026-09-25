@@ -8,6 +8,10 @@
 
 export * from './addPrivacyRetentionVerificationParams';
 export * from './appSettings';
+export * from './auditFieldChange';
+export * from './auditLogEntry';
+export * from './auditLogEntryAction';
+export * from './auditLogEntryDiff';
 export * from './bikeTrackConfig';
 export * from './category';
 export * from './certificate';
@@ -94,6 +98,8 @@ export * from './legionellaControlProfileUkNation';
 export * from './legionellaStatus';
 export * from './legionellaStatusLastResult';
 export * from './legionellaStatusStatus';
+export * from './listAuditLogModule';
+export * from './listAuditLogParams';
 export * from './listComplianceItemsParams';
 export * from './listComplianceItemsPriority';
 export * from './listComplianceItemsStatus';

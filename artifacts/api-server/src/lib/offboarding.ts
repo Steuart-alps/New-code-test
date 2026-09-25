@@ -617,6 +617,12 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
  * missing table (schema drift) never aborts the whole deletion run.
  */
 async function deleteAllClientData(cid: number): Promise<void> {
+  // audit_log, like audit_events, is retained inspection evidence, not an
+  // operational compliance table. Source DELETEs append redacted historical
+  // diffs in the same transaction. Do not disable triggers or purge this ledger
+  // here: its history (including historical personal data) needs a separately
+  // authorised evidence-retention decision. The legal-hold/review gate above
+  // still applies; users are anonymised below and the tenant row is retained.
   // Remove the tenant's privacy records only after the scheduled-delete guard
   // above confirms there is no active legal hold or recorded exception.
   await db.execute(sql`DELETE FROM privacy_retention_verifications WHERE client_id = ${cid}`).catch(() => {});

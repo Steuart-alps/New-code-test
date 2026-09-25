@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { auditContext, db } from "@workspace/db";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
@@ -64,7 +64,10 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     }
   }
 
-  next();
+  const context = { actorId: req.currentUser?.id ?? null, active: true };
+  _res.once("finish", () => { context.active = false; });
+  _res.once("close", () => { context.active = false; });
+  auditContext.run(context, next);
 }
 
 /**

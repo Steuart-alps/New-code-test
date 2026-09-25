@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { downloadFile, printHtmlDocument } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
+import { AuditLog } from "@/components/audit-log";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -796,7 +797,7 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs">(
+  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit">(
     user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
   );
   const [search, setSearch] = useState("");
@@ -972,7 +973,9 @@ export default function DocTrackPage() {
           >
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
+          {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
       </div>
+      {isManager && pageView === "audit" && <AuditLog module="doc" />}
 
       {/* My Documents personal view */}
       {pageView === "my-docs" && (
