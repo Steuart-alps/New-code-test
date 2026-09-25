@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
+import { sitesTable } from "@workspace/db/schema";
+import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 
 const router = Router();
@@ -14,6 +15,25 @@ function rows(result: any): any[] {
   return result.rows;
 }
 
+async function checkSiteAccess(
+  siteId: number | null,
+  clientId: number,
+  departmentId: number | null,
+): Promise<"required" | "invalid" | "forbidden" | null> {
+  if (siteId === null) return departmentId === null ? null : "required";
+  if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
+
+  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+    .from(sitesTable)
+    .where(sql`${sitesTable.id} = ${siteId} AND ${sitesTable.clientId} = ${clientId}`)
+    .limit(1);
+  if (!site) return "invalid";
+  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+    return "forbidden";
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SESSIONS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -21,13 +41,29 @@ function rows(result: any): any[] {
 router.get("/sessions", async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { siteId, limit = "100" } = req.query as Record<string, string>;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const { limit = "100" } = req.query as Record<string, string>;
+    const rawSiteId = req.query.siteId;
+    const hasSiteFilter = rawSiteId !== undefined && rawSiteId !== "";
+    const requestedSiteId = hasSiteFilter ? Number(rawSiteId) : null;
+    if (hasSiteFilter && (
+      typeof rawSiteId !== "string"
+      || !Number.isSafeInteger(requestedSiteId)
+      || requestedSiteId! <= 0
+    )) {
+      return res.status(400).json({ error: "Invalid siteId" });
+    }
+    const departmentId = getActiveDepartmentId(req);
     const result = await db.execute(sql`
       SELECT s.*, si.name AS site_name
       FROM swim_sessions s
       LEFT JOIN sites si ON si.id = s.site_id
       WHERE s.client_id = ${clientId}
-        ${siteId ? sql`AND s.site_id = ${siteId}` : sql``}
+        ${hasSiteFilter ? sql`AND s.site_id = ${requestedSiteId}` : sql``}
+        ${departmentId !== null ? sql`AND (s.site_id IS NULL OR s.site_id IN (
+          SELECT id FROM sites WHERE client_id = ${clientId}
+            AND (department_id IS NULL OR department_id = ${departmentId})
+        ))` : sql``}
       ORDER BY s.session_date DESC, s.open_time DESC NULLS LAST
       LIMIT ${parseInt(limit, 10)}
     `);
@@ -40,12 +76,26 @@ router.get("/sessions", async (req, res) => {
 router.post("/sessions", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
-       siteId, sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
+       sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
       poolClosed, closureReason, notes,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
+    const rawSiteId = req.body.siteId;
+    const siteId = rawSiteId == null ? null : Number(rawSiteId);
+    if (rawSiteId != null && (
+      (typeof rawSiteId !== "number" && typeof rawSiteId !== "string")
+      || !Number.isSafeInteger(siteId)
+      || siteId! <= 0
+    )) {
+      return res.status(400).json({ error: "Invalid siteId" });
+    }
+    const siteAccess = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+    if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
     const performer = await resolveStaffRoster(clientId, lifeguardRosterId, lifeguardName);
     if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });

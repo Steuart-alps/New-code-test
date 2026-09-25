@@ -65,11 +65,15 @@ const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
 const replitDevOrigins = process.env.REPLIT_DEV_DOMAIN
   ? [`https://${process.env.REPLIT_DEV_DOMAIN.trim()}`]
   : [];
+const replitExpoOrigins = process.env.REPLIT_EXPO_DEV_DOMAIN
+  ? [`https://${process.env.REPLIT_EXPO_DEV_DOMAIN.trim()}`]
+  : [];
 
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...replitDeploymentOrigins,
   ...replitDevOrigins,
+  ...replitExpoOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
 ].flatMap((origin) => {

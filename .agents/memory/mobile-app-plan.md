@@ -20,3 +20,9 @@ Mobile issue creation must treat the fault record and its photo uploads as separ
 **Why:** Uploads can fail after the issue has already been persisted. Presenting that as a failed issue submission encourages retries that create duplicate faults.
 
 **How to apply:** Persist the created issue identifier and pending photo state, retry attachments against the same issue, and clearly tell users the issue is saved even when its photos still need attention.
+
+Expo web previews use a separate origin from the proxied API, even though native mobile requests do not have browser CORS restrictions.
+
+**Why:** A healthy API can still appear unavailable in an Expo web preview because the browser's preflight request is denied. An initial white preview can also be only the asynchronous sign-in screen loading, not a crash.
+
+**How to apply:** When an Expo web screen reports network errors, inspect the preflight response using the actual preview origin before changing request URLs or auth. Keep the CORS allowlist restricted to the exact workspace Expo origin.

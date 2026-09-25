@@ -216,6 +216,84 @@ async function main() {
   });
   expectOk("staff: login", staffLogin.status, [200, 201]);
 
+  // PoolTrack and SwimTrack mobile submissions are tenant- and
+  // department-scoped just like the allowed-site list.
+  const poolAlpha = await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(1), siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha pool check", poolAlpha.status, [201]);
+  const poolBeta = await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(1), siteId: siteBetaId,
+  });
+  expectOk("admin: create beta pool check", poolBeta.status, [201]);
+  const swimAlpha = await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(1), siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha swim session", swimAlpha.status, [201]);
+  const swimBeta = await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(1), siteId: siteBetaId,
+  });
+  expectOk("admin: create beta swim session", swimBeta.status, [201]);
+
+  // Manager-style users remain able to use the historical optional / null
+  // site scope on both endpoints.
+  expectOk("admin: pool check without siteId", (await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(0),
+  })).status, [201]);
+  expectOk("admin: pool check with null siteId", (await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: null,
+  })).status, [201]);
+  expectOk("admin: swim session without siteId", (await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0),
+  })).status, [201]);
+  expectOk("admin: swim session with null siteId", (await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: null,
+  })).status, [201]);
+
+  const staffPoolChecks = await staff("GET", "/pool-track");
+  expectOk("staff: GET /pool-track is scoped", staffPoolChecks.status);
+  const staffPoolRows = Array.isArray(staffPoolChecks.data) ? staffPoolChecks.data : [];
+  check("staff: pool list excludes beta site", !staffPoolRows.some(row => row.site_id === siteBetaId), "beta check visible");
+  check("staff: pool list includes alpha site", staffPoolRows.some(row => row.site_id === siteAlphaId), "alpha check missing");
+  const staffPoolBeta = await staff("GET", `/pool-track?siteId=${siteBetaId}`);
+  expectOk("staff: GET /pool-track at inaccessible site returns empty", staffPoolBeta.status);
+  check("staff: pool beta filter is empty", Array.isArray(staffPoolBeta.data) && staffPoolBeta.data.length === 0, "inaccessible site returned records");
+  expectOk("staff: GET /pool-track at allowed site", (await staff("GET", `/pool-track?siteId=${siteAlphaId}`)).status);
+  expectOk("staff: POST /pool-track at allowed site", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: siteAlphaId,
+  })).status, [201]);
+  expectForbidden("staff: POST /pool-track at inaccessible site", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: siteBetaId,
+  })).status);
+  expectBlocked("staff: POST /pool-track without siteId", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0),
+  })).status);
+  expectBlocked("staff: POST /pool-track with null siteId", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: null,
+  })).status);
+
+  const staffSwimSessions = await staff("GET", "/swim-track/sessions");
+  expectOk("staff: GET /swim-track/sessions is scoped", staffSwimSessions.status);
+  const staffSwimRows = Array.isArray(staffSwimSessions.data) ? staffSwimSessions.data : [];
+  check("staff: swim list excludes beta site", !staffSwimRows.some(row => row.site_id === siteBetaId), "beta session visible");
+  check("staff: swim list includes alpha site", staffSwimRows.some(row => row.site_id === siteAlphaId), "alpha session missing");
+  const staffSwimBeta = await staff("GET", `/swim-track/sessions?siteId=${siteBetaId}`);
+  expectOk("staff: GET /swim-track/sessions at inaccessible site returns empty", staffSwimBeta.status);
+  check("staff: swim beta filter is empty", Array.isArray(staffSwimBeta.data) && staffSwimBeta.data.length === 0, "inaccessible site returned sessions");
+  expectOk("staff: GET /swim-track/sessions at allowed site", (await staff("GET", `/swim-track/sessions?siteId=${siteAlphaId}`)).status);
+  expectOk("staff: POST /swim-track/sessions at allowed site", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: siteAlphaId,
+  })).status, [201]);
+  expectForbidden("staff: POST /swim-track/sessions at inaccessible site", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: siteBetaId,
+  })).status);
+  expectBlocked("staff: POST /swim-track/sessions without siteId", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0),
+  })).status);
+  expectBlocked("staff: POST /swim-track/sessions with null siteId", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: null,
+  })).status);
+
   const staffFire = await staff("POST", "/fire-safety", {
     checkType: "alarm",
     checkDate: uniqueDate(0),

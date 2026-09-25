@@ -12,6 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
+import { aquaTrackAccess } from '@/components/aqua-track-logic';
 
 interface CheckModule {
   id: string;
@@ -136,11 +137,13 @@ export default function ChecksScreen() {
   const router = useRouter();
   const { hasService } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const aquaAccess = aquaTrackAccess(hasService);
   const visibleModules = MODULES.filter(
     (mod) =>
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
       (mod.id !== 'pat' || hasService('pattrack')) &&
-      (mod.id !== 'green' || hasService('greentrack')),
+      (mod.id !== 'green' || hasService('greentrack')) &&
+      (mod.id !== 'aqua' || aquaAccess.any),
   );
 
   return (
