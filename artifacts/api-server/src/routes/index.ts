@@ -72,6 +72,9 @@ router.use("/billing", billingRouter);
 // Public contractor self-service portal — token-protected, not login-protected.
 // Mount before root-level routers that install requireAuth for all later paths.
 router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
+// Public FixTrack token links must also precede routers with root-level auth.
+router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -93,10 +96,6 @@ router.use(staffTrainingRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
-// Public contractor token links must be mounted before the protected
-// /fix-track router, otherwise its auth middleware intercepts them.
-router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
-router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
 router.use("/fix-track", requireAuth, (req, res, next) => {
   if (req.path.startsWith("/contractor-email-queue")) return next();
   return requireService("fixtrack")(req, res, next);
