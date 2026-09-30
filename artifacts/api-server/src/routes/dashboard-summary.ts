@@ -140,7 +140,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         FROM daily_checklists
         WHERE client_id = ${clientId}
           AND check_date = ${today}
-          AND site_id = ANY(${allSites.map((site) => site.id)})
+          AND site_id IN (${sql.join(allSites.map((site) => sql`${site.id}`), sql`, `)})
         GROUP BY site_id
       `);
       for (const row of rows(completed)) {
@@ -159,8 +159,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         if (pmEnabled && pmComplete) checklistTotals.completedPmPairs++;
         if ((amEnabled || pmEnabled) && amComplete && pmComplete) checklistTotals.completedSitePairs++;
       }
-    } catch {
-      // The established per-track no-data fallback remains available below.
+    } catch (error) {
+      req.log.error({ err: error }, "Unable to load today's checklist completion");
+      // Keep both the strip and module cards unavailable rather than showing a false clear state.
     }
   }
 
@@ -173,12 +174,13 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (amEnabled && allSites.length > 0) {
       if (checklistTotalsAvailable) {
         const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.am);
-        if (missing.length === 0) {
+        const missingCount = checklistTotals.expectedAmPairs - checklistTotals.completedAmPairs;
+        if (missingCount === 0) {
           status = "ok";
           badge = "All submitted";
         } else {
           status = "overdue";
-          badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not submitted`;
+          badge = `${missingCount} site${missingCount > 1 ? "s" : ""} not submitted`;
           for (const site of missing.slice(0, 10)) {
             items.push({ label: site.name, detail: "AM checklist not submitted today", path: "/daily-track-am" });
           }
@@ -209,12 +211,13 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (pmEnabled && allSites.length > 0) {
       if (checklistTotalsAvailable) {
         const missing = allSites.filter((site) => !checklistCompletionBySite.get(site.id)?.pm);
-        if (missing.length === 0) {
+        const missingCount = checklistTotals.expectedPmPairs - checklistTotals.completedPmPairs;
+        if (missingCount === 0) {
           status = "ok";
           badge = "All submitted";
         } else {
           status = "attention";
-          badge = `${missing.length} site${missing.length > 1 ? "s" : ""} not submitted`;
+          badge = `${missingCount} site${missingCount > 1 ? "s" : ""} not submitted`;
           for (const site of missing.slice(0, 10)) {
             items.push({ label: site.name, detail: "PM checklist not submitted today", path: "/daily-track-pm" });
           }

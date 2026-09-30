@@ -216,6 +216,61 @@ async function main() {
   });
   expectOk("staff: login", staffLogin.status, [200, 201]);
 
+  // The checklist strip and AM/PM cards must report the same completion state
+  // for the same sites, including when department access narrows the site set.
+  const assertDashboardChecklists = (label, response, expectedSites, completedAm, completedPm) => {
+    const totals = response.data?.checklistTotals;
+    const am = response.data?.tracks?.find(track => track.trackId === "daily_am");
+    const pm = response.data?.tracks?.find(track => track.trackId === "daily_pm");
+    check(`${label}: totals and cards available`, response.status === 200 && totals?.available === true &&
+      am?.enabled === true && pm?.enabled === true, `status=${response.status}`);
+    check(`${label}: AM strip matches card`, totals?.expectedAmPairs === expectedSites &&
+      totals?.completedAmPairs === completedAm &&
+      (am?.status === "ok") === (completedAm === expectedSites) &&
+      (am?.health === "clear") === (completedAm === expectedSites),
+      `totals=${JSON.stringify(totals)} card=${JSON.stringify(am)}`);
+    check(`${label}: PM strip matches card`, totals?.expectedPmPairs === expectedSites &&
+      totals?.completedPmPairs === completedPm &&
+      (pm?.status === "ok") === (completedPm === expectedSites) &&
+      (pm?.health === "clear") === (completedPm === expectedSites),
+      `totals=${JSON.stringify(totals)} card=${JSON.stringify(pm)}`);
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const draft = await admin("POST", "/daily-track-am", {
+    siteId: siteAlphaId, checklistType: "premises_opening", checkDate: today, items: [],
+  });
+  expectOk("draft AM checklist remains unsubmitted", draft.status, [201]);
+  for (const [path, checklistType] of [
+    ["/daily-track-am", "kitchen_opening"],
+    ["/daily-track-pm", "kitchen_closing"],
+  ]) {
+    const prior = await admin("POST", path, {
+      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [],
+      submittedAt: new Date().toISOString(),
+    });
+    expectOk("prior-day checklist does not count today", prior.status, [201]);
+  }
+  assertDashboardChecklists("before submissions", await admin("GET", "/dashboard/summary"), 2, 0, 0);
+  const submitChecklist = (siteId, path, checklistType) => admin("POST", path, {
+    siteId, checklistType, checkDate: today, items: [], submittedAt: new Date().toISOString(),
+  });
+  const alphaAm = await submitChecklist(siteAlphaId, "/daily-track-am", "kitchen_opening");
+  const alphaPm = await submitChecklist(siteAlphaId, "/daily-track-pm", "kitchen_closing");
+  expectOk("alpha: submit today's AM checklist", alphaAm.status, [201]);
+  expectOk("alpha: submit today's PM checklist", alphaPm.status, [201]);
+  assertDashboardChecklists("admin all sites after alpha", await admin("GET", "/dashboard/summary"), 2, 1, 1);
+  assertDashboardChecklists("admin alpha site", await admin("GET", `/dashboard/summary?siteId=${siteAlphaId}`), 1, 1, 1);
+  assertDashboardChecklists("admin beta site", await admin("GET", `/dashboard/summary?siteId=${siteBetaId}`), 1, 0, 0);
+  assertDashboardChecklists("alpha department staff", await staff("GET", "/dashboard/summary"), 1, 1, 1);
+  expectForbidden("alpha staff cannot select beta dashboard site",
+    (await staff("GET", `/dashboard/summary?siteId=${siteBetaId}`)).status);
+  const betaAm = await submitChecklist(siteBetaId, "/daily-track-am", "premises_opening");
+  const betaPm = await submitChecklist(siteBetaId, "/daily-track-pm", "premises_closing");
+  expectOk("beta: submit today's AM checklist", betaAm.status, [201]);
+  expectOk("beta: submit today's PM checklist", betaPm.status, [201]);
+  assertDashboardChecklists("admin all sites complete", await admin("GET", "/dashboard/summary"), 2, 2, 2);
+
   // PoolTrack and SwimTrack mobile submissions are tenant- and
   // department-scoped just like the allowed-site list.
   const poolAlpha = await admin("POST", "/pool-track", {
