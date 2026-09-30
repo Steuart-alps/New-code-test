@@ -14,4 +14,5 @@ export const LegionellaStatusStatus = {
   due_soon: 'due_soon',
   overdue: 'overdue',
   never: 'never',
+  plan_required: 'plan_required',
 } as const;

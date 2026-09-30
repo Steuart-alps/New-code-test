@@ -5,6 +5,7 @@ import { hotTubChecksTable, sitesTable, HOT_TUB_CHECK_TYPES, trackControlProfile
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 
 const router = Router();
 
@@ -20,6 +21,7 @@ const FREQUENCY_DAYS: Record<HotTubCheckType, number> = {
   microbiological_test:  91,   // Quarterly: water sample bacteria test
   risk_assessment:       365,  // Annual: HSG282 risk assessment review
 };
+router.use("/monitoring-plan", createMonitoringPlanRouter("hot_tub", HOT_TUB_CHECK_TYPES, "frequencyDays"));
 
 const createSchema = z.object({
   checkType: z.enum(HOT_TUB_CHECK_TYPES),
@@ -256,10 +258,17 @@ router.get("/status", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const { siteId } = req.query as { siteId?: string };
+  const selectedSiteId = siteId == null || siteId === "" ? null : Number(siteId);
+  if (selectedSiteId !== null && (!Number.isSafeInteger(selectedSiteId) || selectedSiteId < 1))
+    return res.status(400).json({ error: "Invalid site" });
+  if (selectedSiteId === null) return res.json(HOT_TUB_CHECK_TYPES.map(checkType => ({
+    checkType, frequencyDays: null, lastDate: null, lastResult: null, dueDate: null, status: "plan_required",
+  })));
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const conditions = [eq(hotTubChecksTable.clientId, clientId)];
-  if (siteId && !isNaN(parseInt(siteId))) {
-    conditions.push(eq(hotTubChecksTable.siteId, parseInt(siteId)));
-  }
+  conditions.push(eq(hotTubChecksTable.siteId, selectedSiteId));
 
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null) {
@@ -300,10 +309,13 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const todayDays = toUtcDays(todayIso);
 
+  const frequencies = approvedFrequencies(await getHotTubProfile(clientId, selectedSiteId), HOT_TUB_CHECK_TYPES, "frequencyDays");
   const statuses = HOT_TUB_CHECK_TYPES.map((checkType) => {
-    const frequencyDays = FREQUENCY_DAYS[checkType];
+    const frequencyDays = frequencies?.[checkType] ?? null;
     const last = lastByType.get(checkType) ?? null;
     const lastDate = last?.date ?? null;
+    if (frequencyDays === null) return { checkType, frequencyDays, lastDate, lastResult: last?.result ?? null,
+      dueDate: null, status: "plan_required" as const };
     if (!lastDate) {
       return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
     }
@@ -323,7 +335,7 @@ router.get("/status", requireAuth, async (req, res) => {
     WHERE client_id = ${clientId}
       AND check_date = ${todayIso}
       AND check_type IN ('water_chemistry', 'temperature')
-      ${siteId && !isNaN(parseInt(siteId)) ? sql`AND site_id = ${parseInt(siteId)}` : sql``}
+      AND site_id = ${selectedSiteId}
       ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
   `);
   const unitsByType = new Map<string, Set<number>>();
@@ -332,7 +344,7 @@ router.get("/status", requireAuth, async (req, res) => {
     SELECT id AS unit_id
     FROM hot_tubs
     WHERE client_id = ${clientId} AND active = true
-      ${siteId && !isNaN(parseInt(siteId)) ? sql`AND site_id = ${parseInt(siteId)}` : sql``}
+      AND site_id = ${selectedSiteId}
       ${deptId !== null ? sql`AND (site_id IS NULL OR site_id IN (SELECT id FROM sites WHERE client_id = ${clientId} AND (department_id IS NULL OR department_id = ${deptId})))` : sql``}
   `);
   const expectedUnitIds = (expectedUnits.rows ?? []).map((row: any) => Number(row.unit_id));
@@ -545,14 +557,16 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
     const [previous] = await tx.select({ profile: trackControlProfilesTable.profile })
       .from(trackControlProfilesTable).where(and(eq(trackControlProfilesTable.clientId, clientId),
         eq(trackControlProfilesTable.siteId, siteId), eq(trackControlProfilesTable.module, HOT_TUB_PROFILE_MODULE))).limit(1);
-    await tx.insert(trackControlProfilesTable).values({ clientId, siteId, module: HOT_TUB_PROFILE_MODULE, profile: parsed.data })
+    const merged = { ...(previous?.profile as Record<string, unknown> ?? {}), ...parsed.data,
+      approvedAt: null, approvedBy: null, reviewRequired: true };
+    await tx.insert(trackControlProfilesTable).values({ clientId, siteId, module: HOT_TUB_PROFILE_MODULE, profile: merged })
       .onConflictDoUpdate({ target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
-        set: { profile: parsed.data, updatedAt: new Date() } });
+        set: { profile: merged, updatedAt: new Date() } });
     await tx.insert(auditEventsTable).values({
       clientId, actorId: req.currentUser?.id ?? null, entityType: "hot_tub_control_profile",
-      entityId: siteId, action: "updated", before: previous?.profile ?? null, after: parsed.data,
+      entityId: siteId, action: "updated", before: previous?.profile ?? null, after: merged,
     });
-    return parsed.data;
+    return merged;
   });
   res.json({ siteId, operatingRanges: (after as any)?.operatingRanges ?? DEFAULT_OPERATING_RANGES, controlProfile: after,
     disclaimer: "Defaults are guidance only; the site's written scheme and risk assessment are authoritative." });

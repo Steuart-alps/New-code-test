@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export const CHECK_TYPES = [
 
 type CheckType = (typeof CHECK_TYPES)[number];
 type CheckResult = "pass" | "fail";
-type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
+type CheckStatus = "ok" | "due_soon" | "overdue" | "never" | "plan_required";
 
 interface HotTub {
   id: number;
@@ -77,7 +78,7 @@ interface HotTubCheck {
 
 interface StatusRow {
   checkType: string;
-  frequencyDays: number;
+  frequencyDays: number | null;
   lastDate: string | null;
   dueDate: string | null;
   status: CheckStatus;
@@ -104,23 +105,13 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
 };
 
 const CHECK_TYPE_HINTS: Record<CheckType, string> = {
-  water_chemistry:       "pH 7.2–7.8 · Free chlorine 3–5 ppm (or bromine 4–6 ppm). Log at least twice daily when in use.",
-  temperature:           "Must not exceed 40°C. Check and log daily. Maintain ≥35°C for bather comfort.",
-  filter_clean:          "Rinse cartridge weekly; deep-clean monthly. Replace when visually degraded.",
+  water_chemistry:       "Record pH and sanitiser against this site's operating controls and approved monitoring plan.",
+  temperature:           "Record water temperature against the site's approved operating controls.",
+  filter_clean:          "Record cleaning and replacement according to the site's written scheme.",
   cover_inspection:      "Check cover is undamaged, seals intact and there is no excess heat loss.",
-  drain_refill:          "Full drain and disinfect every 3 months, or sooner when TDS exceeds recommended levels.",
-  microbiological_test:  "Quarterly water sample for bacteria count per PWTAG / HSG282 guidance.",
-  risk_assessment:       "Annual review of the HSG282 / PWTAG spa pool risk assessment.",
-};
-
-const FREQ_LABELS: Record<CheckType, string> = {
-  water_chemistry:       "3× daily",
-  temperature:           "3× daily",
-  filter_clean:          "Weekly",
-  cover_inspection:      "Weekly",
-  drain_refill:          "Quarterly",
-  microbiological_test:  "Quarterly",
-  risk_assessment:       "Annual",
+  drain_refill:          "Drain, clean and disinfect when required by the site's written scheme.",
+  microbiological_test:  "Record sampling against the site's risk-assessed sampling plan.",
+  risk_assessment:       "Review the spa risk assessment with a competent person after material changes.",
 };
 
 const SESSION_LABELS: Record<string, string> = {
@@ -246,7 +237,7 @@ export default function HotTubPage() {
   const [form, setForm] = useState(emptyForm());
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
   const [showConfig, setShowConfig] = useState(false);
-  const configSiteId = form.siteId ? Number(form.siteId) : (filterSite !== "all" ? Number(filterSite) : undefined);
+  const configSiteId = filterSite !== "all" ? Number(filterSite) : undefined;
   const { data: operatingConfig } = useQuery<HotTubConfig>({
     queryKey: ["hot-tub-config", configSiteId],
     queryFn: () => apiFetch(`/hot-tub/config${configSiteId ? `?siteId=${configSiteId}` : ""}`),
@@ -262,9 +253,9 @@ export default function HotTubPage() {
   });
 
   const { data: statuses = [] } = useQuery<StatusRow[]>({
-    queryKey: ["hot-tub-status", activeClientId],
-    queryFn: () => apiFetch("/hot-tub/status"),
-    enabled: !!activeClientId && hasHotTub,
+    queryKey: ["hot-tub-status", activeClientId, filterSite],
+    queryFn: () => apiFetch(`/hot-tub/status?siteId=${filterSite}`),
+    enabled: !!activeClientId && hasHotTub && filterSite !== "all",
     retry: (count, err: any) => err?.status !== 403 && count < 3,
   });
 
@@ -568,23 +559,31 @@ ${rows.map(r => `<tr>
         </div>
       )}
 
+      {sites.length > 0 && <div className="flex items-center gap-2"><Label>Monitoring site</Label>
+        <Select value={filterSite} onValueChange={setFilterSite}>
+          <SelectTrigger className="w-56"><SelectValue placeholder="Select a site" /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Select a site</SelectItem>
+            {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>}
+      <WaterMonitoringPlan module="hot-tub" siteId={filterSite === "all" ? undefined : Number(filterSite)}
+        checks={CHECK_TYPE_LABELS} unit="days" canManage={canAdmin}
+        onChanged={() => qc.invalidateQueries({ queryKey: ["hot-tub-status", activeClientId, filterSite] })} />
       {/* Status overview */}
-      {statuses.length > 0 && (
+      {filterSite !== "all" && statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {statuses.map(s => {
             const isDaily = DAILY_SESSION_TYPES.includes(s.checkType as CheckType);
             const sessions = s.sessionsToday;
-            // For daily types, derive status from session completion too
-            const allDone = isDaily && sessions && sessions.morning && sessions.midday && sessions.evening;
-            const someDone = isDaily && sessions && (sessions.morning || sessions.midday || sessions.evening);
-            const effectiveStatus = isDaily
-              ? (allDone ? "ok" : someDone ? "due_soon" : s.status)
-              : s.status;
+            // Session dots are informational; only the approved plan drives due states.
+            const effectiveStatus = s.status;
             const statusCfg = {
               ok:        { bg: "bg-emerald-50 border-emerald-200", text: "text-emerald-700", icon: CheckCircle2 },
               due_soon:  { bg: "bg-amber-50 border-amber-200",   text: "text-amber-700",   icon: Clock },
               overdue:   { bg: "bg-rose-50 border-rose-200",     text: "text-rose-700",    icon: AlertTriangle },
               never:     { bg: "bg-slate-50 border-slate-200",   text: "text-slate-500",   icon: CalendarX },
+              plan_required: { bg: "bg-slate-50 border-slate-200", text: "text-slate-500", icon: CalendarX },
             }[effectiveStatus];
             const Icon = statusCfg.icon;
             return (
@@ -604,10 +603,10 @@ ${rows.map(r => `<tr>
                   {CHECK_TYPE_LABELS[s.checkType as CheckType] ?? s.checkType}
                 </div>
                 <div className={cn("text-xs mt-1", statusCfg.text)}>
-                  {FREQ_LABELS[s.checkType as CheckType]}
+                  {s.frequencyDays == null ? "Plan required" : `Every ${s.frequencyDays} days`}
                 </div>
                 {/* Session dots for 3× daily checks */}
-                {isDaily && sessions && (
+                {isDaily && sessions && s.frequencyDays === 1 && (
                   <div className="flex items-center gap-1.5 mt-2">
                     {(["morning", "midday", "evening"] as const).map(sess => (
                       <span
@@ -1060,6 +1059,8 @@ function HotTubConfigDialog({ open, onClose, siteId }: { open: boolean; onClose:
       const response = await apiFetch(`/hot-tub/config?siteId=${siteId}`, { method: "PUT", body: JSON.stringify({ operatingRanges: ranges }) });
       toast({ title: "Operating limits saved", description: response?.disclaimer ?? "Site limits updated." });
       qc.invalidateQueries({ queryKey: ["hot-tub-config"] });
+      qc.invalidateQueries({ queryKey: ["hot-tub-status"] });
+      qc.invalidateQueries({ queryKey: ["water-monitoring-plan", "hot-tub"] });
       onClose();
     } catch (e: any) { toast({ title: "Save failed", description: e.message, variant: "destructive" }); }
   }

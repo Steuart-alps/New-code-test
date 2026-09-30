@@ -11,7 +11,8 @@ import type { LegionellaStatusStatus } from './legionellaStatusStatus';
 
 export interface LegionellaStatus {
   checkType: LegionellaCheckType;
-  frequencyDays: number;
+  /** @nullable */
+  frequencyDays: number | null;
   lastDate?: string | null;
   lastResult: LegionellaStatusLastResult;
   dueDate?: string | null;

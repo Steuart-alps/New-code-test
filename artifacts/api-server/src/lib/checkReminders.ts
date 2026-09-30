@@ -6,6 +6,7 @@
 
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { approvedFrequencies } from "./waterMonitoringPlan";
 
 export interface CheckAlert {
   module: "fire" | "legionella" | "pool" | "hot_tub";
@@ -13,7 +14,7 @@ export interface CheckAlert {
   modulePath: string;
   checkType: string;
   checkLabel: string;
-  status: "overdue" | "due_soon" | "never" | "action_required";
+  status: "overdue" | "due_soon" | "never" | "action_required" | "plan_required";
   lastDate: string | null;
   dueDate: string | null;
   /** Positive = overdue by N days. Zero = due today. Negative = N days remaining. */
@@ -65,22 +66,6 @@ const LEGIONELLA_CHECK_TYPES = [
   "shower_clean", "tmv_service", "outlet_flush",
 ] as const;
 
-const LEGIONELLA_FREQUENCY_DAYS: Record<string, number> = {
-  calorifier_temp:       7,
-  hot_sentinel_temp:     30,
-  hot_nonsent_temp:      90,
-  cold_tank_temp:        30,
-  cold_sentinel_temp:    30,
-  cold_nonsent_temp:     90,
-  cold_tank_inspection:  183,
-  cold_tank_clean:       365,
-  calorifier_inspection: 365,
-  calorifier_clean:      365,
-  shower_clean:          90,
-  tmv_service:           365,
-  outlet_flush:          7,
-};
-
 const LEGIONELLA_LABELS: Record<string, string> = {
   calorifier_temp:       "Calorifier temperature",
   hot_sentinel_temp:     "Hot water sentinel outlet temperature",
@@ -101,15 +86,19 @@ const LEGIONELLA_LABELS: Record<string, string> = {
 
 const POOL_CHECK_TYPES = ["routine", "opening", "closing", "weekly"] as const;
 
-const POOL_FREQUENCY_HOURS: Record<string, number> = {
-  routine: 2, opening: 24, closing: 24, weekly: 168,
-};
-
 const POOL_LABELS: Record<string, string> = {
   routine: "Routine pool check",
   opening: "Pool opening check",
   closing: "Pool closing check",
-  weekly: "Weekly pool test",
+  weekly: "Full pool balance check",
+};
+const TUB_CHECK_TYPES = ["water_chemistry", "temperature", "filter_clean",
+  "cover_inspection", "drain_refill", "microbiological_test", "risk_assessment"] as const;
+const TUB_LABELS: Record<string, string> = {
+  water_chemistry: "Water chemistry check", temperature: "Temperature check",
+  filter_clean: "Filter clean", cover_inspection: "Cover inspection",
+  drain_refill: "Drain & refill", microbiological_test: "Microbiological test",
+  risk_assessment: "Risk assessment review",
 };
 
 function frequencyHoursLabel(hours: number): string {
@@ -139,6 +128,40 @@ export async function getCheckAlerts(clientId: number, scope: { siteId?: number 
       ? sql`AND (site_id IS NULL OR site_id IN (${sql.join(scope.accessibleSiteIds.map(id => sql`${id}`), sql`, `)}))`
       : sql`AND site_id IS NULL`
     : sql``;
+
+  // A site without a current approved plan has no calculable water due date.
+  // Fetch sites even when they have no checks, so the dashboard can surface
+  // the missing plan instead of treating the site as up to date.
+  const waterSiteRows = await db.execute(sql`
+    SELECT id, name FROM sites WHERE client_id = ${clientId}
+    ${scope.siteId != null ? sql`AND id = ${scope.siteId}`
+      : scope.accessibleSiteIds != null ? scope.accessibleSiteIds.length
+        ? sql`AND id IN (${sql.join(scope.accessibleSiteIds.map(id => sql`${id}`), sql`, `)})`
+        : sql`AND false` : sql``}
+  `);
+  const waterSites = (waterSiteRows.rows ?? []) as { id: number; name: string }[];
+  const profileBySite = new Map<string, unknown>();
+  if (waterSites.length) {
+    const profiles = await db.execute(sql`
+      SELECT site_id, module, profile FROM track_control_profiles
+      WHERE client_id = ${clientId}
+        AND site_id IN (${sql.join(waterSites.map(site => sql`${site.id}`), sql`, `)})
+        AND module IN ('legionella', 'pool', 'hot_tub')
+    `);
+    for (const row of (profiles.rows ?? []) as { site_id: number; module: string; profile: unknown }[]) {
+      profileBySite.set(`${row.module}:${row.site_id}`, row.profile);
+    }
+  }
+  const planFor = (siteId: number, module: string, types: readonly string[], unit: "frequencyDays" | "frequencyHours") =>
+    approvedFrequencies(profileBySite.get(`${module}:${siteId}`), types, unit);
+  const needsPlan = (site: { id: number; name: string }, module: CheckAlert["module"], label: string, path: string) => {
+    alerts.push({
+      module, moduleLabel: label, modulePath: path, checkType: "monitoring_plan",
+      checkLabel: `${site.name}: monitoring plan`, status: "plan_required",
+      lastDate: null, dueDate: null, daysUntilDue: null,
+      frequencyLabel: "Review risk assessment, written scheme and competent person",
+    });
+  };
 
   // ── Fire safety ──────────────────────────────────────────────────────────
   try {
@@ -184,43 +207,42 @@ export async function getCheckAlerts(clientId: number, scope: { siteId?: number 
   // ── Legionella ───────────────────────────────────────────────────────────
   try {
     const legRows = await db.execute(sql`
-      SELECT check_type, MIN(check_date) AS last_date
+      SELECT site_id, check_type, MIN(check_date) AS last_date
       FROM (
         SELECT DISTINCT ON (site_id, check_type, COALESCE(outlet_id, 0))
           site_id, check_type, outlet_id, check_date
         FROM legionella_checks
-        WHERE client_id = ${clientId} ${siteClause}
+        WHERE client_id = ${clientId} AND site_id IS NOT NULL ${siteClause}
         ORDER BY site_id, check_type, COALESCE(outlet_id, 0), check_date DESC, id DESC
       ) latest_units
-      GROUP BY check_type
+      GROUP BY site_id, check_type
     `);
     const legByType = new Map<string, string>(
-      ((legRows as any).rows ?? []).map((r: any) => [r.check_type, r.last_date]),
+      ((legRows as any).rows ?? []).map((r: any) => [`${r.site_id}:${r.check_type}`, r.last_date]),
     );
-    for (const ct of LEGIONELLA_CHECK_TYPES) {
-      const lastDate = legByType.get(ct) ?? null;
-      const freq = LEGIONELLA_FREQUENCY_DAYS[ct]!;
-      if (!lastDate) {
-        alerts.push({
-          module: "legionella", moduleLabel: "Water Safety (Legionella)", modulePath: "/legionella",
-          checkType: ct, checkLabel: LEGIONELLA_LABELS[ct] ?? ct,
-          status: "never", lastDate: null, dueDate: null, daysUntilDue: null,
-          frequencyLabel: frequencyDaysLabel(freq),
-        });
+    for (const site of waterSites) {
+      const frequencies = planFor(site.id, "legionella", LEGIONELLA_CHECK_TYPES, "frequencyDays");
+      if (!frequencies) {
+        needsPlan(site, "legionella", "Water Safety (Legionella)", "/legionella");
         continue;
       }
-      const dueDays = toUtcDays(lastDate) + freq;
-      const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
-      const daysUntilDue = dueDays - todayDays;
-      const dueSoonWindow = Math.max(1, Math.ceil(freq * 0.2));
-      const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : null;
-      if (status) {
-        alerts.push({
-          module: "legionella", moduleLabel: "Water Safety (Legionella)", modulePath: "/legionella",
-          checkType: ct, checkLabel: LEGIONELLA_LABELS[ct] ?? ct,
-          status, lastDate, dueDate, daysUntilDue,
+      for (const ct of LEGIONELLA_CHECK_TYPES) {
+        const lastDate = legByType.get(`${site.id}:${ct}`) ?? null;
+        const freq = frequencies[ct]!;
+        const common = {
+          module: "legionella" as const, moduleLabel: "Water Safety (Legionella)", modulePath: "/legionella",
+          checkType: ct, checkLabel: `${site.name}: ${LEGIONELLA_LABELS[ct] ?? ct}`,
           frequencyLabel: frequencyDaysLabel(freq),
-        });
+        };
+        if (!lastDate) {
+          alerts.push({ ...common, status: "never", lastDate: null, dueDate: null, daysUntilDue: null });
+          continue;
+        }
+        const dueDays = toUtcDays(lastDate) + freq;
+        const daysUntilDue = dueDays - todayDays;
+        const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= Math.max(1, Math.ceil(freq * 0.2)) ? "due_soon" : null;
+        if (status) alerts.push({ ...common, status, lastDate,
+          dueDate: new Date(dueDays * MS_DAY).toISOString().slice(0, 10), daysUntilDue });
       }
     }
   } catch {
@@ -230,45 +252,95 @@ export async function getCheckAlerts(clientId: number, scope: { siteId?: number 
   // ── Pool ─────────────────────────────────────────────────────────────────
   try {
     const poolRows = await db.execute(sql`
-      SELECT DISTINCT ON (check_type)
-        check_type, check_date, check_time
+      SELECT DISTINCT ON (site_id, check_type)
+        site_id, check_type, check_date, check_time
       FROM pool_checks
-      WHERE client_id = ${clientId}
-      ORDER BY check_type, check_date DESC, check_time DESC NULLS LAST
+      WHERE client_id = ${clientId} AND site_id IS NOT NULL ${siteClause}
+      ORDER BY site_id, check_type, check_date DESC, check_time DESC NULLS LAST
     `);
     const poolByType = new Map<string, { check_date: string; check_time: string | null }>(
-      ((poolRows as any).rows ?? []).map((r: any) => [r.check_type, r]),
+      ((poolRows as any).rows ?? []).map((r: any) => [`${r.site_id}:${r.check_type}`, r]),
     );
-    for (const ct of POOL_CHECK_TYPES) {
-      const latest = poolByType.get(ct) ?? null;
-      const freqHours = POOL_FREQUENCY_HOURS[ct]!;
-      if (!latest) {
-        alerts.push({
-          module: "pool", moduleLabel: "PoolTrack", modulePath: "/pool-track",
-          checkType: ct, checkLabel: POOL_LABELS[ct] ?? ct,
-          status: "never", lastDate: null, dueDate: null, daysUntilDue: null,
-          frequencyLabel: frequencyHoursLabel(freqHours),
-        });
+    for (const site of waterSites) {
+      if (!profileBySite.has(`pool:${site.id}`) &&
+          !POOL_CHECK_TYPES.some(ct => poolByType.has(`${site.id}:${ct}`))) continue;
+      const frequencies = planFor(site.id, "pool", POOL_CHECK_TYPES, "frequencyHours");
+      if (!frequencies) {
+        needsPlan(site, "pool", "PoolTrack", "/aqua-track");
         continue;
       }
-      const lastDt = latest.check_time
-        ? new Date(`${latest.check_date}T${latest.check_time}`)
-        : new Date(`${latest.check_date}T00:00:00`);
-      const hoursSince = (now.getTime() - lastDt.getTime()) / (1000 * 60 * 60);
-      const status = hoursSince > freqHours * 1.5 ? "overdue"
-        : hoursSince > freqHours ? "due_soon"
-        : null;
-      if (status) {
-        // daysUntilDue in hours for pool (negative = overdue hours)
-        const hoursUntilDue = freqHours - hoursSince;
-        const dueDate = new Date(lastDt.getTime() + freqHours * 3600000).toISOString().slice(0, 10);
-        alerts.push({
-          module: "pool", moduleLabel: "PoolTrack", modulePath: "/pool-track",
-          checkType: ct, checkLabel: POOL_LABELS[ct] ?? ct,
-          status, lastDate: latest.check_date, dueDate,
-          daysUntilDue: Math.round(hoursUntilDue / 24),
+      for (const ct of POOL_CHECK_TYPES) {
+        const latest = poolByType.get(`${site.id}:${ct}`) ?? null;
+        const freqHours = frequencies[ct]!;
+        const common = {
+          module: "pool" as const, moduleLabel: "PoolTrack", modulePath: "/aqua-track",
+          checkType: ct, checkLabel: `${site.name}: ${POOL_LABELS[ct] ?? ct}`,
           frequencyLabel: frequencyHoursLabel(freqHours),
-        });
+        };
+        if (!latest) {
+          alerts.push({ ...common, status: "never", lastDate: null, dueDate: null, daysUntilDue: null });
+          continue;
+        }
+        const lastDt = new Date(`${latest.check_date}T${latest.check_time || "00:00:00"}`);
+        const hoursUntilDue = (lastDt.getTime() + freqHours * 3600000 - now.getTime()) / 3600000;
+        const status = hoursUntilDue < 0 ? "overdue"
+          : hoursUntilDue <= Math.max(1, freqHours * 0.2) ? "due_soon" : null;
+        if (status) alerts.push({ ...common, status, lastDate: latest.check_date,
+          dueDate: new Date(lastDt.getTime() + freqHours * 3600000).toISOString(),
+          daysUntilDue: Math.floor(hoursUntilDue / 24) });
+      }
+    }
+  } catch {
+    // table may not exist yet; skip
+  }
+
+  // ── Spa tubs ──────────────────────────────────────────────────────────────
+  try {
+    const tubRows = await db.execute(sql`
+      SELECT site_id, check_type, MIN(check_date) AS last_date
+      FROM (
+        SELECT DISTINCT ON (site_id, check_type, COALESCE(hot_tub_id, 0))
+          site_id, check_type, hot_tub_id, check_date
+        FROM hot_tub_checks
+        WHERE client_id = ${clientId} AND site_id IS NOT NULL ${siteClause}
+        ORDER BY site_id, check_type, COALESCE(hot_tub_id, 0), check_date DESC, id DESC
+      ) latest_units
+      GROUP BY site_id, check_type
+    `);
+    const tubByType = new Map<string, string>(
+      (tubRows.rows ?? []).map((r: any) => [`${r.site_id}:${r.check_type}`, r.last_date]),
+    );
+    const registeredTubs = await db.execute(sql`
+      SELECT DISTINCT site_id FROM hot_tubs
+      WHERE client_id = ${clientId} AND active = true AND site_id IS NOT NULL ${siteClause}
+    `);
+    const tubSites = new Set((registeredTubs.rows ?? []).map((r: any) => Number(r.site_id)));
+    for (const site of waterSites) {
+      if (!profileBySite.has(`hot_tub:${site.id}`) && !tubSites.has(Number(site.id)) &&
+          !TUB_CHECK_TYPES.some(ct => tubByType.has(`${site.id}:${ct}`))) continue;
+      const frequencies = planFor(site.id, "hot_tub", TUB_CHECK_TYPES, "frequencyDays");
+      if (!frequencies) {
+        needsPlan(site, "hot_tub", "HotTubTrack", "/hot-tub");
+        continue;
+      }
+      for (const ct of TUB_CHECK_TYPES) {
+        const lastDate = tubByType.get(`${site.id}:${ct}`) ?? null;
+        const freq = frequencies[ct]!;
+        const common = {
+          module: "hot_tub" as const, moduleLabel: "HotTubTrack", modulePath: "/hot-tub",
+          checkType: ct, checkLabel: `${site.name}: ${TUB_LABELS[ct] ?? ct}`,
+          frequencyLabel: frequencyDaysLabel(freq),
+        };
+        if (!lastDate) {
+          alerts.push({ ...common, status: "never", lastDate: null, dueDate: null, daysUntilDue: null });
+          continue;
+        }
+        const dueDays = toUtcDays(lastDate) + freq;
+        const daysUntilDue = dueDays - todayDays;
+        const status = daysUntilDue < 0 ? "overdue"
+          : daysUntilDue <= Math.max(1, Math.ceil(freq * 0.2)) ? "due_soon" : null;
+        if (status) alerts.push({ ...common, status, lastDate,
+          dueDate: new Date(dueDays * MS_DAY).toISOString().slice(0, 10), daysUntilDue });
       }
     }
   } catch {

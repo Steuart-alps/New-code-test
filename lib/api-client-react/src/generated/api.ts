@@ -59,9 +59,12 @@ import type {
   GetFoodSafetyRecordByDateParams,
   GetFoodSafetySummaryParams,
   GetHotTubConfigParams,
+  GetHotTubMonitoringPlanParams,
   GetLegionellaConfigParams,
+  GetLegionellaMonitoringPlanParams,
   GetLegionellaStatusParams,
   GetPATPresetTemplates200,
+  GetPoolMonitoringPlanParams,
   GetPrivacyGovernanceParams,
   GreenTrackConfig,
   HealthStatus,
@@ -114,11 +117,16 @@ import type {
   UpdateFoodSafetyRecordRequest,
   UpdateHotTubCheckRequest,
   UpdateHotTubConfigParams,
+  UpdateHotTubMonitoringPlanParams,
   UpdateLegionellaCheckRequest,
   UpdateLegionellaConfigParams,
+  UpdateLegionellaMonitoringPlanParams,
+  UpdatePoolMonitoringPlanParams,
   UpdatePrivacyRecordParams,
   UpdateSiteRequest,
-  UpdateStatusRequest
+  UpdateStatusRequest,
+  WaterMonitoringPlanInput,
+  WaterMonitoringPlanResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -7516,6 +7524,495 @@ export function useGetLegionellaStatus<TData = Awaited<ReturnType<typeof getLegi
 
 
 
+
+export const getGetLegionellaMonitoringPlanUrl = (params: GetLegionellaMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/legionella/monitoring-plan?${stringifiedParams}` : `/api/legionella/monitoring-plan`
+}
+
+/**
+ * @summary Read the site's approved or review-required monitoring plan
+ */
+export const getLegionellaMonitoringPlan = async (params: GetLegionellaMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getGetLegionellaMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLegionellaMonitoringPlanQueryKey = (params?: GetLegionellaMonitoringPlanParams,) => {
+    return [
+    `/api/legionella/monitoring-plan`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetLegionellaMonitoringPlanQueryOptions = <TData = Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>, TError = ErrorType<unknown>>(params: GetLegionellaMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLegionellaMonitoringPlanQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>> = ({ signal }) => getLegionellaMonitoringPlan(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLegionellaMonitoringPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>>
+export type GetLegionellaMonitoringPlanQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the site's approved or review-required monitoring plan
+ */
+
+export function useGetLegionellaMonitoringPlan<TData = Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>, TError = ErrorType<unknown>>(
+ params: GetLegionellaMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLegionellaMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLegionellaMonitoringPlanQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateLegionellaMonitoringPlanUrl = (params: UpdateLegionellaMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/legionella/monitoring-plan?${stringifiedParams}` : `/api/legionella/monitoring-plan`
+}
+
+/**
+ * @summary Approve the site plan or flag a material change
+ */
+export const updateLegionellaMonitoringPlan = async (waterMonitoringPlanInput: WaterMonitoringPlanInput,
+    params: UpdateLegionellaMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getUpdateLegionellaMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(waterMonitoringPlanInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateLegionellaMonitoringPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateLegionellaMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateLegionellaMonitoringPlanParams}, TContext> => {
+
+const mutationKey = ['updateLegionellaMonitoringPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>, {data: BodyType<WaterMonitoringPlanInput>;params: UpdateLegionellaMonitoringPlanParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updateLegionellaMonitoringPlan(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateLegionellaMonitoringPlanMutationResult = NonNullable<Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>>
+    export type UpdateLegionellaMonitoringPlanMutationBody = BodyType<WaterMonitoringPlanInput>
+    export type UpdateLegionellaMonitoringPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve the site plan or flag a material change
+ */
+export const useUpdateLegionellaMonitoringPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateLegionellaMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateLegionellaMonitoringPlan>>,
+        TError,
+        {data: BodyType<WaterMonitoringPlanInput>;params: UpdateLegionellaMonitoringPlanParams},
+        TContext
+      > => {
+      return useMutation(getUpdateLegionellaMonitoringPlanMutationOptions(options));
+    }
+
+export const getGetHotTubMonitoringPlanUrl = (params: GetHotTubMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/hot-tub/monitoring-plan?${stringifiedParams}` : `/api/hot-tub/monitoring-plan`
+}
+
+/**
+ * @summary Read the site's spa monitoring plan
+ */
+export const getHotTubMonitoringPlan = async (params: GetHotTubMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getGetHotTubMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHotTubMonitoringPlanQueryKey = (params?: GetHotTubMonitoringPlanParams,) => {
+    return [
+    `/api/hot-tub/monitoring-plan`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetHotTubMonitoringPlanQueryOptions = <TData = Awaited<ReturnType<typeof getHotTubMonitoringPlan>>, TError = ErrorType<unknown>>(params: GetHotTubMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHotTubMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHotTubMonitoringPlanQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHotTubMonitoringPlan>>> = ({ signal }) => getHotTubMonitoringPlan(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHotTubMonitoringPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHotTubMonitoringPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getHotTubMonitoringPlan>>>
+export type GetHotTubMonitoringPlanQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the site's spa monitoring plan
+ */
+
+export function useGetHotTubMonitoringPlan<TData = Awaited<ReturnType<typeof getHotTubMonitoringPlan>>, TError = ErrorType<unknown>>(
+ params: GetHotTubMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHotTubMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHotTubMonitoringPlanQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateHotTubMonitoringPlanUrl = (params: UpdateHotTubMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/hot-tub/monitoring-plan?${stringifiedParams}` : `/api/hot-tub/monitoring-plan`
+}
+
+/**
+ * @summary Approve the spa plan or flag a material change
+ */
+export const updateHotTubMonitoringPlan = async (waterMonitoringPlanInput: WaterMonitoringPlanInput,
+    params: UpdateHotTubMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getUpdateHotTubMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(waterMonitoringPlanInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateHotTubMonitoringPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateHotTubMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateHotTubMonitoringPlanParams}, TContext> => {
+
+const mutationKey = ['updateHotTubMonitoringPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>, {data: BodyType<WaterMonitoringPlanInput>;params: UpdateHotTubMonitoringPlanParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updateHotTubMonitoringPlan(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateHotTubMonitoringPlanMutationResult = NonNullable<Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>>
+    export type UpdateHotTubMonitoringPlanMutationBody = BodyType<WaterMonitoringPlanInput>
+    export type UpdateHotTubMonitoringPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve the spa plan or flag a material change
+ */
+export const useUpdateHotTubMonitoringPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdateHotTubMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateHotTubMonitoringPlan>>,
+        TError,
+        {data: BodyType<WaterMonitoringPlanInput>;params: UpdateHotTubMonitoringPlanParams},
+        TContext
+      > => {
+      return useMutation(getUpdateHotTubMonitoringPlanMutationOptions(options));
+    }
+
+export const getGetPoolMonitoringPlanUrl = (params: GetPoolMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/pool-track/monitoring-plan?${stringifiedParams}` : `/api/pool-track/monitoring-plan`
+}
+
+/**
+ * @summary Read the site's pool monitoring plan
+ */
+export const getPoolMonitoringPlan = async (params: GetPoolMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getGetPoolMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPoolMonitoringPlanQueryKey = (params?: GetPoolMonitoringPlanParams,) => {
+    return [
+    `/api/pool-track/monitoring-plan`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPoolMonitoringPlanQueryOptions = <TData = Awaited<ReturnType<typeof getPoolMonitoringPlan>>, TError = ErrorType<unknown>>(params: GetPoolMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPoolMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPoolMonitoringPlanQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPoolMonitoringPlan>>> = ({ signal }) => getPoolMonitoringPlan(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPoolMonitoringPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPoolMonitoringPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getPoolMonitoringPlan>>>
+export type GetPoolMonitoringPlanQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the site's pool monitoring plan
+ */
+
+export function useGetPoolMonitoringPlan<TData = Awaited<ReturnType<typeof getPoolMonitoringPlan>>, TError = ErrorType<unknown>>(
+ params: GetPoolMonitoringPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPoolMonitoringPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPoolMonitoringPlanQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdatePoolMonitoringPlanUrl = (params: UpdatePoolMonitoringPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/pool-track/monitoring-plan?${stringifiedParams}` : `/api/pool-track/monitoring-plan`
+}
+
+/**
+ * @summary Approve the pool plan or flag a material change
+ */
+export const updatePoolMonitoringPlan = async (waterMonitoringPlanInput: WaterMonitoringPlanInput,
+    params: UpdatePoolMonitoringPlanParams, options?: RequestInit): Promise<WaterMonitoringPlanResult> => {
+
+  return customFetch<WaterMonitoringPlanResult>(getUpdatePoolMonitoringPlanUrl(params),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(waterMonitoringPlanInput)
+  }
+);}
+
+
+
+
+
+export const getUpdatePoolMonitoringPlanMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePoolMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdatePoolMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePoolMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdatePoolMonitoringPlanParams}, TContext> => {
+
+const mutationKey = ['updatePoolMonitoringPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePoolMonitoringPlan>>, {data: BodyType<WaterMonitoringPlanInput>;params: UpdatePoolMonitoringPlanParams}> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  updatePoolMonitoringPlan(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePoolMonitoringPlanMutationResult = NonNullable<Awaited<ReturnType<typeof updatePoolMonitoringPlan>>>
+    export type UpdatePoolMonitoringPlanMutationBody = BodyType<WaterMonitoringPlanInput>
+    export type UpdatePoolMonitoringPlanMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve the pool plan or flag a material change
+ */
+export const useUpdatePoolMonitoringPlan = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePoolMonitoringPlan>>, TError,{data: BodyType<WaterMonitoringPlanInput>;params: UpdatePoolMonitoringPlanParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePoolMonitoringPlan>>,
+        TError,
+        {data: BodyType<WaterMonitoringPlanInput>;params: UpdatePoolMonitoringPlanParams},
+        TContext
+      > => {
+      return useMutation(getUpdatePoolMonitoringPlanMutationOptions(options));
+    }
 
 export const getUpdateLegionellaCheckUrl = (id: number,) => {
 

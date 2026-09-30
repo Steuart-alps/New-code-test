@@ -39,6 +39,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -115,7 +116,8 @@ function ResultBadge({ result }: { result: string }) {
   );
 }
 
-function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
+function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never" | "plan_required"; lastResult?: string | null }) {
+  if (status === "plan_required") return <Badge variant="outline">Plan required</Badge>;
   if (lastResult === "fail")
     return (
       <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
@@ -245,6 +247,8 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
+          queryClient.invalidateQueries({ queryKey: ["water-monitoring-plan", "legionella"] });
           toast({ title: "Template saved", description: "New checks will use these defaults." });
           setOpen(false);
         },
@@ -283,8 +287,8 @@ function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
               <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
             </div>
              <div className="space-y-2">
-               <Label>Risk-assessed check frequencies (days)</Label>
-               <p className="text-xs text-muted-foreground">HSG274/L8 values are benchmarks; the written scheme and risk assessment control the local interval.</p>
+               <Label>Frequency suggestions (days)</Label>
+               <p className="text-xs text-muted-foreground">These benchmark suggestions do not drive due statuses. Select a site and approve its monitoring plan for the site's actual intervals.</p>
                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
                  {Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, fallback]) => (
                    <div key={key} className="space-y-1">
@@ -1115,7 +1119,7 @@ export default function LegionellaPage() {
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
-    { query: { enabled: hasLegionellatrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) } }
+    { query: { enabled: hasLegionellatrack && !!filterSite, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
 
@@ -1206,8 +1210,23 @@ export default function LegionellaPage() {
           </div>
         </div>
 
+        {sites && sites.length > 0 && (
+          <div className="flex items-center gap-2"><Label>Monitoring site</Label>
+            <Select value={filterSite ? String(filterSite) : "all"} onValueChange={value => setFilterSite(value === "all" ? undefined : Number(value))}>
+              <SelectTrigger className="w-56"><SelectValue placeholder="Select a site" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">Select a site</SelectItem>
+                {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <WaterMonitoringPlan module="legionella" siteId={filterSite} checks={CHECK_TYPE_LABELS} unit="days"
+          canManage={canAdmin} onChanged={() => {
+            queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) });
+            queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
+          }} />
         {/* Status Overview */}
-        {statusLoading ? (
+        {filterSite && (statusLoading ? (
           <Card>
             <CardContent className="p-12 flex justify-center">
               <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -1220,7 +1239,9 @@ export default function LegionellaPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
-                  item.lastResult === "fail"
+                  item.status === "plan_required"
+                    ? "border-l-slate-400 bg-slate-50/50"
+                    : item.lastResult === "fail"
                     ? "border-l-red-600 bg-red-100/60"
                     : item.lastResult === "action_required"
                     ? "border-l-orange-600 bg-orange-100/60"
@@ -1239,13 +1260,15 @@ export default function LegionellaPage() {
                     <CardTitle className="text-sm font-medium leading-tight">
                       {checkTypeLabel(item.checkType)}
                     </CardTitle>
-                    <StatusBadge status={item.status} lastResult={item.lastResult} />
+                    {item.status === "plan_required"
+                      ? <Badge variant="outline">Plan required</Badge>
+                      : <StatusBadge status={item.status} lastResult={item.lastResult} />}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1">
-                  <div className="text-xs text-muted-foreground">
+                  {item.status === "plan_required" ? <p className="text-xs text-muted-foreground">Approve the site's monitoring plan to calculate a due date.</p> : <div className="text-xs text-muted-foreground">
                     <span className="font-medium">Frequency:</span> Every {item.frequencyDays} days
-                  </div>
+                  </div>}
                   {item.lastDate && (
                     <div className="text-xs text-muted-foreground">
                       <span className="font-medium">Last check:</span>{" "}
@@ -1268,7 +1291,7 @@ export default function LegionellaPage() {
               </Card>
             ))}
           </div>
-        )}
+        ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
         <SentinelOutletsPanel canAdmin={canAdmin} />

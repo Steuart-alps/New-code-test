@@ -2046,6 +2046,132 @@ paths:
                 items:
                   $ref: "#/components/schemas/LegionellaStatus"
 
+  /legionella/monitoring-plan:
+    get:
+      operationId: getLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Read the site's approved or review-required monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Approve the site plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /hot-tub/monitoring-plan:
+    get:
+      operationId: getHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Read the site's spa monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Approve the spa plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /pool-track/monitoring-plan:
+    get:
+      operationId: getPoolMonitoringPlan
+      tags: [pool-track]
+      summary: Read the site's pool monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updatePoolMonitoringPlan
+      tags: [pool-track]
+      summary: Approve the pool plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
   /legionella/{id}:
     put:
       operationId: updateLegionellaCheck
@@ -4562,7 +4688,7 @@ components:
         checkType:
           $ref: "#/components/schemas/LegionellaCheckType"
         frequencyDays:
-          type: integer
+          type: ["integer", "null"]
         lastDate:
           type: string
           nullable: true
@@ -4575,9 +4701,39 @@ components:
           nullable: true
         status:
           type: string
-          enum: [ok, due_soon, overdue, never]
+          enum: [ok, due_soon, overdue, never, plan_required]
       required:
         - checkType
         - frequencyDays
         - lastResult
         - status
+
+    WaterMonitoringPlanInput:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [approve, flag_change]
+        riskAssessmentReference:
+          type: string
+        writtenSchemeReference:
+          type: string
+        competentPerson:
+          type: string
+        materialChangeNote:
+          type: string
+        frequencies:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [action]
+
+    WaterMonitoringPlanResult:
+      type: object
+      properties:
+        profile:
+          type: object
+          additionalProperties: true
+        approved:
+          type: boolean
+      required: [profile, approved]

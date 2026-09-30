@@ -3248,13 +3248,118 @@ export const GetLegionellaStatusQueryParams = zod.object({
 
 export const GetLegionellaStatusResponseItem = zod.object({
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
-  "frequencyDays": zod.number(),
+  "frequencyDays": zod.number().nullable(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
   "dueDate": zod.string().nullish(),
-  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'plan_required'])
 })
 export const GetLegionellaStatusResponse = zod.array(GetLegionellaStatusResponseItem)
+
+
+/**
+ * @summary Read the site's approved or review-required monitoring plan
+ */
+export const GetLegionellaMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetLegionellaMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the site plan or flag a material change
+ */
+export const UpdateLegionellaMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdateLegionellaMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdateLegionellaMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Read the site's spa monitoring plan
+ */
+export const GetHotTubMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetHotTubMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the spa plan or flag a material change
+ */
+export const UpdateHotTubMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdateHotTubMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdateHotTubMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Read the site's pool monitoring plan
+ */
+export const GetPoolMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetPoolMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the pool plan or flag a material change
+ */
+export const UpdatePoolMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdatePoolMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdatePoolMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
 
 
 /**

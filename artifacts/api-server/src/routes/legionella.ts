@@ -5,6 +5,7 @@ import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfil
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 
 const router = Router();
 
@@ -44,6 +45,7 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
   tmv_service:           365,  // Annually
   outlet_flush:          7,    // Weekly
 };
+router.use("/monitoring-plan", createMonitoringPlanRouter("legionella", CHECK_TYPES, "frequencyDays"));
 
 const LEGIONELLA_PROFILE_MODULE = "legionella";
 const DEFAULT_TEMPERATURE_LIMITS: Record<string, { min?: number; max?: number }> = {
@@ -179,10 +181,16 @@ router.get("/status", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const { siteId } = req.query as { siteId?: string };
+  const selectedSiteId = parseSiteId(siteId);
+  if (selectedSiteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  if (selectedSiteId === null) return res.json(CHECK_TYPES.map(checkType => ({
+    checkType, frequencyDays: null, lastDate: null, lastResult: null, dueDate: null, status: "plan_required",
+  })));
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const conditions = [eq(legionellaChecksTable.clientId, clientId)];
-  if (siteId && !isNaN(parseInt(siteId))) {
-    conditions.push(eq(legionellaChecksTable.siteId, parseInt(siteId)));
-  }
+  conditions.push(eq(legionellaChecksTable.siteId, selectedSiteId));
 
   // Department scoping: status should only reflect checks visible to this user.
   const deptId = getActiveDepartmentId(req);
@@ -206,7 +214,8 @@ router.get("/status", requireAuth, async (req, res) => {
   const lastByType = new Map<string, { lastDate: string; lastResult: string }>();
   for (const row of ((lastChecks as any).rows ?? []) as { checkType: string; lastDate: string; lastResult: string }[]) {
     const previous = lastByType.get(row.checkType);
-    const lastDate = previous && previous.lastDate > row.lastDate ? previous.lastDate : row.lastDate;
+    // The oldest outlet's most recent reading sets the due state.
+    const lastDate = previous && previous.lastDate < row.lastDate ? previous.lastDate : row.lastDate;
     const lastResult = previous?.lastResult === "fail" || previous?.lastResult === "action_required"
       || row.lastResult === "fail" || row.lastResult === "action_required"
       ? "fail" : row.lastResult;
@@ -218,24 +227,13 @@ router.get("/status", requireAuth, async (req, res) => {
   const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const todayDays = toUtcDays(todayIso);
 
-  const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
-    .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
-  const frequencySetting = settings.find(row => row.key === "water_frequency_days")?.value;
-  let siteProfile: unknown = null;
-  if (siteId && !isNaN(parseInt(siteId))) {
-    const [profile] = await db.select({ profile: trackControlProfilesTable.profile })
-      .from(trackControlProfilesTable)
-      .where(and(
-        eq(trackControlProfilesTable.clientId, clientId),
-        eq(trackControlProfilesTable.siteId, parseInt(siteId)),
-        eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE),
-      )).limit(1);
-    siteProfile = profile?.profile ?? null;
-  }
-  const frequencies = effectiveLegionellaFrequencies(frequencySetting, siteProfile);
+  const siteProfile = await getLegionellaProfile(clientId, selectedSiteId);
+  const frequencies = approvedFrequencies(siteProfile, CHECK_TYPES, "frequencyDays");
   const statuses = CHECK_TYPES.map((checkType) => {
-    const frequencyDays = frequencies[checkType];
+    const frequencyDays = frequencies?.[checkType] ?? null;
     const last = lastByType.get(checkType) ?? null;
+    if (frequencyDays === null) return { checkType, frequencyDays, lastDate: last?.lastDate ?? null,
+      lastResult: last?.lastResult ?? null, dueDate: null, status: "plan_required" as const };
     if (!last) {
       return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
     }
@@ -644,15 +642,19 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
       const [previous] = await tx.select({ profile: trackControlProfilesTable.profile })
         .from(trackControlProfilesTable).where(and(eq(trackControlProfilesTable.clientId, clientId),
           eq(trackControlProfilesTable.siteId, siteId), eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE))).limit(1);
+      const merged = { ...(previous?.profile as Record<string, unknown> ?? {}), ...profile.data,
+        ...(profile.data.writtenControlSchemeReference !== undefined
+          ? { writtenSchemeReference: profile.data.writtenControlSchemeReference } : {}),
+        approvedAt: null, approvedBy: null, reviewRequired: true };
       await tx.insert(trackControlProfilesTable).values({
-        clientId, siteId, module: LEGIONELLA_PROFILE_MODULE, profile: profile.data,
+        clientId, siteId, module: LEGIONELLA_PROFILE_MODULE, profile: merged,
       }).onConflictDoUpdate({
         target: [trackControlProfilesTable.clientId, trackControlProfilesTable.siteId, trackControlProfilesTable.module],
-        set: { profile: profile.data, updatedAt: new Date() },
+        set: { profile: merged, updatedAt: new Date() },
       });
       await tx.insert(auditEventsTable).values({
         clientId, actorId: req.currentUser?.id ?? null, entityType: "legionella_control_profile",
-        entityId: siteId, action: "updated", before: previous?.profile ?? null, after: profile.data,
+        entityId: siteId, action: "updated", before: previous?.profile ?? null, after: merged,
       });
     });
   }

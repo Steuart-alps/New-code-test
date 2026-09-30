@@ -1652,15 +1652,43 @@ export const LegionellaStatusStatus = {
   due_soon: 'due_soon',
   overdue: 'overdue',
   never: 'never',
+  plan_required: 'plan_required',
 } as const;
 
 export interface LegionellaStatus {
   checkType: LegionellaCheckType;
-  frequencyDays: number;
+  /** @nullable */
+  frequencyDays: number | null;
   lastDate?: string | null;
   lastResult: LegionellaStatusLastResult;
   dueDate?: string | null;
   status: LegionellaStatusStatus;
+}
+
+export type WaterMonitoringPlanInputAction = typeof WaterMonitoringPlanInputAction[keyof typeof WaterMonitoringPlanInputAction];
+
+
+export const WaterMonitoringPlanInputAction = {
+  approve: 'approve',
+  flag_change: 'flag_change',
+} as const;
+
+export type WaterMonitoringPlanInputFrequencies = {[key: string]: number};
+
+export interface WaterMonitoringPlanInput {
+  action: WaterMonitoringPlanInputAction;
+  riskAssessmentReference?: string;
+  writtenSchemeReference?: string;
+  competentPerson?: string;
+  materialChangeNote?: string;
+  frequencies?: WaterMonitoringPlanInputFrequencies;
+}
+
+export type WaterMonitoringPlanResultProfile = { [key: string]: unknown };
+
+export interface WaterMonitoringPlanResult {
+  profile: WaterMonitoringPlanResultProfile;
+  approved: boolean;
 }
 
 export type ListAuditLogParams = {
@@ -1885,5 +1913,29 @@ siteId?: number;
 
 export type GetLegionellaStatusParams = {
 siteId?: number;
+};
+
+export type GetLegionellaMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdateLegionellaMonitoringPlanParams = {
+siteId: number;
+};
+
+export type GetHotTubMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdateHotTubMonitoringPlanParams = {
+siteId: number;
+};
+
+export type GetPoolMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdatePoolMonitoringPlanParams = {
+siteId: number;
 };
 

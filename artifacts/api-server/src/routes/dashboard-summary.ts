@@ -362,10 +362,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const overdue = legAlerts.filter((a) => a.status === "overdue");
         const dueSoon = legAlerts.filter((a) => a.status === "due_soon");
         const never = legAlerts.filter((a) => a.status === "never");
+        const planRequired = legAlerts.filter((a) => a.status === "plan_required");
 
         if (overdue.length > 0) {
           status = "overdue";
           badge = `${overdue.length} overdue`;
+        } else if (planRequired.length > 0) {
+          status = "attention";
+          badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due soon`;
@@ -377,11 +381,12 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
+        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
           const days = a.daysUntilDue;
           const detail =
             a.status === "overdue"
               ? `Overdue by ${Math.abs(days ?? 0)} day${Math.abs(days ?? 0) !== 1 ? "s" : ""}`
+              : a.status === "plan_required" ? "Risk assessment and written scheme need competent-person review"
               : days === 0
               ? "Due today"
               : a.status === "never" ? "No record has been submitted" : `Due in ${days} day${days !== 1 ? "s" : ""}`;
@@ -418,10 +423,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         const overdue = poolAlerts.filter((a) => a.status === "overdue");
         const dueSoon = poolAlerts.filter((a) => a.status === "due_soon");
         const never = poolAlerts.filter((a) => a.status === "never");
+        const planRequired = poolAlerts.filter((a) => a.status === "plan_required");
 
         if (overdue.length > 0) {
           status = "overdue";
           badge = `${overdue.length} overdue`;
+        } else if (planRequired.length > 0) {
+          status = "attention";
+          badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
         } else if (dueSoon.length > 0) {
           status = "attention";
           badge = `${dueSoon.length} due soon`;
@@ -433,9 +442,11 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           badge = "All checks up to date";
         }
 
-        for (const a of [...overdue, ...dueSoon, ...never].slice(0, 10)) {
+        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
           const detail =
-            a.status === "overdue" ? "Overdue check" : a.status === "never" ? "No record has been submitted" : "Due soon";
+            a.status === "overdue" ? "Overdue check" : a.status === "plan_required"
+              ? "Risk assessment and written scheme need competent-person review"
+              : a.status === "never" ? "No record has been submitted" : "Due soon";
           items.push({ label: a.checkLabel, detail, path: "/aqua-track" });
         }
       } catch {
@@ -1033,57 +1044,27 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 
     if (enabled) {
       try {
-        const siteClause = protectedSiteClause;
-        const MS_DAY = 86400000;
-        const todayDays = Math.floor(Date.now() / MS_DAY);
-        const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_DAY);
-
-        const FREQ: Record<string, number> = {
-          water_chemistry: 1, temperature: 1, filter_clean: 7,
-          cover_inspection: 7, drain_refill: 91, microbiological_test: 91, risk_assessment: 365,
-        };
-        const CHECK_LABELS: Record<string, string> = {
-          water_chemistry: "Water chemistry check", temperature: "Temperature check",
-          filter_clean: "Filter clean", cover_inspection: "Cover inspection",
-          drain_refill: "Drain & refill", microbiological_test: "Microbiological test",
-          risk_assessment: "Risk assessment review",
-        };
-
-        const lastRows = await db.execute(sql`
-          SELECT DISTINCT ON (site_id, check_type, COALESCE(hot_tub_id, 0))
-            site_id, hot_tub_id, check_type, check_date
-          FROM hot_tub_checks WHERE client_id = ${clientId} ${siteClause}
-          ORDER BY site_id, check_type, COALESCE(hot_tub_id, 0), check_date DESC, id DESC
-        `);
-        const lastByType = new Map<string, string>();
-        for (const row of rows(lastRows)) {
-          const previous = lastByType.get(row.check_type);
-          if (!previous || row.check_date > previous) lastByType.set(row.check_type, row.check_date);
+        const alerts = (await getCheckAlerts(clientId, { siteId, accessibleSiteIds }))
+          .filter(a => a.module === "hot_tub");
+        const overdue = alerts.filter(a => a.status === "overdue");
+        const planRequired = alerts.filter(a => a.status === "plan_required");
+        const dueSoon = alerts.filter(a => a.status === "due_soon");
+        const never = alerts.filter(a => a.status === "never");
+        if (overdue.length) { status = "overdue"; badge = `${overdue.length} overdue`; }
+        else if (planRequired.length) {
+          status = "attention"; badge = `${planRequired.length} site plan${planRequired.length === 1 ? "" : "s"} need review`;
+        } else if (dueSoon.length) { status = "attention"; badge = `${dueSoon.length} due soon`; }
+        else if (never.length || !alerts.length) {
+          status = "no_data"; badge = never.length ? `${never.length} checks never recorded` : "No records yet";
+        } else { status = "ok"; badge = "All checks up to date"; }
+        for (const a of [...overdue, ...planRequired, ...dueSoon, ...never].slice(0, 10)) {
+          const detail = a.status === "overdue"
+            ? `Overdue by ${Math.abs(a.daysUntilDue ?? 0)} days`
+            : a.status === "plan_required" ? "Risk assessment and written scheme need competent-person review"
+            : a.status === "never" ? "No record has been submitted"
+            : a.daysUntilDue === 0 ? "Due today" : `Due in ${a.daysUntilDue} days`;
+          items.push({ label: a.checkLabel, detail, path: "/hot-tub" });
         }
-
-        let overdueCount = 0;
-        let dueSoonCount = 0;
-        let hasAny = lastByType.size > 0;
-
-        for (const [ct, freqDays] of Object.entries(FREQ)) {
-          const lastDate = lastByType.get(ct);
-          if (!lastDate) continue;
-          const dueDays = toUtcDays(lastDate) + freqDays;
-          const daysUntil = dueDays - todayDays;
-          const window = Math.max(1, Math.ceil(freqDays * 0.2));
-          if (daysUntil < 0) {
-            overdueCount++;
-            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: `Overdue by ${Math.abs(daysUntil)} day${Math.abs(daysUntil) !== 1 ? "s" : ""}`, path: "/hot-tub" });
-          } else if (daysUntil <= window) {
-            dueSoonCount++;
-            items.push({ label: CHECK_LABELS[ct] ?? ct, detail: daysUntil === 0 ? "Due today" : `Due in ${daysUntil} day${daysUntil !== 1 ? "s" : ""}`, path: "/hot-tub" });
-          }
-        }
-
-        if (overdueCount > 0) { status = "overdue"; badge = `${overdueCount} overdue`; }
-        else if (dueSoonCount > 0) { status = "attention"; badge = `${dueSoonCount} due soon`; }
-        else if (!hasAny) { status = "no_data"; badge = "No records yet"; }
-        else { status = "ok"; badge = "All checks up to date"; }
       } catch {
         status = "no_data"; badge = "No records";
       }

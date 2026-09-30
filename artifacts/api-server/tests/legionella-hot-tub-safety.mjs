@@ -122,11 +122,84 @@ const run = async () => {
     request("GET", "/legionella/status"), request("GET", `/legionella/status?siteId=${secondSiteId}`),
     request("GET", "/hot-tub/status"), request("GET", `/hot-tub/status?siteId=${secondSiteId}`),
   ]);
-  const outcome = (rows, type) => rows.data?.find(r => r.checkType === type)?.lastResult;
-  check("Legionella status retains unsafe first site but isolates safe second site",
-    outcome(allLeg, "calorifier_temp") === "fail" && outcome(otherLeg, "calorifier_temp") === "pass");
-  check("HotTub status retains unsafe first site but isolates safe second site",
-    outcome(allTub, "water_chemistry") === "fail" && outcome(otherTub, "water_chemistry") === "pass");
+  const item = (rows, type) => rows.data?.find(r => r.checkType === type);
+  check("unselected site never uses a generic Legionella or spa schedule",
+    item(allLeg, "calorifier_temp")?.status === "plan_required" &&
+    item(allTub, "water_chemistry")?.status === "plan_required");
+  check("unapproved second site is not marked on time",
+    item(otherLeg, "calorifier_temp")?.status === "plan_required" &&
+    item(otherTub, "water_chemistry")?.status === "plan_required");
+  const unapprovedDashboard = await request("GET", `/dashboard/summary?siteId=${siteId}`);
+  check("dashboard requests site plan rather than applying generic intervals",
+    ["legionella", "hot_tub"].every(id =>
+      unapprovedDashboard.data?.tracks?.find(t => t.trackId === id)?.items
+        ?.some(entry => entry.detail.includes("competent-person review"))));
+  const legFrequency = Object.fromEntries(allLeg.data.map(row => [row.checkType,
+    row.checkType === "calorifier_temp" ? 14 : row.checkType === "hot_sentinel_temp" ? 2 : 30]));
+  const tubFrequency = Object.fromEntries(allTub.data.map(row => [row.checkType, row.checkType === "water_chemistry" ? 2 : 30]));
+  const approve = (path, id, frequencies) => request("PUT", `/${path}/monitoring-plan?siteId=${id}`, {
+    action: "approve", riskAssessmentReference: "RA-WATER", writtenSchemeReference: "WS-WATER",
+    competentPerson: "Appointed water manager", frequencies,
+  });
+  const [legPlan, tubPlan, secondLegPlan, secondTubPlan] = await Promise.all([
+    approve("legionella", siteId, legFrequency), approve("hot-tub", siteId, tubFrequency),
+    approve("legionella", secondSiteId, legFrequency), approve("hot-tub", secondSiteId, tubFrequency),
+  ]);
+  check("both sites can approve separate water and spa plans",
+    [legPlan, tubPlan, secondLegPlan, secondTubPlan].every(r => r.status === 200 && r.data?.approved));
+  const [firstLeg, firstTub, approvedOtherLeg, approvedOtherTub] = await Promise.all([
+    request("GET", `/legionella/status?siteId=${siteId}`), request("GET", `/hot-tub/status?siteId=${siteId}`),
+    request("GET", `/legionella/status?siteId=${secondSiteId}`), request("GET", `/hot-tub/status?siteId=${secondSiteId}`),
+  ]);
+  check("approved plans drive due states independently of a different site's reading",
+    item(firstLeg, "calorifier_temp")?.frequencyDays === 14 &&
+    item(firstTub, "water_chemistry")?.frequencyDays === 2 &&
+    item(approvedOtherLeg, "calorifier_temp")?.lastResult === "pass" &&
+    item(approvedOtherTub, "water_chemistry")?.lastResult === "pass");
+  const oldDay = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  const oldSiteCheck = await request("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: oldDay, result: "pass",
+    temperature: 52, siteId: secondSiteId,
+  });
+  const overdueSite = await request("GET", `/legionella/status?siteId=${secondSiteId}`);
+  const overdueDashboard = await request("GET", `/dashboard/summary?siteId=${secondSiteId}`);
+  check("two-day site cadence marks five-day-old check overdue on page and main dashboard",
+    oldSiteCheck.status === 201 &&
+    item(overdueSite, "hot_sentinel_temp")?.status === "overdue" &&
+    overdueDashboard.data?.tracks?.find(t => t.trackId === "legionella")?.status === "overdue");
+  const badPoolPlan = await approve("pool-track", siteId, { routine: 4 });
+  check("incomplete pool plan cannot be approved", badPoolPlan.status === 400);
+  const poolPlan = await approve("pool-track", siteId, { routine: 4, opening: 24, closing: 24, weekly: 168 });
+  const poolCheck = await request("POST", "/pool-track", {
+    checkDate: day, checkTime: new Date().toTimeString().slice(0, 5), checkType: "routine", siteId,
+    performedBy: "Integration tester", phLevel: 7.3, result: "pass",
+  });
+  const poolStatus = await request("GET", `/pool-track/status?siteId=${siteId}`);
+  check("pool due date uses approved four-hour frequency", poolPlan.data?.approved && poolCheck.status === 201 &&
+    item(poolStatus, "routine")?.frequencyHours === 4 && !!item(poolStatus, "routine")?.dueDate);
+  const flag = await request("PUT", `/pool-track/monitoring-plan?siteId=${siteId}`, {
+    action: "flag_change", materialChangeNote: "Pool circulation plant replaced",
+  });
+  const flaggedStatus = await request("GET", `/pool-track/status?siteId=${siteId}`);
+  check("material change suspends pool due states pending review", flag.data?.approved === false &&
+    item(flaggedStatus, "routine")?.status === "plan_required");
+  const flaggedDashboard = await request("GET", `/dashboard/summary?siteId=${siteId}`);
+  check("dashboard flags pool plan for review rather than keeping old due status",
+    flaggedDashboard.data?.tracks?.find(t => t.trackId === "pool")?.badge?.includes("need review"));
+  const reapproved = await approve("pool-track", siteId, { routine: 6, opening: 24, closing: 24, weekly: 168 });
+  const newPoolStatus = await request("GET", `/pool-track/status?siteId=${siteId}`);
+  check("reapproval updates site's pool interval", reapproved.data?.approved &&
+    item(newPoolStatus, "routine")?.frequencyHours === 6);
+  const poolControls = await request("PUT", "/pool-track/config", { pool_ph_min: "7.1" });
+  const poolNeedsReview = await request("GET", `/pool-track/status?siteId=${siteId}`);
+  check("changing pool operating limits suspends approved plan", poolControls.status === 200 &&
+    item(poolNeedsReview, "routine")?.status === "plan_required");
+  const changedTubControl = await request("PUT", `/hot-tub/config?siteId=${siteId}`, {
+    operatingRanges: { ph: { min: 7.2, max: 7.8 }, sanitiser: { min: 4, max: 6 }, temperature: { max: 40 } },
+  });
+  const nowUnapproved = await request("GET", `/hot-tub/status?siteId=${siteId}`);
+  check("editing spa controls invalidates prior approval", changedTubControl.status === 200 &&
+    item(nowUnapproved, "water_chemistry")?.status === "plan_required");
   const reminders = await request("GET", "/check-reminders");
   check("unsafe water result appears in reminders", reminders.status === 200 &&
     JSON.stringify(reminders.data).includes("action_required"), JSON.stringify(reminders.data).slice(0, 700));

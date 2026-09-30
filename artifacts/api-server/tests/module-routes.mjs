@@ -293,7 +293,7 @@ async function testLegionella(req, siteId) {
   const put404 = await req("PUT", "/legionella/999999999", { result: "pass" });
   check("legionella: PUT non-existent → 404", put404.status === 404, `got ${put404.status}`);
 
-  // 6. Status endpoint — all 6 types present with correct shape
+  // 6. Without an approved site scheme there is no defensible due state.
   const statusRes = await req("GET", "/legionella/status");
   expectOk("legionella: GET /status", statusRes.status);
   check("legionella: status returns array", Array.isArray(statusRes.data), `got ${typeof statusRes.data}`);
@@ -303,18 +303,11 @@ async function testLegionella(req, siteId) {
     `missing: ${TYPES.filter((t) => !(statusRes.data ?? []).some((s) => s.checkType === t)).join(", ")}`,
   );
   for (const entry of statusRes.data ?? []) {
-    check(`legionella: status.${entry.checkType} has frequencyDays`, typeof entry.frequencyDays === "number", `got ${entry.frequencyDays}`);
+    check(`legionella: status.${entry.checkType} has no generic frequency`, entry.frequencyDays === null, `got ${entry.frequencyDays}`);
     check(`legionella: status.${entry.checkType} has lastDate`, entry.lastDate !== undefined, "lastDate field missing");
     check(`legionella: status.${entry.checkType} has lastResult`, entry.lastResult !== undefined, "lastResult field missing");
-    check(`legionella: status.${entry.checkType} has valid status`, ["ok", "due_soon", "overdue", "never"].includes(entry.status), `got ${entry.status}`);
+    check(`legionella: status.${entry.checkType} requires a site plan`, entry.status === "plan_required", `got ${entry.status}`);
   }
-
-  const coldTankStatus = (statusRes.data ?? []).find((s) => s.checkType === "cold_tank_temp");
-  check("legionella: latest failed cold-tank result is surfaced", coldTankStatus?.lastResult === "fail", `lastResult=${coldTankStatus?.lastResult}`);
-
-  // calorifier_clean is annual (365 days) — a record from yesterday must be "ok"
-  const annualStatus = (statusRes.data ?? []).find((s) => s.checkType === "calorifier_clean");
-  check("legionella: annual calorifier_clean not overdue after recent check", annualStatus?.status === "ok", `status=${annualStatus?.status}`);
 
   // 7. Site-specific written scheme profile and risk-assessed cadence
   const profilePut = await req("PUT", `/legionella/config?siteId=${siteId}`, {
@@ -333,7 +326,16 @@ async function testLegionella(req, siteId) {
   check("legionella: site frequency overrides default", profileGet.data?.controlProfile?.frequencyDays?.hot_sentinel_temp === 45);
   const siteStatus = await req("GET", `/legionella/status?siteId=${siteId}`);
   const siteSentinel = (siteStatus.data ?? []).find((s) => s.checkType === "hot_sentinel_temp");
-  check("legionella: status uses site frequency", siteSentinel?.frequencyDays === 45);
+  check("legionella: unapproved legacy controls never drive due state", siteSentinel?.status === "plan_required");
+  const frequencies = Object.fromEntries(statusRes.data.map(s => [s.checkType, s.checkType === "hot_sentinel_temp" ? 45 : 30]));
+  const plan = await req("PUT", `/legionella/monitoring-plan?siteId=${siteId}`, {
+    action: "approve", riskAssessmentReference: "RA-01", writtenSchemeReference: "WCS-TEST-01",
+    competentPerson: "Water Hygiene Lead", frequencies,
+  });
+  check("legionella: manager approves complete site monitoring plan", plan.status === 200 && plan.data?.approved);
+  const approvedStatus = await req("GET", `/legionella/status?siteId=${siteId}`);
+  check("legionella: status uses approved site frequency",
+    approvedStatus.data?.find(s => s.checkType === "hot_sentinel_temp")?.frequencyDays === 45);
 
   // 8. DELETE
   const protectedId = createdIds["shower_clean"];
