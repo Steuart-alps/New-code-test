@@ -23,6 +23,7 @@ import { SignaturePad } from "@/components/signature-pad";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 
 const INDUCTION_SECTIONS = [
   { key: "accident_hazard", label: "Accident & Hazard Reporting" },
@@ -703,40 +704,21 @@ export default function SafeTrackPage() {
     }));
 
   const now = new Date();
-  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  function daysUntil(date?: string | null) {
-    if (!date) return null;
-    const [year, month, day] = date.split("-").map(Number);
-    return Math.floor((Date.UTC(year, month - 1, day) - todayUtc) / 86_400_000);
-  }
-  function expiryRank(record: TrainingRecord) {
-    const days = daysUntil(record.expiryDate);
-    if (days === null) return 3;
-    if (days < 0) return 0;
-    if (days <= 30) return 1;
-    return 2;
-  }
 
   const expiringTrainingCount = training.filter(record => {
-    const days = daysUntil(record.expiryDate);
-    return days !== null && days >= 0 && days <= 30;
+    return getTrainingExpiry(record.expiryDate, now).state === "expiring_soon";
   }).length;
   const overdueTrainingCount = training.filter(record => {
-    const days = daysUntil(record.expiryDate);
-    return days !== null && days < 0;
+    return getTrainingExpiry(record.expiryDate, now).state === "overdue";
   }).length;
 
   const trainingRows = training
     .filter(record => !q || [record.staffName, record.trainingType, record.notes].some(value => value?.toLowerCase().includes(q)))
-    .sort((a, b) =>
-      expiryRank(a) - expiryRank(b) ||
-      (a.expiryDate ?? "9999-12-31").localeCompare(b.expiryDate ?? "9999-12-31") ||
-      a.staffName.localeCompare(b.staffName)
-    )
+    .sort((a, b) => compareTrainingExpiry(a, b, now))
     .map(record => {
-      const days = daysUntil(record.expiryDate);
-      const overdue = days !== null && days < 0;
-      const expiringSoon = days !== null && days >= 0 && days <= 30;
+      const { days, state } = getTrainingExpiry(record.expiryDate, now);
+      const overdue = state === "overdue";
+      const expiringSoon = state === "expiring_soon";
       return {
         id: record.id,
         className: overdue ? "bg-rose-50/70" : expiringSoon ? "bg-amber-50/70" : undefined,
