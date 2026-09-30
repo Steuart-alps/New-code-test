@@ -11,6 +11,7 @@ import {
   findLiveSubscription,
   collectAddonFirstMonthInvoice,
 } from "../lib/billing";
+import { activatePaidAddonService } from "../lib/addonActivation";
 import { invalidateTrialLock, isClientBillingLocked } from "../lib/trialLock";
 import {
   SERVICES,
@@ -474,67 +475,59 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
       return res.status(400).json({ error: "This account has the Complete bundle — all services are already included" });
     }
 
-    const price = await getServicePrice(service);
-    if (!price) return res.status(400).json({ error: "Service price not configured" });
     const existingItem = sub.items.data.find((i) => i.price?.metadata?.service_key === service);
-    const quantity = quantityForSiteCount(await countClientSites(clientId));
 
     if (action === "add") {
-      if (existingItem) return res.status(409).json({ error: "Service already active" });
-
-      // Add the line for renewals (no proration), then charge the current
-      // month in full immediately — same no-proration policy as added sites.
-      // Idempotency keys are scoped to subscription + service + billing period
-      // so a double-click can't double-charge, while re-adding the service in
-      // a later period bills again as expected.
-      const periodStart = sub.items.data[0]?.current_period_start ?? sub.created;
-      await stripe.subscriptions.update(
-        sub.id,
-        {
-          items: [{ price: price.priceId, quantity }],
-          proration_behavior: "none",
+      const activation = await activatePaidAddonService({
+        allowedServiceKeys: ADDON_KEYS,
+        service,
+        serviceLabel: SERVICES[service as ServiceKey].label,
+        clientId,
+        customerId: client.stripeCustomerId,
+        subscription: sub,
+        stripe,
+        getServicePrice,
+        countClientSites,
+        findLiveSubscription,
+        collectFirstMonthInvoice: collectAddonFirstMonthInvoice,
+        invalidateEntitlements,
+        getEntitledServices,
+        onRollbackFailure: (rollbackError) => {
+          req.log?.error?.(
+            { rollbackError, clientId, service },
+            "Add-on rollback failed — manual attention needed",
+          );
         },
-        { idempotencyKey: `svc-add-${sub.id}-${service}-${periodStart}` },
-      );
-
-      const amount = price.unitAmount * quantity;
-      const label = SERVICES[service as ServiceKey].label;
-      const description = `${label} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
-      try {
-        const payment = await collectAddonFirstMonthInvoice(stripe, {
-          customerId: client.stripeCustomerId,
-          amount,
-          currency: price.currency,
-          description,
-          metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
-          idempotencyPrefix: `svc-add-${sub.id}-${service}-${periodStart}`,
-        });
-        if (payment === "not_collected") {
-          throw new Error("Add-on invoice was not collected");
-        }
-        if (payment === "unknown") {
-          // Do not compensate by removing the item: Stripe may have accepted
-          // payment and only its response/retrieval may have failed.
-          invalidateEntitlements(clientId);
-          return res.status(502).json({
-            error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
-          });
-        }
-      } catch (err: any) {
-        // Roll back the item add: enabling a service without collecting its
-        // first month would violate the pay-up-front policy.
-        try {
-          const fresh = await findLiveSubscription(client.stripeCustomerId);
-          const added = fresh?.items.data.find((i) => i.price?.metadata?.service_key === service);
-          if (added) await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
-        } catch (rollbackErr) {
-          req.log?.error?.({ rollbackErr, clientId, service }, "Add-on rollback failed — manual attention needed");
-        }
-        invalidateEntitlements(clientId);
-        req.log?.error?.({ err, clientId, service }, "Add-on immediate charge failed; item rolled back");
-        return res.status(502).json({ error: "We couldn't complete the charge, so the service wasn't enabled. Please try again." });
+        onChargeFailure: (err) => {
+          req.log?.error?.(
+            { err, clientId, service },
+            "Add-on immediate charge failed; item rolled back",
+          );
+        },
+      });
+      if (activation.status === "unknown_service") {
+        return res.status(400).json({ error: "Unknown service" });
       }
+      if (activation.status === "price_missing") {
+        return res.status(400).json({ error: "Service price not configured" });
+      }
+      if (activation.status === "already_active") {
+        return res.status(409).json({ error: "Service already active" });
+      }
+      if (activation.status === "payment_unknown") {
+        return res.status(502).json({
+          error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
+        });
+      }
+      if (activation.status === "charge_failed") {
+        return res.status(502).json({
+          error: "We couldn't complete the charge, so the service wasn't enabled. Please try again.",
+        });
+      }
+      return res.json({ ok: true, entitled: activation.entitled });
     } else {
+      const price = await getServicePrice(service);
+      if (!price) return res.status(400).json({ error: "Service price not configured" });
       if (!existingItem) return res.status(409).json({ error: "Service not active" });
       await stripe.subscriptionItems.del(existingItem.id, { proration_behavior: "none" });
     }
