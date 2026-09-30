@@ -61,7 +61,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
-import { buildTrainingMatrix, certificateStatus } from "@/lib/training-matrix";
+import { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv } from "@/lib/training-matrix";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -582,18 +582,7 @@ ${rows.map(r => `<tr>
       return;
     }
 
-    const cell = (staff: string, type: string): string => {
-      const value = matrix.cells.get(`${staff}\u0000${type}`);
-      if (!value) return "Missing";
-      return value.expiryDate ? `${value.status} (${formatDate(value.expiryDate)})` : value.status;
-    };
-
-    const csvValue = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
-    const rows = [
-      ["Staff member", ...matrix.types],
-      ...matrix.staffNames.map(staff => [staff, ...matrix.types.map(type => cell(staff, type))]),
-    ];
-    const csv = rows.map(row => row.map(csvValue).join(",")).join("\r\n");
+    const csv = trainingMatrixToCsv(matrix, formatDate);
     const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

@@ -74,3 +74,25 @@ export function buildTrainingMatrix(
 
   return { staffNames, types, cells };
 }
+
+/** Serialize the same matrix shown by the download action, quoting every CSV field. */
+export function trainingMatrixToCsv(
+  matrix: TrainingMatrix,
+  formatExpiryDate: (date: string) => string,
+): string {
+  const rows = [
+    ["Staff member", ...matrix.types],
+    ...matrix.staffNames.map(staff => [
+      staff,
+      ...matrix.types.map(type => {
+        const value = matrix.cells.get(`${staff}\u0000${type}`);
+        if (!value) return "Missing";
+        return value.expiryDate
+          ? `${value.status} (${formatExpiryDate(value.expiryDate)})`
+          : value.status;
+      }),
+    ]),
+  ];
+  return rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(","))
+    .join("\r\n");
+}
