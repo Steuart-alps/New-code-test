@@ -3,7 +3,7 @@ type AnalyticsData = Record<string, string | number | boolean>;
 declare global {
   interface Window {
     umami?: {
-      track(name: string, data?: AnalyticsData): void;
+      track(name: string, data?: AnalyticsData): void | Promise<unknown>;
     };
   }
 }
@@ -44,10 +44,19 @@ function remove(key: string): void {
 export function trackEvent(name: string, data?: AnalyticsData): void {
   if (typeof window === "undefined") return;
   try {
-    window.umami?.track(name, data);
+    void Promise.resolve(window.umami?.track(name, data)).catch(() => {
+      // A rejected tracker request must also remain harmless.
+    });
   } catch {
     // Analytics must never break the app.
   }
+}
+
+/** Only coarse export scope is sent; never send site ids or record content. */
+export function trackTrainingMatrixDownload(siteFilter: string): void {
+  trackEvent("training_matrix_download_started", {
+    site_scope: siteFilter === "all" ? "all_sites" : "selected_site",
+  });
 }
 
 /** Records one successful paid activation per client/module activation cycle. */

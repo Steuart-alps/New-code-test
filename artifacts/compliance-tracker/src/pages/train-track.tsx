@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
 import { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv } from "@/lib/training-matrix";
+import { trackTrainingMatrixDownload } from "@/lib/analytics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -592,6 +593,7 @@ ${rows.map(r => `<tr>
     link.download = `training-matrix-${safeSite}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
+    trackTrainingMatrixDownload(siteFilter);
     link.remove();
     URL.revokeObjectURL(url);
     toast({ title: "Training matrix downloaded" });
