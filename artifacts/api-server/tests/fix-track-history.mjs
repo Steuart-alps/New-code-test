@@ -102,6 +102,14 @@ async function main() {
     })).status === 403);
   check("viewer cannot change issue status",
     (await viewer("PUT", `/fix-track/issues/${id}`, { status: "in_progress" })).status === 403);
+  check("viewer cannot request an issue media upload",
+    (await viewer("POST", `/fix-track/issues/${id}/request-upload`, {
+      name: "photo.jpg", contentType: "image/jpeg",
+    })).status === 403);
+  check("viewer cannot attach issue media",
+    (await viewer("POST", `/fix-track/issues/${id}/media`, {
+      objectPath: `/objects/uploads/tenant-${ownerClientId}/viewer-photo.jpg`,
+    })).status === 403);
   check("viewer cannot append issue notes",
     (await viewer("POST", `/fix-track/issues/${id}/notes`, { note: "Viewer must not add this" })).status === 403);
   check("viewer cannot delete an issue",

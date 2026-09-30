@@ -7,7 +7,14 @@ import { eq, and, or, isNull, inArray, desc, ne, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import {
+  ObjectStorageService,
+  ObjectContentError,
+  ObjectGenerationError,
+  ObjectNotFoundError,
+  ObjectOwnershipError,
+  isTenantReservedObjectPath,
+} from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
@@ -31,6 +38,27 @@ function hydrateQueuedContent(q: any) {
 const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
 const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
 const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
+const FIXTRACK_UPLOAD_EXTENSIONS: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "image/heic": ".heic",
+  "image/heif": ".heif",
+  "image/avif": ".avif",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
+  "video/x-m4v": ".m4v",
+  "video/3gpp": ".3gp",
+  "video/x-msvideo": ".avi",
+  "video/avi": ".avi",
+  "video/mpeg": ".mpeg",
+  "video/ogg": ".ogv",
+  "video/x-matroska": ".mkv",
+  "video/mp2t": ".ts",
+};
 
 function preserveCancellationDraft(
   emailType: unknown,
@@ -87,7 +115,15 @@ const alertSettingsSchema = z.object({ staleDays: z.number().int().min(1).max(36
 
 async function finalizeIssueMedia(paths: string[] | undefined, clientId: number): Promise<string | null> {
   try {
-    for (const objectPath of paths ?? []) await storage.finalizeTenantUpload(objectPath, clientId);
+    for (const objectPath of paths ?? []) {
+      const normalizedPath = storage.normalizeObjectEntityPath(objectPath);
+      if (isTenantReservedObjectPath(normalizedPath, clientId)) {
+        await storage.finalizeTenantUpload(normalizedPath, clientId);
+      } else {
+        const file = await storage.getObjectEntityFile(normalizedPath);
+        await storage.assertTenantObjectOwnership(file, clientId);
+      }
+    }
     return null;
   } catch (err) {
     if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
@@ -872,32 +908,148 @@ router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
 
 // ── Request media upload URL ──────────────────────────────────────────────────
 
-router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, res) => {
+router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, res): Promise<void> => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
 
-  const id = parseInt(req.params.id as string);
-  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   const uploadConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const uploadDeptId = getActiveDepartmentId(req);
   if (uploadDeptId !== null) uploadConditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, uploadDeptId))) as any);
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
     .where(and(...uploadConditions)).limit(1);
-  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
 
-  z.object({
-    name:        z.string().min(1).max(200),
-    contentType: z.string().min(1).max(100),
-  }).parse(req.body);
+  const parsed = z.object({
+    name:        z.string().trim().min(1).max(200),
+    contentType: z.string().trim().min(1).max(100),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid upload details" });
+    return;
+  }
 
   try {
-    const uploadUrl  = await storage.getObjectEntityUploadURL(clientId);
+    const contentType = parsed.data.contentType.trim().toLowerCase();
+    const extension = FIXTRACK_UPLOAD_EXTENSIONS[contentType] ?? "";
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType, extension);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
   } catch (err) {
-    return respondObjectStorageUnavailable(req, res, err, "FixTrack issue upload");
+    respondObjectStorageUnavailable(req, res, err, "FixTrack issue upload");
   }
+});
+
+// ── Append uploaded media to an issue ─────────────────────────────────────────
+
+router.post("/issues/:id/media", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const parsed = z.object({ objectPath: z.string().min(1).max(1000) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid media object" });
+    return;
+  }
+
+  const deptId = getActiveDepartmentId(req);
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+
+  const [existing] = await db.select({ id: fixTrackIssuesTable.id })
+    .from(fixTrackIssuesTable)
+    .where(and(...conditions))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  let finalizedPath: string;
+  try {
+    const finalized = await storage.finalizeVerifiedIssueMediaUpload(parsed.data.objectPath, clientId);
+    finalizedPath = finalized.objectPath;
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded media object not found" });
+      return;
+    }
+    if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (err instanceof ObjectGenerationError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    respondObjectStorageUnavailable(req, res, err, "FixTrack issue media finalization");
+    return;
+  }
+
+  // Lock the issue row and append against the latest array so simultaneous
+  // uploads cannot replace each other's media.
+  let result: string[] | null;
+  try {
+    result = await db.transaction(async (tx) => {
+      const [current] = await tx.select({ mediaUrls: fixTrackIssuesTable.mediaUrls })
+        .from(fixTrackIssuesTable)
+        .where(and(...conditions))
+        .for("update")
+        .limit(1);
+      if (!current) return null;
+
+      const currentPaths = current.mediaUrls ?? [];
+      const mediaUrls = currentPaths.includes(finalizedPath)
+        ? currentPaths
+        : [...currentPaths, finalizedPath];
+      const [updated] = await tx.update(fixTrackIssuesTable)
+        .set({ mediaUrls, updatedAt: new Date() })
+        .where(and(...conditions))
+        .returning({ mediaUrls: fixTrackIssuesTable.mediaUrls });
+      return updated?.mediaUrls ?? null;
+    });
+  } catch (error) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    throw error;
+  }
+
+  if (!result) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ mediaUrls: result });
 });
 
 // ── Contractor suggestions ────────────────────────────────────────────────────

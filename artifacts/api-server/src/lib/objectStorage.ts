@@ -1,8 +1,6 @@
 import { Storage, File } from "@google-cloud/storage";
 import { Readable } from "stream";
 import { randomUUID } from "crypto";
-import sharp from "sharp";
-import { Worker } from "node:worker_threads";
 import {
   ObjectAclPolicy,
   ObjectPermission,
@@ -11,6 +9,31 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 import { createDownloadToken } from "./downloadUsage";
+import {
+  MAX_RESTRICTED_UPLOAD_BYTES,
+  ObjectContentError,
+  detectIssueVideoType,
+  detectUploadType,
+  validateUploadContent,
+} from "./uploadValidation";
+import type {
+  AllowedIssueMediaType,
+  AllowedIssueVideoType,
+  AllowedUploadType,
+} from "./uploadValidation";
+
+export {
+  ObjectContentError,
+  detectIssueVideoType,
+  detectUploadType,
+  validatePdfInWorker,
+  validateUploadContent,
+} from "./uploadValidation";
+export type {
+  AllowedIssueMediaType,
+  AllowedIssueVideoType,
+  AllowedUploadType,
+} from "./uploadValidation";
 
 function createObjectStorageClient(): Storage {
   const options: ConstructorParameters<typeof Storage>[0] = {};
@@ -45,15 +68,6 @@ export class ObjectOwnershipError extends Error {
   }
 }
 
-/** The object is present but is not a safe member of a restricted upload set. */
-export class ObjectContentError extends Error {
-  constructor(message = "Uploaded file contents are not an allowed document type") {
-    super(message);
-    this.name = "ObjectContentError";
-    Object.setPrototypeOf(this, ObjectContentError.prototype);
-  }
-}
-
 export class ObjectGenerationError extends Error {
   constructor(message = "Uploaded object changed during validation") {
     super(message);
@@ -62,8 +76,7 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_RESTRICTED_UPLOAD_BYTES = 10 * 1024 * 1024;
-const MAX_IMAGE_DIMENSION = 12_000;
+const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
@@ -219,15 +232,22 @@ export class ObjectStorageService {
     );
   }
 
-  async getObjectEntityUploadURL(tenantId?: number | string, contentType?: string): Promise<string> {
+  async getObjectEntityUploadURL(
+    tenantId?: number | string,
+    contentType?: string,
+    fileExtension = "",
+  ): Promise<string> {
     if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_SIGNING_FAILURE === "1") {
       throw new Error("TEST_ONLY_PROVIDER_CREDENTIAL_SECRET bucket-internal-name");
+    }
+    if (fileExtension && !/^\.[a-z0-9]{1,10}$/i.test(fileExtension)) {
+      throw new Error("Invalid upload file extension");
     }
     const privateObjectDir = this.getPrivateObjectDir();
 
     const objectId = randomUUID();
     const tenantSegment = tenantId === undefined ? "" : `/tenant-${tenantId}`;
-    const fullPath = `${privateObjectDir}/uploads${tenantSegment}/${objectId}`;
+    const fullPath = `${privateObjectDir}/uploads${tenantSegment}/${objectId}${fileExtension.toLowerCase()}`;
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
 
@@ -390,13 +410,17 @@ export class ObjectStorageService {
     if (bytes.length !== size) throw new ObjectGenerationError("Uploaded object size changed during validation");
     const validated = await validateUploadContent(bytes, allowed);
     const contentType = validated.contentType;
-    if (pinnedMetadata.contentType && pinnedMetadata.contentType !== contentType) {
+    const declaredType = String(pinnedMetadata.contentType ?? "").toLowerCase();
+    const heifInputTypes = new Set(["image/heic", "image/heif"]);
+    const matchingDeclaredType = declaredType === validated.sourceContentType
+      || (heifInputTypes.has(declaredType) && heifInputTypes.has(validated.sourceContentType));
+    if (declaredType && !matchingDeclaredType) {
       throw new ObjectContentError("Uploaded object does not match its content type");
     }
 
     const privateDir = this.getPrivateObjectDir().replace(/\/$/, "");
     const { bucketName, objectName } = parseObjectPath(
-      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}`,
+      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}${uploadTypeExtension(contentType)}`,
     );
     const destination = objectStorageClient.bucket(bucketName).file(objectName);
     try {
@@ -435,6 +459,88 @@ export class ObjectStorageService {
     await this.setTenantObjectAcl(finalPath, tenantId);
     // Delete only the generation we inspected. A concurrently replaced staging
     // object remains private and expires through normal staging cleanup.
+    await pinned.delete({ ignoreNotFound: true }).catch(() => {});
+    return { objectPath: finalPath, contentType };
+  }
+
+  /**
+   * Secure FixTrack media uploads. Images use the existing bounded decoder and
+   * normalization path; videos are signature-checked and copied from one pinned
+   * generation to a fresh immutable tenant key.
+   */
+  async finalizeVerifiedIssueMediaUpload(
+    objectPath: string,
+    tenantId: number | string,
+  ): Promise<{ objectPath: string; contentType: AllowedIssueMediaType }> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
+      throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+    }
+
+    const staging = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await staging.getMetadata();
+    const contentType = String(metadata.contentType ?? "").toLowerCase() as AllowedIssueMediaType;
+    const imageTypes = new Set<AllowedUploadType>([
+      "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif",
+    ]);
+    if (contentType.startsWith("image/") && imageTypes.has(contentType as AllowedUploadType)) {
+      return this.finalizeVerifiedTenantUpload(normalizedPath, tenantId, imageTypes);
+    }
+
+    const videoTypes = new Set<AllowedIssueVideoType>(["video/mp4", "video/quicktime", "video/webm"]);
+    if (!videoTypes.has(contentType as AllowedIssueVideoType)) {
+      throw new ObjectContentError("Choose a JPEG, PNG, WebP, MP4, MOV, or WebM file");
+    }
+
+    const generation = String(metadata.generation ?? "");
+    const metageneration = String(metadata.metageneration ?? "");
+    const size = Number(metadata.size);
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
+      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    }
+
+    const pinned = staging.bucket.file(staging.name, {
+      generation,
+      preconditionOpts: {
+        ifGenerationMatch: generation,
+        ifMetagenerationMatch: metageneration,
+      },
+    });
+    const [pinnedMetadata] = await pinned.getMetadata();
+    if (String(pinnedMetadata.generation) !== generation || String(pinnedMetadata.metageneration) !== metageneration) {
+      throw new ObjectGenerationError();
+    }
+    const [prefix] = await pinned.download({ start: 0, end: 8191 });
+    if (detectIssueVideoType(prefix) !== contentType) {
+      throw new ObjectContentError("Video contents do not match their declared format");
+    }
+
+    const privateDir = this.getPrivateObjectDir().replace(/\/$/, "");
+    const { bucketName, objectName } = parseObjectPath(
+      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}${uploadTypeExtension(contentType)}`,
+    );
+    const destination = objectStorageClient.bucket(bucketName).file(objectName);
+    try {
+      await pinned.copy(destination, { preconditionOpts: { ifGenerationMatch: 0 } });
+    } catch (error: any) {
+      if (error?.code === 409 || error?.code === 412) throw new ObjectGenerationError();
+      throw error;
+    }
+
+    const finalPath = this.normalizeObjectEntityPath(
+      `https://storage.googleapis.com/${bucketName}/${objectName}`,
+    );
+    const [destinationMetadata] = await destination.getMetadata();
+    await destination.setMetadata(
+      { contentType },
+      {
+        preconditionOpts: {
+          ifGenerationMatch: destinationMetadata.generation,
+          ifMetagenerationMatch: destinationMetadata.metageneration,
+        },
+      },
+    );
+    await this.setTenantObjectAcl(finalPath, tenantId);
     await pinned.delete({ ignoreNotFound: true }).catch(() => {});
     return { objectPath: finalPath, contentType };
   }
@@ -596,143 +702,18 @@ function normalizePrefix(prefix: string): string {
   return prefix.trim().replace(/^\/+|\/+$/g, "");
 }
 
-export type AllowedUploadType = "application/pdf" | "image/jpeg" | "image/png";
-
-
-/** Magic-byte/format checks intentionally do not trust filename or MIME. */
-export function detectUploadType(bytes: Buffer): AllowedUploadType | null {
-  // PDF requires a conforming header. %%EOF cannot reliably be in a bounded
-  // prefix, but this rejects arbitrary bytes merely prefixed with "%PDF-".
-  if (bytes.length >= 9 && /^%PDF-[12]\.\d(?:\r?\n|[\x20\t])/.test(bytes.subarray(0, 10).toString("ascii"))) return "application/pdf";
-  // JPEG: SOI, a legal non-standalone marker, and a complete first marker
-  // segment contained in our bounded read. This is enough structural evidence
-  // to reject MIME-spoofed arbitrary byte streams without loading the file.
-  if (bytes.length >= 8 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    const marker = bytes[3];
-    const segmentLength = bytes.readUInt16BE(4);
-    if (marker >= 0xc0 && marker <= 0xfe && marker !== 0xd8 && marker !== 0xd9 && marker !== 0xff
-      && segmentLength >= 2 && segmentLength + 4 <= bytes.length) return "image/jpeg";
-  }
-  // PNG signature plus mandatory first IHDR chunk (length=13, type=IHDR).
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (bytes.length >= 24 && png.every((byte, index) => bytes[index] === byte)
-    && bytes.readUInt32BE(8) === 13 && bytes.subarray(12, 16).toString("ascii") === "IHDR"
-    && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0) return "image/png";
-  return null;
-}
-
-export async function validateUploadContent(
-  bytes: Buffer,
-  allowed: ReadonlySet<AllowedUploadType>,
-): Promise<{ contentType: AllowedUploadType; normalizedBytes?: Buffer }> {
-  if (bytes.length <= 0 || bytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("File size is not allowed");
-  const type = detectUploadType(bytes);
-  if (!type || !allowed.has(type)) throw new ObjectContentError();
-  try {
-    if (type === "application/pdf") {
-      await validatePdf(bytes);
-      return { contentType: type };
-    }
-    if (type === "image/png") validatePngChunkChecksums(bytes);
-    const image = sharp(bytes, {
-      // libvips reports checksum/decompression damage as warnings for some PNG
-      // chunks. Treat warnings as fatal so a successful re-encode cannot mask
-      // corruption in attacker-supplied input.
-      failOn: "warning",
-      limitInputPixels: MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION,
-      pages: 1,
-      sequentialRead: true,
-    });
-    const metadata = await image.metadata();
-    if (metadata.format !== (type === "image/jpeg" ? "jpeg" : "png")
-      || metadata.pages && metadata.pages !== 1
-      || !metadata.width || !metadata.height
-      || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION) {
-      throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
-    }
-    // Full decode is forced by re-encoding, unlike metadata-only inspection.
-    const normalizedBytes = type === "image/jpeg"
-      ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
-      : await image.rotate().png({ compressionLevel: 9 }).toBuffer();
-    if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
-    return { contentType: type, normalizedBytes };
-  } catch (error) {
-    if (error instanceof ObjectContentError) throw error;
-    throw new ObjectContentError(type === "application/pdf" ? "PDF structure is invalid" : "Image data is invalid");
-  }
-}
-
-function validatePngChunkChecksums(bytes: Buffer): void {
-  let offset = 8;
-  let chunkIndex = 0;
-  while (offset + 12 <= bytes.length) {
-    const length = bytes.readUInt32BE(offset);
-    const chunkEnd = offset + 12 + length;
-    if (chunkEnd > bytes.length) throw new ObjectContentError("PNG chunk is truncated");
-    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
-    if (chunkIndex === 0 && (type !== "IHDR" || length !== 13)) {
-      throw new ObjectContentError("PNG header is invalid");
-    }
-    const expected = bytes.readUInt32BE(offset + 8 + length);
-    const actual = crc32(bytes.subarray(offset + 4, offset + 8 + length));
-    if (actual !== expected) throw new ObjectContentError("PNG checksum is invalid");
-    offset = chunkEnd;
-    chunkIndex++;
-    if (type === "IEND") {
-      if (length !== 0) throw new ObjectContentError("PNG end chunk is invalid");
-      return; // Deliberately allow trailing data; normalized output strips it.
-    }
-  }
-  throw new ObjectContentError("PNG end chunk is missing");
-}
-
-function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-async function validatePdf(bytes: Buffer) {
-  await validatePdfInWorker(bytes);
-}
-
-export async function validatePdfInWorker(
-  bytes: Buffer,
-  options: { timeoutMs?: number; testMode?: "timeout" | "oom" } = {},
-): Promise<void> {
-  const timeoutMs = Math.max(50, Math.min(options.timeoutMs ?? 4_000, 10_000));
-  const workerUrl = new URL("./pdf-validation-worker.mjs", import.meta.url);
-  await new Promise<void>((resolve, reject) => {
-    const worker = new Worker(workerUrl, {
-      workerData: { bytes: new Uint8Array(bytes), testMode: options.testMode },
-      resourceLimits: {
-        maxOldGenerationSizeMb: 64,
-        maxYoungGenerationSizeMb: 16,
-        stackSizeMb: 2,
-      },
-    });
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void worker.terminate();
-      error ? reject(new ObjectContentError(error.message)) : resolve();
-    };
-    const timer = setTimeout(() => finish(new Error("PDF validation timed out")), timeoutMs);
-    worker.once("message", (message: { ok?: boolean; error?: string }) =>
-      message.ok ? finish() : finish(new Error(message.error || "PDF validation failed")));
-    worker.once("error", (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      finish(new Error(`PDF validation worker failed: ${message}`));
-    });
-    worker.once("exit", (code) => {
-      if (!settled) finish(new Error(`PDF validation worker exited unexpectedly (${code})`));
-    });
-  });
+function uploadTypeExtension(contentType: AllowedIssueMediaType): string {
+  const extensions: Record<AllowedIssueMediaType, string> = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "image/avif": ".avif",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+  };
+  return extensions[contentType];
 }
