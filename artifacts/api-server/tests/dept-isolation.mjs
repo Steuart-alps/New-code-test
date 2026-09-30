@@ -207,6 +207,15 @@ async function main() {
   const staffUserId = createStaffRes.data?.id;
   check("admin: staff user has clientId", createStaffRes.data?.clientId === clientId, `staff clientId=${createStaffRes.data?.clientId}, expected ${clientId}`);
   check("admin: staff user id", Number.isInteger(staffUserId), `id=${staffUserId}`);
+  expectOk("admin: designate department manager", (await admin("PUT", `/users/${staffUserId}`, {
+    isDepartmentManager: true,
+  })).status);
+  expectOk("admin: route TubTrack to Alpha department", (await admin("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [staffUserId], departmentIds: [deptAlphaId] } }),
+  })).status);
+  check("admin: rejects unknown department recipient", (await admin("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [], departmentIds: [999999999] } }),
+  })).status === 400, "foreign/unknown department accepted");
 
   // ── 5. Staff logs in ─────────────────────────────────────────────────────────
   const staff = makeSession();
@@ -215,6 +224,9 @@ async function main() {
     password: staffPassword,
   });
   expectOk("staff: login", staffLogin.status, [200, 201]);
+  expectForbidden("staff cannot change track recipients", (await staff("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [staffUserId], departmentIds: [] } }),
+  })).status);
 
   // The checklist strip and AM/PM cards must report the same completion state
   // for the same sites, including when department access narrows the site set.

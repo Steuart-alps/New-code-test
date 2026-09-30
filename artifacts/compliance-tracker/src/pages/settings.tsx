@@ -728,46 +728,44 @@ const TRACK_SUMMARY_MODULES = [
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
-function TrackSummaryRoutingCard({
-  value,
-  seniorEmail,
-  onSaved,
-}: {
-  value: string | null | undefined;
-  seniorEmail: string;
-  onSaved: (value: string) => void;
-}) {
+function TrackSummaryRoutingCard() {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const [users, setUsers] = useState<DeptUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [routing, setRouting] = useState<Record<string, number[]>>({});
+  const [routing, setRouting] = useState<Record<string, { managerIds: number[]; departmentIds: number[] }>>({});
+  const [seniorEmail, setSeniorEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    try {
-      const parsed = value ? JSON.parse(value) : {};
-      setRouting(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {});
-    } catch {
-      setRouting({});
-    }
-  }, [value]);
-
-  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const scope = activeClientId != null ? `?clientId=${activeClientId}` : "";
     Promise.all([
-      apiFetch<DeptUser[]>("/users"),
-      apiFetch<Department[]>("/departments"),
+      apiFetch<DeptUser[]>(`/users${scope}`),
+      apiFetch<Department[]>(`/departments${scope}`),
+      apiFetch<{ notificationEmail?: string; trackSummaryRouting?: string }>(`/settings${scope}`),
     ])
-      .then(([userList, departmentList]) => {
+      .then(([userList, departmentList, settings]) => {
+        if (cancelled) return;
         setUsers(userList);
         setDepartments(departmentList);
+        setSeniorEmail(settings.notificationEmail ?? "");
+        const parsed = settings.trackSummaryRouting ? JSON.parse(settings.trackSummaryRouting) : {};
+        const normalized = Object.fromEntries(Object.entries(parsed).map(([key, entry]) =>
+          [key, Array.isArray(entry) ? { managerIds: entry, departmentIds: [] } : entry]
+        )) as Record<string, { managerIds: number[]; departmentIds: number[] }>;
+        setRouting(normalized);
       })
       .catch((err: Error) => {
+        if (cancelled) return;
         toast({ title: "Couldn't load track recipients", description: err.message, variant: "destructive" });
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
 
   const managers = users.filter(
     (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_staff"),
@@ -776,9 +774,16 @@ function TrackSummaryRoutingCard({
 
   const toggleManager = (module: string, userId: number) => {
     setRouting((current) => {
-      const selected = new Set(current[module] ?? []);
+      const selected = new Set(current[module]?.managerIds ?? []);
       selected.has(userId) ? selected.delete(userId) : selected.add(userId);
-      return { ...current, [module]: [...selected] };
+      return { ...current, [module]: { managerIds: [...selected], departmentIds: current[module]?.departmentIds ?? [] } };
+    });
+  };
+  const toggleDepartment = (module: string, departmentId: number) => {
+    setRouting((current) => {
+      const selected = new Set(current[module]?.departmentIds ?? []);
+      selected.has(departmentId) ? selected.delete(departmentId) : selected.add(departmentId);
+      return { ...current, [module]: { managerIds: current[module]?.managerIds ?? [], departmentIds: [...selected] } };
     });
   };
 
@@ -786,11 +791,15 @@ function TrackSummaryRoutingCard({
     setSaving(true);
     try {
       const serialized = JSON.stringify(routing);
-      await apiFetch("/settings", {
+      const scope = activeClientId != null ? `?clientId=${activeClientId}` : "";
+      const response = await authenticatedApiFetch(`/settings${scope}`, {
         method: "PUT",
         body: JSON.stringify({ trackSummaryRouting: serialized }),
       });
-      onSaved(serialized);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? `Request failed (${response.status})`);
+      }
       toast({ title: "Track summary routing saved" });
     } catch (err: any) {
       toast({ title: "Couldn't save routing", description: err.message, variant: "destructive" });
@@ -807,7 +816,9 @@ function TrackSummaryRoutingCard({
           <CardTitle className="font-display">Track Summary Recipients</CardTitle>
         </div>
         <CardDescription>
-          Senior management receives every track. Assign the relevant department managers below so they receive only the tracks they oversee.
+          Senior management receives every enabled track. Choose departments or named staff for additional track-specific digests.
+          By default, tracks are matched to relevant departments by name, but only designated department managers receive them.
+          Designate managers on the Users page. Each recipient gets one combined email; read-only viewers are excluded.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -833,7 +844,8 @@ function TrackSummaryRoutingCard({
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border">
             {TRACK_SUMMARY_MODULES.map((track) => {
-              const selectedIds = routing[track.key] ?? [];
+              const selectedIds = routing[track.key]?.managerIds ?? [];
+              const selectedDepartments = routing[track.key]?.departmentIds ?? [];
               const selectedManagers = managers.filter((manager) => selectedIds.includes(manager.id));
               return (
                 <details key={track.key} className="group">
@@ -841,12 +853,39 @@ function TrackSummaryRoutingCard({
                     <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
                     <span className="flex-1 text-sm font-medium">{track.label}</span>
                     <span className="max-w-[55%] truncate text-xs text-muted-foreground">
-                      {selectedManagers.length > 0
-                        ? selectedManagers.map((manager) => manager.name).join(", ")
-                        : "Senior management only"}
+                      {!Object.hasOwn(routing, track.key)
+                        ? "Automatic department match"
+                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => department.name),
+                            ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
                     </span>
                   </summary>
                   <div className="grid gap-2 border-t border-border/60 bg-muted/10 px-10 py-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold text-muted-foreground">Departments (designated managers only)</span>
+                      {Object.hasOwn(routing, track.key) && <Button size="sm" variant="ghost" disabled={!canAdmin || saving}
+                        onClick={() => setRouting((current) => {
+                          const next = { ...current }; delete next[track.key]; return next;
+                        })}>Restore automatic routing</Button>}
+                    </div>
+                    {!Object.hasOwn(routing, track.key) && (
+                      <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-md border border-border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Automatic matching is on. Customizing replaces the automatic department matches for this track; senior management still receives it.</p>
+                        <Button size="sm" variant="outline" disabled={!canAdmin || saving}
+                          onClick={() => setRouting((current) => ({
+                            ...current, [track.key]: { managerIds: [], departmentIds: [] },
+                          }))}>Customize</Button>
+                      </div>
+                    )}
+                    {departments.map((department) => (
+                      <label key={department.id} className="flex items-center gap-2 rounded-md border border-border bg-background p-2.5 text-sm">
+                        <input type="checkbox" checked={selectedDepartments.includes(department.id)}
+                          onChange={() => toggleDepartment(track.key, department.id)}
+                          disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
+                          className="h-4 w-4 accent-primary" />
+                        {department.name}
+                      </label>
+                    ))}
+                    <span className="sm:col-span-2 text-xs font-semibold text-muted-foreground">Named managers</span>
                     {managers.map((manager) => {
                       const department = departments.find((item) => item.id === manager.departmentId);
                       return (
@@ -856,7 +895,7 @@ function TrackSummaryRoutingCard({
                             className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
                             checked={selectedIds.includes(manager.id)}
                             onChange={() => toggleManager(track.key, manager.id)}
-                            disabled={!canAdmin || saving}
+                            disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
                           />
                           <span>
                             <span className="block font-medium">{manager.name}</span>
@@ -1984,7 +2023,6 @@ export default function SettingsPage() {
   });
 
   const [testEmail, setTestEmail] = useState("");
-  const [trackSummaryRouting, setTrackSummaryRouting] = useState("");
 
   useEffect(() => {
     if (settings) {
@@ -2003,7 +2041,6 @@ export default function SettingsPage() {
         resendApiKey: (settings as any).resendApiKey || "",
         accountTimezone: settings.accountTimezone || "Europe/London",
       });
-      setTrackSummaryRouting((settings as any).trackSummaryRouting || "");
     }
   }, [settings]);
 
@@ -2038,11 +2075,7 @@ export default function SettingsPage() {
         <DataDeletionRequestCard />
         <DepartmentsCard />
         {canAdmin && <RequiredActionTemplatesCard />}
-        <TrackSummaryRoutingCard
-          value={trackSummaryRouting}
-          seniorEmail={formData.notificationEmail}
-          onSaved={setTrackSummaryRouting}
-        />
+        <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { appSettingsTable, usersTable } from "@workspace/db/schema";
+import { appSettingsTable, departmentsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
@@ -71,21 +71,30 @@ async function validateTrackSummaryRouting(
     return { valid: false, error: "Track summary routing must be an object" };
   }
 
-  const normalized: Record<string, number[]> = {};
+  const normalized: Record<string, { managerIds: number[]; departmentIds: number[] }> = {};
   const requestedIds = new Set<number>();
-  for (const [module, rawIds] of Object.entries(parsed as Record<string, unknown>)) {
+  const requestedDepartments = new Set<number>();
+  for (const [module, rawEntry] of Object.entries(parsed as Record<string, unknown>)) {
     if (!TRACK_SUMMARY_MODULES.has(module)) {
       return { valid: false, error: `Unknown track: ${module}` };
     }
-    if (!Array.isArray(rawIds)) {
-      return { valid: false, error: `Recipients for ${module} must be a list` };
+    const entry = Array.isArray(rawEntry) ? { managerIds: rawEntry, departmentIds: [] } : rawEntry;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
+        Object.keys(entry).some((key) => key !== "managerIds" && key !== "departmentIds") ||
+        !Array.isArray((entry as any).managerIds) || !Array.isArray((entry as any).departmentIds)) {
+      return { valid: false, error: `Recipients for ${module} must include managerIds and departmentIds lists` };
     }
-    const ids = [...new Set(rawIds.map(Number))];
-    if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+    const rawManagers = (entry as { managerIds: unknown[] }).managerIds;
+    const rawDepartments = (entry as { departmentIds: unknown[] }).departmentIds;
+    const validId = (id: unknown) => typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+    if (rawManagers.some((id) => !validId(id)) || rawDepartments.some((id) => !validId(id))) {
       return { valid: false, error: `Recipients for ${module} contain an invalid user` };
     }
-    normalized[module] = ids;
-    ids.forEach((id) => requestedIds.add(id));
+    const managerIds = [...new Set(rawManagers as number[])];
+    const departmentIds = [...new Set(rawDepartments as number[])];
+    normalized[module] = { managerIds, departmentIds };
+    managerIds.forEach((id) => requestedIds.add(id));
+    departmentIds.forEach((id) => requestedDepartments.add(id));
   }
 
   if (requestedIds.size > 0) {
@@ -104,6 +113,13 @@ async function validateTrackSummaryRouting(
     );
     if ([...requestedIds].some((id) => !eligibleIds.has(id))) {
       return { valid: false, error: "Every track recipient must be an active manager in this client account" };
+    }
+  }
+  if (requestedDepartments.size > 0) {
+    const departments = await db.select({ id: departmentsTable.id }).from(departmentsTable)
+      .where(and(eq(departmentsTable.clientId, clientId), inArray(departmentsTable.id, [...requestedDepartments])));
+    if (departments.length !== requestedDepartments.size) {
+      return { valid: false, error: "Every track department must belong to this client account" };
     }
   }
 

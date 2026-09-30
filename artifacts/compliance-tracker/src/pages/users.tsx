@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Wrench, ShieldOff, Mail, UsersRound } from "lucide-react";
 
 const NO_DEPT_VALUE = "__none__";
 
@@ -22,6 +22,7 @@ interface User {
   active: boolean;
   totpEnabled?: boolean;
   isMaintenanceManager: boolean;
+  isDepartmentManager: boolean;
 }
 
 interface Department {
@@ -286,6 +287,14 @@ export default function UsersPage() {
     load();
   }
 
+  async function toggleDepartmentManager(user: User) {
+    await apiFetch(`/users/${user.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ isDepartmentManager: !user.isDepartmentManager }),
+    });
+    load();
+  }
+
   async function resendInvite(user: User) {
     if (!confirm(`Send a fresh password setup link to ${user.name} at ${user.email}? Any older unused setup links will stop working.`)) return;
     setResendingInvite(user.id);
@@ -406,6 +415,20 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {canAdmin && u.role === "client_staff" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => toggleDepartmentManager(u)}
+                              disabled={!u.departmentId}
+                              title={!u.departmentId ? "Assign a department before making this user a department manager"
+                                : u.isDepartmentManager ? "Remove department manager digest access" : "Make department manager (receive relevant track summaries)"}
+                              aria-label={u.isDepartmentManager ? `Remove department manager role from ${u.name}` : `Make ${u.name} a department manager`}
+                            >
+                              <UsersRound className={`w-4 h-4 ${u.isDepartmentManager ? "text-primary" : "text-muted-foreground"}`} />
+                            </Button>
+                          )}
                           {canAdmin && u.role === "client_staff" && (
                             <Button
                               variant="ghost"

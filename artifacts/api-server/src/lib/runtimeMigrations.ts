@@ -1409,6 +1409,20 @@ async function migrateTrackActions() {
       UNIQUE ("client_id", "log_date")
     )
   `);
+  // Each recipient has an independent retryable claim. The old client-wide
+  // log remains to avoid re-sending a legacy digest on the upgrade day.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_summary_delivery" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "log_date" date NOT NULL,
+      "email" text NOT NULL,
+      "claim_token" text,
+      "claimed_at" timestamptz NOT NULL DEFAULT now(),
+      "sent_at" timestamptz,
+      UNIQUE ("client_id", "log_date", "email")
+    )
+  `);
 
   // A generic JSONB trigger keeps this independent from source-table schema
   // drift: some operational tables do not have check_type/follow_up_date (or
@@ -3570,6 +3584,10 @@ async function migrateMaintenanceManager() {
   await db.execute(sql`
     ALTER TABLE "users"
       ADD COLUMN IF NOT EXISTS "is_maintenance_manager" boolean NOT NULL DEFAULT false
+  `);
+  await db.execute(sql`
+    ALTER TABLE "users"
+      ADD COLUMN IF NOT EXISTS "is_department_manager" boolean NOT NULL DEFAULT false
   `);
 }
 

@@ -41,6 +41,7 @@
     "test:compliance-hub": "bash tests/run-db-workflow.sh tests/compliance-hub.mjs",
     "test:compliance-hub:ci": "bash tests/run-compliance-hub.sh",
     "test:track-summary-routing": "node tests/track-summary-routing.mjs",
+    "test:track-summary-delivery": "bash tests/run-db-workflow.sh tests/track-summary-delivery.mjs",
     "test:track-actions-trigger": "bash tests/run-track-actions-trigger.sh",
     "test:track-action-templates": "bash tests/run-track-action-templates.sh",
     "test:track-evidence": "bash tests/run-track-evidence.sh",
