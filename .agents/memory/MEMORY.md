@@ -26,6 +26,7 @@
 - [Signup verification tests](signup-verification-tests.md) — self-registration tests must explicitly verify the email token before expecting an authenticated session.
 - [UK compliance controls](uk-compliance-controls.md) — present guidance as support, not certification; verified action closure needs independent, atomic evidence-backed state changes.
 - [Water monitoring due states](water-monitoring-due-states.md) — only current approved site plans can drive water, pool, or spa due dates; missing or changed controls mean review required.
+- [Water outlet read boundaries](water-outlet-read-boundaries.md) — scope both outlet rows and joined readings by site department; legacy cross-site outlet links may exist.
 - [AnyTrack roadmap](anytrack-roadmap.md) — keep user-configurable tracks as a future direction; prioritise completing and improving the main tracks first.
 - [API test readiness](api-test-readiness.md) — integration tests must wait for `/readyz`; `/healthz` becomes available before runtime migrations and Stripe initialization finish.
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.

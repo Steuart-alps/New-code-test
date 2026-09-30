@@ -180,6 +180,40 @@ async function main() {
   const legBetaId = [200, 201].includes(legBeta.status) ? legBeta.data?.id : null;
   check("admin: create beta legionella check", legBetaId != null, `status=${legBeta.status}`);
 
+  // Distinct sentinel outlets and monthly readings make outlet-status leaks visible.
+  const outletAlpha = await admin("POST", "/legionella/outlets", {
+    name: `Alpha sentinel ${ts}`, type: "hot", siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha sentinel outlet", outletAlpha.status, [201]);
+  const outletAlphaId = outletAlpha.data?.id;
+  check("admin: alpha sentinel id", Number.isInteger(outletAlphaId), `id=${outletAlphaId}`);
+  const outletBeta = await admin("POST", "/legionella/outlets", {
+    name: `Beta sentinel ${ts}`, type: "hot", siteId: siteBetaId,
+  });
+  expectOk("admin: create beta sentinel outlet", outletBeta.status, [201]);
+  const outletBetaId = outletBeta.data?.id;
+  check("admin: beta sentinel id", Number.isInteger(outletBetaId), `id=${outletBetaId}`);
+  const alphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 52, performedBy: "Dept Test Admin", siteId: siteAlphaId,
+    outletId: outletAlphaId, notes: `Alpha reading ${ts}`,
+  });
+  expectOk("admin: record alpha sentinel reading", alphaReading.status, [201]);
+  const betaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 53, performedBy: "Dept Test Admin", siteId: siteBetaId,
+    outletId: outletBetaId, notes: `Beta reading ${ts}`,
+  });
+  expectOk("admin: record beta sentinel reading", betaReading.status, [201]);
+  // A historically mismatched outlet reference must not expose a Beta check
+  // through an otherwise accessible Alpha outlet.
+  const crossSiteReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 54, performedBy: "Dept Test Admin", siteId: siteBetaId,
+    outletId: outletAlphaId, notes: `Beta linked to Alpha outlet ${ts}`,
+  });
+  expectOk("admin: record mismatched outlet reference", crossSiteReading.status, [201]);
+
   // Put one module record in the most recently completed month. A trend must
   // return its count without leaking the record to another department.
   const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
@@ -588,6 +622,48 @@ async function main() {
       (await staff("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
     );
   }
+  const alphaStatus = await staff("GET", `/legionella/status?siteId=${siteAlphaId}`);
+  expectOk("staff: GET /legionella/status for alpha site", alphaStatus.status);
+  check("staff: alpha status includes alpha reading",
+    alphaStatus.data?.find(row => row.checkType === "calorifier_temp")?.lastDate === uniqueDate(1),
+    "alpha check date missing or replaced");
+  expectForbidden("staff: GET /legionella/status for beta site",
+    (await staff("GET", `/legionella/status?siteId=${siteBetaId}`)).status);
+  const unselectedStatus = await staff("GET", "/legionella/status");
+  expectOk("staff: GET /legionella/status without a site", unselectedStatus.status);
+  check("staff: status without a site has no beta readings",
+    Array.isArray(unselectedStatus.data) && unselectedStatus.data.every(row => row.lastDate == null),
+    "site-specific reading visible without selecting a site");
+
+  const adminOutlets = await admin("GET", "/legionella/outlets");
+  expectOk("admin: GET /legionella/outlets", adminOutlets.status);
+  check("admin: can see both department outlets",
+    Array.isArray(adminOutlets.data) && [outletAlphaId, outletBetaId].every(id =>
+      adminOutlets.data.some(row => row.id === id)), "department outlet missing for admin");
+  const staffOutlets = await staff("GET", "/legionella/outlets");
+  expectOk("staff: GET /legionella/outlets", staffOutlets.status);
+  check("staff: outlets include alpha but exclude beta",
+    Array.isArray(staffOutlets.data) &&
+      staffOutlets.data.some(row => row.id === outletAlphaId && row.site_id === siteAlphaId) &&
+      !staffOutlets.data.some(row => row.id === outletBetaId || row.site_id === siteBetaId),
+    "alpha outlet missing or beta outlet visible");
+
+  const adminOutletStatus = await admin("GET", "/legionella/outlet-status");
+  expectOk("admin: GET /legionella/outlet-status", adminOutletStatus.status);
+  check("admin: both outlets show their monthly checks",
+    Array.isArray(adminOutletStatus.data) && [outletAlphaId, outletBetaId].every(id =>
+      adminOutletStatus.data.some(row => row.id === id && row.testedThisMonth &&
+        row.thisMonthChecks?.length > 0)), "admin monthly check missing");
+  const staffOutletStatus = await staff("GET", "/legionella/outlet-status");
+  expectOk("staff: GET /legionella/outlet-status", staffOutletStatus.status);
+  check("staff: outlet status includes alpha reading but excludes beta outlet and reading",
+    Array.isArray(staffOutletStatus.data) &&
+      staffOutletStatus.data.some(row => row.id === outletAlphaId && row.siteId === siteAlphaId &&
+        row.thisMonthChecks?.some(reading => reading.id === alphaReading.data?.id)) &&
+      !staffOutletStatus.data.some(row => row.id === outletBetaId || row.siteId === siteBetaId ||
+        row.thisMonthChecks?.some(reading =>
+          reading.id === betaReading.data?.id || reading.id === crossSiteReading.data?.id)),
+    "alpha reading missing or beta outlet/reading visible");
 
   // ── 8c. Viewer (read-only) department scoping ─────────────────────────────────
   const viewerEmail = `dept-viewer-alpha-${ts}@test.local`;

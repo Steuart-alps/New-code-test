@@ -315,10 +315,16 @@ const outletUpdateSchema = outletCreateSchema.partial();
 router.get("/outlets", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const deptId = getActiveDepartmentId(req);
   const rows = await db.execute(sql`
     SELECT id, client_id, site_id, name, type, location, sort_order, active, created_at, updated_at
-    FROM legionella_sentinel_outlets
-    WHERE client_id = ${clientId} AND active = true
+    FROM legionella_sentinel_outlets o
+    WHERE o.client_id = ${clientId} AND o.active = true
+      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+        SELECT 1 FROM sites s
+        WHERE s.id = o.site_id AND s.client_id = o.client_id
+          AND (s.department_id IS NULL OR s.department_id = ${deptId})
+      ))
     ORDER BY sort_order ASC, id ASC
   `);
   res.json(rows.rows ?? []);
@@ -328,6 +334,7 @@ router.get("/outlets", requireAuth, async (req, res) => {
 router.get("/outlet-status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const deptId = getActiveDepartmentId(req);
 
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
@@ -349,7 +356,17 @@ router.get("/outlet-status", requireAuth, async (req, res) => {
       AND c.client_id = ${clientId}
       AND c.check_date >= ${monthStart}
       AND c.check_date <  ${monthEnd}
+      AND (${deptId}::integer IS NULL OR c.site_id IS NULL OR EXISTS (
+        SELECT 1 FROM sites cs
+        WHERE cs.id = c.site_id AND cs.client_id = c.client_id
+          AND (cs.department_id IS NULL OR cs.department_id = ${deptId})
+      ))
     WHERE o.client_id = ${clientId} AND o.active = true
+      AND (${deptId}::integer IS NULL OR o.site_id IS NULL OR EXISTS (
+        SELECT 1 FROM sites s
+        WHERE s.id = o.site_id AND s.client_id = o.client_id
+          AND (s.department_id IS NULL OR s.department_id = ${deptId})
+      ))
     ORDER BY o.sort_order ASC, o.id ASC, c.check_date DESC
   `);
 
