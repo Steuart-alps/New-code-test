@@ -23,6 +23,7 @@
     "test:kitchen-template-completeness": "node tests/kitchen-template-completeness.test.mjs",
     "test:training-matrix": "node tests/training-matrix.test.mjs",
     "test:training-expiry": "node tests/training-expiry.test.mjs",
+    "test:induction-print": "node tests/induction-print.test.mjs",
     "test:daily-track-month-status": "node tests/daily-track-month-status.test.mjs",
     "test:staff-kiosk-token": "node tests/staff-kiosk-token.test.mjs",
     "test:passkey-auth-endpoint": "node tests/passkey-auth-endpoint.test.mjs",
