@@ -21,6 +21,7 @@
     "test:pat-dept-isolation": "bash tests/run-pat-dept-isolation.sh",
     "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",
     "test:dailytrack-locks": "bash tests/run-db-workflow.sh tests/dailytrack-locks.mjs",
+    "test:daily-track-month-history": "bash tests/run-daily-track-month-history.sh",
     "test:dailytrack-locks:ci": "bash tests/run-dailytrack-locks.sh",
     "test:track-record-lock": "node tests/track-record-lock.mjs",
     "test:stored-track-lock": "bash tests/run-stored-track-lock.sh",
