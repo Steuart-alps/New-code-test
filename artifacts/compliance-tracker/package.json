@@ -15,6 +15,7 @@
     "test:contractor-approvals-browser": "node tests/contractor-approvals-browser.test.mjs",
     "test:contractor-approvals-browser-engine": "node tests/contractor-approvals-browser-engine.test.mjs",
     "test:hot-tub-browser": "node tests/hot-tub-browser.test.mjs",
+    "test:viewer-department-browser": "bash tests/run-viewer-department-browser.sh",
     "test:hot-tub-browser-firefox": "HOT_TUB_BROWSER=firefox node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-webkit": "HOT_TUB_BROWSER=webkit node tests/hot-tub-browser.test.mjs",
     "test:hot-tub-browser-engines": "pnpm run test:hot-tub-browser-firefox && pnpm run test:hot-tub-browser-webkit",

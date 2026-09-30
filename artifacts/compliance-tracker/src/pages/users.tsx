@@ -456,7 +456,7 @@ export default function UsersPage() {
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(u)} title={u.active ? "Deactivate" : "Activate"}>
                             {u.active ? <UserX className="w-4 h-4 text-muted-foreground" /> : <UserCheck className="w-4 h-4 text-green-600" />}
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingUser(u); setDialogOpen(true); }}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Edit ${u.name}`} onClick={() => { setEditingUser(u); setDialogOpen(true); }}>
                             <Pencil className="w-4 h-4 text-muted-foreground" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => deleteUser(u.id)}>
