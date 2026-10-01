@@ -7,6 +7,7 @@ import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../mi
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { createBikeHireRegisterPdf, type BikeHireRegisterRow } from "../lib/bikeHireRegisterPdf";
 import { resolveStaffPerformer } from "../lib/staffPerformer";
+import { parseBikeOverdueRepeatInterval } from "../lib/bikeOverdueReminders";
 
 const router = Router();
 
@@ -623,12 +624,14 @@ const BIKE_CONFIG_KEYS = [
   "bike_default_deposit_pence", // string (e.g. "2000" = £20)
   "bike_hire_duration_hours",   // string (e.g. "4")
   "bike_require_helmet",        // "true"|"false"
+  "bike_overdue_repeat_interval_days",
 ] as const;
 
 const BIKE_DEFAULT_CONFIG = {
   bike_default_deposit_pence: "",
   bike_hire_duration_hours: "",
   bike_require_helmet: "true",
+  bike_overdue_repeat_interval_days: "0",
 };
 
 router.get("/config", requireAuth, async (req, res) => {
@@ -648,6 +651,14 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;
+  if ("bike_overdue_repeat_interval_days" in updates) {
+    if (!["consultant", "client_admin"].includes(req.currentUser?.role ?? "")) {
+      return res.status(403).json({ error: "Only client admins can change overdue reminder settings" });
+    }
+    if (parseBikeOverdueRepeatInterval(updates.bike_overdue_repeat_interval_days) === null) {
+      return res.status(400).json({ error: "Choose one-time, 1, 3, 7, or 14 day reminders" });
+    }
+  }
   for (const key of BIKE_CONFIG_KEYS) {
     if (key in updates) {
       const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)

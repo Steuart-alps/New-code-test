@@ -13,6 +13,7 @@ export * from './auditLogEntry';
 export * from './auditLogEntryAction';
 export * from './auditLogEntryDiff';
 export * from './bikeTrackConfig';
+export * from './bikeTrackConfigBikeOverdueRepeatIntervalDays';
 export * from './category';
 export * from './certificate';
 export * from './complianceItem';

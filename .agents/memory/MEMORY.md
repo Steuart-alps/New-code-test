@@ -6,6 +6,7 @@
 - [Schema change workflow](schema-changes.md) — drizzle push is interactive (unusable headless); prod schema comes from api-server runtime migrations, so every new table/column must be added there too.
 - [Session expiry handling](session-expiry-handling.md) — API-client 401s fire setUnauthorizedHandler (registered in auth-context) to clear auth and route to login; stale prod sessions caused "Site not found".
 - [Integration and job testing](job-testing-pattern.md) — bundle workspace TS helpers; own test APIs and capture mail explicitly; restore existing rows touched by jobs.
+- [Background-job test scoping](background-job-test-scoping.md) — tenant-sweeping jobs see unrelated DB fixtures, so assert recipient-scoped delivery instead of global candidate counts.
 - [Validation steps setup](validation-steps.md) — test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
 - [API route middleware](api-route-middleware.md) — admin guards live in requireAuth; root-mounted auth middleware intercepts later public routes, so mount public routers first.

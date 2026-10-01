@@ -5,9 +5,11 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { BikeTrackConfigBikeOverdueRepeatIntervalDays } from './bikeTrackConfigBikeOverdueRepeatIntervalDays';
 
 export interface BikeTrackConfig {
   bike_default_deposit_pence?: string;
   bike_hire_duration_hours?: string;
   bike_require_helmet?: string;
+  bike_overdue_repeat_interval_days?: BikeTrackConfigBikeOverdueRepeatIntervalDays;
 }

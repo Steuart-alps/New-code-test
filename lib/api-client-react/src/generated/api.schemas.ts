@@ -1180,10 +1180,22 @@ export interface HotTubConfigUpdate {
   operatingRanges?: HotTubOperatingRanges;
 }
 
+export type BikeTrackConfigBikeOverdueRepeatIntervalDays = typeof BikeTrackConfigBikeOverdueRepeatIntervalDays[keyof typeof BikeTrackConfigBikeOverdueRepeatIntervalDays];
+
+
+export const BikeTrackConfigBikeOverdueRepeatIntervalDays = {
+  NUMBER_0: '0',
+  NUMBER_1: '1',
+  NUMBER_3: '3',
+  NUMBER_7: '7',
+  NUMBER_14: '14',
+} as const;
+
 export interface BikeTrackConfig {
   bike_default_deposit_pence?: string;
   bike_hire_duration_hours?: string;
   bike_require_helmet?: string;
+  bike_overdue_repeat_interval_days?: BikeTrackConfigBikeOverdueRepeatIntervalDays;
 }
 
 export interface GreenTrackConfig {

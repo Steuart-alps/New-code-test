@@ -2437,7 +2437,8 @@ export const UpdateHotTubCheckResponse = zod.object({
 export const GetBikeTrackConfigResponse = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 
@@ -2447,13 +2448,15 @@ export const GetBikeTrackConfigResponse = zod.object({
 export const UpdateBikeTrackConfigBody = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 export const UpdateBikeTrackConfigResponse = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 
