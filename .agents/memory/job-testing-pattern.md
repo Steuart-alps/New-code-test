@@ -27,3 +27,9 @@ Tests that mutate a database through HTTP and clean up using a direct database c
 **Why:** a ready HTTP endpoint may use a different database from the cleanup connection, leaving fixtures behind in the wrong environment. `NODE_ENV=test` alone does not suppress real email-provider calls, even for synthetic recipient addresses.
 
 **How to apply:** self-boot the API with the same database environment as the test helpers and explicit email capture; reject arbitrary endpoint reuse. Use unique fixture identities, finally-based cleanup, and verify cleanup after deliberate request failures as well as successful runs.
+
+Keep production login throttles enabled in integration tests.
+
+**Why:** Unique fixture accounts do not isolate per-IP counters across suites. Relaxing the throttle to accommodate fixture volume would make approval-flow tests less representative of production.
+
+**How to apply:** Budget fixture logins or give each suite its own private API process, rather than adding a test-only login-rate-limit bypass.

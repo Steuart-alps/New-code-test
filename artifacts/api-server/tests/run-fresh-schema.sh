@@ -29,12 +29,17 @@ psql -h "$temp" -U schema_test -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABAS
 url="postgresql://schema_test@/schema_test?host=$temp"
 count="$(psql "$url" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
 [ "$count" = "0" ] || { echo "Disposable database is not empty" >&2; exit 1; }
+: > "$temp/contractor-outbox.jsonl"
+# Synthetic, test-only key: no workspace encryption key or mail credentials.
+test_token_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 node tests/build-fresh-schema.mjs "$build"
 port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 # Scrub inherited credentials: no email, Stripe, storage, or shared database access.
 env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test FRESH_SCHEMA_TEST=1 \
   SESSION_SECRET=disposable-schema-test-only-not-a-real-secret \
   DATABASE_URL="$url" PORT="$port" \
+  CONTRACTOR_TOKEN_ENCRYPTION_KEY="$test_token_key" CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION=disposable-test TEST_EMAIL_BEHAVIOR=success \
+  TEST_EMAIL_CAPTURE_PATH="$temp/system-outbox.jsonl" FIXTRACK_TEST_EMAIL_OUTBOX="$temp/contractor-outbox.jsonl" \
   node "$build/server.mjs" >"$temp/server.log" 2>&1 &
 server_pid=$!
 ready=0
@@ -47,9 +52,13 @@ done
 if [ "$#" -gt 0 ]; then
   # Reuse the isolated infrastructure for focused HTTP suites. Never give the
   # suite a shared database connection or credentials for email providers.
+  # SQL-backed suites receive only this disposable Unix-socket database.
   for suite in "$@"; do
     env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test FRESH_SCHEMA_TEST=1 \
-      API_BASE="http://127.0.0.1:$port/api" node "$suite"
+      API_BASE="http://127.0.0.1:$port/api" DATABASE_URL="$url" \
+      CONTRACTOR_TOKEN_ENCRYPTION_KEY="$test_token_key" CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION=disposable-test TEST_EMAIL_BEHAVIOR=success \
+      TEST_EMAIL_CAPTURE_PATH="$temp/system-outbox.jsonl" FIXTRACK_TEST_EMAIL_OUTBOX="$temp/contractor-outbox.jsonl" \
+      node "$suite"
   done
 else
   NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/fresh-schema-routes.mjs

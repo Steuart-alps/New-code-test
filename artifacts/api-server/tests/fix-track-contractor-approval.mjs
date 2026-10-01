@@ -1,8 +1,8 @@
 // Focused regression coverage for the FixTrack contractor-email approval gate.
 // Usage: node tests/fix-track-contractor-approval.mjs (with the API running).
 //
-// This deliberately never calls the post-approval dispatch endpoint: its
-// purpose is to prove that a pending request cannot cross the outbound boundary.
+// Approval and dispatch execute against a disposable API/database; the
+// provider boundary is a private capture file, never live mail.
 import { readFile, writeFile, rename, mkdir, rm } from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";

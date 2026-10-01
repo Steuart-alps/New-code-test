@@ -138,6 +138,10 @@ args = "feedback-triage"
 task = "workflow.run"
 args = "feedback-inbox-browser"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "quote-reminder-approval"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -475,6 +479,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/compliance-tracker run test:feedback-inbox-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "quote-reminder-approval"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:fix-track-contractor-approval"
 
 [workflows.workflow.metadata]
 isValidation = true

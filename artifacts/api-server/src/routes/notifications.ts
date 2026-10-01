@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable } from "@workspace/db/schema";
+import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
 import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { encryptTokenPayload } from "../lib/bearerTokens";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -63,9 +64,10 @@ async function sendReminderForItem(opts: {
   fromEmail: string;
   ccList: string[];
   defaultLeadTimeDays: number;
+  departmentId: number | null;
   now: Date;
 }): Promise<boolean> {
-  const { item, contractor, companyName, ccList, defaultLeadTimeDays, now } = opts;
+  const { item, contractor, companyName, ccList, defaultLeadTimeDays, departmentId, now } = opts;
 
   const leadTimeDays = item.leadTimeDays ?? defaultLeadTimeDays;
   const dueDate = new Date(item.dueDate!);
@@ -92,35 +94,57 @@ async function sendReminderForItem(opts: {
   // unique key makes scheduler retries harmless; manager/test mail remains
   // outside this helper and is still sent directly.
   const cycleDate = dueDate.toISOString().slice(0, 10);
-  const queued = await db.execute(sql`
-    INSERT INTO contractor_email_queue
-      (client_id, entity_type, entity_id, contractor_id, email_type, mode,
-       to_email, subject, body_html, body_text, cc_json, email_preview_json, idempotency_key)
-    VALUES (${item.clientId}, 'compliance', ${item.id}, ${contractor.id},
-      'reminder', 'assign', ${contractor.email!},
-       ${`Compliance Check Reminder: ${item.title}`}, ${html}, ${text}, ${JSON.stringify(ccList)}::jsonb,
-      ${JSON.stringify({ subject: `Compliance Check Reminder: ${item.title}`, text, html })}::jsonb,
-      ${`reminder-${item.clientId}-${item.id}-${cycleDate}`})
-    ON CONFLICT (idempotency_key) DO NOTHING
-    RETURNING id
-  `);
+  // Store a placeholder in every rendered field and keep the working bearer
+  // only in the authenticated queue payload. The approval route hydrates it
+  // immediately before manager preview/provider dispatch.
+  const safeHtml = html.split(scheduleToken).join("{{BOOKED_TOKEN}}");
+  const safeText = text.split(scheduleToken).join("{{BOOKED_TOKEN}}");
+  const subject = `Compliance Check Reminder: ${item.title}`;
+  const preview = { subject, text: safeText, html: safeHtml };
+  const encryptedTokenPayload = encryptTokenPayload({ booked: scheduleToken });
 
-  if (queued.rows.length > 0) {
-    await db
-      .update(complianceItemsTable)
+  // The idempotency claim and token issuance are one atomic operation. A retry
+  // (or a concurrent runner) that loses the unique-key race leaves the first
+  // cycle's token untouched; a failed item update rolls back the queue claim.
+  return db.transaction(async (tx) => {
+    const queued = await tx.execute(sql`
+      INSERT INTO contractor_email_queue
+        (client_id, entity_type, entity_id, issue_id, department_id, contractor_id, email_type, mode,
+         to_email, subject, body_html, body_text, cc_json, email_preview_json, encrypted_token_payload, idempotency_key)
+      VALUES (${item.clientId}, 'compliance', ${item.id}, NULL, ${departmentId}, ${contractor.id},
+        'reminder', 'assign', ${contractor.email!}, ${subject}, ${safeHtml}, ${safeText},
+        ${JSON.stringify(ccList)}::jsonb, ${JSON.stringify(preview)}::jsonb,
+        ${encryptedTokenPayload}, ${`reminder-${item.clientId}-${item.id}-${cycleDate}`})
+      ON CONFLICT (idempotency_key) DO NOTHING
+      RETURNING id
+    `);
+
+    if (queued.rows.length === 0) return false;
+    const updatedItems = await tx.update(complianceItemsTable)
       .set({ scheduleToken, visitScheduledAt: null })
-      .where(eq(complianceItemsTable.id, item.id));
-  }
-  return queued.rows.length > 0;
+      .where(and(
+        eq(complianceItemsTable.id, item.id),
+        eq(complianceItemsTable.clientId, item.clientId),
+      ))
+      .returning({ id: complianceItemsTable.id });
+    if (updatedItems.length !== 1) {
+      throw new Error("Compliance item disappeared before its reminder token could be saved");
+    }
+    return true;
+  });
 }
 
 export async function runReminderJob(): Promise<{ queued: number; sent: number; skipped: number; errors: number }> {
   const now = new Date();
 
   const items = await db
-    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .leftJoin(sitesTable, and(
+      eq(complianceItemsTable.siteId, sitesTable.id),
+      eq(complianceItemsTable.clientId, sitesTable.clientId),
+    ))
     .where(isNotNull(complianceItemsTable.contractorId));
 
   const settingsCache: Record<number, Record<string, string>> = {};
@@ -129,7 +153,7 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
   let skipped = 0;
   let errors = 0;
 
-  for (const { item, contractor } of items) {
+  for (const { item, contractor, siteDepartmentId } of items) {
     if (!contractor?.email || !item.dueDate || item.status === "completed") { skipped++; continue; }
 
     const leadTimeDays = item.leadTimeDays ?? 30;
@@ -152,7 +176,10 @@ export async function runReminderJob(): Promise<{ queued: number; sent: number; 
     });
 
     try {
-      if (await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now })) queued++;
+       if (await sendReminderForItem({
+         item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays,
+         departmentId: siteDepartmentId ?? item.departmentId, now,
+       })) queued++;
       else skipped++;
     } catch {
       errors++;
@@ -173,9 +200,13 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
 
   // Scope to the caller's client only — never iterate across tenants.
   const items = await db
-    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .leftJoin(sitesTable, and(
+      eq(complianceItemsTable.siteId, sitesTable.id),
+      eq(complianceItemsTable.clientId, sitesTable.clientId),
+    ))
     .where(and(
       eq(complianceItemsTable.clientId, callerClientId),
       isNotNull(complianceItemsTable.contractorId),
@@ -195,7 +226,7 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
   let skipped = 0;
   let errors = 0;
 
-  for (const { item, contractor } of items) {
+  for (const { item, contractor, siteDepartmentId } of items) {
     if (!contractor?.email) {
       results.push({ itemId: item.id, title: item.title, contractorEmail: "", status: "skipped", reason: "No contractor email" });
       skipped++; continue;
@@ -238,7 +269,10 @@ router.post("/notifications/send-reminders", requireAuth, requireClientAdmin, as
   });
 
     try {
-      const wasQueued = await sendReminderForItem({ item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays, now });
+      const wasQueued = await sendReminderForItem({
+        item, contractor, companyName, fromEmail, ccList, defaultLeadTimeDays,
+        departmentId: siteDepartmentId ?? item.departmentId, now,
+      });
       results.push({ itemId: item.id, title: item.title, contractorEmail: contractor.email,
         status: wasQueued ? "queued" : "skipped",
         reason: wasQueued ? "Awaiting manager approval" : "Already queued for approval" });
@@ -261,9 +295,13 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
   if (!callerClientId) return void res.status(400).json({ error: "clientId required" });
 
   const rows = await db
-    .select({ item: complianceItemsTable, contractor: contractorsTable })
+    .select({ item: complianceItemsTable, contractor: contractorsTable, siteDepartmentId: sitesTable.departmentId })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
+    .leftJoin(sitesTable, and(
+      eq(complianceItemsTable.siteId, sitesTable.id),
+      eq(complianceItemsTable.clientId, sitesTable.clientId),
+    ))
     .where(and(eq(complianceItemsTable.id, itemId), eq(complianceItemsTable.clientId, callerClientId)))
     .limit(1);
 
@@ -290,6 +328,7 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
     fromEmail,
     ccList,
     defaultLeadTimeDays,
+    departmentId: row.siteDepartmentId ?? item.departmentId,
     now: new Date(),
   });
 
