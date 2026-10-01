@@ -98,6 +98,10 @@ args = "recovery-code-browser"
 task = "workflow.run"
 args = "service-price-readiness"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "photo-upload-browser"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -325,6 +329,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run check:service-prices"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "photo-upload-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:photo-upload-browser"
 
 [workflows.workflow.metadata]
 isValidation = true

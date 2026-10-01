@@ -61,3 +61,4 @@
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
+- [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.

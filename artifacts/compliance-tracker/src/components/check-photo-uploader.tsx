@@ -14,17 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch as authenticatedFetch } from "@/lib/api";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
+  const res = await authenticatedFetch(path, init);
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
@@ -96,6 +93,7 @@ export function CheckPhotoUploader({
 }: CheckPhotoUploaderProps) {
   const [photos, setPhotos] = useState<CheckPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +104,7 @@ export function CheckPhotoUploader({
   const fetchPhotos = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const data = await apiFetch<any[]>(`/photos?entityType=${encodeURIComponent(entityType)}&entityId=${entityId}`);
       // API returns snake_case; normalise to camelCase for the component
       const normalised: CheckPhoto[] = data.map(p => ({
@@ -118,8 +117,8 @@ export function CheckPhotoUploader({
       }));
       setPhotos(normalised);
       onCountChange?.(normalised.length);
-    } catch {
-      // Silently fail — photos are supplementary
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -198,10 +197,20 @@ export function CheckPhotoUploader({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const loadErrorNotice = loadError && (
+    <div role="alert" className="text-xs text-destructive">
+      Could not load photos: {loadError}
+      <Button type="button" variant="ghost" size="sm" onClick={() => void fetchPhotos()}>
+        Retry photos
+      </Button>
+    </div>
+  );
+
   if (compact) {
     return (
       <div className="flex items-center gap-2 flex-wrap mt-1">
         {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        {loadErrorNotice}
         {photos.map(p => (
           <div key={p.id} className="relative group w-10 h-10 rounded-sm overflow-hidden border border-border flex-shrink-0">
             <img
@@ -283,7 +292,8 @@ export function CheckPhotoUploader({
         </div>
       )}
 
-      {!loading && photos.length === 0 && (
+      {loadErrorNotice}
+      {!loading && !loadError && photos.length === 0 && (
         <p className="text-xs text-muted-foreground italic py-1">
           {required ? "At least one photo is required for this check." : "No photos attached."}
         </p>
