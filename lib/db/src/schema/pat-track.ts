@@ -128,6 +128,8 @@ export const patCertificateRoomsTable = pgTable("pat_certificate_rooms", {
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   certificateId: integer("certificate_id").notNull().references(() => patCertificatesTable.id, { onDelete: "cascade" }),
   roomId: integer("room_id").notNull().references(() => patRoomsTable.id, { onDelete: "cascade" }),
+  roomNameSnapshot: text("room_name_snapshot"),
+  snapshotSource: text("snapshot_source").notNull().default("recorded"),
 });
 
 export const patReplacementsTable = pgTable("pat_replacements", {

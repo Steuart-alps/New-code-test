@@ -65,4 +65,4 @@
 - [Orphaned workflow children](workflow-orphaned-children.md) — surviving Vite children can force restarted workflows off the registered preview port.
 - [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
-- [PAT history provenance](pat-history-provenance.md) — migrated locations are best-known, not verified at the test date; preserve provenance rather than silently rewriting history.
+- [PAT history provenance](pat-history-provenance.md) — migrated names/locations are best-known, not verified at the inspection date; preserve provenance rather than silently rewriting history.

@@ -382,6 +382,79 @@ async function main() {
   // only dates before CURRENT_DATE are overdue; inactive rooms are excluded.
   const iso = (d) => d.toISOString().slice(0, 10);
   const now = new Date(); const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  // Certificate coverage owns its recorded room identity, independently of the
+  // current room register, including when an old certificate is corrected.
+  const coveredRoom = (data, id) => data?.find(c => c.id === id)?.rooms?.find(r => r.id === alphaRoom.data.id);
+  const originalCoverage = coveredRoom((await admin("GET", "/pat-track/certificates")).data, alphaCertificate.data.id);
+  check("new certificate captures original room name", originalCoverage?.name === "Alpha room");
+  check("new certificate room provenance is recorded", originalCoverage?.snapshot_source === "recorded");
+  const renamedRoomName = 'Suite "201", East';
+  expectStatus("rename covered room", await admin("PUT", `/pat-track/rooms/${alphaRoom.data.id}`, {
+    siteId: alphaSite.data.id, name: renamedRoomName,
+  }), [200]);
+  const renamedRooms = await admin("GET", `/pat-track/rooms?siteId=${alphaSite.data.id}`);
+  check("room register shows current name", renamedRooms.data?.find(r => r.id === alphaRoom.data.id)?.name === renamedRoomName);
+  check("old certificate still shows original identity",
+    coveredRoom((await admin("GET", "/pat-track/certificates")).data, alphaCertificate.data.id)?.name === "Alpha room");
+  expectStatus("correct old certificate without rebuilding room snapshots",
+    await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
+      ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT-CORRECTED"),
+      roomIds: [alphaRoom.data.id, alphaRoom.data.id], notes: "Corrected notes",
+    }), [200]);
+  const correctedCertificates = (await staff("GET", `/pat-track/certificates?siteId=${alphaSite.data.id}`)).data;
+  check("certificate correction preserves old name", coveredRoom(correctedCertificates, alphaCertificate.data.id)?.name === "Alpha room");
+  check("duplicate room selections cannot duplicate coverage",
+    correctedCertificates?.find(c => c.id === alphaCertificate.data.id)?.rooms?.length === 1);
+  check("historical coverage retains authorized department visibility",
+    correctedCertificates?.every(c => c.site_id === alphaSite.data.id));
+  const newNameCertificate = await admin("POST", "/pat-track/certificates",
+    certificateBody(alphaSite.data.id, alphaRoom.data.id, "RENAMED-CERT"));
+  expectStatus("record later certificate after rename", newNameCertificate, [201]);
+  check("later certificate records renamed identity",
+    coveredRoom((await admin("GET", "/pat-track/certificates")).data, newNameCertificate.data.id)?.name === renamedRoomName);
+  expectStatus("rename covered room again", await admin("PUT", `/pat-track/rooms/${alphaRoom.data.id}`, {
+    siteId: alphaSite.data.id, name: "Current room name",
+  }), [200]);
+  const allHistoricCertificates = (await admin("GET", "/pat-track/certificates")).data;
+  check("first certificate retains first identity after multiple renames",
+    coveredRoom(allHistoricCertificates, alphaCertificate.data.id)?.name === "Alpha room");
+  check("second certificate retains its own distinct recorded identity",
+    coveredRoom(allHistoricCertificates, newNameCertificate.data.id)?.name === renamedRoomName);
+  expectStatus("room snapshot work preserves cross-site movement ban", await admin("PUT", `/pat-track/rooms/${alphaRoom.data.id}`, {
+    siteId: betaSite.data.id, name: "Current room name",
+  }), [409]);
+
+  const raceRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Before room rename" });
+  const [roomRaceCertificate, roomRaceRename] = await Promise.all([
+    admin("POST", "/pat-track/certificates", certificateBody(alphaSite.data.id, raceRoom.data.id, "ROOM-RACE")),
+    admin("PUT", `/pat-track/rooms/${raceRoom.data.id}`, { siteId: alphaSite.data.id, name: "After room rename" }),
+  ]);
+  expectStatus("concurrent certificate coverage records safely", roomRaceCertificate, [201]);
+  expectStatus("concurrent room rename succeeds", roomRaceRename, [200]);
+  const raceCoverage = (await admin("GET", "/pat-track/certificates")).data
+    ?.find(c => c.id === roomRaceCertificate.data?.id)?.rooms?.[0];
+  check("concurrent coverage captures one complete room identity",
+    ["Before room rename", "After room rename"].includes(raceCoverage?.name));
+  await admin("PUT", `/pat-track/rooms/${raceRoom.data.id}`, { siteId: alphaSite.data.id, name: "Third room name" });
+  check("concurrent coverage identity remains frozen",
+    (await admin("GET", "/pat-track/certificates")).data?.find(c => c.id === roomRaceCertificate.data?.id)?.rooms?.[0]?.name === raceCoverage?.name);
+  expectStatus("add another room to an existing certificate", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`, {
+    ...certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT-CORRECTED"),
+    roomIds: [alphaRoom.data.id, raceRoom.data.id],
+  }), [200]);
+  const extendedCoverage = (await admin("GET", "/pat-track/certificates")).data
+    ?.find(c => c.id === alphaCertificate.data.id)?.rooms;
+  check("adding coverage does not recapture retained room identity",
+    extendedCoverage?.find(r => r.id === alphaRoom.data.id)?.name === "Alpha room");
+  check("new coverage on existing certificate captures name when added",
+    extendedCoverage?.find(r => r.id === raceRoom.data.id)?.name === "Third room name");
+  expectStatus("remove only deselected certificate coverage", await admin("PUT", `/pat-track/certificates/${alphaCertificate.data.id}`,
+    certificateBody(alphaSite.data.id, alphaRoom.data.id, "ALPHA-CERT-CORRECTED")), [200]);
+  const reducedCoverage = (await admin("GET", "/pat-track/certificates")).data
+    ?.find(c => c.id === alphaCertificate.data.id)?.rooms;
+  check("coverage correction removes only the deselected link", reducedCoverage?.length === 1);
+  check("coverage removal preserves the retained historical name", reducedCoverage?.[0]?.name === "Alpha room");
+
   const todayRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Due today room" });
   const overdueRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Overdue room" });
   const untestedRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Untested room" });
@@ -424,6 +497,13 @@ async function main() {
       && legacyHistoryCsv.includes("locationSnapshot") && legacyHistoryCsv.includes("snapshotSource"));
     check("client export retains retired appliance's original evidence",
       legacyHistoryCsv.includes("Original alpha kitchen") && legacyHistoryCsv.includes("Alpha kettle"));
+    const roomHistoryCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/certificate-rooms.csv"], { encoding: "utf8" });
+    check("certificate-room export includes immutable identity and provenance",
+      roomHistoryCsv.includes("room_name_snapshot") && roomHistoryCsv.includes("snapshot_source"));
+    check("certificate-room export retains each historical name",
+      roomHistoryCsv.includes("Alpha room") && roomHistoryCsv.includes('Suite ""201"", East'));
+    check("certificate-room export never substitutes the current name",
+      !roomHistoryCsv.includes("Current room name"));
   } finally {
     await rm(exportPath, { force: true });
   }
