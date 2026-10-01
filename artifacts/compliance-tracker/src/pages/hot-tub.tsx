@@ -23,10 +23,11 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   Waves, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, ThermometerSun, Beaker, Search, Building2,
-  Filter, Settings2, ToggleLeft, ToggleRight, Printer,
+  Filter, Settings2, ToggleLeft, ToggleRight, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { printHtmlDocument } from "@/lib/download";
+import { downloadBlob } from "@/lib/download";
+import { createHotTubLogPdf } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
@@ -229,6 +230,7 @@ export default function HotTubPage() {
   const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
   const [search, setSearch] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [showManageTubs, setShowManageTubs] = useState(false);
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
@@ -299,15 +301,13 @@ export default function HotTubPage() {
     return rows;
   }, [checks, filterType, filterSite, filterTub, filterFrom, filterTo, search, tubMap]);
 
-  // ── Export printable log (for health inspections) ────────────────────────────
+  // ── Download PDF log (for health inspections) ────────────────────────────────
 
   const siteName = (id: number | null) =>
     id == null ? "—" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
 
-  const esc = (s: string | null | undefined) =>
-    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  const handleExportLog = () => {
+  const handleExportLog = async () => {
+    if (exportingPdf) return;
     // Respect the current on-page filters
     const rows = [...filtered].sort((a, b) => (a.checkDate < b.checkDate ? 1 : -1));
 
@@ -319,48 +319,34 @@ export default function HotTubPage() {
       filterParts.push(`Date range: ${filterFrom ? fmt(filterFrom) : "earliest"} to ${filterTo ? fmt(filterTo) : "latest"}`);
     }
     if (search.trim()) filterParts.push(`Search: "${search.trim()}"`);
-    const filterLine = filterParts.length ? `Filters applied — ${filterParts.join(" · ")}` : "All records";
-
-    const resultLabel = (r: string) =>
-      r === "pass" ? "Pass" : "Fail";
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hot Tub Maintenance Log</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .empty { font-size: 11px; color: #777; font-style: italic; }
-  @page { size: landscape; margin: 10mm; }
-  @media print { body { margin: 0; } }
-</style></head><body>
-<h1>Hot Tub &amp; Spa Maintenance Log</h1>
-<div class="meta">${esc(user?.name ?? "")} — generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for health inspection</div>
-<div class="meta">${esc(filterLine)}</div>
-<div class="meta">Records: ${rows.length}</div>
-
-<h2>Maintenance records</h2>
-${rows.length === 0 ? `<p class="empty">No records match the current filter.</p>` : `<table>
-<tr><th>Date</th><th>Session</th><th>Tub</th><th>Check</th><th>Result</th><th>pH</th><th>Sanitiser (ppm)</th><th>Temp (°C)</th><th>Location</th><th>Performed by</th><th>Notes</th></tr>
-${rows.map(r => `<tr>
-  <td>${fmt(r.checkDate)}</td>
-  <td>${esc(r.session ? (SESSION_LABELS[r.session] ?? r.session) : "")}</td>
-  <td>${esc(r.hotTubId ? (tubMap.get(r.hotTubId)?.name ?? "") : "")}</td>
-  <td>${esc(CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType)}</td>
-  <td>${esc(resultLabel(r.result))}</td>
-  <td>${esc(r.phValue)}</td>
-  <td>${esc(r.sanitiserLevel)}</td>
-  <td>${esc(r.temperature)}</td>
-  <td>${esc(r.location)}</td>
-  <td>${esc(r.performedBy)}</td>
-  <td>${esc(r.notes)}</td>
-</tr>`).join("")}
-</table>`}
-</body></html>`;
-    printHtmlDocument(html);
+    const generatedAt = new Date();
+    setExportingPdf(true);
+    try {
+      const blob = await createHotTubLogPdf({
+        generatedAt,
+        generatedBy: user?.name ?? "",
+        filters: filterParts,
+        rows: rows.map(r => [
+          fmt(r.checkDate),
+          r.session ? (SESSION_LABELS[r.session] ?? r.session) : "",
+          siteName(r.siteId),
+          r.hotTubId ? (tubMap.get(r.hotTubId)?.name ?? "") : "",
+          CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType,
+          r.result === "pass" ? "Pass" : "Fail",
+          r.phValue ?? "", r.sanitiserLevel ?? "", r.temperature ?? "",
+          r.location ?? "", r.performedBy ?? "", r.notes ?? "",
+        ]),
+      });
+      downloadBlob(blob, `hot-tub-maintenance-log-${dateInputValue(generatedAt)}.pdf`);
+    } catch (error) {
+      toast({
+        title: "PDF download failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -504,8 +490,9 @@ ${rows.map(r => `<tr>
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
-            title="Open the filtered maintenance log to print or save as PDF">
-            <Printer className="w-4 h-4" /> Download PDF
+            disabled={isLoading || exportingPdf} aria-busy={exportingPdf}
+            title="Download the filtered maintenance log as a PDF file">
+            <Download className="w-4 h-4" /> {exportingPdf ? "Preparing PDF…" : "Download PDF"}
           </Button>
           {canAdmin && (
             <Button variant="outline" onClick={() => setShowManageTubs(true)} className="gap-2 rounded-sm">

@@ -59,3 +59,4 @@
 - [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
+- [Shell runtime loader hangs](shell-runtime-loader-hangs.md) — if Node/pnpm stall silently, clear injected loader settings for that command only; do not change project secrets or workflows.
