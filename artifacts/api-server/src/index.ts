@@ -69,7 +69,7 @@ async function initStripe(): Promise<string | null> {
         logger.info({ configured: preflight.configured }, "Stripe service-price preflight passed");
       } else {
         logger.error(
-          { missing: preflight.missing, configured: preflight.configured },
+          { missing: preflight.missing, duplicates: preflight.duplicates, issues: preflight.issues, configured: preflight.configured },
           "Stripe service-price preflight failed — affected modules cannot be activated",
         );
       }
@@ -103,7 +103,7 @@ async function initStripe(): Promise<string | null> {
         logger.info({ configured: finalPreflight.configured }, "Stripe service-price preflight passed");
       } else {
         logger.error(
-          { missing: finalPreflight.missing, configured: finalPreflight.configured },
+          { missing: finalPreflight.missing, duplicates: finalPreflight.duplicates, issues: finalPreflight.issues, configured: finalPreflight.configured },
           "Stripe service-price preflight failed — affected modules cannot be activated",
         );
       }

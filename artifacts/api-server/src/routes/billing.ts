@@ -459,10 +459,12 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     // Keep the individual getServicePrice check below as a race-safe defence
     // if a price is deactivated after this read.
     const pricePreflight = await getServicePricePreflight();
-    if (pricePreflight.missing.includes(service)) {
+    if (action === "add" && (pricePreflight.missing.includes(service) || pricePreflight.duplicates.includes(service))) {
       return res.status(503).json({
-        error: "Service price not configured",
+        error: "Service price is missing or ambiguous",
         missingServicePrices: pricePreflight.missing,
+        duplicateServicePrices: pricePreflight.duplicates,
+        servicePriceIssues: pricePreflight.issues,
       });
     }
 

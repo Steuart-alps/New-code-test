@@ -18,3 +18,6 @@ description: Durable billing decisions for ComplyTrack — per-site pricing mode
 - **Look subscriptions up dynamically by customer id.** No stored subscription id is reliable — the Stripe webhook only populates the synced `stripe.*` mirror tables. **Why:** a stored id goes stale; customer-id lookup is robust.
 - **One subscription per client.** Checkout refuses to create a second subscription when a live (active/trialing/past_due) one exists; users manage it via the Stripe billing portal instead.
 - **Quantity sync is best-effort.** It must never throw and break site create/delete; the price resolver returns null when Stripe isn't seeded, and callers must tolerate that.
+- **Duplicate active service prices require review, not automatic deactivation.** Readiness checks must report ambiguity without choosing a cheapest price or deleting an older one.
+  **Why:** an older price can still back existing subscriptions; changing it to make a catalogue check pass risks unrelated customer billing.
+  **How to apply:** keep standalone readiness checks read-only and leave duplicate cleanup to an explicit, subscription-aware administrative action.

@@ -8,6 +8,7 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "check:service-prices": "node scripts/check-service-prices.mjs",
     "typecheck": "flock -s /tmp/complytrack-api-codegen.lock sh -c 'pnpm exec tsc --build ../../lib/db ../../lib/api-zod && tsc -p tsconfig.json --noEmit && pnpm run test:viewer-route-policy'",
     "test:api-runner-lock": "bash tests/test-api-integration-lock.sh",
     "test:isolation": "bash tests/run-db-workflow.sh tests/tenant-isolation.mjs",

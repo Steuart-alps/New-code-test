@@ -154,6 +154,7 @@ export async function getServicePrice(serviceKey: string): Promise<PerSitePrice 
       WHERE p.active = true
         AND pr.active = true
         AND (pr.recurring->>'interval') = 'month'
+        AND COALESCE(pr.recurring->>'interval_count', '1') = '1'
         AND pr.metadata->>'service_key' = ${serviceKey}
       ORDER BY pr.unit_amount ASC
       LIMIT 1

@@ -57,10 +57,13 @@ export const SERVICE_PRICE_CATALOGUE = [
 export interface ServicePricePreflight {
   /** All catalogue service keys which require a Stripe monthly price. */
   required: string[];
-  /** Required keys with an active, synced monthly Stripe price. */
+  /** Required keys with exactly one active, synced monthly Stripe price. */
   configured: string[];
   /** Required keys which cannot safely be selected in checkout or add-on activation. */
   missing: string[];
+  /** Required keys with more than one selectable active monthly price. */
+  duplicates: string[];
+  issues: { key: string; label: string; reason: "missing" | "duplicate" }[];
   ready: boolean;
 }
 
@@ -80,6 +83,9 @@ export function getServicePriceReadinessBlocker(input: {
   if (input.repairFailed) {
     return "Stripe service-price catalogue repair failed";
   }
+  if (input.finalPreflight?.duplicates.length) {
+    return "Required Stripe service prices are duplicated";
+  }
   if (!input.finalPreflight || !input.finalPreflight.ready) {
     return "Required Stripe service prices are missing";
   }
@@ -93,21 +99,32 @@ export function getServicePriceReadinessBlocker(input: {
 export function evaluateServicePricePreflight(
   configuredServiceKeys: Iterable<string>,
 ): ServicePricePreflight {
-  const configuredKeys = new Set(configuredServiceKeys);
+  const counts = new Map<string, number>();
+  for (const key of configuredServiceKeys) counts.set(key, (counts.get(key) ?? 0) + 1);
   const required = SERVICE_PRICE_CATALOGUE.map((service) => service.key);
-  const configured = required.filter((key) => configuredKeys.has(key));
-  const missing = required.filter((key) => !configuredKeys.has(key));
-  return { required, configured, missing, ready: missing.length === 0 };
+  const configured = required.filter((key) => counts.get(key) === 1);
+  const missing = required.filter((key) => !counts.has(key));
+  const duplicates = required.filter((key) => (counts.get(key) ?? 0) > 1);
+  const issues = SERVICE_PRICE_CATALOGUE.flatMap((service) => {
+    const count = counts.get(service.key) ?? 0;
+    return count === 1 ? [] : [{
+      key: service.key,
+      label: service.label,
+      reason: count === 0 ? "missing" as const : "duplicate" as const,
+    }];
+  });
+  return { required, configured, missing, duplicates, issues, ready: issues.length === 0 };
 }
 
 async function listLiveMonthlyPriceServiceKeys(): Promise<string[]> {
   const rows = await db.execute(sql`
-    SELECT DISTINCT pr.metadata->>'service_key' AS service_key
+    SELECT pr.metadata->>'service_key' AS service_key
     FROM stripe.prices pr
     JOIN stripe.products p ON p.id = pr.product
     WHERE p.active = true
       AND pr.active = true
       AND (pr.recurring->>'interval') = 'month'
+      AND COALESCE(pr.recurring->>'interval_count', '1') = '1'
       AND pr.metadata->>'service_key' IS NOT NULL
   `);
   return (rows.rows as { service_key: string | null }[])
