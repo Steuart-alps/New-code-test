@@ -6,7 +6,7 @@ import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/d
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
-import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
+import { escapeHtml, sendSystemEmail, getPublicAppUrl, sendTwoFactorResetEmail } from "../lib/email";
 
 const router = Router();
 
@@ -289,9 +289,20 @@ router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req,
     return;
   }
 
-  await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
-    .where(eq(usersTable.id, id));
+  const resetAt = new Date();
+  const [resetUser] = await db.update(usersTable)
+    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: resetAt })
+    .where(eq(usersTable.id, id))
+    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name });
+  if (!resetUser) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  try {
+    await sendTwoFactorResetEmail({ to: resetUser.email, name: resetUser.name, resetAt });
+  } catch (err) {
+    req.log.error({ err, userId: resetUser.id, actorId: actor.id }, "Failed to send two-factor reset security notification");
+  }
   res.json({ ok: true });
 });
 

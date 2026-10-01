@@ -171,6 +171,35 @@ export async function sendSystemEmail(opts: {
   }
 }
 
+/** Notify the affected account only after an administrator's reset is committed. */
+export async function sendTwoFactorResetEmail(opts: {
+  to: string;
+  name: string;
+  resetAt: Date;
+}): Promise<void> {
+  const when = opts.resetAt.toISOString();
+  await sendSystemEmail({
+    to: opts.to,
+    subject: "Security alert: your two-factor authentication was reset",
+    text: [
+      `Hello ${opts.name},`,
+      "",
+      `An administrator reset your ComplyTrack two-factor authentication at ${when} (UTC).`,
+      "If you did not expect this reset, contact your administrator immediately.",
+      "Sign in and re-enrol your authenticator promptly. You must complete two-factor setup before accessing your account.",
+      "",
+      "ComplyTrack account security",
+    ].join("\n"),
+    html: `
+      <h2>ComplyTrack account security</h2>
+      <p>Hello ${escapeHtml(opts.name)},</p>
+      <p>An administrator reset your two-factor authentication at <strong>${when} (UTC)</strong>.</p>
+      <p>If you did not expect this reset, <strong>contact your administrator immediately</strong>.</p>
+      <p>Sign in and re-enrol your authenticator promptly. You must complete two-factor setup before accessing your account.</p>
+    `,
+  });
+}
+
 function toIcsDate(date: Date): string {
   return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
