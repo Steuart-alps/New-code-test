@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   useGetGreenTrackConfig,
@@ -34,32 +35,23 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
-import { getCsrfToken } from "@/lib/api";
+import { getApiErrorMessage } from "@/lib/api";
+import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-
-async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const method = (init?.method ?? "GET").toUpperCase();
-  const headers = new Headers(init?.headers);
-  headers.set("Content-Type", "application/json");
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-    const token = await getCsrfToken();
-    if (token) headers.set("X-CSRF-Token", token);
-  }
-  const res = await fetch(`${baseUrl}/api${path}`, {
-    ...init,
-    credentials: "include",
-    headers,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
-  }
-  return res.json();
+function useGreenTrackApi() {
+  const request = useActiveClientApi();
+  return useCallback(async <T = any,>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await request(path, init);
+    if (!response.ok) {
+      throw new Error(await getApiErrorMessage(response, `Request failed: ${response.status}`));
+    }
+    return response.json() as Promise<T>;
+  }, [request]);
 }
 
 function fmt(d: string | null | undefined) {
@@ -422,6 +414,7 @@ function MachineDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
   const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "" };
   const [form, setForm] = useState(blank);
@@ -678,6 +671,7 @@ function MachineImportDialog({
   onImported: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<MachineImportRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -811,7 +805,9 @@ function PreUseDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const { data: config } = useGetGreenTrackConfig();
+  const photoEvidence = useNewRecordPhotoEvidence("green_pre_use_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", checkDate: today, operator: "", operatorRosterId: null as number | null,
@@ -822,15 +818,22 @@ function PreUseDialog({
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(check ? {
-    machineId: String(check.machineId), checkDate: check.checkDate,
-    operator: check.operator ?? "", operatorRosterId: (check as any).operatorRosterId ?? (check as any).operator_roster_id ?? null,
-    fluidLevelsOk: check.fluidLevelsOk, tyresOk: check.tyresOk,
-    bladesOk: check.bladesOk, guardsOk: check.guardsOk,
-    controlsOk: check.controlsOk, lightsOk: check.lightsOk,
-    cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(check ? {
+      machineId: String(check.machineId), checkDate: check.checkDate,
+      operator: check.operator ?? "", operatorRosterId: (check as any).operatorRosterId ?? (check as any).operator_roster_id ?? null,
+      fluidLevelsOk: check.fluidLevelsOk, tyresOk: check.tyresOk,
+      bladesOk: check.bladesOk, guardsOk: check.guardsOk,
+      controlsOk: check.controlsOk, lightsOk: check.lightsOk,
+      cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
+    } : blank);
+  };
 
   // N/A is represented at checklist-item level; the completed observation is
   // always canonical pass/fail.
@@ -841,6 +844,7 @@ function PreUseDialog({
   }, [form.fluidLevelsOk, form.tyresOk, form.bladesOk, form.guardsOk, form.controlsOk, form.lightsOk, form.cleanlinessOk]);
 
   const handleSave = async () => {
+    if (!check && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -857,7 +861,10 @@ function PreUseDialog({
       if (check) {
         await apiFetch(`/green-track/pre-use-checks/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/pre-use-checks", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/pre-use-checks", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: check ? "Check updated" : "Pre-use check recorded" });
       onSaved(); onClose();
@@ -929,10 +936,13 @@ function PreUseDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
               placeholder="Any faults observed, corrective action taken…" />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Record check"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!check && photoEvidenceBlocked)}>
+            {saving ? "Saving…" : check ? "Save changes" : "Record check"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -950,6 +960,8 @@ function ServiceDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("green_service", open && !record);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", serviceDate: today, serviceType: "scheduled",
@@ -958,18 +970,26 @@ function ServiceDialog({
   };
   const [form, setForm] = useState({ ...blank, servicedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(record ? {
-    machineId: String(record.machineId), serviceDate: record.serviceDate,
-    serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
-    nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
-    nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
-    servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
-    costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
-    notes: record.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(record ? {
+      machineId: String(record.machineId), serviceDate: record.serviceDate,
+      serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
+      nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
+      nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
+      servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
+      costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
+      notes: record.notes ?? "",
+    } : blank);
+  };
 
   const handleSave = async () => {
+    if (!record && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -987,7 +1007,10 @@ function ServiceDialog({
       if (record) {
         await apiFetch(`/green-track/service-records/${record.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/service-records", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/service-records", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: record ? "Service record updated" : "Service record logged" });
       onSaved(); onClose();
@@ -1069,10 +1092,13 @@ function ServiceDialog({
             <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : record ? "Save changes" : "Log service"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!record && photoEvidenceBlocked)}>
+            {saving ? "Saving…" : record ? "Save changes" : "Log service"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1090,6 +1116,8 @@ function DefectDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("green_defect", open && !defect);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", reportDate: today, reportedBy: "", reportedByRosterId: null,
@@ -1098,16 +1126,24 @@ function DefectDialog({
   };
   const [form, setForm] = useState({ ...blank, reportedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(defect ? {
-    machineId: String(defect.machineId), reportDate: defect.reportDate,
-    reportedBy: defect.reportedBy ?? "", reportedByRosterId: (defect as any).reportedByRosterId ?? (defect as any).reported_by_roster_id ?? null, description: defect.description,
-    severity: defect.severity, outOfService: defect.outOfService,
-    status: defect.status, resolution: defect.resolution ?? "",
-    resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(defect ? {
+      machineId: String(defect.machineId), reportDate: defect.reportDate,
+      reportedBy: defect.reportedBy ?? "", reportedByRosterId: (defect as any).reportedByRosterId ?? (defect as any).reported_by_roster_id ?? null, description: defect.description,
+      severity: defect.severity, outOfService: defect.outOfService,
+      status: defect.status, resolution: defect.resolution ?? "",
+      resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
+    } : blank);
+  };
 
   const handleSave = async () => {
+    if (!defect && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
@@ -1122,7 +1158,10 @@ function DefectDialog({
       if (defect) {
         await apiFetch(`/green-track/defects/${defect.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/defects", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/defects", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: defect ? "Defect updated" : "Defect reported" });
       onSaved(); onClose();
@@ -1221,10 +1260,11 @@ function DefectDialog({
             <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}
+          <Button onClick={handleSave} disabled={saving || (!defect && photoEvidenceBlocked)}
             variant={form.severity === "critical" && form.status !== "resolved" ? "destructive" : "default"}>
             {saving ? "Saving…" : defect ? "Save changes" : "Report defect"}
           </Button>
@@ -1250,6 +1290,7 @@ function PuwerDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", inspectionDate: today, nextInspectionDate: "",
@@ -1392,6 +1433,7 @@ function FuelLogDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", logDate: today, fuelType: "diesel",
@@ -1504,11 +1546,13 @@ function FuelLogDialog({
 
 type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel" | "actions";
 
-function GreenTrackPageInternal() {
-  const { user } = useAuth();
+export function GreenTrackPageInternal() {
+  const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoRequirements = usePhotoRequirements();
 
   const [activeTab, setActiveTab] = useState<Tab>("fleet");
   const [search, setSearch] = useState("");
@@ -1532,39 +1576,39 @@ function GreenTrackPageInternal() {
 
   // Queries
   const { data: sites = [] } = useQuery({
-    queryKey: ["sites"], queryFn: () => apiFetch<{ id: number; name: string }[]>("/sites"),
+    queryKey: ["sites", activeClientId], queryFn: () => apiFetch<{ id: number; name: string }[]>("/sites"),
   });
   const { data: machines = [], isLoading: machinesLoading } = useQuery({
-    queryKey: ["green-machines"],
+    queryKey: ["green-machines", activeClientId],
     queryFn: () => apiFetch<Machine[]>("/green-track/machines"),
   });
   const { data: status } = useQuery({
-    queryKey: ["green-status"],
+    queryKey: ["green-status", activeClientId],
     queryFn: () => apiFetch<StatusData>("/green-track/status"),
     refetchInterval: 60_000,
   });
   const { data: preUseChecks = [], isLoading: preUseLoading } = useQuery({
-    queryKey: ["green-pre-use", filterMachine],
+    queryKey: ["green-pre-use", activeClientId, filterMachine],
     queryFn: () => apiFetch<PreUseCheck[]>(`/green-track/pre-use-checks${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "pre-use",
   });
   const { data: serviceRecords = [], isLoading: servicesLoading } = useQuery({
-    queryKey: ["green-services", filterMachine],
+    queryKey: ["green-services", activeClientId, filterMachine],
     queryFn: () => apiFetch<ServiceRecord[]>(`/green-track/service-records${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "services",
   });
   const { data: defects = [], isLoading: defectsLoading } = useQuery({
-    queryKey: ["green-defects", filterMachine],
+    queryKey: ["green-defects", activeClientId, filterMachine],
     queryFn: () => apiFetch<Defect[]>(`/green-track/defects${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "defects",
   });
   const { data: puwerInspections = [], isLoading: puwerLoading } = useQuery({
-    queryKey: ["green-puwer", filterMachine],
+    queryKey: ["green-puwer", activeClientId, filterMachine],
     queryFn: () => apiFetch<PuwerInspection[]>(`/green-track/puwer-inspections${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "puwer",
   });
   const { data: fuelLogs = [], isLoading: fuelLoading } = useQuery({
-    queryKey: ["green-fuel", filterMachine],
+    queryKey: ["green-fuel", activeClientId, filterMachine],
     queryFn: () => apiFetch<FuelLog[]>(`/green-track/fuel-logs${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "fuel",
   });
@@ -1658,6 +1702,20 @@ function GreenTrackPageInternal() {
   return (
     <AppLayout title="GreenTrack">
       <div className="space-y-6">
+        {photoRequirements.error && (
+          <div role="alert" className="flex items-start justify-between gap-3 rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            <div>
+              <p className="font-medium">Photo requirements could not be loaded.</p>
+              <p className="mt-0.5">{photoRequirements.error.message} Existing record photo uploads may not reflect the configured rules.</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={photoRequirements.retry}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {photoRequirements.isLoading && !photoRequirements.error && (
+          <p role="status" className="text-xs text-muted-foreground">Loading GreenTrack photo requirements…</p>
+        )}
 
         {/* ── Status strip ──────────────────────────────────────────────── */}
         {status && (
@@ -1972,7 +2030,9 @@ function GreenTrackPageInternal() {
                           )}
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
-                          <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact />
+                          <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact
+                            required={photoRequirements.requirements.green_pre_use_check?.required ?? false}
+                            minPhotos={photoRequirements.requirements.green_pre_use_check?.minPhotos ?? 1} />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2072,7 +2132,9 @@ function GreenTrackPageInternal() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
-                            <CheckPhotoUploader entityType="green_service" entityId={s.id} compact />
+                            <CheckPhotoUploader entityType="green_service" entityId={s.id} compact
+                              required={photoRequirements.requirements.green_service?.required ?? false}
+                              minPhotos={photoRequirements.requirements.green_service?.minPhotos ?? 1} />
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2145,7 +2207,9 @@ function GreenTrackPageInternal() {
                           {d.resolvedDate && <div><span className="font-medium">Resolved:</span> {fmt(d.resolvedDate)}</div>}
                           {d.notes && <div><span className="font-medium">Notes:</span> {d.notes}</div>}
                         </div>
-                        <CheckPhotoUploader entityType="green_defect" entityId={d.id} compact />
+                        <CheckPhotoUploader entityType="green_defect" entityId={d.id} compact
+                          required={photoRequirements.requirements.green_defect?.required ?? false}
+                          minPhotos={photoRequirements.requirements.green_defect?.minPhotos ?? 1} />
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
@@ -8,6 +8,8 @@ import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as authenticatedApiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1762,34 +1764,37 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
 function PhotoRequirementsCard() {
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
+  const request = useActiveClientApi();
+  const rules = usePhotoRequirements();
+  const queryClient = useQueryClient();
   const [requirements, setRequirements] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch<{ entity_type: string; required: boolean }[]>("/photos/requirements")
-      .then(rows => {
-        const map: Record<string, boolean> = {};
-        rows.forEach((r: { entity_type: string; required: boolean }) => { map[r.entity_type] = r.required; });
-        setRequirements(map);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    const map: Record<string, boolean> = {};
+    Object.entries(rules.requirements).forEach(([key, rule]) => { map[key] = rule.required; });
+    setRequirements(map);
+  }, [rules.requirements]);
 
   const toggle = (entityType: string) => {
     setRequirements(prev => ({ ...prev, [entityType]: !prev[entityType] }));
   };
 
   const handleSave = async () => {
+    if (rules.isLoading || rules.error) return;
     setSaving(true);
     try {
       const items = Object.keys(PHOTO_ENTITY_LABELS).map(k => ({
         entityType: k,
         required: requirements[k] ?? false,
-        minPhotos: 1,
+        minPhotos: rules.requirements[k]?.minPhotos ?? 1,
       }));
-      await apiFetch("/photos/requirements", { method: "PUT", body: JSON.stringify(items) });
+      const response = await request("/photos/requirements", { method: "PUT", body: JSON.stringify(items) });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? `Request failed (${response.status})`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["photo-requirements"] });
       toast({ title: "Photo requirements saved" });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
@@ -1812,9 +1817,14 @@ function PhotoRequirementsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        {loading ? (
+        {rules.isLoading ? (
           <div className="p-6 flex justify-center">
             <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : rules.error ? (
+          <div role="alert" className="p-6 text-sm text-destructive">
+            Could not load photo requirements. Existing rules have not been changed.
+            <Button type="button" variant="ghost" onClick={rules.retry}>Retry photo requirements</Button>
           </div>
         ) : (
           <>

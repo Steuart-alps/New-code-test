@@ -1,8 +1,10 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
+import { randomUUID } from "crypto";
+import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAnyService, requireService } from "../lib/services";
 import {
   AllowedUploadType,
   ObjectContentError,
@@ -14,10 +16,16 @@ import {
 } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { hasTenantAttachmentReference } from "../lib/attachmentReferences";
+import {
+  isStagedPhotoEntityType,
+  lockPhotoRequirement,
+  STAGED_PHOTO_ENTITY_TYPES,
+} from "../lib/stagedPhotoReceipts";
 
 const router = Router();
 const storage = new ObjectStorageService();
 const ALLOWED_PHOTO_TYPES: ReadonlySet<AllowedUploadType> = new Set(["image/jpeg", "image/png"]);
+const STAGED_ENTITY_TYPE_SET: ReadonlySet<string> = new Set(STAGED_PHOTO_ENTITY_TYPES);
 
 /**
  * check_photos is intentionally polymorphic, but it must not be an arbitrary
@@ -62,6 +70,35 @@ export function isSupportedPhotoEntityType(entityType: string): entityType is Ph
   return Object.prototype.hasOwnProperty.call(PHOTO_ENTITY_TABLES, entityType);
 }
 
+const stagedPhotoEntitlement: RequestHandler = (req, res, next) => {
+  const entityType = req.body?.entityType;
+  if (typeof entityType !== "string" || !STAGED_ENTITY_TYPE_SET.has(entityType)) {
+    return res.status(400).json({ error: "Unsupported staged photo entity type" });
+  }
+  if (entityType.startsWith("green_")) return requireService("greentrack")(req, res, next);
+  return requireAnyService("swimtrack", "aquatrack")(req, res, next);
+};
+
+const greenServiceCreationRole: RequestHandler = (req, res, next) => {
+  if (req.body?.entityType === "green_service") return requireClientAdmin(req, res, next);
+  next();
+};
+
+function photoStorageError(err: unknown): { status: number; error: string } {
+  const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
+    : err instanceof ObjectContentError ? "Photo contents must be a valid JPEG or PNG"
+    : err instanceof ObjectGenerationError ? err.message
+    : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded photo";
+  const status = err instanceof ObjectNotFoundError ? 404
+    : err instanceof ObjectContentError ? 400
+    : err instanceof ObjectGenerationError ? 409 : 403;
+  return { status, error };
+}
+
+function isPostgresUniqueViolation(err: any): boolean {
+  return err?.code === "23505";
+}
+
 async function requireOwnedPhotoEntity(
   entityType: string,
   entityId: number,
@@ -96,6 +133,98 @@ async function rejectUnownedPhotoEntity(
 
 // ── Request presigned upload URL ──────────────────────────────────────────────
 // POST /photos/request-upload
+router.post(
+  "/request-staged-upload",
+  requireAuth,
+  denyViewers,
+  stagedPhotoEntitlement,
+  greenServiceCreationRole,
+  async (req, res) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+
+    const body = z.object({
+      entityType: z.string().min(1).max(100),
+      name: z.string().min(1).max(200),
+      contentType: z.enum(["image/jpeg", "image/png"], {
+        message: "Photos must be JPEG or PNG",
+      }),
+    }).parse(req.body);
+    if (!isStagedPhotoEntityType(body.entityType)) {
+      return res.status(400).json({ error: "Unsupported staged photo entity type" });
+    }
+
+    try {
+      const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
+      const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
+      if (!isTenantReservedObjectPath(objectPath, clientId)) {
+        throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+      }
+      return res.json({ uploadUrl, objectPath });
+    } catch (err) {
+      return respondObjectStorageUnavailable(req, res, err, "photo upload");
+    }
+  },
+);
+
+// Verify and pin the upload before creating a short-lived server-issued receipt.
+router.post(
+  "/staged",
+  requireAuth,
+  denyViewers,
+  stagedPhotoEntitlement,
+  greenServiceCreationRole,
+  async (req, res) => {
+    const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const body = z.object({
+      entityType: z.string().min(1).max(100),
+      objectPath: z.string().min(1).max(500),
+    }).parse(req.body);
+    if (!isStagedPhotoEntityType(body.entityType)) {
+      return res.status(400).json({ error: "Unsupported staged photo entity type" });
+    }
+
+    let normalizedPath: string;
+    let finalized: { objectPath: string; contentType: AllowedUploadType };
+    try {
+      normalizedPath = storage.normalizeObjectEntityPath(body.objectPath);
+      if (!isTenantReservedObjectPath(normalizedPath, clientId)) {
+        throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+      }
+      finalized = await storage.finalizeVerifiedTenantUpload(
+        normalizedPath,
+        clientId,
+        ALLOWED_PHOTO_TYPES,
+      );
+    } catch (err) {
+      await storage.discardTenantUpload(body.objectPath, clientId).catch(() => {});
+      const mapped = photoStorageError(err);
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
+
+    const id = randomUUID();
+    try {
+      await db.execute(sql`
+        INSERT INTO staged_photo_upload_receipts
+          (id, client_id, entity_type, actor_id, object_path, expires_at)
+        VALUES (
+          ${id}::uuid, ${clientId}, ${body.entityType}, ${req.currentUser!.id},
+          ${finalized.objectPath}, now() + interval '30 minutes'
+        )
+      `);
+      return res.status(201).json({ id, objectPath: finalized.objectPath });
+    } catch (err) {
+      await storage.deleteTenantObject(finalized.objectPath, clientId).catch(() => {});
+      return res.status(isPostgresUniqueViolation(err) ? 409 : 500).json({
+        error: isPostgresUniqueViolation(err)
+          ? "This photo upload has already been staged"
+          : "Could not save staged photo receipt",
+      });
+    }
+  },
+);
+
 router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -257,7 +386,7 @@ router.get("/requirements", requireAuth, async (req, res) => {
 });
 
 // PUT /photos/requirements — upsert all at once
-router.put("/requirements", requireAuth, denyViewers, async (req, res) => {
+router.put("/requirements", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -267,17 +396,22 @@ router.put("/requirements", requireAuth, denyViewers, async (req, res) => {
     minPhotos: z.number().int().min(1).max(10).default(1),
   })).parse(req.body);
 
-  for (const item of items) {
-    await db.execute(sql`
-      INSERT INTO photo_requirements (client_id, entity_type, required, min_photos)
-      VALUES (${clientId}, ${item.entityType}, ${item.required}, ${item.minPhotos})
-      ON CONFLICT (client_id, entity_type)
-      DO UPDATE SET
-        required   = EXCLUDED.required,
-        min_photos = EXCLUDED.min_photos,
-        updated_at = now()
-    `);
-  }
+  await db.transaction(async (tx) => {
+    for (const entityType of [...new Set(items.map((item) => item.entityType))].sort()) {
+      await lockPhotoRequirement(tx as any, clientId, entityType);
+    }
+    for (const item of items) {
+      await tx.execute(sql`
+        INSERT INTO photo_requirements (client_id, entity_type, required, min_photos)
+        VALUES (${clientId}, ${item.entityType}, ${item.required}, ${item.minPhotos})
+        ON CONFLICT (client_id, entity_type)
+        DO UPDATE SET
+          required   = EXCLUDED.required,
+          min_photos = EXCLUDED.min_photos,
+          updated_at = now()
+      `);
+    }
+  });
 
   res.json({ ok: true });
 });

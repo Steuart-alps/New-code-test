@@ -16,6 +16,7 @@ export const TENANT_ATTACHMENT_REFERENCE_SOURCES = [
   "contractor_certificates.object_path",
   "certificates.file_url",
   "check_photos.object_path",
+  "staged_photo_upload_receipts.object_path",
   "fix_track_issues.media_urls",
   "fix_track_issues.completion_document_path",
   "fix_track_action_tokens.completion_object_path",
@@ -46,6 +47,7 @@ export async function listTenantAttachmentObjectPaths(
         JOIN contractors contractor ON contractor.id = cert.contractor_id
         WHERE contractor.client_id = ${tenantId}
       UNION ALL SELECT object_path FROM check_photos WHERE client_id = ${tenantId}
+      UNION ALL SELECT object_path FROM staged_photo_upload_receipts WHERE client_id = ${tenantId}
       UNION ALL
         SELECT media.object_path
         FROM fix_track_issues issue
@@ -89,6 +91,7 @@ export async function hasTenantAttachmentReference(
         WHERE contractor.client_id = ${tenantId} AND cert.file_url = ${objectPath}
       )
       OR EXISTS (SELECT 1 FROM check_photos WHERE client_id = ${tenantId} AND object_path = ${objectPath})
+      OR EXISTS (SELECT 1 FROM staged_photo_upload_receipts WHERE client_id = ${tenantId} AND object_path = ${objectPath})
       OR EXISTS (
         SELECT 1
         FROM fix_track_issues issue

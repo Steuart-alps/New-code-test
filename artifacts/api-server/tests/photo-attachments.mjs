@@ -91,6 +91,7 @@ try {
       "contractor_certificates.object_path",
       "certificates.file_url",
       "check_photos.object_path",
+      "staged_photo_upload_receipts.object_path",
       "fix_track_issues.media_urls",
       "fix_track_issues.completion_document_path",
       "fix_track_action_tokens.completion_object_path",

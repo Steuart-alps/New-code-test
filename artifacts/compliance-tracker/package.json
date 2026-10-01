@@ -16,6 +16,7 @@
     "test:contractor-approvals-browser-engine": "node tests/contractor-approvals-browser-engine.test.mjs",
     "test:hot-tub-browser": "node tests/hot-tub-browser.test.mjs",
     "test:photo-upload-browser": "node tests/photo-upload-browser.test.mjs",
+    "test:required-track-photos-browser": "node tests/required-track-photos-browser.test.mjs",
     "test:recovery-code-browser": "node tests/recovery-code-browser.test.mjs",
     "test:billing-addon-settings-browser": "node tests/billing-addon-settings-browser.test.mjs",
     "test:hot-tub-pdf": "node tests/hot-tub-pdf-browser.test.mjs",

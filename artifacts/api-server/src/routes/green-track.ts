@@ -4,6 +4,7 @@ import { sql, eq, and } from "drizzle-orm";
 import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
 
 const router = Router();
 
@@ -281,10 +282,11 @@ router.get("/pre-use-checks", async (req, res) => {
 router.post("/pre-use-checks", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
        machineId, checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-       checklistItems, fuelLevel, defectNoted, notes,
+        checklistItems, fuelLevel, defectNoted, notes, photoUploadIds,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
@@ -322,23 +324,33 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
       ? (parsedChecklist.some(item => item.status === "fail") ? "fail" : "pass")
       : ([fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
         .some((value) => value === false) ? "fail" : "pass");
-    const result = await db.execute(sql`
-      INSERT INTO green_pre_use_checks (
-         client_id, machine_id, check_date, operator, operator_roster_id,
-        fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
-         defect_noted, result, notes, checklist_items, fuel_level, submitted_at
-      ) VALUES (
-         ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-        ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
-        ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
-         ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
-         ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
-         ${fuelLevel?.trim() ?? null}, now()
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_pre_use_check",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_pre_use_checks (
+           client_id, machine_id, check_date, operator, operator_roster_id,
+          fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
+           defect_noted, result, notes, checklist_items, fuel_level, submitted_at
+        ) VALUES (
+           ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
+          ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
+          ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
+           ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
+           ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
+           ${fuelLevel?.trim() ?? null}, now()
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create pre-use check" });
   }
 });
@@ -444,9 +456,10 @@ router.get("/service-records", async (req, res) => {
 router.post("/service-records", requireClientAdmin, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
       machineId, serviceDate, serviceType, hoursAtService, nextServiceHours,
-      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes,
+      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes, photoUploadIds,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!serviceDate) return res.status(400).json({ error: "serviceDate is required" });
@@ -458,20 +471,30 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, servicedByRosterId, servicedBy);
     if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-    const result = await db.execute(sql`
-      INSERT INTO green_service_records (
-        client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
-        next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
-      ) VALUES (
-        ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
-        ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
-        ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-        ${costPence ?? null}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_service",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_service_records (
+          client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
+          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
+        ) VALUES (
+          ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
+          ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
+          ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
+          ${costPence ?? null}, ${notes?.trim() ?? null}
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create service record" });
   }
 });
@@ -548,7 +571,8 @@ router.get("/defects", async (req, res) => {
 router.post("/defects", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes, photoUploadIds } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
@@ -559,18 +583,28 @@ router.post("/defects", denyViewers, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, reportedByRosterId, reportedBy);
     if (reportedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-    const result = await db.execute(sql`
-      INSERT INTO green_defects (
-        client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
-      ) VALUES (
-        ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
-        ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
-        ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_defect",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_defects (
+          client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
+        ) VALUES (
+          ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
+          ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
+          ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create defect report" });
   }
 });

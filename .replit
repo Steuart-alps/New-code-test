@@ -110,6 +110,14 @@ args = "billing-addon-catalog"
 task = "workflow.run"
 args = "billing-addon-settings-browser"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "staged-photo-creation"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "required-track-photos-browser"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -370,6 +378,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/compliance-tracker run test:billing-addon-settings-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "staged-photo-creation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:staged-photo-creation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "required-track-photos-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:required-track-photos-browser"
 
 [workflows.workflow.metadata]
 isValidation = true

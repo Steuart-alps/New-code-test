@@ -2624,6 +2624,29 @@ async function migrateCheckPhotos() {
       UNIQUE ("client_id", "entity_type")
     )
   `);
+  // A verified photo may be staged before its parent record exists, but this
+  // short-lived receipt is never itself a draft check. Claiming it and inserting
+  // the real record/photo rows happen together in the creator's transaction.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "staged_photo_upload_receipts" (
+      "id" uuid PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "entity_type" text NOT NULL,
+      "actor_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "object_path" text NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "claimed" boolean NOT NULL DEFAULT false,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT "UQ_staged_photo_receipt_client_path" UNIQUE ("client_id", "object_path")
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_staged_photo_receipts_expiry"
+    ON "staged_photo_upload_receipts" ("expires_at")
+  `);
+  await db.execute(sql`
+    DELETE FROM "staged_photo_upload_receipts" WHERE "expires_at" <= now()
+  `);
 
   // KitchenTrack originally stored diary photos under food_safety_record.
   // Keep existing attachments and manager requirements visible after the UI

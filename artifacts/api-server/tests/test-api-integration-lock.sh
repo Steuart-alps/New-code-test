@@ -66,6 +66,7 @@ const runnerLocked = new Set([
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
+  "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
   "test:track-summary-routing", // unique temp bundle; pure formatting helpers
   "test:billing-addon-activation", // fake Stripe; unique temp bundle
@@ -100,7 +101,7 @@ for (const name of [...directLocked, ...runnerLocked, ...pure]) {
 const pureEntrypoints = new Set([
   "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
   "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
-  "private-file-acl.mjs", "private-file-acl-fixture.mjs",
+  "private-file-acl.mjs", "private-file-acl-fixture.mjs", "staged-photo-creation.mjs",
 ]);
 const entrypoints = require("node:fs").readdirSync("tests").filter((file) => file.endsWith(".mjs"));
 for (const entrypoint of entrypoints) {

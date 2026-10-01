@@ -63,3 +63,5 @@
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
 - [Orphaned workflow children](workflow-orphaned-children.md) — surviving Vite children can force restarted workflows off the registered preview port.
+- [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
+- [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
