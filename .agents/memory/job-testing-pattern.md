@@ -1,6 +1,6 @@
 ---
-name: Testing internal jobs
-description: How to test api-server internal jobs (cron-style, no HTTP route) against the dev DB.
+name: Integration and job testing
+description: Workspace helper bundling, whole-table job fixtures, and HTTP test isolation.
 ---
 
 # Internal-job test pattern
@@ -15,3 +15,11 @@ Internal jobs (e.g. trial reminders) can't be tested via the HTTP-level test sty
 **Why:** `@workspace/db` exports TS source and its dist is absent, so plain Node can't import it; bundling everything breaks on pino workers/native addons.
 
 **How to apply:** copy `tests/trial-reminders.mjs` bundling setup for any new job test; wire it as a `test:*` script plus a console workflow like `tenant-isolation`.
+
+## HTTP fixture isolation
+
+Tests that mutate a database through HTTP and clean up using a direct database connection should own their private local API, with email captured explicitly.
+
+**Why:** a ready HTTP endpoint may use a different database from the cleanup connection, leaving fixtures behind in the wrong environment. `NODE_ENV=test` alone does not suppress real email-provider calls, even for synthetic recipient addresses.
+
+**How to apply:** self-boot the API with the same database environment as the test helpers and explicit email capture; reject arbitrary endpoint reuse. Use unique fixture identities, finally-based cleanup, and verify cleanup after deliberate request failures as well as successful runs.
