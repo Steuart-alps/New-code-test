@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
-import { downloadFile, printHtmlDocument } from "@/lib/download";
+import { downloadFile } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { AuditLog } from "@/components/audit-log";
 import { Button } from "@/components/ui/button";
@@ -1149,7 +1149,7 @@ export default function DocTrackPage() {
       )}
 
       {/* Outstanding acknowledgements overview */}
-      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} />
+      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager} />
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
@@ -1190,56 +1190,44 @@ interface OutstandingDoc {
   acknowledged: { name: string; acknowledgedAt: string | null; signed: boolean }[];
 }
 
-function escapeHtml(s: string | null | undefined) {
-  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function exportAckRegister(docs: OutstandingDoc[]) {
-  const generated = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  const fmtDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Document Acknowledgement Register</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 14px; margin: 22px 0 6px; }
-  .meta { font-size: 11px; color: #555; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 4px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .out { color: #a15c00; }
-  @media print { body { margin: 12mm; } }
-</style></head><body>
-<h1>Document Acknowledgement Register</h1>
-<div class="meta">Generated ${generated} — for audit purposes</div>
-${docs.map(d => `
-<h2>${escapeHtml(d.title)}${d.department ? ` <span class="meta">(${escapeHtml(d.department)})</span>` : ""}</h2>
-<div class="meta">${d.acknowledgedCount}/${d.staffTotal} staff acknowledged</div>
-<table>
-<tr><th>Staff member</th><th>Status</th><th>Date</th><th>Signed</th></tr>
-${d.acknowledged.map(a => `<tr><td>${escapeHtml(a.name)}</td><td>Acknowledged</td><td>${fmtDate(a.acknowledgedAt)}</td><td>${a.signed ? "Yes" : "—"}</td></tr>`).join("")}
-${d.outstanding.map(s => `<tr class="out"><td>${escapeHtml(s.name)}</td><td>Outstanding</td><td></td><td></td></tr>`).join("")}
-</table>`).join("")}
-${docs.length === 0 ? `<p class="meta">No documents require acknowledgement.</p>` : ""}
-</body></html>`;
-  printHtmlDocument(html);
-  return true;
-}
-
-function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClose: () => void; canExport: boolean }) {
+  const { activeClientId } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState<OutstandingDoc[]>([]);
   const [view, setView] = useState<"outstanding" | "summary">("outstanding");
+  const [exporting, setExporting] = useState(false);
+  const clientScope = activeClientId == null ? "" : `?clientId=${encodeURIComponent(activeClientId)}`;
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     setView("outstanding");
-    apiFetch("/doc-track/acknowledgements/outstanding")
+    apiFetch(`/doc-track/acknowledgements/outstanding${clientScope}`)
       .then(r => (r.ok ? r.json() : { documents: [] }))
       .then(d => setDocs(d.documents ?? []))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [open, clientScope]);
+
+  async function handleExportCombinedRegister() {
+    setExporting(true);
+    try {
+      const response = await apiFetch(`/doc-track/acknowledgements/export${clientScope}`);
+      if (!response.ok) throw new Error("Export failed");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "document-acknowledgement-register.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      toast({ title: "PDF export failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const withOutstanding = docs.filter(d => d.outstanding.length > 0);
   const fullyAcknowledged = docs.filter(d => d.outstanding.length === 0);
@@ -1276,10 +1264,13 @@ function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 All docs ({docs.length})
               </button>
             </div>
-            <Button variant="outline" size="sm" className="ml-auto gap-1.5"
-              onClick={() => exportAckRegister(docs)}>
-              <Download className="w-3.5 h-3.5" /> Export PDF
-            </Button>
+            {canExport && (
+              <Button variant="outline" size="sm" className="ml-auto gap-1.5"
+                onClick={handleExportCombinedRegister} disabled={exporting} aria-busy={exporting}>
+                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                {exporting ? "Preparing…" : "Export PDF"}
+              </Button>
+            )}
           </div>
         )}
 

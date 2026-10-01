@@ -6,7 +6,10 @@ import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, de
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
-import { createAcknowledgementRegisterPdf } from "../lib/acknowledgementRegisterPdf";
+import {
+  createAcknowledgementRegisterPdf,
+  createCombinedAcknowledgementRegisterPdf,
+} from "../lib/acknowledgementRegisterPdf";
 import { newBearerToken } from "../lib/bearerTokens";
 
 const router = Router();
@@ -432,26 +435,23 @@ router.get("/acknowledgements/my", requireAuth, async (req, res) => {
 // ── Outstanding acknowledgements overview (managers) ────────────────────────
 // For every document that requires acknowledgement, list the roster staff who
 // have NOT yet acknowledged it.
-router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
-  const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
-
+async function getAcknowledgementOverview(clientId: number, departmentId: number | null) {
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.category, d.department, d.site_id, d.created_at
     FROM doc_track_documents d
-    LEFT JOIN sites s ON s.id = d.site_id
+    LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
-      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
-        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+      ${departmentId !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${departmentId})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY d.title ASC
   `);
   const docs = (docsResult.rows ?? []) as any[];
-  if (docs.length === 0) return res.json({ documents: [] });
+  if (docs.length === 0) return [];
 
   const staffResult = await db.execute(sql`
     SELECT id, name, department, site_id FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
-      ${getActiveDepartmentId(req) !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+      ${departmentId !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY name ASC
   `);
   const staff = (staffResult.rows ?? []) as any[];
@@ -468,21 +468,55 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
       ON tr.id = a.train_track_record_id
      AND tr.client_id = a.client_id
     WHERE a.client_id = ${clientId}
+      AND a.document_id IN (
+        SELECT d.id FROM doc_track_documents d
+        WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      )
   `);
   const ackRows = (acksResult.rows ?? []) as any[];
-  const acked = new Set(
-    ackRows
-      .filter((r) => r.is_current)
-      .map((r) => `${r.document_id}:${r.staff_roster_id}`),
-  );
 
-  const documents = docs.map((d) => {
+  const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  return docs.map((d) => {
     // Documents scoped to a department only need acknowledgement from that department.
     const relevant = staff.filter((s) =>
       (!d.department || s.department === d.department)
       && (d.site_id == null || s.site_id === d.site_id),
     );
-    const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
+    const relevantIds = new Set(relevant.map((s) => Number(s.id)));
+    const currentAcks = ackRows.filter((r) =>
+      Number(r.document_id) === Number(d.id)
+      && r.is_current
+      && r.staff_roster_id !== null
+      && relevantIds.has(Number(r.staff_roster_id)),
+    );
+    const currentByRosterId = new Map(
+      currentAcks.map((r) => [Number(r.staff_roster_id), r]),
+    );
+    const outstanding = relevant.filter((s) => !currentByRosterId.has(Number(s.id)));
+    const acknowledgedDates = currentAcks
+      .filter((r) => r.acknowledged_at)
+      .map((r) => new Date(r.acknowledged_at))
+      .sort((a, b) => a.getTime() - b.getTime());
+    const dateRange = acknowledgedDates.length
+      ? `${formatDate(acknowledgedDates[0])} to ${formatDate(acknowledgedDates[acknowledgedDates.length - 1])}`
+      : "No acknowledgements recorded";
+    const acknowledgedRows = relevant
+      .filter((s) => currentByRosterId.has(Number(s.id)))
+      .map((s) => {
+        const ack = currentByRosterId.get(Number(s.id));
+        return {
+          staffName: String(ack.staff_name),
+          acknowledgedAt: ack.acknowledged_at ? formatDate(new Date(ack.acknowledged_at)) : "",
+          status: "Acknowledged" as const,
+        };
+      });
+    const outstandingRows = outstanding.map((s) => ({
+      staffName: String(s.name),
+      acknowledgedAt: "",
+      status: "Outstanding" as const,
+    }));
     return {
       id: d.id,
       title: d.title,
@@ -491,17 +525,48 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
       staffTotal: relevant.length,
       acknowledgedCount: relevant.length - outstanding.length,
       outstanding: outstanding.map((s) => ({ id: s.id, name: s.name, department: s.department })),
-      acknowledged: ackRows
-        .filter((r) =>
-          r.document_id === d.id
-          && r.is_current
-          && relevant.some((s) => s.id === r.staff_roster_id),
-        )
+      acknowledged: currentAcks
         .map((r) => ({ name: r.staff_name, acknowledgedAt: r.acknowledged_at, signed: !!r.signature })),
+      dateRange,
+      registerRows: [...acknowledgedRows, ...outstandingRows].map((row) => ({
+        ...row,
+        signature: "",
+      })),
     };
   });
+}
 
-  res.json({ documents });
+router.get("/acknowledgements/export", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  const pdf = createCombinedAcknowledgementRegisterPdf({
+    generatedAt: formatDate(new Date()),
+    sections: documents.map((document) => ({
+      title: document.title,
+      category: String(document.category).replace(/_/g, " "),
+      dateRange: document.dateRange,
+      rows: document.registerRows,
+    })),
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="document-acknowledgement-register.pdf"');
+  res.setHeader("Content-Length", pdf.length);
+  res.send(pdf);
+});
+
+router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  res.json({
+    documents: documents.map(({ dateRange: _dateRange, registerRows: _registerRows, ...document }) => document),
+  });
 });
 
 // ── Record acknowledgements ───────────────────────────────────────────────────

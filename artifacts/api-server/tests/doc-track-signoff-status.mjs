@@ -423,6 +423,39 @@ async function main() {
   const pdfText = managerExport.bytes?.toString() ?? "";
   check("PDF contains document and acknowledged staff", pdfText.includes("Annual safety policy") && pdfText.includes("Alex Staff"));
 
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement,department)
+     VALUES (${Number(clientId)},${Number(primarySite.data?.id)},'Combined register outstanding fixture','procedure','combined.pdf','application/pdf','fixtures/combined-register.pdf',true,false,'Kitchen')`,
+  ]);
+  const combinedExport = await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`);
+  check("manager can export a combined acknowledgement PDF",
+    combinedExport.status === 200 && combinedExport.contentType === "application/pdf"
+      && combinedExport.disposition?.includes('filename="document-acknowledgement-register.pdf"')
+      && combinedExport.bytes?.subarray(0, 8).toString() === "%PDF-1.4");
+  const combinedPdfText = combinedExport.bytes?.toString() ?? "";
+  check("combined PDF contains separate sections for each required document",
+    combinedPdfText.includes("Annual safety policy")
+      && combinedPdfText.includes("Staff signoff fixture")
+      && combinedPdfText.includes("Combined register outstanding fixture"));
+  check("each register section includes its category and acknowledgement date range",
+    combinedPdfText.includes("Category: policy")
+      && combinedPdfText.includes("Category: procedure")
+      && combinedPdfText.includes("Acknowledgement date range:")
+      && combinedPdfText.includes("No acknowledgements recorded"));
+  const outstandingSectionStart = combinedPdfText.indexOf("Combined register outstanding fixture");
+  const nextSectionStart = combinedPdfText.indexOf("Section ", outstandingSectionStart + 1);
+  const outstandingSection = combinedPdfText.slice(
+    outstandingSectionStart,
+    nextSectionStart === -1 ? undefined : nextSectionStart,
+  );
+  check("combined register separates acknowledged and outstanding staff per document",
+    outstandingSection.includes("Alex Staff") && outstandingSection.includes("Outstanding")
+      && !outstandingSection.includes("Other Site Staff")
+      && !outstandingSection.includes("Other Department Staff")
+      && !outstandingSection.includes("Former Staff"));
+
   const exportStaffEmail = `doc-export-staff-${Date.now()}@test.local`;
   const viewerEmail = `doc-export-viewer-${Date.now()}@test.local`;
   requireSuccess("create staff user", await request("POST", "/users", {
@@ -436,11 +469,15 @@ async function main() {
   requireSuccess("log in as staff", await request("POST", "/auth/login", { email: exportStaffEmail, password: "password-123" }), 200);
   check("staff cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+  check("staff cannot export the combined acknowledgement PDF",
+    (await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`)).status === 403);
 
   cookie = "";
   requireSuccess("log in as viewer", await request("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), 200);
   check("viewer cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+  check("viewer cannot export the combined acknowledgement PDF",
+    (await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`)).status === 403);
   check("viewer cannot create TrainTrack records",
     (await request("POST", "/train-track/records", {
       recordType: "internal", staffName: "Viewer", trainingType: "Test",
