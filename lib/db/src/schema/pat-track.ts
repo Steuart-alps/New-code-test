@@ -41,7 +41,16 @@ export const patAppliancesTable = pgTable("pat_appliances", {
 export const patTestsTable = pgTable("pat_tests", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
-  applianceId: integer("appliance_id").notNull().references(() => patAppliancesTable.id, { onDelete: "cascade" }),
+  applianceId: integer("appliance_id").notNull().references(() => patAppliancesTable.id, { onDelete: "no action" }),
+  // Historical identity/location is intentionally not a live foreign key.
+  siteIdSnapshot: integer("site_id_snapshot"),
+  siteNameSnapshot: text("site_name_snapshot"),
+  departmentIdSnapshot: integer("department_id_snapshot"),
+  locationSnapshot: text("location_snapshot"),
+  applianceNameSnapshot: text("appliance_name_snapshot"),
+  applianceTypeSnapshot: text("appliance_type_snapshot"),
+  assetTagSnapshot: text("asset_tag_snapshot"),
+  snapshotSource: text("snapshot_source").notNull().default("recorded"),
   testDate: date("test_date").notNull(),
   result: text("result").notNull().default("pass"),      // pass | fail
   nextTestDate: date("next_test_date"),

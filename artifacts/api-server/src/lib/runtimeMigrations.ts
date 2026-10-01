@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
 import { migrateAuditLog } from "./auditLogMigration";
+import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
 import {
   digestBearerToken,
   encryptTokenPayload,
@@ -3289,6 +3290,7 @@ async function migratePATtrack() {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_client" ON "pat_tests" ("client_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_tests_appliance" ON "pat_tests" ("appliance_id")`);
+  await migrateLegacyPatHistory();
   // Certificate-level PAT register. These are additive and deliberately do not
   // alter the original appliance/test tables used by the existing register.
   await db.execute(sql`

@@ -2,8 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { patAppliancesTable, patTestsTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
+import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 
 const router = Router();
 
@@ -48,6 +49,12 @@ function csvCell(value: string): string {
   return `"${safeValue.replace(/"/g, "\"\"")}"`;
 }
 
+async function lockLegacyAppliance(executor: { execute(query: SQL): Promise<any> }, clientId: number, id: number) {
+  return resultRows(await executor.execute(sql`
+    SELECT site_id, active FROM pat_appliances WHERE id=${id} AND client_id=${clientId} FOR UPDATE
+  `))[0] as { site_id: number | null; active: boolean } | undefined;
+}
+
 async function ownedSite(clientId: number, siteId: number | null | undefined) {
   if (siteId == null) return true;
   const result = await db.execute(sql`SELECT id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
@@ -72,13 +79,20 @@ router.get("/appliances", requireAuth, async (req, res) => {
       t.test_date       AS last_test_date,
       t.result          AS last_result,
       t.next_test_date  AS next_test_date,
-      t.tested_by       AS last_tested_by
+       t.tested_by       AS last_tested_by,
+       t.site_id_snapshot AS last_test_site_id,
+       t.site_name_snapshot AS last_test_site_name,
+       t.location_snapshot AS last_test_location,
+       t.snapshot_source AS last_test_location_source
     FROM pat_appliances a
     LEFT JOIN LATERAL (
-      SELECT test_date, result, next_test_date, tested_by
-      FROM pat_tests
-      WHERE appliance_id = a.id AND client_id = a.client_id
-      ORDER BY test_date DESC LIMIT 1
+       SELECT test_date, result, next_test_date, tested_by,
+         site_id_snapshot, site_name_snapshot, location_snapshot, snapshot_source
+       FROM pat_tests t
+       LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+       WHERE t.appliance_id = a.id AND t.client_id = a.client_id
+       ${historicalTestDepartmentScope(departmentId)}
+       ORDER BY t.test_date DESC, t.created_at DESC LIMIT 1
     ) t ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId}
@@ -116,13 +130,17 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
       latest.test_date AS last_test_date,
       latest.result AS last_result,
       latest.tested_by,
-      latest.next_test_date
+       latest.next_test_date,
+       latest.site_name_snapshot, latest.location_snapshot, latest.snapshot_source
     FROM pat_appliances a
     LEFT JOIN LATERAL (
-      SELECT test_date, result, tested_by, next_test_date
-      FROM pat_tests
-      WHERE appliance_id=a.id AND client_id=a.client_id
-      ORDER BY test_date DESC, created_at DESC
+       SELECT test_date, result, tested_by, next_test_date,
+         site_name_snapshot, location_snapshot, snapshot_source
+       FROM pat_tests t
+       LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+       WHERE t.appliance_id=a.id AND t.client_id=a.client_id
+       ${historicalTestDepartmentScope(departmentId)}
+       ORDER BY t.test_date DESC, t.created_at DESC
       LIMIT 1
     ) latest ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
@@ -133,7 +151,7 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
     ORDER BY a.name ASC, a.id ASC
   `);
 
-  const headings = ["Appliance name", "Asset tag", "Type", "Location", "Last test date", "Result", "Tested by", "Next due date", "Status"];
+   const headings = ["Appliance name", "Asset tag", "Type", "Location", "Last test date", "Result", "Tested by", "Next due date", "Status", "Last test site", "Last test location", "Test location source"];
   const rows = resultRows(result).map((row: any) => {
     const nextDue = row.next_test_date ? String(row.next_test_date).slice(0, 10) : "";
     const testResult = row.last_result === "pass" ? "Pass" : row.last_result === "fail" ? "Fail" : "";
@@ -149,7 +167,8 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
     return [
       row.name ?? "", row.asset_tag ?? "", row.appliance_type ?? "", row.location ?? "",
       row.last_test_date ? String(row.last_test_date).slice(0, 10) : "", testResult,
-      row.tested_by ?? "", nextDue, registerStatus,
+       row.tested_by ?? "", nextDue, registerStatus,
+       row.site_name_snapshot ?? "", row.location_snapshot ?? "", row.snapshot_source ?? "",
     ].map((value) => csvCell(String(value))).join(",");
   });
   const scope = siteId !== undefined ? `site-${siteId}` : "all-sites";
@@ -196,7 +215,13 @@ router.put("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const targetAccess = await siteAccess(clientId, d.siteId, departmentId);
   if (targetAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (targetAccess === "missing") return res.status(400).json({ error: "Invalid siteId for this client" });
-  const [row] = await db.update(patAppliancesTable)
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, id);
+    if (!locked) return { status: 404, data: { error: "Not found" } };
+    if (await siteAccess(clientId, locked.site_id, departmentId) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    const [row] = await tx.update(patAppliancesTable)
     .set({
       siteId:        d.siteId ?? null,
       name:          d.name,
@@ -209,8 +234,9 @@ router.put("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
     })
     .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)))
     .returning();
-  if (!row) return res.status(404).json({ error: "Not found" });
-  res.json(row);
+    return { status: 200, data: row };
+  });
+  res.status(response.status).json(response.data);
 });
 
 router.delete("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
@@ -221,9 +247,17 @@ router.delete("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const access = await applianceAccess(clientId, id, getActiveDepartmentId(req));
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (access === "missing") return res.status(404).json({ error: "Not found" });
-  await db.delete(patAppliancesTable)
-    .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)));
-  res.json({ ok: true });
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, id);
+    if (!locked) return { status: 404, data: { error: "Not found" } };
+    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    await tx.update(patAppliancesTable).set({ active: false, updatedAt: new Date() })
+      .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)));
+    return { status: 200, data: { ok: true, archived: true, message: "Appliance retired; test history retained." } };
+  });
+  res.status(response.status).json(response.data);
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -235,24 +269,39 @@ router.get("/tests", requireAuth, async (req, res) => {
   const applianceId = req.query.applianceId ? parseInt(req.query.applianceId as string, 10) : undefined;
   if (req.query.applianceId && isNaN(applianceId!)) return res.status(400).json({ error: "Invalid applianceId" });
   const departmentId = getActiveDepartmentId(req);
+  const siteId = await checkedSiteQuery(req, clientId, departmentId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid siteId for this client" });
+  if (siteId === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceId) {
     const access = await applianceAccess(clientId, applianceId, departmentId);
-    if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
     if (access === "missing") return res.status(400).json({ error: "Appliance not found" });
+    if (access === "forbidden") {
+      // A relocated appliance can still have tests owned by the original scope.
+      const history = resultRows(await db.execute(sql`
+        SELECT t.id FROM pat_tests t
+        JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+        LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+        WHERE t.client_id=${clientId} AND t.appliance_id=${applianceId}
+        ${historicalTestDepartmentScope(departmentId)}
+        ${siteId ? sql`AND t.site_id_snapshot=${siteId}` : sql``} LIMIT 1
+      `));
+      if (!history.length) return res.status(403).json({ error: "Forbidden" });
+    }
   }
 
   const rows = await db.execute(sql`
     SELECT
       t.*,
-      a.name AS appliance_name,
-      a.appliance_type,
-      a.asset_tag
+       t.appliance_name_snapshot AS appliance_name,
+       t.appliance_type_snapshot AS appliance_type,
+       t.asset_tag_snapshot AS asset_tag
     FROM pat_tests t
-    JOIN pat_appliances a ON a.id = t.appliance_id
-    LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
+     JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+     LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
     WHERE t.client_id = ${clientId}
-    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+     ${historicalTestDepartmentScope(departmentId)}
     ${applianceId ? sql`AND t.appliance_id = ${applianceId}` : sql``}
+     ${siteId ? sql`AND t.site_id_snapshot=${siteId}` : sql``}
     ORDER BY t.test_date DESC, t.created_at DESC
     LIMIT 500
   `);
@@ -269,7 +318,14 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const applianceAccessResult = await applianceAccess(clientId, d.applianceId, getActiveDepartmentId(req));
   if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
-  const [row] = await db.insert(patTestsTable).values({
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
+    if (!locked) return { status: 400, data: { error: "Appliance not found" } };
+    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
+    const [row] = await tx.insert(patTestsTable).values({
     clientId,
     applianceId:         d.applianceId,
     testDate:            d.testDate,
@@ -283,7 +339,9 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
     notes:               d.notes ?? null,
     createdBy:            req.currentUser!.id,
   }).returning();
-  res.status(201).json(row);
+    return { status: 201, data: row };
+  });
+  res.status(response.status).json(response.data);
 });
 
 router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
@@ -298,9 +356,13 @@ router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const currentAccess = await testAccess(clientId, id, departmentId);
   if (currentAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (currentAccess === "missing") return res.status(404).json({ error: "Not found" });
-  const applianceAccessResult = await applianceAccess(clientId, d.applianceId, departmentId);
-  if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
-  if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
+  const existing = resultRows(await db.execute(sql`
+    SELECT appliance_id FROM pat_tests WHERE id=${id} AND client_id=${clientId}
+  `))[0];
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (existing.appliance_id !== d.applianceId) {
+    return res.status(409).json({ error: "Historical PAT tests cannot be reassigned to another appliance" });
+  }
   const [row] = await db.update(patTestsTable)
     .set({
       applianceId:         d.applianceId,
@@ -329,9 +391,7 @@ router.delete("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const access = await testAccess(clientId, id, getActiveDepartmentId(req));
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (access === "missing") return res.status(404).json({ error: "Not found" });
-  await db.delete(patTestsTable)
-    .where(and(eq(patTestsTable.id, id), eq(patTestsTable.clientId, clientId)));
-  res.json({ ok: true });
+  res.status(405).json({ error: "PAT tests are retained as compliance evidence and cannot be deleted" });
 });
 
 // ── Status summary ────────────────────────────────────────────────────────────
@@ -354,9 +414,11 @@ router.get("/status", requireAuth, async (req, res) => {
     FROM pat_appliances a
     LEFT JOIN LATERAL (
       SELECT next_test_date, result
-      FROM pat_tests
-      WHERE appliance_id = a.id AND client_id = a.client_id
-      ORDER BY test_date DESC LIMIT 1
+      FROM pat_tests t
+      LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+      WHERE t.appliance_id = a.id AND t.client_id = a.client_id
+      ${historicalTestDepartmentScope(departmentId)}
+      ORDER BY t.test_date DESC, t.created_at DESC LIMIT 1
     ) last ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId} AND a.active = true
@@ -551,10 +613,15 @@ async function applianceAccess(clientId: number, applianceId: number, department
 }
 async function testAccess(clientId: number, testId: number, departmentId: number | null): Promise<AccessResult> {
   const row = resultRows(await db.execute(sql`
-    SELECT a.site_id FROM pat_tests t JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+    SELECT t.site_id_snapshot, t.department_id_snapshot, t.snapshot_source
+    FROM pat_tests t JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
     WHERE t.id=${testId} AND t.client_id=${clientId}
-  `))[0] as { site_id: number | null } | undefined;
-  return row ? siteAccess(clientId, row.site_id, departmentId) : "missing";
+  `))[0] as { site_id_snapshot: number | null; department_id_snapshot: number | null; snapshot_source: string } | undefined;
+  if (!row) return "missing";
+  if (departmentId !== null && (row.snapshot_source === "legacy_unavailable"
+    || (row.department_id_snapshot !== null && row.department_id_snapshot !== departmentId))) return "forbidden";
+  const access = await siteAccess(clientId, row.site_id_snapshot, departmentId);
+  return access === "missing" ? "allowed" : access;
 }
 
 async function checkedSiteQuery(req: any, clientId: number, departmentId: number | null) {

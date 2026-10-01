@@ -77,20 +77,20 @@ async function main() {
     documentLink: "data:text/html,<script>alert(1)</script>",
   }), [400]);
   const betaReplacement = await admin("POST", "/pat-track/replacements", {
-    roomId: betaRoom.data.id, applianceName: "Kettle", replacedOn: "2025-01-11",
+    roomId: betaRoom.data.id, applianceName: "Kettle", replacedOn: fixtureDate,
   });
   const betaFailure = await admin("POST", "/pat-track/failures", {
     certificateId: betaCertificate.data.id, roomId: betaRoom.data.id, applianceName: "Lamp",
   });
   // Legacy appliance/test register records must obey exactly the same boundary.
   const alphaAppliance = await admin("POST", "/pat-track/appliances", {
-    siteId: alphaSite.data.id, name: "Alpha kettle",
+    siteId: alphaSite.data.id, name: "Alpha kettle", location: "Original alpha kitchen", assetTag: "ALPHA-OLD",
   });
   const betaAppliance = await admin("POST", "/pat-track/appliances", {
     siteId: betaSite.data.id, name: "Beta kettle",
   });
   const alphaTest = await admin("POST", "/pat-track/tests", {
-    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass",
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass", nextTestDate: "2099-12-31",
   });
   const betaTest = await admin("POST", "/pat-track/tests", {
     applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
@@ -157,7 +157,7 @@ async function main() {
     applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
   }), [403]);
   expectStatus("cannot link replacement to beta room", await staff("POST", "/pat-track/replacements", {
-    roomId: betaRoom.data.id, applianceName: "Forbidden", replacedOn: "2025-01-12",
+    roomId: betaRoom.data.id, applianceName: "Forbidden", replacedOn: fixtureDate,
   }), [403]);
   expectStatus("cannot link certificate to beta room", await staff("POST", "/pat-track/certificates",
     certificateBody(betaSite.data.id, betaRoom.data.id, "FORBIDDEN-CERT")), [403]);
@@ -179,7 +179,7 @@ async function main() {
   expectStatus("cannot update beta certificate", await staff("PUT", `/pat-track/certificates/${betaCertificate.data.id}`,
     certificateBody(betaSite.data.id, betaRoom.data.id, "CHANGED")), [403]);
   expectStatus("cannot update beta replacement", await staff("PUT", `/pat-track/replacements/${betaReplacement.data.id}`, {
-    roomId: betaRoom.data.id, applianceName: "Changed", replacedOn: "2025-01-12",
+    roomId: betaRoom.data.id, applianceName: "Changed", replacedOn: fixtureDate,
   }), [403]);
   expectStatus("cannot update beta failure", await staff("PUT", `/pat-track/failures/${betaFailure.data.id}`, {
     certificateId: betaCertificate.data.id, roomId: betaRoom.data.id, applianceName: "Changed",
@@ -228,6 +228,156 @@ async function main() {
   expectStatus("history blocks room delete", await admin("DELETE", `/pat-track/rooms/${alphaRoom.data.id}`), [409]);
   expectStatus("certificate delete is retained evidence", await admin("DELETE", `/pat-track/certificates/${alphaCertificate.data.id}`), [405]);
 
+  // Legacy evidence retains identity/location, independently of the live asset.
+  check("new legacy test records its site", alphaTest.data?.siteIdSnapshot === alphaSite.data.id);
+  check("new legacy test records its department", alphaTest.data?.departmentIdSnapshot === alphaDept.data.id);
+  check("new legacy test records its location", alphaTest.data?.locationSnapshot === "Original alpha kitchen");
+  check("new snapshots are labelled recorded", alphaTest.data?.snapshotSource === "recorded");
+  expectStatus("test deletion is retained evidence", await admin("DELETE", `/pat-track/tests/${alphaTest.data.id}`), [405]);
+  expectStatus("cannot reassign test to another appliance", await admin("PUT", `/pat-track/tests/${alphaTest.data.id}`, {
+    applianceId: betaAppliance.data.id, testDate: fixtureDate, result: "pass",
+  }), [409]);
+  expectStatus("relocate and rename appliance", await admin("PUT", `/pat-track/appliances/${alphaAppliance.data.id}`, {
+    siteId: betaSite.data.id, name: "Renamed beta kettle", location: "New beta kitchen", assetTag: "BETA-NEW",
+  }), [200]);
+  const oldHistory = await staff("GET", `/pat-track/tests?applianceId=${alphaAppliance.data.id}&siteId=${alphaSite.data.id}`);
+  expectStatus("original department can still read its test after relocation", oldHistory, [200]);
+  const retained = oldHistory.data?.find(row => row.id === alphaTest.data.id);
+  check("history retains original site", retained?.site_id_snapshot === alphaSite.data.id);
+  check("history retains original site name", retained?.site_name_snapshot === alphaSite.data.name);
+  check("history retains original location", retained?.location_snapshot === "Original alpha kitchen");
+  check("history retains original appliance identity", retained?.appliance_name === "Alpha kettle" && retained?.asset_tag === "ALPHA-OLD");
+  const editedHistory = await staff("PUT", `/pat-track/tests/${alphaTest.data.id}`, {
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass", notes: "Correction", nextTestDate: "2099-12-31",
+    locationSnapshot: "Spoofed", siteIdSnapshot: betaSite.data.id,
+  });
+  expectStatus("original department can correct retained test", editedHistory, [200]);
+  check("editing test cannot rewrite historical location", editedHistory.data?.locationSnapshot === "Original alpha kitchen"
+    && editedHistory.data?.siteIdSnapshot === alphaSite.data.id);
+  const betaStaffEmail = `pat-beta-staff-${stamp}@test.local`;
+  expectStatus("create beta staff", await admin("POST", "/users", {
+    name: "PAT Beta staff", email: betaStaffEmail, password: "password-beta",
+    role: "client_staff", clientId, departmentId: betaDept.data.id,
+  }), [200, 201]);
+  const betaStaff = session();
+  expectStatus("login beta staff", await betaStaff("POST", "/auth/login", { email: betaStaffEmail, password: "password-beta" }), [200]);
+  const movedHistory = await betaStaff("GET", `/pat-track/tests?applianceId=${alphaAppliance.data.id}`);
+  expectStatus("destination department can request appliance history", movedHistory, [200]);
+  check("destination department cannot read original test", !movedHistory.data?.some(row => row.id === alphaTest.data.id));
+  const destinationAppliances = await betaStaff("GET", "/pat-track/appliances");
+  const movedAsset = destinationAppliances.data?.find(row => row.id === alphaAppliance.data.id);
+  check("latest-test projection cannot expose another department's location",
+    movedAsset?.last_test_date === null && movedAsset?.last_test_location === null);
+  const destinationDashboard = await betaStaff("GET", `/dashboard/summary?siteId=${betaSite.data.id}`);
+  expectStatus("destination dashboard", destinationDashboard, [200]);
+  const destinationPat = destinationDashboard.data?.tracks?.find(track => track.trackId === "pat");
+  check("dashboard hides old department test-derived due status",
+    destinationPat?.enabled === true && destinationPat?.badge === "2 appliances never tested", JSON.stringify(destinationPat));
+  const register = await fetch(`${BASE}/pat-track/register`, { headers: { cookie: admin.cookie() } });
+  expectStatus("download current register with historical location", register, [200]);
+  const registerCsv = await register.text();
+  check("register distinguishes current and last-test location",
+    registerCsv.includes('"Last test location"') && registerCsv.includes('"New beta kitchen"')
+    && registerCsv.includes('"Original alpha kitchen"'));
+  expectStatus("destination department cannot edit original test", await betaStaff("PUT", `/pat-track/tests/${alphaTest.data.id}`, {
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "fail",
+  }), [403]);
+  expectStatus("destination department cannot delete original test", await betaStaff("DELETE", `/pat-track/tests/${alphaTest.data.id}`), [403]);
+  const newTest = await betaStaff("POST", "/pat-track/tests", {
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass",
+  });
+  expectStatus("new destination test", newTest, [201]);
+  check("new destination test captures new location", newTest.data?.siteIdSnapshot === betaSite.data.id
+    && newTest.data?.locationSnapshot === "New beta kitchen");
+  const alphaHistory = await staff("GET", "/pat-track/tests");
+  check("source department cannot see destination test", !alphaHistory.data?.some(row => row.id === newTest.data.id));
+  const retired = await admin("DELETE", `/pat-track/appliances/${alphaAppliance.data.id}`);
+  expectStatus("appliance deletion retires rather than erases", retired, [200]);
+  check("retirement response is explicit", retired.data?.archived === true);
+  const archived = await admin("GET", "/pat-track/appliances");
+  check("appliance retained inactive", archived.data?.some(row => row.id === alphaAppliance.data.id && row.active === false));
+  const afterRetirement = await admin("GET", `/pat-track/tests?applianceId=${alphaAppliance.data.id}`);
+  check("all tests survive appliance retirement", [alphaTest.data.id, newTest.data.id].every(id => afterRetirement.data?.some(row => row.id === id)));
+  expectStatus("retired appliance rejects new tests", await betaStaff("POST", "/pat-track/tests", {
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass",
+  }), [409]);
+  const retirementDashboard = await betaStaff("GET", `/dashboard/summary?siteId=${betaSite.data.id}`);
+  const retirementPat = retirementDashboard.data?.tracks?.find(track => track.trackId === "pat");
+  check("retired appliance no longer generates dashboard alerts", retirementPat?.badge === "1 appliance never tested", JSON.stringify(retirementPat));
+  const siteReport = await admin("GET", `/reports/compliance?from=${fixtureDate}&to=${fixtureDate}&siteId=${alphaSite.data.id}`);
+  expectStatus("historic site compliance report", siteReport, [200]);
+  check("site report retains original PAT activity after move and retirement",
+    siteReport.data?.moduleActivity?.find(row => row.module === "PATtrack" && row.siteId === alphaSite.data.id)?.count === 1);
+  const allSitesReport = await admin("GET", `/reports/compliance?from=${fixtureDate}&to=${fixtureDate}`);
+  expectStatus("all-site compliance report", allSitesReport, [200]);
+  check("unscoped report retains original site attribution",
+    allSitesReport.data?.moduleActivity?.find(row => row.module === "PATtrack" && row.siteId === alphaSite.data.id)?.count === 1);
+  const nullLocationAppliance = await admin("POST", "/pat-track/appliances", {
+    siteId: alphaSite.data.id, name: "No location supplied",
+  });
+  const nullLocationTest = await staff("POST", "/pat-track/tests", {
+    applianceId: nullLocationAppliance.data.id, testDate: fixtureDate, result: "pass",
+  });
+  expectStatus("capture explicit missing location", nullLocationTest, [201]);
+  await admin("PUT", `/pat-track/appliances/${nullLocationAppliance.data.id}`, {
+    siteId: alphaSite.data.id, name: "No location supplied", location: "Later location",
+  });
+  const nullHistory = await staff("GET", `/pat-track/tests?applianceId=${nullLocationAppliance.data.id}`);
+  check("missing historic location cannot become later location", nullHistory.data?.[0]?.location_snapshot === null);
+  await admin("PUT", `/pat-track/appliances/${nullLocationAppliance.data.id}`, {
+    siteId: betaSite.data.id, name: "No location supplied", location: "Later location",
+  });
+  const departmentReport = await staff("GET", `/reports/compliance?from=${fixtureDate}&to=${fixtureDate}&siteId=${alphaSite.data.id}`);
+  expectStatus("original department compliance report", departmentReport, [200]);
+  check("department report retains original authored test after relocation",
+    departmentReport.data?.moduleActivity?.find(row => row.module === "PATtrack" && row.siteId === alphaSite.data.id)?.count === 1);
+  const previousMonth = new Date(); previousMonth.setUTCDate(1); previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1); previousMonth.setUTCDate(15);
+  const previousTestDate = previousMonth.toISOString().slice(0, 10);
+  const previousAppliance = await admin("POST", "/pat-track/appliances", {
+    siteId: alphaSite.data.id, name: "Previous-month appliance", location: "Previous-month location",
+  });
+  expectStatus("admin records previous-month evidence", await admin("POST", "/pat-track/tests", {
+    applianceId: previousAppliance.data.id, testDate: previousTestDate, result: "pass",
+  }), [201]);
+  await admin("PUT", `/pat-track/appliances/${previousAppliance.data.id}`, {
+    siteId: betaSite.data.id, name: "Previous-month appliance", location: "Moved",
+  });
+  await admin("DELETE", `/pat-track/appliances/${previousAppliance.data.id}`);
+  const trend = await admin("GET", "/reports/compliance-trend?months=2");
+  expectStatus("historic monthly compliance trend", trend, [200]);
+  check("monthly trend keeps historic PAT activity at original site",
+    trend.data?.series?.find(series => series.siteId === alphaSite.data.id)?.data?.find(point => point.month === previousTestDate.slice(0, 7))?.moduleRecordCount === 1);
+  check("monthly trend does not relocate old activity to destination",
+    trend.data?.series?.find(series => series.siteId === betaSite.data.id)?.data?.find(point => point.month === previousTestDate.slice(0, 7))?.moduleRecordCount === 0);
+  const raceAppliance = await admin("POST", "/pat-track/appliances", {
+    siteId: alphaSite.data.id, name: "Concurrent move fixture", location: "Before move",
+  });
+  const [raceTest, raceMove] = await Promise.all([
+    staff("POST", "/pat-track/tests", { applianceId: raceAppliance.data.id, testDate: fixtureDate, result: "pass" }),
+    admin("PUT", `/pat-track/appliances/${raceAppliance.data.id}`, {
+      siteId: betaSite.data.id, name: "Concurrent move fixture", location: "After move",
+    }),
+  ]);
+  expectStatus("concurrent relocation completes", raceMove, [200]);
+  expectStatus("concurrent test either records authorized location or denies", raceTest, [201, 403]);
+  check("concurrent move cannot record destination evidence for source staff",
+    raceTest.status !== 201 || (raceTest.data?.siteIdSnapshot === alphaSite.data.id
+      && raceTest.data?.locationSnapshot === "Before move"));
+  const foreign = session();
+  const foreignEmail = `pat-foreign-${stamp}@test.local`;
+  const foreignRegistration = await foreign("POST", "/auth/register", {
+    name: "Foreign PAT client", email: foreignEmail, password: "password-foreign",
+  });
+  expectStatus("create foreign tenant", foreignRegistration, [200, 201]);
+  expectStatus("verify foreign tenant", await foreign("GET", `/auth/verify-email?token=${encodeURIComponent(foreignRegistration.data.verificationToken)}`), [200]);
+  expectStatus("login foreign tenant", await foreign("POST", "/auth/login", { email: foreignEmail, password: "password-foreign" }), [200]);
+  expectStatus("foreign tenant cannot read history by appliance", await foreign("GET", `/pat-track/tests?applianceId=${alphaAppliance.data.id}`), [400]);
+  expectStatus("foreign tenant cannot retire appliance", await foreign("DELETE", `/pat-track/appliances/${alphaAppliance.data.id}`), [404]);
+  expectStatus("foreign tenant cannot delete retained test", await foreign("DELETE", `/pat-track/tests/${alphaTest.data.id}`), [404]);
+  expectStatus("foreign tenant cannot edit retained test", await foreign("PUT", `/pat-track/tests/${alphaTest.data.id}`, {
+    applianceId: alphaAppliance.data.id, testDate: fixtureDate, result: "pass",
+  }), [404]);
+
   // Use explicit due dates so the boundary is independent of the server clock:
   // only dates before CURRENT_DATE are overdue; inactive rooms are excluded.
   const iso = (d) => d.toISOString().slice(0, 10);
@@ -263,11 +413,17 @@ async function main() {
     await writeFile(exportPath, Buffer.from(await exportResponse.arrayBuffer()));
     const entries = execFileSync("unzip", ["-Z1", exportPath], { encoding: "utf8" }).split("\n");
     for (const filename of [
+      "pat-track/tests.csv",
       "pat-track/equipment-templates.csv", "pat-track/equipment-template-items.csv",
       "pat-track/rooms.csv", "pat-track/certificates.csv",
       "pat-track/certificate-rooms.csv", "pat-track/replacements.csv",
       "pat-track/failures.csv",
     ]) check(`export includes ${filename}`, entries.includes(filename));
+    const legacyHistoryCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/tests.csv"], { encoding: "utf8" });
+    check("client export preserves snapshot columns", legacyHistoryCsv.includes("siteIdSnapshot")
+      && legacyHistoryCsv.includes("locationSnapshot") && legacyHistoryCsv.includes("snapshotSource"));
+    check("client export retains retired appliance's original evidence",
+      legacyHistoryCsv.includes("Original alpha kitchen") && legacyHistoryCsv.includes("Alpha kettle"));
   } finally {
     await rm(exportPath, { force: true });
   }

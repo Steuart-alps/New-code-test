@@ -5,6 +5,7 @@ import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/r
 import { z } from "zod";
 import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
 import { getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
+import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -432,11 +433,12 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
           WHERE client_id = ${clientId} AND session_date    BETWEEN ${from} AND ${to}
             AND site_id IS NOT NULL
         UNION ALL
-        SELECT 'PATtrack', a.site_id
+        SELECT 'PATtrack', t.site_id_snapshot
           FROM pat_tests t
-          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = ${clientId}
-          WHERE t.test_date BETWEEN ${from} AND ${to}
-            AND a.site_id IS NOT NULL
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
       ) sub
       ${moduleWhereClause}
       GROUP BY module, site_id
@@ -576,9 +578,13 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
           WHERE client_id = ${clientId} AND session_date BETWEEN ${from} AND ${to}
             AND site_id IS NOT NULL
         UNION ALL
-        SELECT t.test_date, a.site_id FROM pat_tests t
-          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = ${clientId}
-          WHERE t.test_date BETWEEN ${from} AND ${to} AND a.site_id IS NOT NULL
+        SELECT t.test_date, t.site_id_snapshot FROM pat_tests t
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          LEFT JOIN sites s ON s.id = t.site_id_snapshot AND s.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
+            ${departmentId !== undefined ? historicalTestDepartmentScope(departmentId) : sql``}
       ) activity
       JOIN sites s ON s.id = activity.site_id AND s.client_id = ${clientId}
       WHERE true

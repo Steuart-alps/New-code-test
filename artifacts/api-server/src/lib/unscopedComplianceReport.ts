@@ -35,9 +35,11 @@ export async function getUnscopedComplianceReport(clientId: number, from: string
         UNION ALL SELECT 'KitchenTrack', site_id FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND log_date BETWEEN ${from} AND ${to} AND site_id IS NOT NULL
         UNION ALL SELECT 'PoolTrack', site_id FROM pool_checks WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
         UNION ALL SELECT 'SwimTrack', site_id FROM swim_sessions WHERE client_id = ${clientId} AND session_date BETWEEN ${from} AND ${to} AND site_id IS NOT NULL
-        UNION ALL SELECT 'PATtrack', a.site_id FROM pat_tests t
-          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = ${clientId}
-          WHERE t.test_date BETWEEN ${from} AND ${to} AND a.site_id IS NOT NULL
+        UNION ALL SELECT 'PATtrack', t.site_id_snapshot FROM pat_tests t
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
       ) sub
       GROUP BY module, site_id
       ORDER BY module, site_id

@@ -31,6 +31,7 @@ const MODULE_COLOR = '#6366f1';
 interface Appliance {
   id: number;
   name: string;
+  active: boolean;
   appliance_type?: string | null;
   asset_tag?: string | null;
   location?: string | null;
@@ -50,6 +51,9 @@ interface PatTest {
   tested_by: string | null;
   next_test_date: string | null;
   notes: string | null;
+  site_name_snapshot?: string | null;
+  location_snapshot?: string | null;
+  snapshot_source?: 'recorded' | 'legacy_backfill' | 'legacy_unavailable';
 }
 
 type Result = 'pass' | 'fail';
@@ -166,6 +170,10 @@ export default function PatScreen() {
       Alert.alert('Appliance required', 'Please choose the appliance you tested.');
       return;
     }
+    if (!appliances.some((appliance) => appliance.id === applianceId && appliance.active)) {
+      Alert.alert('Appliance unavailable', 'Retired appliances cannot receive new PAT tests.');
+      return;
+    }
     if (!testedBy.trim()) {
       Alert.alert('Tester required', 'Enter the name of the person who carried out the test.');
       return;
@@ -192,8 +200,10 @@ export default function PatScreen() {
   }
 
   const recentTests = [...tests].slice(0, 15);
+  const activeAppliances = appliances.filter((appliance) => appliance.active);
 
   function openLogForm(appliance: Appliance) {
+    if (!appliance.active) return;
     setApplianceId(appliance.id);
     setResult('pass');
     setTestDate(today());
@@ -250,15 +260,15 @@ export default function PatScreen() {
         </Text>
         {appliancesLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
-        ) : appliances.length === 0 ? (
+        ) : activeAppliances.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Feather name="zap" size={22} color={colors.mutedForeground} />
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              No appliances found. Add appliances on the web app first.
+              No active appliances found. Add or reactivate appliances on the web app first.
             </Text>
           </View>
         ) : (
-          appliances.map((appliance) => {
+          activeAppliances.map((appliance) => {
             const status = applianceStatus(appliance);
             const display = statusDisplay[status];
             return (
@@ -482,6 +492,13 @@ export default function PatScreen() {
                 <Text style={[styles.recordSub, { color: colors.foreground }]}>
                   {test.appliance_name}
                   {test.asset_tag ? ` · ${test.asset_tag}` : ''}
+                </Text>
+                <Text style={[styles.recordSub, { color: colors.mutedForeground }]}>
+                  {test.snapshot_source === 'recorded'
+                    ? `Test location: ${[test.site_name_snapshot, test.location_snapshot].filter(Boolean).join(' · ') || 'No location recorded'}`
+                    : test.snapshot_source === 'legacy_backfill'
+                      ? `Backfilled location (not verified at test date): ${[test.site_name_snapshot, test.location_snapshot].filter(Boolean).join(' · ') || 'No location recorded'}`
+                      : 'Historical test location unavailable'}
                 </Text>
                 {test.tested_by && (
                   <Text style={[styles.recordSub, { color: colors.mutedForeground }]}>

@@ -3,6 +3,7 @@ import app, { markApplicationReady } from "../src/app";
 import { runRuntimeMigrations } from "../src/lib/runtimeMigrations";
 import { pool } from "@workspace/db";
 import { ObjectStorageService } from "../src/lib/objectStorage";
+import { verifyLegacyPatHistoryMigration } from "./pat-legacy-history-migration";
 
 if (process.env.NODE_ENV !== "test" || process.env.FRESH_SCHEMA_TEST !== "1") {
   throw new Error("This entry point is only for isolated schema tests");
@@ -21,6 +22,7 @@ ObjectStorageService.prototype.getObjectEntityFile = async function (path) {
   } as any;
 };
 await runRuntimeMigrations();
+await verifyLegacyPatHistoryMigration();
 await runRuntimeMigrations(); // Boot migrations must also be idempotent.
 markApplicationReady();
 const server = app.listen(Number(process.env.PORT), "127.0.0.1");

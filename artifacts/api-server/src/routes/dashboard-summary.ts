@@ -7,6 +7,7 @@
  */
 
 import { Router } from "express";
+import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/requireAuth";
@@ -488,12 +489,14 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
           FROM pat_appliances a
           LEFT JOIN LATERAL (
             SELECT next_test_date
-            FROM pat_tests
-            WHERE appliance_id = a.id
-            ORDER BY test_date DESC, id DESC
+            FROM pat_tests t
+            LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+            WHERE t.appliance_id = a.id AND t.client_id=a.client_id
+            ${historicalTestDepartmentScope(departmentId)}
+            ORDER BY t.test_date DESC, t.id DESC
             LIMIT 1
           ) last ON true
-          WHERE a.client_id = ${clientId} ${siteClause}
+          WHERE a.client_id = ${clientId} AND a.active=true ${siteClause}
           ORDER BY last.next_test_date ASC NULLS FIRST
         `);
         const appliances = rows(patRows);

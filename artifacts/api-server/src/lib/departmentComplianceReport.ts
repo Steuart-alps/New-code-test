@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { historicalTestDepartmentScope } from "./patLegacyHistoryScope";
 
 type Options = {
   clientId: number;
@@ -96,9 +97,13 @@ export async function getDepartmentComplianceReport({
         SELECT 'SwimTrack', site_id, created_by FROM swim_sessions
           WHERE client_id = ${clientId} AND session_date BETWEEN ${from} AND ${to}
         UNION ALL
-        SELECT 'PATtrack', a.site_id, t.created_by FROM pat_tests t
-          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = ${clientId}
-          WHERE t.test_date BETWEEN ${from} AND ${to}
+        SELECT 'PATtrack', t.site_id_snapshot, t.created_by FROM pat_tests t
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          LEFT JOIN sites s ON s.id = t.site_id_snapshot AND s.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
+            ${historicalTestDepartmentScope(departmentId)}
       ) activity
       JOIN users author ON author.id = activity.created_by
         AND author.client_id = ${clientId} AND author.department_id = ${departmentId}
