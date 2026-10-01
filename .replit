@@ -94,6 +94,10 @@ args = "induction-print"
 task = "workflow.run"
 args = "private-file-acl"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "hot-tub-pdf-export"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -299,6 +303,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:private-file-acl"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "hot-tub-pdf-export"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:hot-tub-pdf"
 
 [workflows.workflow.metadata]
 isValidation = true

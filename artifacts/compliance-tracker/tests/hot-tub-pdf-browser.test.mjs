@@ -83,16 +83,37 @@ const expectedRows = Array.from({ length: 125 }, (_, index) => {
       : `needle-search-filter ${marker}`,
   });
 });
+// Boundary probes have distinctive field values, so headers alone cannot satisfy
+// the evidence checks. Use midnight and the final millisecond of the end date.
+expectedRows[30] = makeCheck(31, {
+  checkDate: "2024-07-31T23:59:59.999Z",
+  phValue: "6.83",
+  sanitiserLevel: "2.45",
+  temperature: "41.25",
+  result: "fail",
+  performedBy: "Boundary End Operator",
+  notes: "needle-search-filter CHECKROW031 FIELDPROBE end-date corrective action",
+});
+expectedRows[31] = makeCheck(32, {
+  checkDate: "2024-07-01T00:00:00.000Z",
+  phValue: "7.61",
+  sanitiserLevel: "4.17",
+  temperature: "38.56",
+  result: "pass",
+  performedBy: "Boundary Start Operator",
+  notes: "needle-search-filter CHECKROW032 FIELDPROBE start-date normal operation",
+});
 const excludedRows = [
   makeCheck(126, {
-    checkDate: "2024-06-30T12:00:00.000Z",
+    checkDate: "2024-06-30T23:59:59.999Z",
     notes: "needle-search-filter EXCLUDED-BEFORE-DATE",
   }),
   makeCheck(127, {
-    checkDate: "2024-08-01T12:00:00.000Z",
+    checkDate: "2024-08-01T00:00:00.000Z",
     notes: "needle-search-filter EXCLUDED-AFTER-DATE",
   }),
   makeCheck(128, {
+    checkDate: "2024-07-01T00:00:00.000Z",
     siteId: 22,
     hotTubId: otherActiveTub.id,
     notes: "needle-search-filter EXCLUDED-OTHER-SITE",
@@ -102,6 +123,7 @@ const excludedRows = [
     notes: "needle-search-filter EXCLUDED-OTHER-TUB",
   }),
   makeCheck(130, {
+    checkDate: "2024-07-31T23:59:59.999Z",
     checkType: "temperature",
     notes: "needle-search-filter EXCLUDED-OTHER-TYPE",
   }),
@@ -187,6 +209,25 @@ async function downloadPdf(label) {
   const filePath = join(temporaryDirectory, `${label}.pdf`);
   await download.saveAs(filePath);
   return { filename, ...await readPdf(filePath) };
+}
+
+async function assertExportMembership(label, expectedIds) {
+  const expected = new Set(expectedIds);
+  await page.getByText(`Showing ${expected.size} of ${checks.length} records`, { exact: true })
+    .waitFor({ state: "visible" });
+  const pdf = await downloadPdf(label);
+  assert.ok(pdf.text.includes(`Records: ${expected.size}`), `${label}: report count must match the UI`);
+  for (const row of checks) {
+    const marker = row.notes.match(/CHECKROW\d+|EXCLUDED-[A-Z-]+/)?.[0];
+    assert.ok(marker, `fixture ${row.id} must have a unique report marker`);
+    assert.equal(pdf.text.includes(marker), expected.has(row.id),
+      `${label}: report membership of record ${row.id} (${marker})`);
+  }
+  assert.ok(pdf.text.includes("CHECKROW031"), `${label}: include the final millisecond of the end date`);
+  assert.ok(pdf.text.includes("CHECKROW032"), `${label}: include midnight on the start date`);
+  assert.ok(!pdf.text.includes("EXCLUDED-BEFORE-DATE"), `${label}: exclude the millisecond before the start date`);
+  assert.ok(!pdf.text.includes("EXCLUDED-AFTER-DATE"), `${label}: exclude midnight after the end date`);
+  return pdf;
 }
 
 try {
@@ -307,14 +348,25 @@ try {
 
   await page.locator("#hot-tub-filter-from").fill("2024-07-01");
   await page.locator("#hot-tub-filter-to").fill("2024-07-31");
-  await page.getByRole("button", { name: activeTub.name, exact: true }).click();
+  const inRangeIds = expectedRows.map(row => row.id);
+  await assertExportMembership("dates-only", [...inRangeIds, 128, 129, 130, 131]);
 
   const filterPanel = page.getByPlaceholder("Search tubs, checks, staff…").locator("xpath=../..");
   const filterComboboxes = filterPanel.getByRole("combobox");
   await filterComboboxes.nth(0).click();
   await page.getByRole("option", { name: "Main site", exact: true }).click();
+  await assertExportMembership("dates-and-site", [...inRangeIds, 129, 130, 131]);
+
+  await filterComboboxes.nth(0).click();
+  await page.getByRole("option", { name: "All sites", exact: true }).click();
   await filterComboboxes.nth(1).click();
   await page.getByRole("option", { name: "Water chemistry test (pH & sanitiser)", exact: true }).click();
+  await assertExportMembership("dates-and-check-type", [...inRangeIds, 128, 129, 131]);
+  await filterComboboxes.nth(0).click();
+  await page.getByRole("option", { name: "Main site", exact: true }).click();
+  await assertExportMembership("dates-site-and-check-type", [...inRangeIds, 129, 131]);
+
+  await page.getByRole("button", { name: activeTub.name, exact: true }).click();
   await page.getByPlaceholder("Search tubs, checks, staff…").fill("needle-search-filter");
 
   await page.getByText(`Showing ${expectedRows.length} of ${checks.length} records`, { exact: true })
@@ -384,6 +436,30 @@ try {
   for (const row of excludedRows) {
     assert.ok(!populatedText.includes(row.notes), `PDF should exclude ${row.notes}`);
   }
+
+  // Inspect actual values in a small downloaded report, not just table headings
+  // or evidence that the list screen contains them.
+  await page.getByPlaceholder("Search tubs, checks, staff…").fill("FIELDPROBE");
+  await page.getByText(`Showing 2 of ${checks.length} records`, { exact: true })
+    .waitFor({ state: "visible" });
+  const fieldPdf = await downloadPdf("boundary-evidence-fields");
+  assert.ok(fieldPdf.text.includes("Records: 2"));
+  for (const row of [expectedRows[30], expectedRows[31]]) {
+    for (const [field, value] of Object.entries({
+      pH: row.phValue,
+      sanitiser: row.sanitiserLevel,
+      temperature: row.temperature,
+      staff: row.performedBy,
+      result: row.result === "pass" ? "Pass" : "Fail",
+      notes: row.notes,
+    })) {
+      assert.ok(fieldPdf.text.includes(value), `boundary record ${row.id}: export must retain ${field} value "${value}"`);
+    }
+  }
+  assert.ok(fieldPdf.text.includes(formatDate("2024-07-01")));
+  assert.ok(fieldPdf.text.includes(formatDate("2024-07-31")));
+  assert.ok(!fieldPdf.text.includes("EXCLUDED-"), "evidence report must not leak excluded rows");
+  assert.ok(!fieldPdf.text.includes("CHECKROW001"), "evidence report must apply its search filter");
 
   const forbiddenCalls = await page.evaluate(() => window.__pdfForbiddenCalls);
   assert.deepEqual(forbiddenCalls, [], "PDF export must not open a popup or invoke print");

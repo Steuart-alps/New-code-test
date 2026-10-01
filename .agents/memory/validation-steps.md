@@ -19,3 +19,7 @@ description: How the automated test validation steps are wired and platform quir
 **Codegen race in parallel checks:** the API codegen drift check temporarily removes generated client files; a concurrent fresh-schema build can fail to import them even though both checks pass in sequence.
 - **Why:** completion validation once failed during that temporary file gap, while the fresh-schema suite passed independently without code changes.
 - **How to apply:** when the only fresh-schema failure is a missing generated API import, run it alone after codegen finishes rather than treating it as a schema regression.
+
+**Validation inventory response shape:** the live `getValidationCommands()` callback returns `{ commands: [{ name, command }], message }`, despite the skill describing a `workflows` array.
+- **Why:** following the documented shape caused an undefined-array error; the live response confirmed the different envelope.
+- **How to apply:** inspect the live envelope and read `commands` when checking for existing validation names. Do not assume the skill's output shape is current.
