@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
@@ -2321,7 +2322,7 @@ export default function SettingsPage() {
         </form>
 
         {/* Two-Factor Authentication */}
-        <TwoFactorCard />
+        <TwoFactorCard key={user?.id ?? "signed-out"} />
         <PasskeyCard />
       </div>
     </AppLayout>
@@ -2329,9 +2330,10 @@ export default function SettingsPage() {
 }
 
 // ── Two-Factor Authentication card ───────────────────────────────────────────
-function TwoFactorCard() {
+export function TwoFactorCard() {
   const { user, refresh } = useAuth();
   const { toast } = useToast();
+  const passwordInputRef = useRef<HTMLInputElement>(null);
 
   type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating";
   const [step, setStep] = useState<SetupStep>("idle");
@@ -2341,8 +2343,36 @@ function TwoFactorCard() {
   const [error, setError] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [regeneratePassword, setRegeneratePassword] = useState("");
+  const [regenerationPending, setRegenerationPending] = useState(false);
 
   const enabled = user?.totpEnabled ?? false;
+  const userId = user?.id ?? null;
+  const recoveryCodesQuery = useQuery({
+    queryKey: ["auth", "recovery-codes-remaining", userId],
+    queryFn: async () => {
+      if (userId === null) throw new Error("Unable to verify the signed-in user.");
+      const data = await apiFetch<{
+        user?: { id?: number; recoveryCodesRemaining?: number };
+        error?: string;
+      }>("/auth/me");
+      if (data?.user?.id !== userId) throw new Error("Unable to verify recovery code count for this account.");
+      const remaining = data.user.recoveryCodesRemaining;
+      if (!Number.isSafeInteger(remaining) || remaining! < 0) {
+        throw new Error("The server returned an invalid recovery code count.");
+      }
+      return remaining!;
+    },
+    enabled: userId !== null && enabled,
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    refetchInterval: enabled ? 30_000 : false,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (step === "regenerating") passwordInputRef.current?.focus();
+  }, [step]);
 
   async function startSetup() {
     setError("");
@@ -2365,6 +2395,7 @@ function TwoFactorCard() {
     try {
       const result = await apiFetch<{ ok: boolean; recoveryCodes: string[] }>("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
       await refresh();
+      await recoveryCodesQuery.refetch();
       setRecoveryCodes(result.recoveryCodes);
       toast({ title: "Two-factor authentication enabled" });
       setStep("idle");
@@ -2380,18 +2411,29 @@ function TwoFactorCard() {
 
   async function handleRegenerate(e: React.FormEvent) {
     e.preventDefault();
+    if (regenerationPending) return;
     setError("");
+    setRegenerationPending(true);
     try {
-      const result = await apiFetch<{ recoveryCodes: string[] }>("/auth/2fa/recovery-codes/regenerate", {
+      const response = await authenticatedApiFetch("/auth/2fa/recovery-codes/regenerate", {
         method: "POST",
         body: JSON.stringify({ password: regeneratePassword }),
       });
+      const result = await response.json().catch(() => null) as { recoveryCodes?: unknown; error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? `Request failed (${response.status})`);
+      if (!Array.isArray(result?.recoveryCodes) || !result.recoveryCodes.every((recoveryCode): recoveryCode is string => typeof recoveryCode === "string")) {
+        throw new Error("The server did not return recovery codes.");
+      }
       setRecoveryCodes(result.recoveryCodes);
       setRegeneratePassword("");
       setStep("idle");
       toast({ title: "Recovery codes regenerated", description: "Your previous recovery codes no longer work." });
+      await refresh();
+      await recoveryCodesQuery.refetch();
     } catch (e: any) {
       setError(e.message ?? "Failed to regenerate recovery codes");
+    } finally {
+      setRegenerationPending(false);
     }
   }
 
@@ -2418,6 +2460,36 @@ function TwoFactorCard() {
       <CardContent className="pt-6">
         {enabled ? (
           <div className="space-y-4">
+            {recoveryCodesQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground" role="status" data-testid="status-recovery-code-count-loading">
+                Checking your unused recovery codes…
+              </p>
+            ) : recoveryCodesQuery.isError ? (
+              <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm" role="alert" data-testid="status-recovery-code-count-error">
+                <span>Unable to load your unused recovery code count: {recoveryCodesQuery.error.message}</span>
+                <Button size="sm" variant="outline" className="rounded-sm" onClick={() => recoveryCodesQuery.refetch()} data-testid="button-retry-recovery-code-count">
+                  Retry
+                </Button>
+              </div>
+            ) : recoveryCodesQuery.data !== undefined && (
+              <>
+                <p className="text-sm" data-testid="text-recovery-code-count">
+                  {recoveryCodesQuery.data} unused recovery {recoveryCodesQuery.data === 1 ? "code" : "codes"} remaining.
+                </p>
+                {recoveryCodesQuery.data <= 3 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm" role="alert" data-testid="status-recovery-code-warning">
+                    <p className="font-medium">
+                      {recoveryCodesQuery.data === 0
+                        ? "You have no unused recovery codes. Generate a new set now to avoid losing backup access to your account."
+                        : `Only ${recoveryCodesQuery.data} unused recovery ${recoveryCodesQuery.data === 1 ? "code remains" : "codes remain"}. Generate a new set soon.`}
+                    </p>
+                    <Button size="sm" className="rounded-sm" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-regenerate-recovery-codes-warning">
+                      {recoveryCodesQuery.data === 0 ? "Generate new codes now" : "Regenerate recovery codes"}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
             {recoveryCodes.length > 0 && (
               <div className="px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm space-y-2">
                 <p className="font-semibold">Save your recovery codes</p>
@@ -2449,7 +2521,7 @@ function TwoFactorCard() {
             </div>
             {step === "idle" && (
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }}>
+                <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-view-regenerate-recovery-codes">
                   <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
                 </Button>
                 <p className="text-xs text-muted-foreground">Two-factor authentication is required for all ComplyTrack user accounts. Contact an administrator if you lose access to your authenticator.</p>
@@ -2458,11 +2530,13 @@ function TwoFactorCard() {
             {step === "regenerating" && (
               <form onSubmit={handleRegenerate} className="space-y-3 max-w-sm">
                 <p className="text-sm text-muted-foreground">For security, existing codes cannot be viewed. Enter your password to replace them with 10 new codes.</p>
-                <Input type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus className="rounded-sm" />
+                <Input ref={passwordInputRef} type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus disabled={regenerationPending} className="rounded-sm" data-testid="input-recovery-code-password" />
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 <div className="flex gap-2">
-                  <Button type="submit" className="rounded-sm" disabled={!regeneratePassword}>Regenerate codes</Button>
-                  <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
+                  <Button type="submit" className="rounded-sm" disabled={!regeneratePassword || regenerationPending} data-testid="button-submit-recovery-code-regeneration">
+                    {regenerationPending ? "Regenerating…" : "Regenerate codes"}
+                  </Button>
+                  <Button type="button" variant="outline" className="rounded-sm" disabled={regenerationPending} onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
                 </div>
               </form>
             )}

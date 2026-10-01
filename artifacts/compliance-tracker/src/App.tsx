@@ -14,6 +14,7 @@ import CategoryDetailPage from "@/pages/category-detail";
 import SitesPage from "@/pages/sites";
 import SiteDetailPage from "@/pages/site-detail";
 import SettingsPage from "@/pages/settings";
+import AccountSecurityPage from "@/pages/account-security";
 import UsersPage from "@/pages/users";
 import ClientsPage, { LockedClientsPage } from "@/pages/clients";
 import LoginPage from "@/pages/login";
@@ -154,6 +155,9 @@ function ProtectedRoutes() {
   // Trial expired without a subscription: the whole app is replaced by the
   // billing-required screen (which lets consultants pay and everyone log out).
   if (billingLocked) {
+    if (location === "/account-security") {
+      return <AccountSecurityPage />;
+    }
     if (location === "/settings" && (user.role === "consultant" || user.role === "client_admin")) {
       return <SettingsPage />;
     }
@@ -214,6 +218,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
+      <Route path="/account-security" component={AccountSecurityPage} />
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}

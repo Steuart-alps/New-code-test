@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   Smartphone,
   Lock,
+  KeyRound,
   Menu,
   ChevronRight,
   MessageSquareWarning
@@ -378,6 +379,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
           
           <div className="flex items-center gap-4">
+            <Link
+              href="/account-security"
+              className="flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"
+              aria-label="Account security"
+              title="Account security"
+              data-testid="link-account-security"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>Security</span>
+            </Link>
             {isConsultant && (
               <div className="hidden sm:flex items-center gap-2 text-xs text-[#162D42] bg-[#F7F2E4] border border-border px-3 py-1.5 rounded-sm">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary" />

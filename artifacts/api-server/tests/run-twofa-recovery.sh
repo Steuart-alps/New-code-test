@@ -41,7 +41,7 @@ if curl -sf -m 2 "$READY_URL" >/dev/null 2>&1; then
 fi
 
 pnpm run build
-NODE_ENV=test TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success PORT="$TEST_PORT" \
+NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 45); do

@@ -102,6 +102,10 @@ args = "hot-tub-pdf-export"
 task = "workflow.run"
 args = "test-twofa-recovery"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "recovery-code-browser"
+
 [[workflows.workflow]]
 name = "trial-reminders"
 author = "agent"
@@ -329,6 +333,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:twofa-recovery"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "recovery-code-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:recovery-code-browser"
 
 [workflows.workflow.metadata]
 isValidation = true

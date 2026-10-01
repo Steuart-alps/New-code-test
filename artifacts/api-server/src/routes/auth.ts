@@ -548,7 +548,19 @@ router.get("/auth/me", async (req, res) => {
     res.json({ requires2faSetup: true, user: safeUser });
     return;
   }
-  res.json({ user: safeUser, client, billingLocked, services, passkeyCount: passkeys.length });
+  const recoveryCount = await db.execute(sql`
+    SELECT count(*)::int AS remaining
+    FROM totp_recovery_codes
+    WHERE user_id = ${user.id} AND used_at IS NULL
+  `);
+  const recoveryCodesRemaining = Number(recoveryCount.rows[0]?.remaining);
+  if (!Number.isInteger(recoveryCodesRemaining) || recoveryCodesRemaining < 0) {
+    throw new Error("Could not determine remaining recovery codes");
+  }
+  res.json({
+    user: { ...safeUser, recoveryCodesRemaining },
+    client, billingLocked, services, passkeyCount: passkeys.length,
+  });
 });
 
 const ForgotPasswordBody = z.object({

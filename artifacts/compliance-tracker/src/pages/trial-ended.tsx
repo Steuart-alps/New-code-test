@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
 import { trackModuleActivation } from "@/lib/analytics";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -470,9 +470,18 @@ export default function TrialEndedPage() {
         </div>
 
         <div className="px-6 pb-8 pt-2 border-t border-border/50 mt-2 flex justify-center relative z-10">
-          <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
-            <LogOut className="mr-2 h-4 w-4" /> Log out
-          </Button>
+          <div className="flex w-full flex-col items-center gap-2">
+            <Link
+              href="/account-security"
+              className="inline-flex items-center justify-center gap-2 text-sm font-medium text-[#162D42] underline underline-offset-2 hover:text-primary"
+              data-testid="link-account-security-locked"
+            >
+              <KeyRound className="h-4 w-4" /> Account security
+            </Link>
+            <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
+              <LogOut className="mr-2 h-4 w-4" /> Log out
+            </Button>
+          </div>
         </div>
       </div>
 
