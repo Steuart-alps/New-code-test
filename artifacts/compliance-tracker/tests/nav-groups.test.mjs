@@ -13,6 +13,7 @@ assert.ok(adminItems.includes("Clients"), "Consultant should see Clients");
 assert.ok(adminItems.includes("Users"), "Admin should see Users");
 assert.ok(adminItems.includes("Staff Roster"), "Admin should see Staff Roster");
 assert.ok(adminItems.includes("Sites"), "Admin should see Sites");
+assert.ok(adminItems.includes("Feedback inbox"), "Admin should see the feedback inbox");
 
 // Non-admin user
 const userGroups = getNavGroups({ isConsultant: false, canAdmin: false });
@@ -22,6 +23,7 @@ assert.ok(!userItems.includes("Clients"), "User should not see Clients");
 assert.ok(!userItems.includes("Users"), "User should not see Users");
 assert.ok(!userItems.includes("Staff Roster"), "User should not see Staff Roster");
 assert.ok(!userItems.includes("Sites"), "User should not see Sites");
+assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
 
 console.log("Nav groups visibility regression tests passed.");

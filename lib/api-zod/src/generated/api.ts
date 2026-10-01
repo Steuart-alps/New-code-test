@@ -9,6 +9,70 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary List feedback for the selected client (administrators only)
+ */
+export const ListFeedbackReportsQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional(),
+  "category": zod.enum(['feedback', 'bug', 'feature']).optional(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional()
+})
+
+export const ListFeedbackReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "submitterName": zod.string().nullable()
+})
+export const ListFeedbackReportsResponse = zod.array(ListFeedbackReportsResponseItem)
+
+
+/**
+ * @summary Update the status or internal response for a report in the selected client
+ */
+export const UpdateFeedbackReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFeedbackReportQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const updateFeedbackReportBodyInternalNoteMax = 5000;
+
+
+
+export const UpdateFeedbackReportBody = zod.object({
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional(),
+  "internalNote": zod.string().max(updateFeedbackReportBodyInternalNoteMax).optional()
+})
+
+export const UpdateFeedbackReportResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "submitterName": zod.string().nullable()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

@@ -14,9 +14,9 @@ description: How the automated test validation steps are wired and platform quir
 - **How to apply:** exercise disjoint job scopes concurrently without the outer lock, then exercise the launch group through its locked entrypoints. Remove duplicate workflows rather than treating paired failures as acceptable.
 - Build validation steps: `build-api-server` and `build-web`. The vite config hard-requires `PORT` and `BASE_PATH` env vars (normally injected by the artifact service), so the `build-web` command must inline `PORT=5000 BASE_PATH=/`.
 
-**Broad completion-check contention:** automatic completion validation starts many API integration suites together. Their shared lock waiters can time out, and the suite holding the lock can miss its readiness deadline under the concurrent load even when its assertions pass in isolation.
-- **Why:** a parallel completion run reported lock timeouts and module-server readiness failure while the same module suite passed when rerun alone.
-- **How to apply:** inspect failure logs for lock/readiness symptoms, run the affected suite serially to separate infrastructure contention from a real regression, and avoid broad retries that reproduce the same contention.
+**Broad completion-check contention:** automatic completion validation starts builds plus many API/browser suites together. Shared lock waiters, Vite readiness and browser launches can time out; a concurrent build can be killed with exit 137 even when the same checks pass in isolation.
+- **Why:** parallel completion runs have reported lock/readiness and browser-launch failures plus a killed web build, while targeted suites and the sequential build passed.
+- **How to apply:** inspect failure logs for contention symptoms, run affected checks serially to separate infrastructure contention from a real regression, and avoid broad retries that reproduce the same contention. Describe any full-project validation limitation separately from successful task-specific checks.
 
 **Codegen race in parallel checks:** the API codegen drift check temporarily removes generated client files; a concurrent fresh-schema build can fail to import them even though both checks pass in sequence.
 - **Why:** completion validation once failed during that temporary file gap, while the fresh-schema suite passed independently without code changes.

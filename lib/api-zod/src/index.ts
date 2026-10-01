@@ -14,5 +14,6 @@ export {
   SavePATPresetTemplateBody,
   SendRemindersResponse,
   TestEmailResponse,
+  UpdateFeedbackReportParams,
   UpdatePrivacyRecordParams,
-} from "./generated/api";
+} from './generated/api';

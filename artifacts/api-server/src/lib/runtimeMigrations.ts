@@ -3998,6 +3998,13 @@ async function migrateDoctrackSafetrackMerge() {
     CREATE INDEX IF NOT EXISTS "IDX_feedback_reports_client_created"
     ON feedback_reports (client_id, created_at DESC)
   `);
+  await db.execute(sql`
+    ALTER TABLE feedback_reports
+      ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'new',
+      ADD COLUMN IF NOT EXISTS internal_note text NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS updated_at timestamp
+  `);
 
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
   {

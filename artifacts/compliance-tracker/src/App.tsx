@@ -59,6 +59,7 @@ import PremisesTrackPage from "@/pages/premises-track";
 import RoomTrackPage from "@/pages/room-track";
 import ReportsPage from "@/pages/reports";
 import ComplianceHubPage from "@/pages/compliance-hub";
+import FeedbackInboxPage from "@/pages/feedback-inbox";
 import NotFound from "@/pages/not-found";
 import DailyOverviewPage from "@/pages/daily-overview";
 import DailyChecklistPage from "@/pages/daily-checklist";
@@ -217,6 +218,7 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
+      {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
       <Route path="/account-security" component={AccountSecurityPage} />
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}

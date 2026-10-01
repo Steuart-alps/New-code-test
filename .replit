@@ -130,6 +130,14 @@ args = "content-filter-endpoints"
 task = "workflow.run"
 args = "fix-track-priority"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "feedback-triage"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "feedback-inbox-browser"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -445,6 +453,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/compliance-tracker run test:fix-track-priority"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "feedback-triage"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:feedback-triage"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "feedback-inbox-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:feedback-inbox-browser"
 
 [workflows.workflow.metadata]
 isValidation = true

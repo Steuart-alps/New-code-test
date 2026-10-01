@@ -40,6 +40,61 @@ tags:
   - name: privacy-governance
     description: Customer privacy-governance records and rights workflows
 paths:
+  /feedback:
+    get:
+      operationId: listFeedbackReports
+      tags: [feedback]
+      summary: List feedback for the selected client (administrators only)
+      parameters:
+        - in: query
+          name: clientId
+          schema: { type: integer }
+        - in: query
+          name: category
+          schema: { type: string, enum: [feedback, bug, feature] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [new, reviewing, resolved] }
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReport" }
+        "403":
+          description: Not an administrator or not authorised for this client
+  /feedback/{id}:
+    patch:
+      operationId: updateFeedbackReport
+      tags: [feedback]
+      summary: Update the status or internal response for a report in the selected client
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackReportUpdate" }
+      responses:
+        "200":
+          description: Updated report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackReport" }
+        "400":
+          description: Invalid status or note
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found in the selected client
   /healthz:
     get:
       operationId: healthCheck
@@ -2212,6 +2267,30 @@ paths:
 
 components:
   schemas:
+    FeedbackReport:
+      type: object
+      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, submitterName]
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        category: { type: string, enum: [feedback, bug, feature] }
+        summary: { type: string }
+        details: { type: string }
+        pagePath: { type: [string, "null"] }
+        emailStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string }
+        updatedAt: { type: [string, "null"], format: date-time }
+        updatedBy: { type: [integer, "null"] }
+        submitterName: { type: [string, "null"] }
+    FeedbackReportUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string, maxLength: 5000 }
     HealthStatus:
       type: object
       properties:

@@ -5,6 +5,59 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
+
+
+export const FeedbackReportCategory = {
+  feedback: 'feedback',
+  bug: 'bug',
+  feature: 'feature',
+} as const;
+
+export type FeedbackReportStatus = typeof FeedbackReportStatus[keyof typeof FeedbackReportStatus];
+
+
+export const FeedbackReportStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export interface FeedbackReport {
+  id: number;
+  clientId: number;
+  category: FeedbackReportCategory;
+  summary: string;
+  details: string;
+  /** @nullable */
+  pagePath: string | null;
+  emailStatus: string;
+  createdAt: string;
+  status: FeedbackReportStatus;
+  internalNote: string;
+  /** @nullable */
+  updatedAt: string | null;
+  /** @nullable */
+  updatedBy: number | null;
+  /** @nullable */
+  submitterName: string | null;
+}
+
+export type FeedbackReportUpdateStatus = typeof FeedbackReportUpdateStatus[keyof typeof FeedbackReportUpdateStatus];
+
+
+export const FeedbackReportUpdateStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export interface FeedbackReportUpdate {
+  status?: FeedbackReportUpdateStatus;
+  /** @maxLength 5000 */
+  internalNote?: string;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -1702,6 +1755,34 @@ export interface WaterMonitoringPlanResult {
   profile: WaterMonitoringPlanResultProfile;
   approved: boolean;
 }
+
+export type ListFeedbackReportsParams = {
+clientId?: number;
+category?: ListFeedbackReportsCategory;
+status?: ListFeedbackReportsStatus;
+};
+
+export type ListFeedbackReportsCategory = typeof ListFeedbackReportsCategory[keyof typeof ListFeedbackReportsCategory];
+
+
+export const ListFeedbackReportsCategory = {
+  feedback: 'feedback',
+  bug: 'bug',
+  feature: 'feature',
+} as const;
+
+export type ListFeedbackReportsStatus = typeof ListFeedbackReportsStatus[keyof typeof ListFeedbackReportsStatus];
+
+
+export const ListFeedbackReportsStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateFeedbackReportParams = {
+clientId?: number;
+};
 
 export type ListAuditLogParams = {
 module: ListAuditLogModule;

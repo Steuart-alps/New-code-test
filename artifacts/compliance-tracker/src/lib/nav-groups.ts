@@ -26,7 +26,8 @@ import {
   BarChart2,
   FileCheck2,
   BedDouble,
-  Tractor
+  Tractor,
+  Inbox
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -138,6 +139,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
 
   if (canAdmin) {
     groups.find(g => g.id === "admin")?.items.push(
+      { href: "/feedback", label: "Feedback inbox", icon: Inbox },
       { href: "/privacy-governance", label: "Privacy Centre", icon: ShieldCheck },
       { href: "/settings", label: "Settings", icon: Settings }
     );

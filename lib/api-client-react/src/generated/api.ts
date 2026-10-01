@@ -44,6 +44,8 @@ import type {
   CreateSiteRequest,
   DashboardStats,
   ErrorResponse,
+  FeedbackReport,
+  FeedbackReportUpdate,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -77,6 +79,7 @@ import type {
   LegionellaStatus,
   ListAuditLogParams,
   ListComplianceItemsParams,
+  ListFeedbackReportsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
   ListHotTubChecksParams,
@@ -110,6 +113,7 @@ import type {
   TestEmailResponse,
   UpdateCategoryRequest,
   UpdateComplianceItemRequest,
+  UpdateFeedbackReportParams,
   UpdateFireSafetyCheckRequest,
   UpdateFireSafetyConfigParams,
   UpdateFoodSafetyConfig200,
@@ -155,6 +159,171 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListFeedbackReportsUrl = (params?: ListFeedbackReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/feedback?${stringifiedParams}` : `/api/feedback`
+}
+
+/**
+ * @summary List feedback for the selected client (administrators only)
+ */
+export const listFeedbackReports = async (params?: ListFeedbackReportsParams, options?: RequestInit): Promise<FeedbackReport[]> => {
+
+  return customFetch<FeedbackReport[]>(getListFeedbackReportsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFeedbackReportsQueryKey = (params?: ListFeedbackReportsParams,) => {
+    return [
+    `/api/feedback`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFeedbackReportsQueryOptions = <TData = Awaited<ReturnType<typeof listFeedbackReports>>, TError = ErrorType<void>>(params?: ListFeedbackReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFeedbackReportsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFeedbackReports>>> = ({ signal }) => listFeedbackReports(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFeedbackReportsQueryResult = NonNullable<Awaited<ReturnType<typeof listFeedbackReports>>>
+export type ListFeedbackReportsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List feedback for the selected client (administrators only)
+ */
+
+export function useListFeedbackReports<TData = Awaited<ReturnType<typeof listFeedbackReports>>, TError = ErrorType<void>>(
+ params?: ListFeedbackReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFeedbackReportsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFeedbackReportUrl = (id: number,
+    params?: UpdateFeedbackReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/feedback/${id}?${stringifiedParams}` : `/api/feedback/${id}`
+}
+
+/**
+ * @summary Update the status or internal response for a report in the selected client
+ */
+export const updateFeedbackReport = async (id: number,
+    feedbackReportUpdate: FeedbackReportUpdate,
+    params?: UpdateFeedbackReportParams, options?: RequestInit): Promise<FeedbackReport> => {
+
+  return customFetch<FeedbackReport>(getUpdateFeedbackReportUrl(id,params),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(feedbackReportUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateFeedbackReportMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext> => {
+
+const mutationKey = ['updateFeedbackReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFeedbackReport>>, {id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}> = (props) => {
+          const {id,data,params} = props ?? {};
+
+          return  updateFeedbackReport(id,data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFeedbackReportMutationResult = NonNullable<Awaited<ReturnType<typeof updateFeedbackReport>>>
+    export type UpdateFeedbackReportMutationBody = BodyType<FeedbackReportUpdate>
+    export type UpdateFeedbackReportMutationError = ErrorType<void>
+
+    /**
+ * @summary Update the status or internal response for a report in the selected client
+ */
+export const useUpdateFeedbackReport = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFeedbackReport>>,
+        TError,
+        {id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams},
+        TContext
+      > => {
+      return useMutation(getUpdateFeedbackReportMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 
