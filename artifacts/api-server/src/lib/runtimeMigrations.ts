@@ -275,6 +275,21 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
 
+    // Shared authentication throttles keep sign-in quotas consistent across
+    // API processes. Only HMACed IP/namespace keys are persisted.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "auth_rate_limit_counters" (
+        "key_hash" text PRIMARY KEY,
+        "attempts" integer NOT NULL,
+        "expires_at" timestamptz NOT NULL,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_auth_rate_limit_counters_expires_at"
+      ON "auth_rate_limit_counters" ("expires_at")
+    `);
+
     // Authoritative streamed download accounting. Raw events are retained for
     // idempotent completion/reconciliation; the month table serves dashboard reads.
     await db.execute(sql`
