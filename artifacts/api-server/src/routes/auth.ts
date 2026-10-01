@@ -7,7 +7,12 @@ import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
-import { makeLoginRateLimit } from "../lib/loginRateLimit";
+import {
+  configureProductionLoginRateLimitStore,
+  loginRateLimit,
+  makeLoginRateLimit,
+  registrationRateLimit,
+} from "../lib/loginRateLimit";
 import { createDatabaseLoginRateLimitStore } from "../lib/loginRateLimitStore";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
@@ -37,25 +42,9 @@ const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const router = Router();
 
-const sharedAuthRateLimitsRequired = process.env.NODE_ENV === "production"
-  || process.env.REPLIT_DEPLOYMENT === "1";
-const sharedAuthRateLimitStore = sharedAuthRateLimitsRequired
-  ? createDatabaseLoginRateLimitStore()
-  : undefined;
-const loginRateLimit = makeLoginRateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  namespace: "login",
-  store: sharedAuthRateLimitStore,
-  requireStore: sharedAuthRateLimitsRequired,
-});
-const registrationRateLimit = makeLoginRateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  namespace: "register",
-  store: sharedAuthRateLimitStore,
-  requireStore: sharedAuthRateLimitsRequired,
-});
+if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1") {
+  configureProductionLoginRateLimitStore(createDatabaseLoginRateLimitStore());
+}
 
 router.get("/auth/csrf-token", (req, res) => {
   res.json({ token: getCsrfToken(req) });

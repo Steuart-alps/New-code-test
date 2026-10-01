@@ -4,6 +4,25 @@ import { digestBearerToken } from "./bearerTokens";
 type Entry = { count: number; resetAt: number };
 
 const failures = new Map<string, Entry>();
+let productionSharedStore: SharedRateLimitStore | undefined;
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1";
+}
+
+/** Configure the database-backed store before the API begins serving requests. */
+export function configureProductionLoginRateLimitStore(store: SharedRateLimitStore) {
+  productionSharedStore = store;
+}
+
+const productionStoreProxy: SharedRateLimitStore = {
+  async consume(key, windowMs, max) {
+    if (!productionSharedStore) {
+      throw new Error("Shared authentication rate-limit store is not configured");
+    }
+    return productionSharedStore.consume(key, windowMs, max);
+  },
+};
 
 export interface SharedRateLimitStore {
   /**
@@ -70,6 +89,7 @@ export function makeLoginRateLimit(opts?: {
   key?: (req: Request) => string;
   store?: SharedRateLimitStore;
   requireStore?: boolean;
+  storeOnlyInProduction?: boolean;
 }) {
   const windowMs = opts?.windowMs ?? 15 * 60 * 1000;
   const max = opts?.max ?? 10;
@@ -83,11 +103,16 @@ export function makeLoginRateLimit(opts?: {
   return async function loginRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
     const now = Date.now();
     const key = `${namespace}:${opts?.key ? opts.key(req) : `ip:${clientIp(req)}`}`;
+    const useStore = Boolean(opts?.store)
+      && (!opts?.storeOnlyInProduction || isProductionRuntime());
+    const requireStore = Boolean(opts?.requireStore
+      && (!opts?.storeOnlyInProduction || isProductionRuntime()));
 
-    if (opts?.store || opts?.requireStore) {
+    if (useStore || requireStore) {
       try {
-        if (!opts.store) throw new Error("Shared authentication rate-limit store is not configured");
-        const result = await opts.store.consume(key, windowMs, max);
+        const store = opts?.store;
+        if (!store) throw new Error("Shared authentication rate-limit store is not configured");
+        const result = await store.consume(key, windowMs, max);
         if (!Number.isSafeInteger(result.count) || result.count < 1
           || !Number.isSafeInteger(result.retryAfterSeconds) || result.retryAfterSeconds < 0) {
           throw new Error("Shared authentication rate-limit store returned an invalid result");
@@ -132,6 +157,26 @@ export function makeLoginRateLimit(opts?: {
     next();
   };
 }
+
+/** Ten credential attempts per source IP in each shared 15-minute window in production. */
+export const loginRateLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  namespace: "login",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/** Five registration attempts per source IP in each shared one-hour window in production. */
+export const registrationRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  namespace: "register",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
 
 /** Public token links are intentionally usable without login, but are still
  * bounded per source IP to slow token enumeration and abusive scraping. */

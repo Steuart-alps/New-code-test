@@ -17,7 +17,7 @@ try {
     auth: "export const getUserById = () => { throw Error('Unexpected user lookup'); };",
     billing: "export const findLiveSubscription = () => { throw Error('Unexpected billing lookup'); };",
     references: "export const listTenantAttachmentObjectPaths = () => { throw Error('Unexpected attachment scan'); };",
-    pdf: "export const createAcknowledgementRegisterPdf = () => { throw Error('Unexpected PDF export'); };",
+    pdf: "export const createAcknowledgementRegisterPdf = () => { throw Error('Unexpected PDF export'); }; export const createCombinedAcknowledgementRegisterPdf = () => { throw Error('Unexpected combined PDF export'); };",
     downloads: `
       export const createDownloadMeter = () => ({ add() {}, async commit() {} });
       export const createDownloadToken = () => { throw Error('Unexpected download token'); };

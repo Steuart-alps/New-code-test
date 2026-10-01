@@ -26,6 +26,7 @@ function startExpiredCounterCleanup() {
  * windows reset atomically. Only an HMAC is stored; raw IPs never persist.
  */
 export function createDatabaseLoginRateLimitStore(): SharedRateLimitStore {
+  startExpiredCounterCleanup();
   return {
     async consume(key, windowMs, max) {
       const sessionSecret = process.env.SESSION_SECRET;
@@ -61,7 +62,6 @@ export function createDatabaseLoginRateLimitStore(): SharedRateLimitStore {
         | undefined;
       if (!row) throw new Error("Shared authentication rate-limit counter was not returned");
 
-      startExpiredCounterCleanup();
       return {
         count: Number(row.attempts),
         retryAfterSeconds: Number(row.retry_after_seconds),
