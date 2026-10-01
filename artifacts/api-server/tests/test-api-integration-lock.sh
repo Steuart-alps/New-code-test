@@ -69,6 +69,7 @@ const pure = new Set([
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
   "test:track-summary-routing", // unique temp bundle; pure formatting helpers
   "test:billing-addon-activation", // fake Stripe; unique temp bundle
+  "test:billing-addon-catalog", // fake Stripe/database; in-process Express router
   "test:private-file-acl", // real routes with isolated provider/database doubles
   "test:service-price-preflight", // read-only source assertions and fake inputs
   "test:biketrack-billing", // fake Stripe/static wiring assertions
@@ -97,7 +98,7 @@ for (const name of [...directLocked, ...runnerLocked, ...pure]) {
 // self-booting API runner that sources the lock. Standalone pure entrypoints
 // use isolated fixtures with no shared database, build output or live storage.
 const pureEntrypoints = new Set([
-  "billing-addon-activation.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
+  "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
   "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
   "private-file-acl.mjs", "private-file-acl-fixture.mjs",
 ]);

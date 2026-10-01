@@ -125,6 +125,7 @@ async function listLiveMonthlyPriceServiceKeys(): Promise<string[]> {
       AND pr.active = true
       AND (pr.recurring->>'interval') = 'month'
       AND COALESCE(pr.recurring->>'interval_count', '1') = '1'
+      AND pr.currency = ${PER_SITE_CURRENCY}
       AND pr.metadata->>'service_key' IS NOT NULL
   `);
   return (rows.rows as { service_key: string | null }[])

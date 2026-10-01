@@ -1,0 +1,23 @@
+[
+  { "key": "firetrack", "label": "FireTrack", "amountPence": 1000 },
+  { "key": "kitchentrack", "label": "KitchenTrack", "amountPence": 1000 },
+  { "key": "legionellatrack", "label": "LegionellaTrack", "amountPence": 1000 },
+  { "key": "safetrack", "label": "SafeTrack", "amountPence": 1000 },
+  { "key": "fixtrack", "label": "FixTrack", "amountPence": 1000 },
+  { "key": "doctrack", "label": "DocTrack", "amountPence": 1000 },
+  { "key": "traintrack", "label": "TrainTrack", "amountPence": 1000 },
+  { "key": "hottubtrack", "label": "HotTubTrack", "amountPence": 1000 },
+  { "key": "treetrack", "label": "TreeTrack", "amountPence": 1000 },
+  { "key": "biketrack", "label": "BikeTrack", "amountPence": 1000 },
+  { "key": "aquatrack", "label": "AquaTrack", "amountPence": 1000 },
+  { "key": "pooltrack", "label": "PoolTrack", "amountPence": 1000 },
+  { "key": "greentrack", "label": "GreenTrack", "amountPence": 1000 },
+  { "key": "swimtrack", "label": "SwimTrack", "amountPence": 1000 },
+  { "key": "incidenttrack", "label": "IncidentTrack", "amountPence": 1000 },
+  { "key": "pattrack", "label": "PATtrack", "amountPence": 1000 },
+  { "key": "pesttrack", "label": "PestTrack", "amountPence": 1000 },
+  { "key": "premisestrack", "label": "PremisesTrack", "amountPence": 1000 },
+  { "key": "roomtrack", "label": "RoomTrack", "amountPence": 1000 },
+  { "key": "dailytrack_am", "label": "DailyTrack AM", "amountPence": 1000 },
+  { "key": "dailytrack_pm", "label": "DailyTrack PM", "amountPence": 1000 }
+]

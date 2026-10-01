@@ -60,6 +60,7 @@
     "test:storage-usage": "node tests/storage-usage.mjs",
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
+    "test:billing-addon-catalog": "node tests/billing-addon-catalog.mjs",
     "test:service-price-preflight": "node tests/service-price-preflight.mjs",
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
     "test:bike-overdue-reminders": "bash tests/run-db-workflow.sh tests/bike-overdue-reminders.mjs",

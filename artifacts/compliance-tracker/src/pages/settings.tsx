@@ -1375,11 +1375,23 @@ function BillingCard() {
 
     setActionBusy(serviceKey);
     try {
-      const res = await apiFetch<{ ok: boolean; entitled?: boolean | "all" | string[]; paymentPending?: boolean }>("/billing/services", {
+      const response = await authenticatedApiFetch("/billing/services", {
         method: "POST",
         body: JSON.stringify({ service: serviceKey, action }),
       });
-      const confirmed = trackServiceActionOutcome(serviceKey, action, res);
+      const res = await response.json().catch(() => null) as {
+        ok?: boolean;
+        entitled?: boolean | "all" | string[];
+        paymentPending?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(res?.error ?? `Request failed (${response.status})`);
+      if (!res || typeof res.ok !== "boolean") throw new Error("Invalid service action response");
+      const confirmed = trackServiceActionOutcome(serviceKey, action, {
+        ok: res.ok,
+        entitled: res.entitled,
+        paymentPending: res.paymentPending,
+      });
       if (res.paymentPending || (isAdd && !confirmed)) {
         toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
       } else {

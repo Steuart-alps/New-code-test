@@ -102,6 +102,14 @@ args = "service-price-readiness"
 task = "workflow.run"
 args = "photo-upload-browser"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "billing-addon-catalog"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "billing-addon-settings-browser"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -340,6 +348,28 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/compliance-tracker run test:photo-upload-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "billing-addon-catalog"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:billing-addon-catalog"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "billing-addon-settings-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:billing-addon-settings-browser"
 
 [workflows.workflow.metadata]
 isValidation = true
