@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { clearModuleActivation, trackModuleActivation } from "@/lib/analytics";
+import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 interface DomainRecord {
   record?: string;
@@ -1375,18 +1375,19 @@ function BillingCard() {
 
     setActionBusy(serviceKey);
     try {
-      const res = await apiFetch<{ ok: boolean; paymentPending?: boolean }>("/billing/services", {
+      const res = await apiFetch<{ ok: boolean; entitled?: boolean | "all" | string[]; paymentPending?: boolean }>("/billing/services", {
         method: "POST",
         body: JSON.stringify({ service: serviceKey, action }),
       });
-      if (res.paymentPending) {
+      const confirmed = trackServiceActionOutcome(serviceKey, action, res);
+      if (res.paymentPending || (isAdd && !confirmed)) {
         toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
       } else {
         toast({ title: `Service ${isAdd ? "added" : "removed"} successfully` });
       }
-      if (isAdd && !res.paymentPending) {
+      if (isAdd && confirmed) {
         trackModuleActivation(activeClientId, serviceKey);
-      } else {
+      } else if (!isAdd && confirmed) {
         clearModuleActivation(activeClientId, serviceKey);
       }
       fetchConfig();

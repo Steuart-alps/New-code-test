@@ -52,6 +52,18 @@ export function trackEvent(name: string, data?: AnalyticsData): void {
   }
 }
 
+/** Track confirmed Settings outcomes; never copy response or account data. */
+export function trackServiceActionOutcome(
+  serviceKey: string,
+  action: "add" | "remove",
+  result: { ok: boolean; entitled?: unknown; paymentPending?: boolean },
+): boolean {
+  if (result.ok !== true || result.paymentPending
+    || (action === "add" && result.entitled !== true)) return false;
+  trackEvent("service_action_succeeded", { service_key: serviceKey, action });
+  return true;
+}
+
 /** Only coarse export scope is sent; never send site ids or record content. */
 export function trackTrainingMatrixDownload(siteFilter: string): void {
   trackEvent("training_matrix_download_started", {
