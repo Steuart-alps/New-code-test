@@ -44,8 +44,17 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 [ "$ready" = "1" ] || { echo "Fresh-schema API did not become ready" >&2; exit 1; }
-NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/fresh-schema-routes.mjs
-DATABASE_URL="$url" API_BASE="http://127.0.0.1:$port/api" node tests/module-routes.mjs
+if [ "$#" -gt 0 ]; then
+  # Reuse the isolated infrastructure for focused HTTP suites. Never give the
+  # suite a shared database connection or credentials for email providers.
+  for suite in "$@"; do
+    env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test FRESH_SCHEMA_TEST=1 \
+      API_BASE="http://127.0.0.1:$port/api" node "$suite"
+  done
+else
+  NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/fresh-schema-routes.mjs
+  DATABASE_URL="$url" API_BASE="http://127.0.0.1:$port/api" node tests/module-routes.mjs
+fi
 if grep -Eq '42P01|42703|relation .* does not exist|column .* does not exist|Runtime migrations failed' "$temp/server.log"; then
   echo "Missing database table/column detected in API logs" >&2
   exit 1

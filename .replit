@@ -122,6 +122,10 @@ args = "required-track-photos-browser"
 task = "workflow.run"
 args = "pat-evidence-retention"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "content-filter-endpoints"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -415,6 +419,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:pat-dept-isolation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "content-filter-endpoints"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:content-filter"
 
 [workflows.workflow.metadata]
 isValidation = true
