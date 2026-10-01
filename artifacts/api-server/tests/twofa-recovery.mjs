@@ -1,7 +1,7 @@
 // E2E test: 2FA recovery code + admin 2FA reset.
 // Usage: pnpm run test:twofa-recovery (starts a private, email-capturing API).
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -11,11 +11,19 @@ let passed = 0;
 let testIpSequence = 10;
 const failures = [];
 const sessions = [];
+const resetNoticeSubject = "Security alert: your two-factor authentication was reset";
 const fixtureId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 const fixtureCompany = `TwoFA Co ${fixtureId}`;
 const fixtureEmails = ["admin", "staff", "invited"].map(role => `twofa-${role}-${fixtureId}@test.local`);
 function check(name, ok, detail = "") {
   if (ok) { passed++; } else { failures.push(`${name}${detail ? ` — ${detail}` : ""}`); }
+}
+function resetNotices() {
+  const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
+  if (!capturePath) return [];
+  return readFileSync(capturePath, "utf8").split("\n")
+    .filter((line) => line.includes(resetNoticeSubject))
+    .map((line) => JSON.parse(line));
 }
 
 // Bundle workspace-owned helpers; do not add a transitive pg import to this package.
@@ -143,7 +151,7 @@ async function main() {
   // ── User with 2FA: staff member created by admin ────────────────────────────
   const staffEmail = `twofa-staff-${ts}@test.local`;
   const staffCreate = await admin("POST", "/users", {
-    email: staffEmail, password: "password-456", name: "2FA Staff", role: "client_staff", clientId,
+    email: staffEmail, password: "password-456", name: "2FA <Staff & Co>", role: "client_staff", clientId,
   });
   check("create staff", [200, 201].includes(staffCreate.status), `got ${staffCreate.status}`);
   const staffId = staffCreate.data?.id;
@@ -397,13 +405,60 @@ async function main() {
 
   const reset = await admin("POST", `/users/${staffId}/reset-2fa`, {});
   check("admin reset-2fa ok", reset.status === 200, JSON.stringify(reset.data));
+  const resetEmail = resetNotices()[0];
+  check("reset notice is sent only to the affected staff member",
+    resetNotices().length === 1 && resetEmail?.to === staffEmail);
+  const resetState = (await pool.query(
+    "SELECT updated_at, totp_enabled, totp_secret, totp_recovery_hash FROM users WHERE id = $1",
+    [staffId],
+  )).rows[0];
+  check("reset notice identifies the persisted UTC reset time",
+    !!resetState?.updated_at && resetEmail?.text?.includes(`${new Date(resetState.updated_at).toISOString()} (UTC)`));
+  check("reset notice tells staff to report unexpected resets and re-enrol",
+    resetEmail?.text?.includes("contact your administrator immediately")
+      && resetEmail.text.includes("re-enrol your authenticator promptly"));
+  check("reset notice HTML escapes the affected user's name",
+    resetEmail?.html?.includes("Hello 2FA &lt;Staff &amp; Co&gt;"));
+  const noticeContents = `${resetEmail?.html ?? ""}\n${resetEmail?.text ?? ""}`;
+  const issuedRecoveryCodes = [
+    ...(recoveryCodes ?? []),
+    ...(regenerated.data?.recoveryCodes ?? []),
+    ...(replenished.data?.recoveryCodes ?? []),
+  ];
+  check("reset notice contains no passwords, authenticator secret, or recovery codes",
+    !noticeContents.includes("password-456")
+      && !noticeContents.includes(setup.data.secret)
+      && issuedRecoveryCodes.every((code) => !noticeContents.includes(code)));
+  check("successful reset clears 2FA before notification is sent",
+    resetState?.totp_enabled === false && resetState.totp_secret === null && resetState.totp_recovery_hash === null);
   const s4 = makeSession();
   const login4 = await s4("POST", "/auth/login", { email: staffEmail, password: "password-456" });
   check("plain login works after admin reset", login4.status === 200 && !login4.data?.requires2fa);
 
+  const reSetup = await s4("GET", "/auth/2fa/setup");
+  const reEnabled = reSetup.data?.secret
+    ? await s4("POST", "/auth/2fa/enable", { code: generateToken(reSetup.data.secret) })
+    : { status: reSetup.status };
+  check("staff can re-enrol before the email-failure case", reEnabled.status === 200);
+  const deliveryFailureReset = await admin("POST", `/users/${staffId}/reset-2fa`, {});
+  check("email delivery failure does not undo a successful admin reset", deliveryFailureReset.status === 200);
+  const afterDeliveryFailure = (await pool.query(
+    "SELECT totp_enabled, totp_secret, totp_recovery_hash FROM users WHERE id = $1",
+    [staffId],
+  )).rows[0];
+  check("2FA remains cleared after the notification provider fails",
+    afterDeliveryFailure?.totp_enabled === false
+      && afterDeliveryFailure.totp_secret === null
+      && afterDeliveryFailure.totp_recovery_hash === null);
+  check("a failed notification is not recorded as sent", resetNotices().length === 1);
+  const missingReset = await admin("POST", `/users/${staffId + 1000000}/reset-2fa`, {});
+  check("reset rejects a nonexistent user", missingReset.status === 404);
+  check("rejected admin reset sends no security notification", resetNotices().length === 1);
+
   // Staff cannot reset another user's 2FA (route is admin-only).
   const staffReset = await s4("POST", `/users/${staffId}/reset-2fa`, {});
   check("staff blocked from reset-2fa", [401, 403].includes(staffReset.status), `got ${staffReset.status}`);
+  check("permission-denied reset sends no security notification", resetNotices().length === 1);
   const staffResend = await s4("POST", `/users/${invitedId}/resend-invite`, {});
   check("staff blocked from resending invitations", [401, 403].includes(staffResend.status), `got ${staffResend.status}`);
 

@@ -123,6 +123,8 @@ function extractEmail(raw: string): string {
   return match ? match[1].trim() : raw.trim();
 }
 
+const testEmailRejectionOccurrences = new Map<string, number>();
+
 export async function sendSystemEmail(opts: {
   to: string;
   subject: string;
@@ -138,6 +140,14 @@ export async function sendSystemEmail(opts: {
   const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
   const testBehavior = process.env.TEST_EMAIL_BEHAVIOR;
   if (process.env.NODE_ENV === "test" && (capturePath || testBehavior)) {
+    if (process.env.TEST_EMAIL_REJECT_SUBJECT === opts.subject) {
+      const occurrences = (testEmailRejectionOccurrences.get(opts.subject) ?? 0) + 1;
+      testEmailRejectionOccurrences.set(opts.subject, occurrences);
+      const rejectAtOccurrence = Number(process.env.TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE ?? 1);
+      if (occurrences === rejectAtOccurrence) {
+        throw new Error("Simulated email delivery failure for selected subject");
+      }
+    }
     if (testBehavior === "delay") {
       const delayMs = Number(process.env.TEST_EMAIL_DELAY_MS ?? 2500);
       await new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 2500));

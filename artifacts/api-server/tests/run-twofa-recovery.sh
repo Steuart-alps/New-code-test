@@ -34,6 +34,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 touch "$CAPTURE_FILE"
+export TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE"
 
 if curl -sf -m 2 "$READY_URL" >/dev/null 2>&1; then
   echo "A ready API already occupies TEST_PORT; refusing to reuse it. Choose a free TEST_PORT." >&2
@@ -41,7 +42,9 @@ if curl -sf -m 2 "$READY_URL" >/dev/null 2>&1; then
 fi
 
 pnpm run build
-NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success PORT="$TEST_PORT" \
+NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success \
+  TEST_EMAIL_REJECT_SUBJECT="Security alert: your two-factor authentication was reset" \
+  TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE=2 PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 45); do
@@ -57,3 +60,8 @@ curl -sf -m 2 "$READY_URL" >/dev/null || {
   exit 1
 }
 node tests/twofa-recovery.mjs "$@"
+if ! grep -Fq "Failed to send two-factor reset security notification" "$SERVER_LOG"; then
+  echo "The test API did not log the simulated reset notification failure." >&2
+  exit 1
+fi
+echo "Verified reset notification delivery failure is logged without undoing the reset."
