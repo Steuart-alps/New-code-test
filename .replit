@@ -126,6 +126,10 @@ args = "pat-evidence-retention"
 task = "workflow.run"
 args = "content-filter-endpoints"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "fix-track-priority"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -430,6 +434,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:content-filter"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "fix-track-priority"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:fix-track-priority"
 
 [workflows.workflow.metadata]
 isValidation = true
