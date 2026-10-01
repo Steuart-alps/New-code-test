@@ -9,9 +9,8 @@
 //   - the sent flag is set, so a second run sends nothing
 //   - if every send fails, the flag is released so the next run retries
 //
-// Pre-existing dev clients that happen to fall in the reminder window are
-// temporarily marked as already-reminded and restored afterwards, so the test
-// never emails (or permanently flags) real data.
+// Every job invocation is scoped to this run's UUID-tagged fixture IDs.
+// Pre-existing development clients and other test runs are never touched.
 //
 // Usage: node tests/trial-reminders.mjs   (DATABASE_URL must be set)
 // Exits 0 when every check passes, 1 otherwise.
@@ -21,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import { build } from "esbuild";
+import { randomUUID } from "node:crypto";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,9 +74,8 @@ async function main() {
   }
   const { runTrialReminderJob, db, pool, clientsTable, usersTable, sql, eq, inArray } = lib;
 
-  const tag = `trialrem-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const tag = `trialrem-${randomUUID()}`;
   const seededClientIds = [];
-  const neutralizedIds = [];
 
   async function seedClient(label, fields) {
     const [row] = await db
@@ -110,19 +109,6 @@ async function main() {
   }
 
   try {
-    // --- Neutralize pre-existing candidates so the run is hermetic ---
-    const preExisting = await db.execute(sql`
-      UPDATE clients
-      SET trial_reminder_sent_at = now()
-      WHERE active = true
-        AND subscription_status IN ('trial', 'trialing')
-        AND trial_ends_at IS NOT NULL
-        AND trial_ends_at > now()
-        AND trial_reminder_sent_at IS NULL
-      RETURNING id
-    `);
-    for (const r of preExisting.rows ?? []) neutralizedIds.push(r.id);
-
     // --- Seed the scenario ---
     const clientSend = await seedClient("send", { trialEndsAt: daysFromNow(2) });
     const clientFar = await seedClient("far", { trialEndsAt: daysFromNow(10) });
@@ -146,13 +132,19 @@ async function main() {
     await seedUser(clientExpired.id, "expired-c", "consultant");
     await seedUser(clientActive.id, "subscribed-c", "consultant");
 
+    const jobClientIds = [...seededClientIds];
+    const outsideClient = await seedClient("outside-run", { trialEndsAt: daysFromNow(2) });
+    const outsideConsultant = await seedUser(outsideClient.id, "outside-c", "consultant");
+
     // --- Run 1: exactly the right emails go out ---
     const sent = [];
     const fakeSend = async ({ to, subject }) => {
       sent.push({ to, subject });
     };
 
-    const result1 = await runTrialReminderJob({ sendEmail: fakeSend });
+    const emptyResult = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: [] });
+    check("empty scope never scans all clients", emptyResult.clientsNotified === 0 && sent.length === 0);
+    const result1 = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: jobClientIds });
 
     check("run1: one client notified", result1.clientsNotified === 1, `got ${result1.clientsNotified}`);
     check("run1: two emails sent", result1.emailsSent === 2 && sent.length === 2, `emailsSent=${result1.emailsSent}, captured=${sent.length}`);
@@ -192,7 +184,7 @@ async function main() {
 
     // --- Run 2: no duplicates ---
     sent.length = 0;
-    const result2 = await runTrialReminderJob({ sendEmail: fakeSend });
+    const result2 = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: jobClientIds });
     check("run2: nothing sent on second run", result2.emailsSent === 0 && sent.length === 0, `emailsSent=${result2.emailsSent}, captured=${sent.length}`);
     check("run2: no clients notified on second run", result2.clientsNotified === 0, `got ${result2.clientsNotified}`);
 
@@ -204,7 +196,7 @@ async function main() {
     const failingSend = async () => {
       throw new Error("simulated email outage");
     };
-    const result3 = await runTrialReminderJob({ sendEmail: failingSend });
+    const result3 = await runTrialReminderJob({ sendEmail: failingSend, clientIds: jobClientIds });
     check("run3: total send failure notifies nobody", result3.clientsNotified === 0 && result3.emailsSent === 0, JSON.stringify(result3));
     const [releasedRow] = await db
       .select()
@@ -214,17 +206,27 @@ async function main() {
 
     // --- And the retry then succeeds ---
     sent.length = 0;
-    const result4 = await runTrialReminderJob({ sendEmail: fakeSend });
+    const result4 = await runTrialReminderJob({ sendEmail: fakeSend, clientIds: jobClientIds });
     check("run4: retry after outage sends again", result4.clientsNotified === 1 && sent.length === 2, `clientsNotified=${result4.clientsNotified}, captured=${sent.length}`);
+
+    const [outsideRow] = await db.select().from(clientsTable).where(eq(clientsTable.id, outsideClient.id));
+    check("another run's eligible client remains untouched", outsideRow?.trialReminderSentAt == null);
+    await db.update(clientsTable).set({ trialReminderSentAt: null }).where(eq(clientsTable.id, clientSend.id));
+    const parallelSent = [[], []];
+    const parallelResults = await Promise.all([
+      runTrialReminderJob({ clientIds: jobClientIds, sendEmail: async ({ to }) => { parallelSent[0].push(to); } }),
+      runTrialReminderJob({ clientIds: [outsideClient.id], sendEmail: async ({ to }) => { parallelSent[1].push(to); } }),
+    ]);
+    check("parallel batches notify only their own clients",
+      parallelResults.every((result) => result.clientsNotified === 1)
+        && JSON.stringify(parallelSent[0].sort()) === JSON.stringify(expected)
+        && JSON.stringify(parallelSent[1]) === JSON.stringify([outsideConsultant.email]));
   } finally {
-    // --- Cleanup: remove seeded rows, restore neutralized real clients ---
+    // Cleanup touches only this UUID-tagged run's fixture IDs.
     try {
       if (seededClientIds.length > 0) {
         await db.execute(sql`DELETE FROM users WHERE client_id IN (${sql.join(seededClientIds.map((id) => sql`${id}`), sql`, `)})`);
         await db.execute(sql`DELETE FROM clients WHERE id IN (${sql.join(seededClientIds.map((id) => sql`${id}`), sql`, `)})`);
-      }
-      if (neutralizedIds.length > 0) {
-        await db.execute(sql`UPDATE clients SET trial_reminder_sent_at = NULL WHERE id IN (${sql.join(neutralizedIds.map((id) => sql`${id}`), sql`, `)})`);
       }
     } catch (err) {
       console.error("Cleanup failed:", err);

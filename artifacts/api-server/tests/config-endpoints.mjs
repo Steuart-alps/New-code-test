@@ -36,6 +36,9 @@
 // Usage: node tests/config-endpoints.mjs   (API must be running on API_BASE)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { randomUUID } from "node:crypto";
+
+const runId = randomUUID();
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -94,7 +97,7 @@ function isoDate(daysOffset = 0) {
 // auto-provisioned client). Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
   const session = makeSession();
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const reg = await session("POST", "/auth/register", {
     name: `${label} account`,
     email,
@@ -130,7 +133,7 @@ async function registerAccount(label, ts) {
 
 // Create a sub-user under the given admin session, then log them in.
 async function createAndLogin(admin, clientId, role, label, ts) {
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const password = "password-456";
   const created = await admin("POST", "/users", {
     name: label,
@@ -291,7 +294,7 @@ async function testFormOptionsIsolation(admin, clientAId, ts) {
   // them via consultant_clients so they can act on it with ?clientId.
   const bRes = await admin("POST", "/clients", {
     name: `Isolation Client B ${ts}`,
-    slug: `isolation-b-${ts}-${Math.floor(Math.random() * 1e6)}`,
+    slug: `isolation-b-${runId}`,
   });
   expectOk("isolation: consultant creates client B", bRes.status, [200, 201]);
   const clientBId = bRes.data?.id;
@@ -1202,7 +1205,8 @@ async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 async function main() {
-  const ts = Date.now();
+  // Full UUID entropy, without separators, fits the 60-character option limit.
+  const ts = runId.replaceAll("-", "");
 
   // Probe account A: self-service consultant + its own client.
   const a = await registerAccount("config-admin", ts);

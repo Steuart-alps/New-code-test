@@ -11,6 +11,9 @@
 // Usage: node tests/module-routes.mjs
 // Exits 0 when all checks pass, 1 otherwise.
 import { testDocTrainFlows } from "./doc-train-flows.mjs";
+import { randomUUID } from "node:crypto";
+
+const runId = randomUUID();
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -781,7 +784,7 @@ async function main() {
   const req = makeSession();
 
   // Register a fresh account
-  const email = `modules-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `modules-${runId}@test.local`;
   const regRes = await req("POST", "/auth/register", {
     name: "Module Test Account",
     email,

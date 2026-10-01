@@ -11,7 +11,7 @@ fi
 
 _api_integration_lock_file="${API_TEST_LOCK_FILE:-${TMPDIR:-/tmp}/complytrack-api-server-integration.lock}"
 exec 9>"$_api_integration_lock_file"
-if ! flock -w "${API_TEST_LOCK_TIMEOUT:-600}" 9; then
+if ! flock -w "${API_TEST_LOCK_TIMEOUT:-1800}" 9; then
   echo "Timed out waiting for the shared API integration-test lock ($_api_integration_lock_file)" >&2
   exit 1
 fi

@@ -9,7 +9,9 @@ description: How the automated test validation steps are wired and platform quir
 - **Why:** validation runs in a clean shell where no workflow is running, so any test needing a live server must boot one itself.
 - **How to apply:** `setValidationCommand` rejects names that already exist as non-validation workflows — pick a fresh name (e.g. `test-` prefix). Watch for legacy workflows with `isValidation = true` duplicating a step; `clearValidationCommand` removes them even when `setValidationCommand` refused the name.
 
-**Duplicate test workflows race:** `trial-reminders` and `test-trial-reminders` run the same suite; when both fire concurrently (e.g. after a restart-all), their seeded rows cross-contaminate and one fails with swapped email expectations. Re-run one alone to confirm; ignore paired failures.
+**Fixture isolation and locks solve different problems:** unique identities alone do not isolate a job that scans all tenants. Scope job candidates to owned fixture IDs, and retain shared runner serialization for builds and migrations.
+- **Why:** duplicate reminder tests swapped recipients because they globally neutralized candidate rows, even though fixture names were unique.
+- **How to apply:** exercise disjoint job scopes concurrently without the outer lock, then exercise the launch group through its locked entrypoints. Remove duplicate workflows rather than treating paired failures as acceptable.
 - Build validation steps: `build-api-server` and `build-web`. The vite config hard-requires `PORT` and `BASE_PATH` env vars (normally injected by the artifact service), so the `build-web` command must inline `PORT=5000 BASE_PATH=/`.
 
 **Broad completion-check contention:** automatic completion validation starts many API integration suites together. Their shared lock waiters can time out, and the suite holding the lock can miss its readiness deadline under the concurrent load even when its assertions pass in isolation.

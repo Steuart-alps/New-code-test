@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { clientsTable, usersTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { countClientSites, getPerSitePrice, quantityForSiteCount } from "./billing";
@@ -88,6 +88,8 @@ ComplyTrack
 export async function runTrialReminderJob(
   deps: {
     sendEmail?: typeof sendSystemEmail;
+    /** Optional internal batch scope; omitted by the production scheduler. */
+    clientIds?: readonly number[];
   } = {},
 ): Promise<{
   clientsNotified: number;
@@ -102,6 +104,7 @@ export async function runTrialReminderJob(
     .from(clientsTable)
     .where(
       and(
+        deps.clientIds === undefined ? undefined : inArray(clientsTable.id, [...deps.clientIds]),
         eq(clientsTable.active, true),
         sql`${clientsTable.subscriptionStatus} IN ('trial', 'trialing')`,
         sql`${clientsTable.trialEndsAt} IS NOT NULL`,

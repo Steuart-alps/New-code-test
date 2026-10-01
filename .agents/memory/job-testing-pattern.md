@@ -10,7 +10,11 @@ Internal jobs (e.g. trial reminders) can't be tested via the HTTP-level test sty
 - Give the job an optional injected deps param (e.g. `{ sendEmail }`) defaulting to the real sender — never mock at module level.
 - Test script is plain `.mjs` in `artifacts/api-server/tests/`; it esbuild-bundles a tiny `.entry.ts` (re-exporting the job + db + schema) at runtime, externalizing `pino`, `pino-pretty`, `resend`, `pg-native`, `nodemailer`, `@google-cloud/*`, and adds a `createRequire` banner for bundled CJS (pg). Output must land under the tests dir so externals resolve from api-server's node_modules.
 - The same bundling requirement applies to HTTP integration tests that use `@workspace/db` directly to seed or clean up fixtures. A plain Node `.mjs` import fails on the workspace's TypeScript directory export, even if the separate API server build succeeded. Readiness checks for an isolated server use root `/readyz`, not `/api/readyz`.
-- Jobs that scan whole tables: neutralize pre-existing matching rows first (temporarily set their dedupe flag), restore in `finally`, so real dev data is never emailed or permanently flagged.
+- Whole-table job tests must inject an explicit fixture-ID candidate scope, including safe empty-scope semantics. Never neutralize unrelated rows and restore them later.
+
+**Why:** a second test run can see or restore the first run's scheduling markers; even a fake sender does not make global state mutation hermetic.
+
+**How to apply:** keep production invocations unscoped, pass only the current run's fixture IDs in tests, and prove two disjoint scopes work simultaneously without the outer runner lock.
 
 **Why:** `@workspace/db` exports TS source and its dist is absent, so plain Node can't import it; bundling everything breaks on pino workers/native addons.
 
