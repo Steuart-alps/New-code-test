@@ -128,7 +128,8 @@ try {
   await page.evaluate(() => window.cacheHarness.auth.login('first@example.test', 'test-only-password'));
   await page.getByText('ALPHA_PRIVATE LOCATION · ALPHA_PRIVATE PERSON', { exact: true }).waitFor();
   await page.evaluate(() => window.cacheHarness.seedOtherModules('ALPHA_PRIVATE OTHER_MODULE'));
-  assert.ok((await snapshot()).queries.some(query => JSON.stringify(query.key) === '["incidents",11]'));
+  assert.ok((await snapshot()).queries.some(query => JSON.stringify(query.key) === '["incidents",11]'),
+    'incident query key includes the signed-in client id');
   assert.equal((await snapshot()).mutations.length, 1);
   // Leave an uncancellable HTTP response in flight, then remove its query.
   await page.evaluate(() => { void window.cacheHarness.delayedQuery(); });
@@ -164,6 +165,8 @@ try {
   });
   await page.getByTestId('account').getByText('Signed out', { exact: true }).waitFor();
   assert.deepEqual(await snapshot(), { queries: [], mutations: [] });
+  assert.ok(requests.some(req => req.path === '/api/auth/mobile-refresh' && req.clientId === 22),
+    'foreground revalidation must exercise an actual expired-session 401');
   revokeClientB = false;
   await page.evaluate(() => window.cacheHarness.auth.login('second@example.test', 'test-only-password'));
   await page.getByText('BRAVO_PRIVATE LOCATION · BRAVO_PRIVATE PERSON', { exact: true }).waitFor();
