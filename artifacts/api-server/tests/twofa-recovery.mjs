@@ -366,37 +366,178 @@ async function main() {
   await checkRemainingCodes("regeneration after exhaustion refreshes count to 10", s3, 10);
 
   // ── Mobile login challenge ──────────────────────────────────────────────────
-  const mobileLogin = await fetch(`${BASE}/auth/mobile-login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.200" },
-    body: JSON.stringify({ email: staffEmail, password: "password-456" }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const mobileChallenge = await mobileLogin.json();
-  check("mobile login returns a pending token", mobileLogin.status === 200 && typeof mobileChallenge?.pendingToken === "string");
-  check("mobile login does not return bearer token before 2fa", mobileChallenge?.token === undefined);
+  async function startMobileChallenge(ipSuffix) {
+    const result = await mobileRequest("POST", "/auth/mobile-login", {
+      email: staffEmail, password: "password-456",
+    }, null, ipSuffix);
+    check(`mobile login creates a pending challenge (${ipSuffix})`,
+      result.status === 200 && typeof result.data?.pendingToken === "string", `got ${result.status}`);
+    check(`mobile login withholds the bearer token (${ipSuffix})`,
+      result.data?.token === undefined, JSON.stringify(result.data));
+    return result.data?.pendingToken;
+  }
+  const mobileChallengeHash = pendingToken =>
+    createHash("sha256").update(pendingToken).digest("hex");
+  const mobileSessionCount = async () => Number((await pool.query(
+    "SELECT count(*)::int AS count FROM mobile_sessions WHERE user_id = $1", [staffId])).rows[0].count);
+  async function verifyMobileChallenge(pendingToken, code, ipSuffix) {
+    return mobileRequest("POST", "/auth/mobile-login/verify-totp", { pendingToken, code }, null, ipSuffix);
+  }
 
-  const mobileVerify = await fetch(`${BASE}/auth/mobile-login/verify-totp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.200" },
-    body: JSON.stringify({
-      pendingToken: mobileChallenge?.pendingToken,
-      code: generateToken(setup.data.secret),
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const mobileSession = await mobileVerify.json();
-  check("mobile login exchanges valid 2fa challenge", mobileVerify.status === 200 && typeof mobileSession?.token === "string", JSON.stringify(mobileSession));
+  // Pin one challenge before expiry and at the exact boundary in the database,
+  // so this does not depend on sleeping or the five-minute wall clock.
+  for (const [ipSuffix, expirySql, label] of [
+    [210, "now() - interval '1 millisecond'", "past expiry"],
+    [211, "now()", "exact expiry boundary"],
+  ]) {
+    const pendingToken = await startMobileChallenge(ipSuffix);
+    const tokenHash = mobileChallengeHash(pendingToken);
+    const challenge = await pool.query(
+      "SELECT extract(epoch FROM (expires_at - created_at)) * 1000 AS lifetime_ms FROM mobile_login_challenges WHERE token_hash = $1",
+      [tokenHash]);
+    const lifetimeMs = Number(challenge.rows[0]?.lifetime_ms);
+    check(`mobile challenge is issued for five minutes (${label})`,
+      challenge.rows.length === 1 && lifetimeMs >= 299000 && lifetimeMs <= 301000,
+      `lifetime was ${lifetimeMs}ms`);
+    await pool.query(`UPDATE mobile_login_challenges SET expires_at = ${expirySql} WHERE token_hash = $1`, [tokenHash]);
+    const before = await mobileSessionCount();
+    const verification = await verifyMobileChallenge(pendingToken, generateToken(setup.data.secret), ipSuffix);
+    check(`mobile challenge cannot be used at or after ${label}`, verification.status === 401,
+      `got ${verification.status}`);
+    check(`expired mobile challenge cannot issue a bearer session (${label})`,
+      verification.data?.token === undefined && await mobileSessionCount() === before);
+  }
 
-  const replay = await fetch(`${BASE}/auth/mobile-login/verify-totp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.200" },
-    body: JSON.stringify({
-      pendingToken: mobileChallenge?.pendingToken,
-      code: generateToken(setup.data.secret),
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
+  // A failed session insert happens after recovery-code consumption in the
+  // transaction. The HTTP endpoint must roll both operations back so retrying
+  // the still-valid challenge with the same one-use code succeeds.
+  const rollbackToken = await startMobileChallenge(212);
+  const rollbackCode = replenished.data.recoveryCodes[0];
+  const rollbackCodeHash = createHash("sha256")
+    .update(rollbackCode.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  const rollbackHash = mobileChallengeHash(rollbackToken);
+  const suffix = fixtureId.replace(/[^a-zA-Z0-9_]/g, "_");
+  const rejectFunction = `test_reject_mobile_session_${suffix}`;
+  const rejectTrigger = `test_reject_mobile_session_${suffix}`;
+  await pool.query(`CREATE FUNCTION public."${rejectFunction}"() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.user_id = ${Number(staffId)} THEN
+        RAISE EXCEPTION 'Injected mobile session creation failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$`);
+  try {
+    await pool.query(`CREATE TRIGGER "${rejectTrigger}" BEFORE INSERT ON mobile_sessions
+      FOR EACH ROW EXECUTE FUNCTION public."${rejectFunction}"()`);
+    const beforeSessions = await mobileSessionCount();
+    const failedExchange = await verifyMobileChallenge(rollbackToken, rollbackCode, 212);
+    check("mobile recovery verification reports a failed session exchange",
+      failedExchange.status === 500, `got ${failedExchange.status}`);
+    const afterFailedExchange = await pool.query(`
+      SELECT rc.used_at, c.id AS challenge_id
+      FROM totp_recovery_codes rc
+      LEFT JOIN mobile_login_challenges c ON c.token_hash = $2
+      WHERE rc.user_id = $1 AND rc.code_hash = $3
+    `, [staffId, rollbackHash, rollbackCodeHash]);
+    check("failed mobile challenge exchange rolls back recovery-code consumption and challenge deletion",
+      afterFailedExchange.rows.length === 1 && afterFailedExchange.rows[0].used_at === null
+      && afterFailedExchange.rows[0].challenge_id != null
+      && await mobileSessionCount() === beforeSessions);
+  } finally {
+    await pool.query(`DROP TRIGGER IF EXISTS "${rejectTrigger}" ON mobile_sessions`);
+    await pool.query(`DROP FUNCTION IF EXISTS public."${rejectFunction}"()`);
+  }
+  const retriedExchange = await verifyMobileChallenge(rollbackToken, rollbackCode, 215);
+  check("the recovery code and challenge remain usable after the failed exchange",
+    retriedExchange.status === 200 && typeof retriedExchange.data?.token === "string",
+    `got ${retriedExchange.status}`);
+  const afterRetry = await pool.query(`
+    SELECT rc.used_at, c.id AS challenge_id
+    FROM totp_recovery_codes rc
+    LEFT JOIN mobile_login_challenges c ON c.token_hash = $2
+    WHERE rc.user_id = $1 AND rc.code_hash = $3
+  `, [staffId, rollbackHash, rollbackCodeHash]);
+  check("successful exchange consumes the recovery code and deletes its challenge",
+    afterRetry.rows.length === 1 && afterRetry.rows[0].used_at != null
+    && afterRetry.rows[0].challenge_id == null);
+
+  // Hold the challenge row until both HTTP verifications are waiting on it;
+  // otherwise Promise.all alone would not prove the requests actually raced.
+  const raceToken = await startMobileChallenge(213);
+  const raceHash = mobileChallengeHash(raceToken);
+  const raceCode = replenished.data.recoveryCodes[1];
+  const raceCodeHash = createHash("sha256")
+    .update(raceCode.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  const beforeRaceSessions = await mobileSessionCount();
+  const challengeLocker = await pool.connect();
+  let mobileVerifications;
+  let mobileRaceError;
+  try {
+    await challengeLocker.query("BEGIN");
+    await challengeLocker.query(
+      "SELECT id FROM mobile_login_challenges WHERE token_hash = $1 FOR UPDATE", [raceHash]);
+    mobileVerifications = Promise.all([
+      verifyMobileChallenge(raceToken, raceCode, 213),
+      verifyMobileChallenge(raceToken, raceCode, 214),
+    ]);
+    let waiting = 0;
+    const deadline = Date.now() + 10000;
+    do {
+      const blocked = await pool.query(`
+        WITH RECURSIVE blocked AS (
+          SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+          UNION
+          SELECT activity.pid FROM pg_stat_activity activity
+          JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+        )
+        SELECT count(*)::int AS waiting
+        FROM blocked JOIN pg_stat_activity activity USING (pid)
+        WHERE activity.query ILIKE '%FROM mobile_login_challenges%'
+      `, [challengeLocker.processID]);
+      waiting = blocked.rows[0].waiting;
+      if (waiting === 2) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    } while (Date.now() < deadline);
+    check("both mobile verifications overlap while the challenge is locked",
+      waiting === 2, `waiting: ${waiting}`);
+  } catch (error) {
+    mobileRaceError = error;
+  } finally {
+    let rollbackError;
+    try {
+      await challengeLocker.query("ROLLBACK");
+    } catch (error) {
+      rollbackError = error;
+      mobileRaceError ??= error;
+    } finally {
+      challengeLocker.release(rollbackError);
+    }
+  }
+  const mobileRaceResults = mobileVerifications ? await mobileVerifications : [];
+  if (mobileRaceError) throw mobileRaceError;
+  check("concurrent mobile challenge verification issues exactly one bearer session",
+    mobileRaceResults.filter(result => result.status === 200
+      && typeof result.data?.token === "string").length === 1
+    && mobileRaceResults.filter(result => result.status === 401).length === 1,
+    JSON.stringify(mobileRaceResults.map(result => result.status)));
+  check("concurrent mobile challenge creates exactly one database session",
+    await mobileSessionCount() === beforeRaceSessions + 1);
+  const racedRecovery = await pool.query(
+    "SELECT used_at FROM totp_recovery_codes WHERE user_id = $1 AND code_hash = $2",
+    [staffId, raceCodeHash]);
+  check("concurrent mobile challenge consumes its recovery code once",
+    racedRecovery.rows.length === 1 && racedRecovery.rows[0].used_at != null);
+
+  const mobileTokenChallenge = await startMobileChallenge(216);
+  const mobileSession = await verifyMobileChallenge(
+    mobileTokenChallenge, generateToken(setup.data.secret), 216);
+  check("mobile login exchanges valid TOTP challenge",
+    mobileSession.status === 200 && typeof mobileSession.data?.token === "string",
+    JSON.stringify(mobileSession.data));
+  const replay = await verifyMobileChallenge(
+    mobileTokenChallenge, generateToken(setup.data.secret), 216);
   check("mobile login challenge is single use", replay.status === 401, `got ${replay.status}`);
 
   const userList = await admin("GET", "/users");

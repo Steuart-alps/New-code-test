@@ -23,6 +23,11 @@ CAPTURE_FILE="${CAPTURE_DIR}/emails.jsonl"
 SERVER_LOG="${CAPTURE_DIR}/server.log"
 SERVER_PID=""
 cleanup() {
+  result=$?
+  if [ "$result" -ne 0 ] && [ -f "$SERVER_LOG" ]; then
+    echo "Two-factor recovery test API log (last 100 lines):" >&2
+    tail -n 100 "$SERVER_LOG" >&2
+  fi
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" 2>/dev/null || true
@@ -47,7 +52,7 @@ NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_
   TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE=2 PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
-for _ in $(seq 1 45); do
+for _ in $(seq 1 120); do
   kill -0 "$SERVER_PID" 2>/dev/null || {
     echo "Test API server exited before becoming ready." >&2
     exit 1
@@ -56,7 +61,7 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 curl -sf -m 2 "$READY_URL" >/dev/null || {
-  echo "Test API server did not become ready at $READY_URL within 45s." >&2
+  echo "Test API server did not become ready at $READY_URL within 120s." >&2
   exit 1
 }
 node tests/twofa-recovery.mjs "$@"
