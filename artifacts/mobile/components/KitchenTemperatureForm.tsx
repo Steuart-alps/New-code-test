@@ -7,7 +7,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Platform,
 } from 'react-native';
+import { assessKitchenTemperatures, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -62,6 +64,7 @@ interface CoreTemperatureReading {
 }
 
 interface FoodSafetyConfig extends FoodSafetyColdConfig {
+  food_temperature_rules?: string | null;
   food_hot_holding_limit?: string | null;
   food_reheating_limit?: string | null;
   food_show_deliveries?: string | null;
@@ -202,6 +205,8 @@ function KitchenTemperatureFields() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (loadedRecordId === undefined) throw new Error('Wait for the selected diary to load.');
+      if (temperatureAssessment.error) throw new Error(temperatureAssessment.error);
+      if (temperatureAssessment.failures.some(f => !f.actionTaken)) throw new Error('Record the corrective action taken for the failed readings before saving.');
       const hasValues = (row: object) =>
         Object.values(row).some((value) => typeof value === 'string' && value.trim());
       const deliveryRow = config?.food_show_deliveries !== 'false' && hasValues(delivery)
@@ -262,7 +267,29 @@ function KitchenTemperatureFields() {
   const loading = configLoading || recordLoading || loadedRecordId === undefined;
   const waitingForCreatedDiary = loadedRecordId === null && outbox.entries.some(entry =>
     entry.siteId === siteId && entry.recordDate === date && entry.state === 'sent' && entry.recordId === null);
-  const canSave = !pendingForDiary && !waitingForCreatedDiary && !outbox.error && canSaveTemperatureForm(
+  const temperatureAssessment = (() => {
+    try {
+      const before = loadedRecordId === null ? null : {
+        ...existingRecord, coldFood: initialColdFood, correctives: initialCorrectives,
+      };
+      const append = (section: string, row: object) =>
+        [...(((existingRecord as unknown as Record<string, unknown>)?.[section] ?? []) as object[]), row];
+      const after = {
+        coldFood, correctives,
+        deliveries: config?.food_show_deliveries === 'false' ? existingRecord?.deliveries ?? [] : append('deliveries', delivery),
+        hotHolding: config?.food_show_hot_holding === 'false' ? existingRecord?.hotHolding ?? [] : append('hotHolding', hotHolding),
+        hotTemperature: config?.food_show_hot_temperature === 'false' ? (before as Record<string, unknown>)?.hotTemperature ?? [] : append('hotTemperature', cooking),
+        cooling: config?.food_show_cooling === 'false' ? (before as Record<string, unknown>)?.cooling ?? [] : append('cooling', cooling),
+        reheating: config?.food_show_reheating === 'false' ? (before as Record<string, unknown>)?.reheating ?? [] : append('reheating', reheating),
+      };
+      const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
+      return { failures: assessKitchenTemperatures(before, after, rules, units), error: '', rules };
+    } catch (error) {
+      return { failures: [] as KitchenTemperatureFailure[], error: error instanceof Error ? error.message : 'The temperature rules could not be evaluated.', rules: null };
+    }
+  })();
+  const canSave = !temperatureAssessment.error && temperatureAssessment.failures.every(f => !!f.actionTaken)
+    && !pendingForDiary && !waitingForCreatedDiary && !outbox.error && canSaveTemperatureForm(
     { coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives },
     {
       deliveries: config?.food_show_deliveries !== 'false',
@@ -433,6 +460,8 @@ function KitchenTemperatureFields() {
               }}
             />
           </View>
+          <TextInputField label="Corrective action taken (required if outside limits)" value={reading.correctiveAction}
+            onChange={(value) => { markDirty(); setColdFood(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, correctiveAction: value } : row)); }} />
         </View>
       ))}
         </>
@@ -448,7 +477,7 @@ function KitchenTemperatureFields() {
           <TextInputField label="Time" value={hotHolding.timeOfCheck} onChange={(timeOfCheck) => { markDirty(); setHotHolding((row) => ({ ...row, timeOfCheck })); }} placeholder="HH:mm" compact />
         </View>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>
-          Target: {config?.food_hot_holding_limit ?? 'Above 63°C'}
+          Target: {temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.hotHolding) : 'Review numeric rules'}
         </Text>
       </View>
         </>
@@ -464,6 +493,8 @@ function KitchenTemperatureFields() {
           <TemperatureInput label="Chilled °C" value={delivery.tempChilled} onChange={(tempChilled) => { markDirty(); setDelivery((row) => ({ ...row, tempChilled })); }} />
           <TemperatureInput label="Frozen °C" value={delivery.tempFrozen} onChange={(tempFrozen) => { markDirty(); setDelivery((row) => ({ ...row, tempFrozen })); }} />
         </View>
+        <TextInputField label="Corrective action taken (required for failed deliveries)" value={delivery.correctiveActions}
+          onChange={(value) => { markDirty(); setDelivery(row => ({ ...row, correctiveActions: value })); }} />
       </View>
         </>
       ) : null}
@@ -478,13 +509,20 @@ function KitchenTemperatureFields() {
         <CoreTemperatureCard
           title="Reheating"
           icon="rotate-cw"
-          target={`Target: ${config?.food_reheating_limit ?? 'Above 82°C'}`}
+          target={`Target: ${temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.reheating) : 'Review numeric rules'}`}
           value={reheating}
           onChange={(value) => { markDirty(); setReheating(value); }}
         />
       ) : null}
 
       <SectionTitle icon="tool" title="Corrective actions" color={colors.foreground} />
+      {temperatureAssessment.error ? <Text accessibilityRole="alert" style={{ color: colors.destructive }}>{temperatureAssessment.error}</Text> : null}
+      {temperatureAssessment.failures.length ? <View style={[styles.notice, { borderColor: colors.destructive }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.destructive }}>Outside configured limits — record what you did for each failure. A manager must verify the follow-up evidence.</Text>
+          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {failure.value}{failure.unit}</Text>)}
+        </View>
+      </View> : null}
       <TextInput
         style={[styles.textArea, { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.border }]}
         value={correctives}
@@ -580,7 +618,7 @@ function TextInputField({
         onChangeText={onChange}
         placeholder={placeholder}
         placeholderTextColor={colors.mutedForeground}
-        keyboardType={numeric ? 'decimal-pad' : 'default'}
+        keyboardType={numeric ? (Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'decimal-pad') : 'default'}
       />
     </View>
   );

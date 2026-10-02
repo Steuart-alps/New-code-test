@@ -1,3 +1,5 @@
+import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
+import { assessKitchenTemperatures, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { AppLayout } from "@/components/layout";
@@ -846,6 +848,7 @@ function DailyDiaryTab() {
 
   // Invalidate the record queries for the current diary scope.
   const invalidateRecords = () => {
+    window.dispatchEvent(new Event("kitchen-actions-changed"));
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetyRecordByDateQueryKey(selectedDate, recordParams) });
     queryClient.invalidateQueries({ queryKey: getListFoodSafetyRecordsQueryKey(recordParams) });
     queryClient.invalidateQueries({ queryKey: getGetFoodSafetySummaryQueryKey().slice(0, 1) });
@@ -885,8 +888,27 @@ function DailyDiaryTab() {
     managerSignature: managerSignature || undefined,
     submittedAt,
   });
+  const temperatureAssessment = (() => {
+    try {
+      const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
+      const units = JSON.parse(config?.food_cold_units || "[]");
+      const failures = assessKitchenTemperatures(record as unknown as Record<string, unknown> | null, buildData(), rules, units);
+      return { failures, error: "", rules };
+    } catch (problem) {
+      return { failures: [] as KitchenTemperatureFailure[], error: problem instanceof Error ? problem.message : "Numeric rules could not be evaluated", rules: null };
+    }
+  })();
+  const missingCorrective = temperatureAssessment.failures.some(failure => !failure.actionTaken);
+  const validateTemperatures = () => {
+    if (temperatureAssessment.error || missingCorrective) {
+      toast({ title: "Temperature follow-up required", description: temperatureAssessment.error || "Record the corrective action taken for every failed reading, using the row's action field or new corrective-action notes.", variant: "destructive" });
+      return false;
+    }
+    return true;
+  };
 
   const handleSaveDraft = async () => {
+    if (!validateTemperatures()) return;
     const data = buildData(undefined);
 
     if (record) {
@@ -930,6 +952,7 @@ function DailyDiaryTab() {
   };
 
   const handleSubmit = async () => {
+    if (!validateTemperatures()) return;
     if (!managerSignature.trim()) {
       toast({ title: "Manager signature required", variant: "destructive" });
       return;
@@ -964,6 +987,11 @@ function DailyDiaryTab() {
 
   return (
     <div className="space-y-6">
+      {temperatureAssessment.error && <p role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{temperatureAssessment.error}</p>}
+      {temperatureAssessment.failures.length > 0 && <div role="alert" className="rounded border border-destructive p-3 text-sm">
+        <p className="font-medium">Outside configured limits — record the action taken. Each new failed observation opens a manager-verified follow-up.</p>
+        {temperatureAssessment.failures.map((failure, index) => <p key={index}>{failure.label} · {failure.field}: {failure.value}{failure.unit}{!failure.actionTaken ? " — corrective action required" : " — action recorded"}</p>)}
+      </div>}
       {/* Date Picker */}
       <Card>
         <CardHeader className="border-b border-border/50 pb-4">
@@ -1274,7 +1302,7 @@ function DailyDiaryTab() {
                     : cooling.map((row, i) => {
                       const upd = (f: keyof CoolingRow, v: string) => { const n = [...cooling]; n[i] = { ...n[i], [f]: v }; setCooling(n); };
                       const mins = coolingMins(row.timeStart, row.timeFinish);
-                      const overTime = mins !== null && mins > 90;
+                      const overTime = mins !== null && mins > (temperatureAssessment.rules?.coolingMinutes ?? 90);
                       const durationLabel = mins === null ? "" : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
                       return (
                         <tr key={i} className={cn("hover:bg-muted/10", overTime && "bg-rose-50")}>
@@ -2017,6 +2045,7 @@ export default function KitchenPage() {
   return (
     <AppLayout title="KitchenTrack">
       <div className="space-y-6">
+        <KitchenTemperatureControls />
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">

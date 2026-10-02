@@ -12,6 +12,11 @@ type ProfileRequirement = {
 };
 
 export const DEFAULT_TRACK_EVIDENCE_REQUIREMENTS: Record<string, ProfileRequirement[]> = {
+  kitchen: [
+    { requirementKey: "temperature_control_restored", title: "Corrective-action verification evidence",
+      description: "Record a repeat reading, disposal/rejection record, or other evidence showing the failed temperature was controlled. A manager verifies the action with their final signature.",
+      evidenceType: "verification", minimumCount: 1, reviewRequired: false },
+  ],
   fire: [
     { requirementKey: "risk_assessment", title: "Current fire risk assessment", description: "Current version, assessment date and next review date.", evidenceType: "document", minimumCount: 1, reviewRequired: true },
     { requirementKey: "responsible_person", title: "Responsible person and role", description: "Named responsible person and their operational role.", evidenceType: "observation", minimumCount: 1, reviewRequired: false },
@@ -64,6 +69,7 @@ export async function missingEvidenceForAction(clientId: number, action: {
   // Manual actions retain the existing resolution contract. Product-generated
   // FireTrack/LegionellaTrack actions use the structured profile.
   if (!action.sourceKind || !DEFAULT_TRACK_EVIDENCE_REQUIREMENTS[action.module]) return [];
+  if (action.module === "kitchen" && !action.sourceKind.startsWith("kitchen_temperature_")) return [];
   const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, action.module);
   if (!requirements.length) return [];
   const keys = requirements.map(item => item.requirementKey);

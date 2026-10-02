@@ -1,5 +1,8 @@
 import { Router } from "express";
 import { createHash } from "node:crypto";
+import type { Request, Response, NextFunction } from "express";
+import { kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules } from "@workspace/api-zod/kitchen-temperature";
+import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib/kitchenTemperatureActions";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
@@ -105,6 +108,7 @@ const CONFIG_KEYS = [
   "food_cooling_limit",
   "food_reheating_limit",
   "food_hot_holding_limit",
+  "food_temperature_rules",
   // Template keys — stored as JSON strings
   "food_cold_units",            // JSON: [{name, type:"fridge"|"freezer"}]
   "food_default_hot_items",     // JSON: ["item1", "item2"]
@@ -125,6 +129,7 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_cooling_limit: "8°C within 90 minutes",
   food_reheating_limit: "Above 82°C",
   food_hot_holding_limit: "Above 63°C",
+  food_temperature_rules: JSON.stringify(DEFAULT_KITCHEN_TEMPERATURE_RULES),
   food_cold_units: "",
   food_default_hot_items: "",
   food_default_holding_items: "",
@@ -364,6 +369,12 @@ function validateConfigPatch(
     if ((SECTION_SHOW_KEYS as readonly string[]).includes(key)) {
       if (raw !== "true" && raw !== "false") return { error: `${key} must be "true" or "false"` };
       out[key] = raw;
+    } else if (key === "food_temperature_rules") {
+      try {
+        const result = kitchenTemperatureRulesSchema.safeParse(JSON.parse(raw));
+        if (!result.success) return { error: "Supply complete, ordered numeric temperature rules" };
+        out[key] = JSON.stringify(result.data);
+      } catch { return { error: "Temperature rules must be valid JSON" }; }
     } else if (key === "food_jurisdiction") {
       if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
         return { error: `${key} must be "scotland" or "england_wales"` };
@@ -455,9 +466,15 @@ router.get("/config", requireAuth, async (req, res) => {
     if (siteJurisdictionOverride && !siteReheatingOverride) {
       config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
     }
+    if (!clientStored.has("food_temperature_rules") && !siteOverrides.includes("food_temperature_rules")) {
+      config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
+    }
     return res.json({ ...config, _siteOverrides: siteOverrides });
   }
 
+  if (!clientStored.has("food_temperature_rules")) {
+    config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
+  }
   res.json(config);
 });
 
@@ -812,7 +829,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
   }
 
-  const [inserted] = await db
+  const inserted = await db.transaction(async tx => {
+  const [created] = await tx
     .insert(foodSafetyRecordsTable)
     .values({
       clientId,
@@ -840,6 +858,9 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     })
     .onConflictDoNothing()
     .returning();
+  if (created) await recordKitchenTemperatureActions(tx, null, created, clientId, siteId, req.currentUser!.id);
+  return created;
+  });
 
   if (!inserted) {
     const [winner] = await db
@@ -906,18 +927,19 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     ? await resolveReheatingLimit(clientId, siteId)
     : undefined;
 
+  const outcome = await db.transaction(async tx => {
   // Ensure the day's record exists for this diary scope (ignore the race where
   // another writer creates it first), then append in a single UPDATE. The
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
     if (reheatingLimit !== undefined) {
-      await db.execute(sql`
+      await tx.execute(sql`
         INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
         VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
         ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
       `);
     } else {
-      await db.execute(sql`
+      await tx.execute(sql`
         INSERT INTO food_safety_records (client_id, record_date, created_by)
         VALUES (${clientId}, ${recordDate}, ${userId})
         ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
@@ -925,13 +947,13 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
     }
   } else {
     if (reheatingLimit !== undefined) {
-      await db.execute(sql`
+      await tx.execute(sql`
         INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
         VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
         ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
       `);
     } else {
-      await db.execute(sql`
+      await tx.execute(sql`
         INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
         VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
         ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
@@ -940,13 +962,17 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
+  const [before] = await tx.select().from(foodSafetyRecordsTable).where(and(
+    eq(foodSafetyRecordsTable.clientId, clientId),
+    eq(foodSafetyRecordsTable.recordDate, recordDate), siteScopeCond(siteId),
+  )).for("update");
   const duplicateGuard = entryId
     ? sql`AND NOT EXISTS (
         SELECT 1 FROM jsonb_array_elements(COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb)) AS existing
         WHERE existing->>'_entryId' = ${entryId}
       )`
     : sql``;
-  const result = await db.execute(sql`
+  const result = await tx.execute(sql`
     UPDATE food_safety_records
     SET ${sql.raw(`"${column}"`)} = COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb) || ${rowJson}::jsonb,
         updated_at = now()
@@ -956,16 +982,20 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   `);
   const updated = (result.rows ?? [])[0];
   if (!updated && entryId) {
-    const existingResult = await db.execute(sql`
+    const existingResult = await tx.execute(sql`
       SELECT * FROM food_safety_records
       WHERE client_id = ${clientId} AND record_date = ${recordDate} AND ${scopeCond}
       LIMIT 1
     `);
     const existing = existingResult.rows?.[0];
-    if (existing) return res.status(200).json({ ...existing, deduplicated: true });
+    if (existing) return { status: 200, record: { ...existing, deduplicated: true } };
   }
-  if (!updated) return res.status(500).json({ error: "Could not append record" });
-  res.status(201).json(updated);
+  if (!updated) throw new Error("Could not append record");
+  const [after] = await tx.select().from(foodSafetyRecordsTable).where(eq(foodSafetyRecordsTable.id, before.id));
+  await recordKitchenTemperatureActions(tx, before, after, clientId, siteId, req.currentUser!.id);
+  return { status: 201, record: updated };
+  });
+  res.status(outcome.status).json(outcome.record);
 });
 
 // PUT /api/food-safety/:id
@@ -1070,6 +1100,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
         })
         .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
         .returning();
+      await recordKitchenTemperatureActions(tx, current, saved, clientId, current.siteId, req.currentUser!.id);
       return saved;
     });
     if (!updated) return res.status(404).json({ error: "Not found" });
@@ -1140,6 +1171,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       .set(updates)
       .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
       .returning();
+    await recordKitchenTemperatureActions(tx, current, updated, clientId, current.siteId, req.currentUser!.id);
     return { kind: "updated" as const, record: updated };
   });
 
@@ -1207,4 +1239,10 @@ router.get("/status", requireAuth, async (req, res) => {
   res.json(statuses);
 });
 
+router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (error instanceof KitchenTemperatureError) return res.status(400).json({
+    error: error.message, code: "KITCHEN_CORRECTIVE_ACTION_REQUIRED",
+  });
+  return next(error);
+});
 export default router;

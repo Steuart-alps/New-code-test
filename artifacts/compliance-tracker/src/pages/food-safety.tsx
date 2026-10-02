@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useListSites } from "@workspace/api-client-react";
@@ -217,6 +218,7 @@ export default function FoodSafetyPage() {
 
   return (
     <AppLayout title="Food Safety Records">
+      <KitchenTemperatureControls />
       <div className="max-w-2xl mx-auto space-y-6">
         {sites.length > 0 && (
           <div className="flex items-center justify-end gap-2">

@@ -16,3 +16,9 @@ Package-level checks must build their own referenced composite libraries before 
 **Why:** A clean workspace has no committed `lib/*/dist` declarations. Direct package validation then reports missing referenced outputs and can also degrade inferred types into misleading follow-on errors.
 
 **How to apply:** Keep package `typecheck` scripts self-preparing only their declared references, and retain the root `tsc --build` as the shared library gate.
+
+Domain helpers added to api-zod must use a separate package subpath export rather than a manual export in its generated root index.
+
+**Why:** Orval rewrites the api-zod root barrel during regeneration, deleting hand-added domain exports even when they use single quotes. The manually maintained api-client-react barrel is different and can retain its public domain re-exports.
+
+**How to apply:** Expose shared domain helpers through package exports; import that subpath on the server and re-export it from the maintained client barrel. Include regeneration in validation.

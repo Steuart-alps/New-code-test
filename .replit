@@ -154,6 +154,10 @@ args = "contractor-key-rotation"
 task = "workflow.run"
 args = "kitchen-mobile-replay"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-temperature-actions"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -535,6 +539,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:kitchen-mobile-replay"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-temperature-actions"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-temperature-actions"
 
 [workflows.workflow.metadata]
 isValidation = true

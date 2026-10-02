@@ -79,6 +79,14 @@ router.get("/requirements", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   if (!await accessibleSite(parsed.data.siteId, clientId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Forbidden site" });
+  if (parsed.data.actionId != null) {
+    const [action] = await db.select({ siteId: trackActionsTable.siteId }).from(trackActionsTable).where(and(
+      eq(trackActionsTable.id, parsed.data.actionId), eq(trackActionsTable.clientId, clientId),
+      eq(trackActionsTable.module, parsed.data.module),
+    ));
+    if (!action) return res.status(404).json({ error: "Action not found" });
+    if (!await accessibleSite(action.siteId, clientId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Forbidden action" });
+  }
   const requirements = await ensureDefaultTrackEvidenceRequirements(clientId, parsed.data.module);
   const evidenceConditions = [
     eq(trackEvidenceTable.clientId, clientId),
@@ -124,6 +132,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         id: trackActionsTable.id,
         module: trackActionsTable.module,
         siteId: trackActionsTable.siteId,
+        sourceKind: trackActionsTable.sourceKind,
+        status: trackActionsTable.status,
       }).from(trackActionsTable).where(and(
         eq(trackActionsTable.id, parsed.data.actionId),
         eq(trackActionsTable.clientId, clientId),
@@ -131,6 +141,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       if (!action || action.module !== parsed.data.module) return { status: 404 as const, error: "Action not found" };
       if (siteId != null && siteId !== action.siteId) return { status: 400 as const, error: "Evidence site must match its action" };
       siteId = action.siteId;
+      if (!await accessibleSite(siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden action" };
+      if (action.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_") && action.status === "resolved") {
+        return { status: 409 as const, error: "Evidence for a manager-verified action is immutable" };
+      }
     }
     if (parsed.data.requirementKey != null) {
       if (parsed.data.actionId == null) return { status: 400 as const, error: "Required evidence must be linked to the corrective action being signed off" };
@@ -176,6 +190,18 @@ router.post("/:id/review", requireAuth, denyViewers, async (req, res) => {
   if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid evidence id" });
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const result = await db.transaction(async tx => {
+    const [link] = await tx.select({ actionId: trackEvidenceTable.actionId }).from(trackEvidenceTable).where(and(
+      eq(trackEvidenceTable.id, id), eq(trackEvidenceTable.clientId, clientId),
+    ));
+    if (link?.actionId) {
+      const [action] = await tx.select().from(trackActionsTable).where(and(
+        eq(trackActionsTable.id, link.actionId), eq(trackActionsTable.clientId, clientId),
+      )).for("update");
+      if (action?.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_")) {
+        if (!["client_admin", "consultant"].includes(req.currentUser!.role)) return { status: 403 as const, error: "A manager must review failed-temperature evidence" };
+        if (action.status === "resolved") return { status: 409 as const, error: "Evidence for a manager-verified action is immutable" };
+      }
+    }
     const [current] = await tx.select().from(trackEvidenceTable).where(and(
       eq(trackEvidenceTable.id, id),
       eq(trackEvidenceTable.clientId, clientId),

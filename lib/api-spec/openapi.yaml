@@ -4283,6 +4283,9 @@ components:
     FoodSafetyConfig:
       type: object
       properties:
+        food_temperature_rules:
+          type: string
+          description: Validated JSON containing numeric min/max ranges and maximum cooling minutes; authoritative for new readings.
         food_cold_units:
           type: string
           nullable: true

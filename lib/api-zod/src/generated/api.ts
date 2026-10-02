@@ -1976,6 +1976,7 @@ export const GetFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const GetFoodSafetyConfigResponse = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),
@@ -2008,6 +2009,7 @@ export const UpdateFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const UpdateFoodSafetyConfigBody = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),
@@ -2043,6 +2045,7 @@ export const ResetFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const ResetFoodSafetyConfigResponse = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),

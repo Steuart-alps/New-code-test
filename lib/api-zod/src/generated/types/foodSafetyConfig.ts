@@ -8,6 +8,8 @@
 import type { FoodSafetyConfigFoodJurisdiction } from './foodSafetyConfigFoodJurisdiction';
 
 export interface FoodSafetyConfig {
+  /** Validated JSON containing numeric min/max ranges and maximum cooling minutes; authoritative for new readings. */
+  food_temperature_rules?: string;
   food_cold_units?: string | null;
   food_default_hot_items?: string | null;
   food_default_holding_items?: string | null;

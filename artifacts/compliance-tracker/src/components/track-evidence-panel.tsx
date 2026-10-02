@@ -188,7 +188,7 @@ export function TrackEvidencePanel({ moduleKey, actions, sites, canMutate }: {
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="font-medium text-[#162D42]">Required evidence profile</p>
-              <p className="text-xs text-muted-foreground">Structured requirements apply to source-linked FireTrack and LegionellaTrack actions. Evidence marked for independent review must be verified before sign-off.</p>
+              <p className="text-xs text-muted-foreground">Structured requirements apply to source-linked FireTrack, LegionellaTrack and failed-temperature KitchenTrack actions. KitchenTrack’s manager verifies corrective-action evidence with their final signature. Evidence marked for independent review must be verified before sign-off.</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {profileActionId
                   ? `Showing closure-specific evidence for action #${profileActionId}.`
