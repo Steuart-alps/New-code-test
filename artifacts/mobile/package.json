@@ -12,8 +12,9 @@
     "test:cleaning-draft": "node tests/cleaning-draft-logic.mjs",
     "test:aqua-track": "node tests/aqua-track-logic.mjs",
     "test:mobile-login-error": "node tests/mobile-login-error.mjs",
-    "test:kitchen-site-scope": "pnpm run test:kitchen-diary-scope && pnpm run test:cleaning-draft",
+    "test:kitchen-site-scope": "pnpm run test:kitchen-diary-scope && pnpm run test:kitchen-temperature-flow && pnpm run test:cleaning-draft",
     "test:kitchen-diary-scope": "node tests/kitchen-diary-scope.mjs",
+    "test:kitchen-temperature-flow": "node tests/kitchen-temperature-form-flow.mjs",
     "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
     "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
     "validate:production": "node scripts/validate-production.js"

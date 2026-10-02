@@ -21,26 +21,22 @@ import {
   shouldHydrateDiaryDraft,
 } from './kitchen-diary-draft-logic';
 import {
+  configuredUnits,
+  deviceLocalCalendarDate,
+  hydrateColdReadings,
+  saveKitchenTemperatureDiary,
+  type ColdReading,
+  type FoodSafetyColdConfig,
+} from './kitchen-temperature-form-logic';
+import {
   canSaveTemperatureForm,
   hasAnyValue,
   shouldIncludeHotHolding,
 } from '@/components/kitchen-temperature-logic';
 
-interface ColdUnit {
-  name: string;
-  type: 'fridge' | 'freezer';
-}
-
 interface Site {
   id: number;
   name: string;
-}
-
-interface ColdReading {
-  unit: string;
-  tempAm: string;
-  tempPm: string;
-  correctiveAction: string;
 }
 
 interface DeliveryReading {
@@ -64,10 +60,7 @@ interface CoreTemperatureReading {
   timeFinish: string;
 }
 
-interface FoodSafetyConfig {
-  food_cold_units?: string | null;
-  food_num_fridges?: string | null;
-  food_num_freezers?: string | null;
+interface FoodSafetyConfig extends FoodSafetyColdConfig {
   food_hot_holding_limit?: string | null;
   food_reheating_limit?: string | null;
   food_show_deliveries?: string | null;
@@ -107,30 +100,7 @@ const EMPTY_CORE_READING: CoreTemperatureReading = {
 };
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function configuredUnits(config?: FoodSafetyConfig): ColdUnit[] {
-  if (config?.food_cold_units) {
-    try {
-      const units = JSON.parse(config.food_cold_units) as ColdUnit[];
-      if (Array.isArray(units) && units.length > 0) return units;
-    } catch {
-      // Invalid saved configuration falls back to the configured unit counts.
-    }
-  }
-  const fridgeCount = Math.max(0, Number(config?.food_num_fridges ?? 2) || 0);
-  const freezerCount = Math.max(0, Number(config?.food_num_freezers ?? 2) || 0);
-  return [
-    ...Array.from({ length: fridgeCount }, (_, index) => ({
-      name: `Fridge ${index + 1}`,
-      type: 'fridge' as const,
-    })),
-    ...Array.from({ length: freezerCount }, (_, index) => ({
-      name: `Freezer ${index + 1}`,
-      type: 'freezer' as const,
-    })),
-  ];
+  return deviceLocalCalendarDate(new Date());
 }
 
 function currentTime(): string {
@@ -141,7 +111,7 @@ export function KitchenTemperatureForm() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const date = today();
+  const [date] = useState(today);
   const [siteId, setSiteId] = useState<number | null>(DEFAULT_DIARY_SITE);
   const scope = kitchenDiaryScope(siteId, date);
   const [coldFood, setColdFood] = useState<ColdReading[]>([]);
@@ -197,19 +167,10 @@ export function KitchenTemperatureForm() {
       || existingRecord === undefined
       || !shouldHydrateDiaryDraft(dirtyRef.current)
     ) return;
-    const nextColdFood = units.map((unit) => {
-      const saved = existingRecord?.coldFood?.find((row) => row.unit === unit.name);
-      return saved ?? {
-        unit: unit.name,
-        tempAm: '',
-        tempPm: '',
-        correctiveAction: '',
-      };
-    });
+    const { coldFood: nextColdFood, initialColdFood: nextInitialColdFood } =
+      hydrateColdReadings(units, existingRecord?.coldFood);
     setColdFood(nextColdFood);
-    setInitialColdFood(
-      existingRecord?.coldFood?.filter((row) => units.some((unit) => unit.name === row.unit)) ?? [],
-    );
+    setInitialColdFood(nextInitialColdFood);
     setDelivery(EMPTY_DELIVERY);
     setHotHolding({
       ...EMPTY_HOT_HOLDING,
@@ -262,18 +223,11 @@ export function KitchenTemperatureForm() {
           expectedCorrectives: initialCorrectives,
         },
       };
-      return apiFetch(
-        scope.saveUrl(loadedRecordId),
-        {
-          method: loadedRecordId === null ? 'POST' : 'PUT',
-          body: JSON.stringify(body),
-        },
-      );
+      return saveKitchenTemperatureDiary(scope, loadedRecordId, body, apiFetch, queryClient);
     },
     onSuccess: async () => {
       clearDirty();
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await queryClient.invalidateQueries({ queryKey: ['food-safety'] });
       Alert.alert('Saved', 'Today’s KitchenTrack temperatures have been saved.', [
         { text: 'Done', onPress: () => router.back() },
       ]);
