@@ -146,6 +146,10 @@ args = "quote-reminder-approval"
 task = "workflow.run"
 args = "contractor-token-security"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "contractor-key-rotation"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -505,6 +509,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:contractor-token-security"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "contractor-key-rotation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:contractor-key-rotation"
 
 [workflows.workflow.metadata]
 isValidation = true
