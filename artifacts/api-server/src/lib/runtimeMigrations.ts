@@ -1011,7 +1011,12 @@ export async function runRuntimeMigrations() {
         const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal)\/([a-z0-9-]{32,})/ig;
         const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
         const candidates = [...all.matchAll(bearerPattern)];
-        if (candidates.length === 0 && row.quote_token == null) continue;
+        // Older edited drafts may contain a known credential as plain text,
+        // without its URL. They still need scrubbing, even with an encrypted
+        // dispatch payload already present.
+        const containsPayloadToken = Object.values(payload).some(token =>
+          typeof token === "string" && token.length > 0 && all.includes(token));
+        if (candidates.length === 0 && row.quote_token == null && !containsPayloadToken) continue;
         const discovered: Array<[string, string]> = [];
         const rawQuote = row.quote_token ? String(row.quote_token) : null;
         if (rawQuote) payload.quote = rawQuote;

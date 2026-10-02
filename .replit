@@ -142,6 +142,10 @@ args = "feedback-inbox-browser"
 task = "workflow.run"
 args = "quote-reminder-approval"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "contractor-token-security"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -490,6 +494,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:fix-track-contractor-approval"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "contractor-token-security"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:contractor-token-security"
 
 [workflows.workflow.metadata]
 isValidation = true

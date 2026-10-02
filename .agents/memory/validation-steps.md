@@ -22,6 +22,10 @@ description: How the automated test validation steps are wired and platform quir
 - **Why:** completion validation once failed during that temporary file gap, while the fresh-schema suite passed independently without code changes.
 - **How to apply:** when the only fresh-schema failure is a missing generated API import, run it alone after codegen finishes rather than treating it as a schema regression.
 
+**Preview after codegen checks:** a running Vite preview can retain missing-generated-module errors after the drift check has restored the files.
+- **Why:** the temporary import gap left the preview returning asset timeouts and displaying its static fallback even though codegen and builds subsequently passed.
+- **How to apply:** confirm the generated files are restored, then restart the affected web workflow once and verify the rendered preview. Do not change application code to fix a stale preview graph.
+
 **Validation inventory response shape:** the live `getValidationCommands()` callback returns `{ commands: [{ name, command }], message }`, despite the skill describing a `workflows` array.
 - **Why:** following the documented shape caused an undefined-array error; the live response confirmed the different envelope.
 - **How to apply:** inspect the live envelope and read `commands` when checking for existing validation names. Do not assume the skill's output shape is current.

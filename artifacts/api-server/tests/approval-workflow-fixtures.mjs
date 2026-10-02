@@ -27,7 +27,7 @@ try {
 } finally {
   await rm(temp, { recursive: true, force: true });
 }
-export const { db, sql, pool, runReminderJob } = runtime;
+export const { db, sql, pool, runReminderJob, runRuntimeMigrations, decryptTokenPayload } = runtime;
 
 export function requestSession() {
   let cookie = "";

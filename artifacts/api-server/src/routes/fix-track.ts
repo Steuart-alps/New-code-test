@@ -33,7 +33,7 @@ function hydrateQueuedContent(q: any) {
     : Array.isArray(value) ? value.map(replace)
     : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replace(v)]))
     : value;
-  return { html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
+  return { subject: replace(q.subject) as string, html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
 }
 const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
 const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
@@ -1536,7 +1536,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
-    await dispatchStoredContractorEmail({ to: q.to_email, subject: q.subject, html: hydrated.html, text: hydrated.text ?? undefined,
+    await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
       cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
       icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
       clientId, idempotencyKey: q.idempotency_key });
@@ -1549,7 +1549,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
       await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     }
-    res.json({ ok: true, queueId: qid, mode: q.mode, subject: q.subject, bodyHtml: hydrated.html });
+    res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`UPDATE contractor_email_queue SET status='pending', last_error=${err instanceof Error ? err.message.slice(0, 2000) : "Email failed"}, updated_at=now() WHERE id=${qid} AND status='sending'`);
@@ -1603,7 +1603,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     const hydrated = hydrateQueuedContent(q);
     await dispatchStoredContractorEmail({
       to: q.to_email,
-      subject: q.subject,
+      subject: hydrated.subject,
       html: hydrated.html,
       text: hydrated.text ?? undefined,
       cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
@@ -1622,7 +1622,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
       await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     }
-    res.json({ ok: true, queueId: qid, subject: q.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
+    res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
@@ -1866,7 +1866,7 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   try {
     const hydrated = hydrateQueuedContent(queueRow);
     await dispatchStoredContractorEmail({
-      to: queueRow.to_email, subject: queueRow.subject, html: hydrated.html,
+      to: queueRow.to_email, subject: hydrated.subject, html: hydrated.html,
       text: hydrated.text ?? undefined, clientId, idempotencyKey: queueRow.idempotency_key,
       icsAttachment: queueRow.ics_content ?? undefined,
       icsFilename: queueRow.ics_filename ?? undefined,
