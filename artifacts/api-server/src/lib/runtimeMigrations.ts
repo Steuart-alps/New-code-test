@@ -3249,6 +3249,7 @@ async function migrateComplianceAuditTrail() {
 }
 
 async function migrateSousVide() {
+  await db.execute(sql`ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS mobile_submission_receipts jsonb NOT NULL DEFAULT '[]'::jsonb`);
   await db.execute(sql`
     ALTER TABLE food_safety_records ADD COLUMN IF NOT EXISTS sous_vide jsonb NOT NULL DEFAULT '[]'
   `);

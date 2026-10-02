@@ -144,7 +144,8 @@ assert.match(formSource, /function today\(\): string \{\s*return deviceLocalCale
 assert.match(formSource, /const \[date\] = useState\(today\);/,
   'the diary date stays stable while a staff member is editing it');
 assert.match(formSource, /hydrateColdReadings\(units, existingRecord\?\.coldFood\)/);
-assert.match(formSource, /return saveKitchenTemperatureDiary\(scope, loadedRecordId, body, apiFetch, queryClient\)/);
+assert.match(formSource, /return kitchenOutbox\.enqueue\(/,
+  'the form persists each save before its HTTP attempt');
 assert.match(logicSource, /buildKitchenTemperatureWrite\(scope, recordId, body\)/);
 assert.match(logicSource, /await invalidateKitchenDashboard\(queryClient\)/);
 assert.match(formSource, /coldFood\.map\(\(reading, index\)/);

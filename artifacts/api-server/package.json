@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:schema:fresh": "bash tests/run-fresh-schema.sh",
+    "test:kitchen-mobile-replay": "bash tests/run-fresh-schema.sh tests/kitchen-mobile-replay.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",

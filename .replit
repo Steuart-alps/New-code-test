@@ -150,6 +150,10 @@ args = "contractor-token-security"
 task = "workflow.run"
 args = "contractor-key-rotation"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-mobile-replay"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -520,6 +524,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:contractor-key-rotation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-mobile-replay"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-mobile-replay"
 
 [workflows.workflow.metadata]
 isValidation = true

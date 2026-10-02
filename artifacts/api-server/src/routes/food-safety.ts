@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
@@ -11,6 +12,12 @@ const router = Router();
 // Rows are user-defined shapes, but must be flat objects of primitive values
 const rowSchema = z.record(z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
 const rowsSchema = z.array(rowSchema).max(200);
+const mobileEntryIdSchema = z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional();
+type MobileReceipt = { entryId: string; userId: number; fingerprint: string };
+const submissionFingerprint = (data: unknown) =>
+  createHash("sha256").update(JSON.stringify(data)).digest("hex");
+const findMobileReceipt = (receipts: MobileReceipt[], entryId: string | undefined, userId: number) =>
+  entryId ? receipts.find(receipt => receipt.entryId === entryId && receipt.userId === userId) : undefined;
 const mobileTemperatureLogSchema = z.object({
   coldFood: rowsSchema,
   expectedColdFood: rowsSchema,
@@ -63,11 +70,14 @@ const updateRecordSchema = recordFieldsSchema.extend({
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
   expectedRecord: diaryRecordSnapshotSchema.optional(),
   mobileTemperatureLog: mobileTemperatureLogSchema.optional(),
+  mobileEntryId: mobileEntryIdSchema,
+  mobileRecordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const createRecordSchema = recordFieldsSchema.extend({
   recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   submittedAt: z.string().datetime({ offset: true }).optional(),
+  mobileEntryId: mobileEntryIdSchema,
 });
 
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
@@ -778,6 +788,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data;
+  const fingerprint = submissionFingerprint({ siteId, data });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const reheatingLimit = await resolveReheatingLimit(clientId, siteId, data.reheatingLimit);
@@ -789,12 +800,17 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       siteId: foodSafetyRecordsTable.siteId,
       staffRosterId: foodSafetyRecordsTable.staffRosterId,
       performedBy: foodSafetyRecordsTable.performedBy,
+      mobileSubmissionReceipts: foodSafetyRecordsTable.mobileSubmissionReceipts,
     })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
 
-  if (existing) return void res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+  if (existing) {
+    const receipt = findMobileReceipt(existing.mobileSubmissionReceipts, data.mobileEntryId, req.currentUser!.id);
+    if (receipt?.fingerprint === fingerprint) return res.json({ id: existing.id, deduplicated: true });
+    return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+  }
 
   const [inserted] = await db
     .insert(foodSafetyRecordsTable)
@@ -819,13 +835,15 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       staffRosterId: performer.staffRosterId,
       submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
       createdBy: req.currentUser!.id,
+      mobileSubmissionReceipts: data.mobileEntryId
+        ? [{ entryId: data.mobileEntryId, userId: req.currentUser!.id, fingerprint }] : [],
     })
     .onConflictDoNothing()
     .returning();
 
   if (!inserted) {
     const [winner] = await db
-      .select({ id: foodSafetyRecordsTable.id })
+      .select({ id: foodSafetyRecordsTable.id, mobileSubmissionReceipts: foodSafetyRecordsTable.mobileSubmissionReceipts })
       .from(foodSafetyRecordsTable)
       .where(and(
         eq(foodSafetyRecordsTable.clientId, clientId),
@@ -833,6 +851,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         siteScopeCond(siteId),
       ))
       .limit(1);
+    const receipt = winner && findMobileReceipt(winner.mobileSubmissionReceipts, data.mobileEntryId, req.currentUser!.id);
+    if (receipt?.fingerprint === fingerprint) return res.json({ id: winner!.id, deduplicated: true });
     return res.status(409).json({ error: "Record already exists for this date", id: winner?.id });
   }
 
@@ -978,6 +998,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsedUpdate.success) return res.status(400).json({ error: "Invalid data" });
 
   const mobileLog = parsedUpdate.data.mobileTemperatureLog;
+  const mobileEntryId = parsedUpdate.data.mobileEntryId;
+  if (mobileEntryId && (!mobileLog || !parsedUpdate.data.mobileRecordDate)) {
+    return res.status(400).json({ error: "A mobile submission requires its original diary date and readings." });
+  }
+  const fingerprint = submissionFingerprint({ id, data: parsedUpdate.data });
   if (mobileLog) {
     const updated = await db.transaction(async (tx) => {
       const [current] = await tx
@@ -987,6 +1012,13 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
         .limit(1)
         .for("update");
       if (!current) return null;
+      if (mobileEntryId) {
+        if (parsedUpdate.data.mobileRecordDate !== current.recordDate) return { conflict: true as const };
+        const receipt = findMobileReceipt(current.mobileSubmissionReceipts, mobileEntryId, req.currentUser!.id);
+        if (receipt) {
+          return receipt.fingerprint === fingerprint ? current : { conflict: true as const };
+        }
+      }
 
       const currentCold = (current.coldFood ?? []) as Record<string, unknown>[];
       const expectedByUnit = new Map(
@@ -1029,6 +1061,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
           cooling: append(current.cooling, mobileLog.cooling),
           reheating: append(current.reheating, mobileLog.reheating),
           ...(mobileLog.correctives !== undefined ? { correctives: mobileLog.correctives } : {}),
+          ...(mobileEntryId ? {
+            mobileSubmissionReceipts: current.mobileSubmissionReceipts.concat({
+              entryId: mobileEntryId, userId: req.currentUser!.id, fingerprint,
+            }),
+          } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
@@ -1058,6 +1095,8 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       expectedUpdatedAt,
       expectedRecord,
       mobileTemperatureLog: _mobileTemperatureLog,
+      mobileEntryId: _mobileEntryId,
+      mobileRecordDate: _mobileRecordDate,
       ...rest
     } = parsedUpdate.data;
     const updates: Record<string, unknown> = {};

@@ -11,10 +11,12 @@ import {
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { kitchenOutbox, newKitchenEntryId, useKitchenOutbox } from '@/lib/kitchenOutbox';
+import { KitchenQueueStatus } from './KitchenQueueStatus';
 import { DEFAULT_DIARY_SITE, kitchenDiaryScope } from './kitchen-diary-scope';
 import {
   requestDiaryScopeChange,
@@ -24,7 +26,6 @@ import {
   configuredUnits,
   deviceLocalCalendarDate,
   hydrateColdReadings,
-  saveKitchenTemperatureDiary,
   type ColdReading,
   type FoodSafetyColdConfig,
 } from './kitchen-temperature-form-logic';
@@ -108,12 +109,24 @@ function currentTime(): string {
 }
 
 export function KitchenTemperatureForm() {
+  return (
+    <View style={{ flex: 1 }}>
+      <KitchenQueueStatus />
+      <KitchenTemperatureFields />
+    </View>
+  );
+}
+
+function KitchenTemperatureFields() {
   const colors = useColors();
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const outbox = useKitchenOutbox();
+  const submissionId = useRef<string | null>(null);
   const [date] = useState(today);
   const [siteId, setSiteId] = useState<number | null>(DEFAULT_DIARY_SITE);
   const scope = kitchenDiaryScope(siteId, date);
+  const pendingForDiary = outbox.entries.some(entry =>
+    entry.siteId === siteId && entry.recordDate === date && entry.state !== 'sent');
   const [coldFood, setColdFood] = useState<ColdReading[]>([]);
   const [initialColdFood, setInitialColdFood] = useState<ColdReading[]>([]);
   const [delivery, setDelivery] = useState<DeliveryReading>(EMPTY_DELIVERY);
@@ -128,6 +141,7 @@ export function KitchenTemperatureForm() {
   const dirtyRef = useRef(false);
 
   const markDirty = () => {
+    submissionId.current = null;
     dirtyRef.current = true;
     setIsDirty(true);
   };
@@ -223,12 +237,19 @@ export function KitchenTemperatureForm() {
           expectedCorrectives: initialCorrectives,
         },
       };
-      return saveKitchenTemperatureDiary(scope, loadedRecordId, body, apiFetch, queryClient);
+      if (pendingForDiary) throw new Error('This diary already has a saved device entry. Wait for delivery or review the failed entry first.');
+      submissionId.current ??= newKitchenEntryId();
+      return kitchenOutbox.enqueue({
+        entryId: submissionId.current, siteId, recordDate: date, recordId: loadedRecordId, body,
+      });
     },
-    onSuccess: async () => {
+    onSuccess: async (entry) => {
       clearDirty();
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Saved', 'Today’s KitchenTrack temperatures have been saved.', [
+      submissionId.current = null;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(entry.state === 'sent' ? 'Sent' : 'Saved on this device',
+        entry.state === 'sent' ? 'The server has confirmed these readings.'
+          : 'The readings are queued for delivery. KitchenTrack delivery shows “Sent” only after the server confirms them.', [
         { text: 'Done', onPress: () => router.back() },
       ]);
     },
@@ -239,7 +260,9 @@ export function KitchenTemperatureForm() {
   });
 
   const loading = configLoading || recordLoading || loadedRecordId === undefined;
-  const canSave = canSaveTemperatureForm(
+  const waitingForCreatedDiary = loadedRecordId === null && outbox.entries.some(entry =>
+    entry.siteId === siteId && entry.recordDate === date && entry.state === 'sent' && entry.recordId === null);
+  const canSave = !pendingForDiary && !waitingForCreatedDiary && !outbox.error && canSaveTemperatureForm(
     { coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives },
     {
       deliveries: config?.food_show_deliveries !== 'false',
@@ -251,6 +274,7 @@ export function KitchenTemperatureForm() {
   );
 
   const switchSite = (nextSiteId: number | null) => {
+    submissionId.current = null;
     clearDirty();
     setLoadedRecordId(undefined);
     setSiteId(nextSiteId);
@@ -277,7 +301,7 @@ export function KitchenTemperatureForm() {
     );
   };
 
-  if (configError || recordError) {
+  if ((configError || recordError) && (loadedRecordId === undefined || !config)) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.background }]}>
         <Feather name="wifi-off" size={28} color={colors.mutedForeground} />
@@ -371,6 +395,14 @@ export function KitchenTemperatureForm() {
             Today’s diary is signed off. Saving will update its temperature readings.
           </Text>
         </View>
+      ) : null}
+
+      {waitingForCreatedDiary ? (
+        <TouchableOpacity onPress={() => void refetchRecord()}>
+          <Text style={[styles.helper, { color: colors.primary }]}>
+            Your diary was sent. Tap to refresh it before adding more readings.
+          </Text>
+        </TouchableOpacity>
       ) : null}
 
       {config?.food_show_cold_food !== 'false' ? (

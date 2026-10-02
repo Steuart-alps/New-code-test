@@ -3065,7 +3065,11 @@ export const CreateFoodSafetyRecordQueryParams = zod.object({
   "siteId": zod.coerce.number().optional().describe('Scope the new record to a site. Omit for the whole-organisation diary.')
 })
 
+export const createFoodSafetyRecordBodyMobileEntryIdRegExp = new RegExp('^[A-Za-z0-9_-]{12,100}$');
+
+
 export const CreateFoodSafetyRecordBody = zod.object({
+  "mobileEntryId": zod.string().regex(createFoodSafetyRecordBodyMobileEntryIdRegExp).optional().describe('Stable device submission identifier retained across retries.'),
   "recordDate": zod.string(),
   "deliveries": zod.array(zod.unknown()).optional(),
   "coldFood": zod.array(zod.unknown()).optional(),
@@ -3186,7 +3190,13 @@ export const UpdateFoodSafetyRecordParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateFoodSafetyRecordBodyMobileEntryIdRegExp = new RegExp('^[A-Za-z0-9_-]{12,100}$');
+export const updateFoodSafetyRecordBodyMobileRecordDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
 export const UpdateFoodSafetyRecordBody = zod.object({
+  "mobileEntryId": zod.string().regex(updateFoodSafetyRecordBodyMobileEntryIdRegExp).optional().describe('Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.'),
+  "mobileRecordDate": zod.string().regex(updateFoodSafetyRecordBodyMobileRecordDateRegExp).optional().describe('Original device-local diary date; must match the target record.'),
   "expectedUpdatedAt": zod.date().optional().describe('Updated-at value returned when the web diary was loaded.'),
   "expectedRecord": zod.object({
   "deliveries": zod.array(zod.unknown()).optional(),
