@@ -1650,6 +1650,22 @@ async function migrateAuditFixes2026_08() {
     END $$;
   `);
 
+  // Existing daily sign-offs are also needed on installations created entirely
+  // by runtime migrations (the schema declaration alone does not create them).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "daily_manager_signoffs" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "signoff_date" date NOT NULL,
+      "manager_name" text NOT NULL,
+      "notes" text,
+      "submitted_at" timestamp,
+      "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
   // KitchenTrack weekly review + probe checks tables (referenced by kitchen-weekly.ts and food-safety.ts).
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "kitchen_weekly_records" (

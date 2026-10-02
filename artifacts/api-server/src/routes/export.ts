@@ -10,6 +10,7 @@
  * so one stale upload never prevents a client receiving its export.
  */
 import { Router } from "express";
+import kitchenInspectionExport from "./kitchen-inspection-export";
 // archiver v8 is pure ESM — use ZipArchive directly, no factory function.
 import { ZipArchive } from "archiver";
 import { db } from "@workspace/db";
@@ -57,6 +58,7 @@ import {
 import { requireAuth, getClientId, requireRole } from "../middleware/requireAuth";
 
 const router = Router();
+router.use(kitchenInspectionExport);
 
 // ── CSV helpers ────────────────────────────────────────────────────────────────
 

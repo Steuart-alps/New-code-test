@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
+import { KitchenInspectionExport } from "@/components/kitchen-inspection-export";
 import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useListSites } from "@workspace/api-client-react";
@@ -235,6 +236,7 @@ export default function FoodSafetyPage() {
           </div>
         )}
 
+        <KitchenInspectionExport siteId={selectedSiteId} />
         {/* Top summary banner */}
         {!loading && !loadError && (
           <div className={`rounded-xl border p-4 flex items-center gap-4 ${

@@ -158,6 +158,10 @@ args = "kitchen-mobile-replay"
 task = "workflow.run"
 args = "kitchen-temperature-actions"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-inspection-register-export"
+
 [[workflows.workflow]]
 name = "test-trial-reminders"
 author = "agent"
@@ -550,6 +554,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server run test:kitchen-temperature-actions"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-inspection-register-export"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-inspection-export"
 
 [workflows.workflow.metadata]
 isValidation = true

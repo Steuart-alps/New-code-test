@@ -37,7 +37,10 @@ export function KitchenTemperatureControls() {
     if (!inherit && !valid.success) { setError("Supply an ordered numeric range for every section."); return; }
     setSaving(true); setError("");
     try {
-      const response = await apiFetch(`/food-safety/config${siteId === null ? "" : `?siteId=${siteId}`}`, {
+      const params = new URLSearchParams();
+      if (siteId !== null) params.set("siteId", String(siteId));
+      if (activeClientId !== null) params.set("clientId", String(activeClientId));
+      const response = await apiFetch(`/food-safety/config?${params}`, {
         method: "PUT", body: JSON.stringify({ food_temperature_rules: inherit ? null : JSON.stringify(valid.data) }),
       });
       const result = await response.json();

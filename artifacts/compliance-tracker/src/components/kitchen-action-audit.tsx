@@ -1,14 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/context/auth-context";
 
 export function KitchenActionAudit({ actionId }: { actionId: string | number }) {
+  const { activeClientId } = useAuth();
   const [open, setOpen] = useState(false);
   const { data, isLoading, isError, refetch } = useQuery({
     enabled: open,
-    queryKey: ["kitchen-action-audit", actionId], refetchInterval: 30_000,
+    queryKey: ["kitchen-action-audit", activeClientId, actionId], refetchInterval: 30_000,
     queryFn: async () => {
-      const response = await apiFetch(`/audit-events?entityType=track_action&entityId=${actionId}`);
+      const response = await apiFetch(`/audit-events?entityType=track_action&entityId=${actionId}${activeClientId === null ? "" : `&clientId=${activeClientId}`}`);
       if (!response.ok) throw new Error("The action history could not be loaded");
       return response.json() as Promise<{ id: number; actorName: string; action: string; createdAt: string; after?: { ownerName?: string; status?: string } }[]>;
     },

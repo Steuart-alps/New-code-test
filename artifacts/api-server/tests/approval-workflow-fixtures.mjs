@@ -34,7 +34,7 @@ export const {
 
 export function requestSession() {
   let cookie = "";
-  return async (method, path, body) => {
+  return async (method, path, body, format = "json") => {
     const response = await fetch(`${base}${path}`, {
       method,
       headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
@@ -43,7 +43,7 @@ export function requestSession() {
     });
     const setCookie = response.headers.get("set-cookie");
     if (setCookie) cookie = setCookie.split(";")[0];
-    return { status: response.status, data: await response.json().catch(() => null) };
+    return { status: response.status, data: format === "buffer" ? Buffer.from(await response.arrayBuffer()) : await response.json().catch(() => null) };
   };
 }
 

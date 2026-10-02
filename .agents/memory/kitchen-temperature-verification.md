@@ -19,3 +19,9 @@ Unconfigured numeric reheating defaults follow the effective client/site jurisdi
 **Why:** England/Wales and Scotland have different existing defaults. Automatically persisting a default during a staff write would make it appear to be an administrator's deliberate numeric override.
 
 **How to apply:** Materialize fallback rules for reads and assessment without saving an implicit override; save explicit rules only through configuration.
+
+Inspection-register access is a read-only handover, not approval of corrective work. Department managers can export accessible sites without acquiring the stricter action sign-off permissions.
+
+**Why:** Manager handover needs department-scoped access; reusing the approval restriction would unnecessarily prevent department managers from handing over their existing records.
+
+**How to apply:** Keep download authorization separate from remediation approval. Always apply tenant and site/department checks to the download; do not broaden action approval roles to match it.
