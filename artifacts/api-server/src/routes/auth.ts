@@ -935,6 +935,7 @@ const MobileTotpVerificationBody = z.object({
 const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const MOBILE_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MOBILE_LOGIN_CHALLENGE_INVALID_CODE = "MOBILE_LOGIN_CHALLENGE_INVALID";
 
 function hashMobileLoginChallenge(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -1129,7 +1130,10 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
   });
 
   if (verification.status === "invalid-challenge") {
-    res.status(401).json({ error: "This verification request is invalid or has expired. Please sign in again." });
+    res.status(401).json({
+      error: "This verification request is invalid or has expired. Please sign in again.",
+      code: MOBILE_LOGIN_CHALLENGE_INVALID_CODE,
+    });
     return;
   }
   if (verification.status === "invalid-code") {

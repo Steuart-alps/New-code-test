@@ -404,6 +404,9 @@ async function main() {
     const verification = await verifyMobileChallenge(pendingToken, generateToken(setup.data.secret), ipSuffix);
     check(`mobile challenge cannot be used at or after ${label}`, verification.status === 401,
       `got ${verification.status}`);
+    check(`mobile challenge rejection returns a stable code (${label})`,
+      verification.data?.code === "MOBILE_LOGIN_CHALLENGE_INVALID",
+      JSON.stringify(verification.data));
     check(`expired mobile challenge cannot issue a bearer session (${label})`,
       verification.data?.token === undefined && await mobileSessionCount() === before);
   }
@@ -539,6 +542,8 @@ async function main() {
   const replay = await verifyMobileChallenge(
     mobileTokenChallenge, generateToken(setup.data.secret), 216);
   check("mobile login challenge is single use", replay.status === 401, `got ${replay.status}`);
+  check("reused mobile challenge returns the stable invalid-challenge code",
+    replay.data?.code === "MOBILE_LOGIN_CHALLENGE_INVALID", JSON.stringify(replay.data));
 
   const userList = await admin("GET", "/users");
   const staffRow = (Array.isArray(userList.data) ? userList.data : []).find((u) => u.id === staffId);
