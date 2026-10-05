@@ -1,5 +1,8 @@
 # ComplyTrack — Health & Safety Compliance for UK Businesses
 
+> Product and architecture reference (formerly `replit.md`). Setup and
+> commands are in the root `CLAUDE.md`; configuration in `.env.example`.
+
 ## Overview
 
 Health & Safety compliance tracking platform for **individual UK businesses** managing
@@ -37,7 +40,7 @@ consultants managing portfolios of clients.
 - **Frontend**: React + Vite, TanStack Query, Tailwind CSS, shadcn/ui, Recharts, Framer Motion
 - **Auth**: Session-based (express-session + connect-pg-simple), bcryptjs for password hashing
 - **Email**: Nodemailer (SMTP configurable via Settings page)
-- **File Storage**: Google Cloud Storage via Replit Object Storage
+- **File Storage**: Google Cloud Storage (signed URLs for direct upload/download)
 
 ## User Roles & Access
 

@@ -114,7 +114,7 @@ template) so it's easy to miss there.
 
 ## 2. Schema drift — route code and `runtimeMigrations.ts` disagree
 
-Per the project's own `.agents/memory/schema-drift.md`: prod schema comes
+Per the project's own `docs/notes/schema-drift.md`: prod schema comes
 **only** from `runtimeMigrations.ts` (no `drizzle push` in prod), so a route
 column that isn't in that file will never exist anywhere. These three are
 genuinely out of sync — confirmed by booting a fresh DB from
@@ -233,7 +233,7 @@ Daily Diary landing view calls (`food-safety.ts:597-599`), so the daily diary
 
 ## 3. Documentation cleanup (not a bug — feature was removed, docs weren't)
 
-`replit.md` documents `GET/POST /api/compliance-items?type=external|internal`
+`docs/architecture.md` documents `GET/POST /api/compliance-items?type=external|internal`
 and separate "EXTERNAL COMPLIANCE" / "INTERNAL COMPLIANCE" nav sections.
 Neither exists anymore:
 
@@ -247,7 +247,7 @@ Neither exists anymore:
   `insertComplianceItemSchema` just ignores the unknown field.
 
 This isn't causing a live bug (nothing depends on the filter), but the
-`replit.md` API reference and nav description are stale and should be
+`docs/architecture.md` API reference and nav description are stale and should be
 updated to match the current unified-list design — otherwise the next person
 (human or agent) will "fix" a phantom bug or build against a param that does
 nothing.
@@ -266,6 +266,6 @@ nothing.
 4. **3** — doc-only, whenever convenient.
 
 After any of the above, re-verify against the pattern in
-`.agents/memory/schema-changes.md`: schema changes need three touches
+`docs/notes/schema-changes.md`: schema changes need three touches
 (drizzle schema file if applicable, applied to the dev DB, and the
 idempotent statement added to `runtimeMigrations.ts` for prod).

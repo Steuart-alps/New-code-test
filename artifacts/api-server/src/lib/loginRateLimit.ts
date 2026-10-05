@@ -15,7 +15,7 @@ cleanupTimer.unref();
 /**
  * Derive the caller's IP. Express's `req.ip` already honours the app's
  * `trust proxy` setting (set to 1 in app.ts) so it reflects the first hop of
- * X-Forwarded-For behind Replit's proxy. If trust-proxy weren't configured we
+ * X-Forwarded-For behind the hosting proxy. If trust-proxy weren't configured we
  * fall back to parsing the first hop of X-Forwarded-For ourselves.
  */
 function clientIp(req: Request): string {

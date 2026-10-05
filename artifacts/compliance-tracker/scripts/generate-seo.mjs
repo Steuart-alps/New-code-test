@@ -3,11 +3,11 @@
 //
 // Canonical base URL resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. https://<first REPLIT_DOMAINS entry>   (the deployment's own address)
+//   2. PUBLIC_APP_URL             (the app's public address)
 //   3. local dev fallback
 //
 // Because it reads the domain at build time, the production deployment build
-// emits files pointing at the live published address automatically.
+// emits files pointing at the configured public address.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

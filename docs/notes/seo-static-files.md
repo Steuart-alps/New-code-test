@@ -14,4 +14,4 @@ robots.txt, sitemap.xml and llms.txt for the `compliance-tracker` artifact are *
 **How to apply:**
 - To add/remove public marketing pages in the sitemap, edit the `publicPages` array in the generator — do NOT hand-edit the gitignored output files (they get overwritten).
 - To change which app routes crawlers avoid, edit the `privatePaths` array. Current public/indexable routes are only `/`, `/login`, `/signup`; everything else is behind auth.
-- Serving works because the Replit static deploy rewrite `/* -> /index.html` (in `.replit-artifact/artifact.toml`) is a fallback: real files in `dist/public` are served first, so no artifact.toml change is needed for these files.
+- Serving works because the API server's static handler (end of `api-server/src/app.ts`) serves real files in `dist/public` first and only falls back to `index.html` for other non-`/api` paths.

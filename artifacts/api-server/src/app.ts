@@ -1,4 +1,6 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import cors from "cors";
 import helmet from "helmet";
@@ -50,16 +52,9 @@ app.use(
   }),
 );
 
-const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
-  .split(",")
-  .map(d => d.trim())
-  .filter(Boolean)
-  .flatMap(d => [`https://${d}`, `http://${d}`]);
-
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
-  ...replitDeploymentOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
 ];
@@ -83,7 +78,7 @@ app.use(
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
-    contentSecurityPolicy: false, // API-only server — no HTML is served here.
+    contentSecurityPolicy: false, // The web app sets no CSP; see the static serving below.
   }),
 );
 
@@ -189,5 +184,19 @@ app.use("/api", (err: unknown, _req: Request, res: Response, _next: NextFunction
   logger.error({ err }, "Unhandled API error");
   res.status(status).json({ error: message });
 });
+
+// Serve the built web app (compliance-tracker) from the same origin as the API
+// so production is a single process. WEB_DIST_DIR overrides the default
+// location next to this bundle; nothing is served when the build is absent.
+const webDistDir =
+  process.env.WEB_DIST_DIR ??
+  fileURLToPath(new URL("../../compliance-tracker/dist/public/", import.meta.url));
+if (existsSync(webDistDir)) {
+  app.use(express.static(webDistDir, { index: false }));
+  // Client-side routes fall back to index.html; /api paths never do.
+  app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    res.sendFile("index.html", { root: webDistDir });
+  });
+}
 
 export default app;

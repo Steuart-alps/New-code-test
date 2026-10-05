@@ -1,10 +1,10 @@
 # ComplyTrack
 
 Health & safety compliance SaaS for UK businesses. pnpm monorepo (Node 24,
-TypeScript 5.9). Development moved here from Replit; `replit.md` is the
-detailed product/architecture reference and `.agents/memory/` holds the
-Replit Agent's notes on past decisions and pitfalls — read `.agents/memory/MEMORY.md`
-(an index) before working in an unfamiliar area.
+TypeScript 5.9). `docs/architecture.md` is the detailed product/architecture
+reference and `docs/notes/` holds notes on past decisions and pitfalls — read
+`docs/notes/MEMORY.md` (an index) before working in an unfamiliar area.
+`docs/reference/` holds source material (UK check sheets, record templates).
 
 ## Layout
 
@@ -21,7 +21,12 @@ Replit Agent's notes on past decisions and pitfalls — read `.agents/memory/MEM
 - `pnpm install --frozen-lockfile`
 - `pnpm run typecheck` — the main correctness gate (libs via `tsc --build`, then each package)
 - `pnpm --filter @workspace/api-server run build`
-- `pnpm --filter @workspace/api-server run dev` / `pnpm --filter @workspace/compliance-tracker run dev`
+- Dev: `PORT=8080 pnpm --filter @workspace/api-server run dev` and
+  `pnpm --filter @workspace/compliance-tracker run dev` (port 5173, proxies `/api`
+  to `API_PORT`, default 8080)
+- Production: build both, then `node artifacts/api-server/dist/index.mjs` — the API
+  server also serves the web build (`compliance-tracker/dist/public`) with an
+  `index.html` fallback, so one process serves the whole app
 - `pnpm --filter @workspace/api-spec run codegen` — after changing the OpenAPI spec
 - API tests: `pnpm --filter @workspace/api-server run test:<name>` (see its `package.json`;
   `*:ci` variants boot their own server). They need `DATABASE_URL` and `SESSION_SECRET`.
@@ -44,20 +49,16 @@ PostgreSQL with a `complytrack` database, and exports a dev `DATABASE_URL` and
 
 ## Configuration
 
-All settings are environment variables; `.env.example` lists them. The code
-is host-agnostic, with Replit kept only as a fallback when the standard
-variable is unset:
+All settings are environment variables; `.env.example` lists them.
 
-- Stripe: `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY`, else Replit's connector
-  (`api-server/src/lib/stripeClient.ts`, `scripts/src/stripeClient.ts`).
+- Stripe: `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` (`api-server/src/lib/stripeClient.ts`,
+  `scripts/src/stripeClient.ts`). `stripe-replit-sync` is just the npm library
+  that mirrors Stripe data into Postgres; it runs anywhere.
 - File storage: Google Cloud Storage via `GCS_SERVICE_ACCOUNT_JSON` or
-  `GOOGLE_APPLICATION_CREDENTIALS`, else the Replit sidecar at `127.0.0.1:1106`
-  (`api-server/src/lib/objectStorage.ts`).
-- Public URL: `getPublicAppUrl()` in `api-server/src/lib/email.ts` —
-  `PUBLIC_APP_URL`, else `REPLIT_DOMAINS`, else localhost. Use it rather than
-  reading `REPLIT_DOMAINS` directly.
-- `.replit`, the `@replit/vite-plugin-*` plugins (gated on `REPL_ID`) and the
-  mobile `dev` script remain for the Replit deployment; use `dev:local` elsewhere.
+  `GOOGLE_APPLICATION_CREDENTIALS`, plus `PRIVATE_OBJECT_DIR` /
+  `PUBLIC_OBJECT_SEARCH_PATHS` (`api-server/src/lib/objectStorage.ts`).
+- Public URL: `getPublicAppUrl()` in `api-server/src/lib/email.ts` (`PUBLIC_APP_URL`,
+  else localhost) — used for email links, Stripe return URLs and the webhook.
 
 ## Rules
 
@@ -65,4 +66,4 @@ variable is unset:
   `canAccessClient` / `enforceClientAccess` helpers. Mutation routes must mount
   `denyViewers` so `client_viewer` stays read-only.
 - Billing: no proration; per-site charges go through the outbox. See
-  `.agents/memory/billing-*.md` before touching billing.
+  `docs/notes/billing-*.md` before touching billing.
