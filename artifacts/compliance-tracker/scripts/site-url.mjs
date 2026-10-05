@@ -3,7 +3,8 @@
 // Resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
 //   2. https://<first REPLIT_DOMAINS entry>   (the deployment's own address)
-//   3. local dev fallback
+//   3. RENDER_EXTERNAL_URL         (Render's onrender.com address)
+//   4. local dev fallback
 export function resolveBaseUrl() {
   if (process.env.PUBLIC_SITE_URL) {
     return {
@@ -18,6 +19,12 @@ export function resolveBaseUrl() {
   if (domains.length > 0) {
     return { baseUrl: `https://${domains[0]}`, source: "REPLIT_DOMAINS" };
   }
+  if (process.env.RENDER_EXTERNAL_URL) {
+    return {
+      baseUrl: process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, ""),
+      source: "RENDER_EXTERNAL_URL",
+    };
+  }
   return { baseUrl: "http://localhost:21186", source: "localhost-fallback" };
 }
 
@@ -26,7 +33,7 @@ export function assertCanonicalForProduction(source) {
   if (source === "localhost-fallback" && process.env.NODE_ENV === "production") {
     throw new Error(
       "[seo] No canonical site URL available for production build. " +
-        "Set PUBLIC_SITE_URL (custom domain) or ensure REPLIT_DOMAINS is present.",
+        "Set PUBLIC_SITE_URL (custom domain), or build on Render or Replit.",
     );
   }
 }

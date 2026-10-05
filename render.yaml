@@ -1,0 +1,72 @@
+# Render Blueprint: one always-on web service plus PostgreSQL, both in Frankfurt.
+# The API server also serves the web app, so the whole product is one process.
+#
+# Deploy sequence: buildCommand, then preDeployCommand (creates the base schema
+# on an empty database, otherwise does nothing), then startCommand (the API runs
+# its runtime migrations on boot).
+#
+# Cost: web "starter" and Postgres "basic-256mb" are Render's cheapest plans
+# that stay on (free web services sleep, free databases expire after 30 days).
+
+services:
+  - type: web
+    name: complytrack
+    runtime: node
+    region: frankfurt
+    plan: starter
+    autoDeploy: true
+    buildCommand: >-
+      npm install -g pnpm@10.28.0 &&
+      pnpm install --frozen-lockfile --prod=false &&
+      PORT=5173 BASE_PATH=/ pnpm --filter @workspace/compliance-tracker run build &&
+      pnpm --filter @workspace/api-server run build
+    preDeployCommand: node lib/db/bootstrap.mjs
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    # /readyz stays 503 until Stripe is configured, so the platform health
+    # check uses the liveness endpoint.
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: complytrack-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      # Set once a custom domain is live; until then the app uses Render's
+      # onrender.com address (RENDER_EXTERNAL_URL).
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PUBLIC_SITE_URL
+        sync: false
+      # Billing
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      # Email (Resend)
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      # File storage (Google Cloud Storage)
+      - key: GCS_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: PRIVATE_OBJECT_DIR
+        sync: false
+      - key: PUBLIC_OBJECT_SEARCH_PATHS
+        sync: false
+
+databases:
+  - name: complytrack-db
+    databaseName: complytrack
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    # Only Render services may connect; no public access.
+    ipAllowList: []

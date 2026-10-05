@@ -1,4 +1,6 @@
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import { ZodError } from "zod";
 import cors from "cors";
 import helmet from "helmet";
@@ -59,6 +61,8 @@ const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
+  // Render sets this to the service's own onrender.com address.
+  ...(process.env.RENDER_EXTERNAL_URL ? [process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, "")] : []),
   ...replitDeploymentOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
@@ -86,6 +90,40 @@ app.use(
     contentSecurityPolicy: false, // API-only server — no HTML is served here.
   }),
 );
+
+// Production: serve the compliance-tracker build from this process, with an
+// index.html fallback for client-side routes. Mounted before the session and
+// auth middleware so static files never touch the database. WEB_DIST_DIR
+// overrides the location; when no build exists (development) this is skipped
+// and Vite serves the web app instead.
+const webDistDir = process.env.WEB_DIST_DIR
+  ? path.resolve(process.env.WEB_DIST_DIR)
+  : path.resolve(import.meta.dirname, "../../compliance-tracker/dist/public");
+const webIndexHtml = path.join(webDistDir, "index.html");
+
+if (fs.existsSync(webIndexHtml)) {
+  logger.info({ webDistDir }, "Serving web app build");
+  const isServerPath = (p: string) =>
+    p === "/api" || p.startsWith("/api/") || p === "/healthz" || p === "/readyz";
+
+  const serveWebFiles = express.static(webDistDir, {
+    index: false,
+    setHeaders(res, filePath) {
+      // Vite fingerprints everything under assets/, so it can be cached forever.
+      if (filePath.startsWith(path.join(webDistDir, "assets") + path.sep)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  });
+
+  app.use((req, res, next) => (isServerPath(req.path) ? next() : serveWebFiles(req, res, next)));
+
+  app.use((req, res, next) => {
+    if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(webIndexHtml);
+  });
+}
 
 app.use(cookieParser());
 
@@ -164,6 +202,11 @@ app.get("/readyz", (_req, res) => {
 });
 
 app.use("/api", router);
+
+// Unknown /api paths get a JSON 404 rather than Express's HTML page.
+app.use("/api", (_req: Request, res: Response) => {
+  res.status(404).json({ error: "Not found" });
+});
 
 // Sentry error handler — must come after all routes and before other error
 // handlers so it has access to the full request context and error details.

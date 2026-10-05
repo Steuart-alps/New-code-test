@@ -211,6 +211,9 @@ export function getPublicAppUrl(): string {
   if (explicit) return explicit;
   const domain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
   if (domain) return `https://${domain}`;
+  // Render sets this to the service's own onrender.com address.
+  const render = process.env.RENDER_EXTERNAL_URL?.replace(/\/+$/, "");
+  if (render) return render;
   return "http://localhost:5173";
 }
 

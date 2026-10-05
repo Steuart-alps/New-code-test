@@ -59,6 +59,15 @@ variable is unset:
 - `.replit`, the `@replit/vite-plugin-*` plugins (gated on `REPL_ID`) and the
   mobile `dev` script remain for the Replit deployment; use `dev:local` elsewhere.
 
+## Deployment (Render)
+
+`render.yaml` is a Render Blueprint: one always-on web service plus Postgres,
+both in Frankfurt. Render runs the build, then `node lib/db/bootstrap.mjs`
+(creates the base schema only when the database is empty), then starts the API,
+which also serves the web build (`WEB_DIST_DIR` overrides its location). Rehearse
+that sequence against an empty database before changing it. Without a custom
+domain, URLs fall back to Render's `RENDER_EXTERNAL_URL`.
+
 ## Rules
 
 - Tenant isolation: never trust a client-supplied `clientId`; use the existing
