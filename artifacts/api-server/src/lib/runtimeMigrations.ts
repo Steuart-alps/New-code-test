@@ -391,29 +391,6 @@ export async function runRuntimeMigrations() {
     await migrateRoomTrack();
     await migrateKitchenCleaning();
     await migrateMaintenanceManager();
-    // Performer attribution is additive so existing records remain readable.
-    // The roster id is tenant-scoped and the accompanying display name remains
-    // an immutable snapshot on the record.
-    for (const [table, columns] of [
-      ["daily_checklists", ["staff_roster_id"]],
-      ["kitchen_probe_checks", ["checked_by_roster_id"]],
-      ["room_track_checks", ["checked_by_roster_id"]],
-      ["pest_visits", ["signed_off_by_roster_id"]],
-      ["pest_activity", ["recorded_by_roster_id"]],
-      ["swim_sessions", ["lifeguard_roster_id"]],
-      ["swim_surveillance_checks", ["checked_by_roster_id"]],
-      ["swim_first_aid_checks", ["checked_by_roster_id"]],
-      ["green_pre_use_checks", ["operator_roster_id"]],
-      ["green_service_records", ["serviced_by_roster_id"]],
-      ["green_defects", ["reported_by_roster_id"]],
-      ["green_puwer_inspections", ["inspector_roster_id"]],
-      ["green_fuel_logs", ["filled_by_roster_id"]],
-    ] as const) {
-      for (const column of columns) {
-        await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "${column}" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`));
-      }
-    }
-
     // ---- Push notification tokens (keep this LAST) ----
     // Placed at the very end of the migration function so other agents can add
     // their own migrations above without conflicting with this region.
@@ -815,6 +792,31 @@ export async function runRuntimeMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS "UQ_daily_checklist_submissions_client_site_date_type"
       ON "daily_checklist_submissions" ("client_id", "site_id", "checklist_date", "type")
     `);
+
+    // Performer attribution is additive so existing records remain readable.
+    // Runs after every table-creating migration above so a fresh database
+    // does not ALTER a table (e.g. kitchen_probe_checks) before it exists.
+    // The roster id is tenant-scoped and the accompanying display name remains
+    // an immutable snapshot on the record.
+    for (const [table, columns] of [
+      ["daily_checklists", ["staff_roster_id"]],
+      ["kitchen_probe_checks", ["checked_by_roster_id"]],
+      ["room_track_checks", ["checked_by_roster_id"]],
+      ["pest_visits", ["signed_off_by_roster_id"]],
+      ["pest_activity", ["recorded_by_roster_id"]],
+      ["swim_sessions", ["lifeguard_roster_id"]],
+      ["swim_surveillance_checks", ["checked_by_roster_id"]],
+      ["swim_first_aid_checks", ["checked_by_roster_id"]],
+      ["green_pre_use_checks", ["operator_roster_id"]],
+      ["green_service_records", ["serviced_by_roster_id"]],
+      ["green_defects", ["reported_by_roster_id"]],
+      ["green_puwer_inspections", ["inspector_roster_id"]],
+      ["green_fuel_logs", ["filled_by_roster_id"]],
+    ] as const) {
+      for (const column of columns) {
+        await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "${column}" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`));
+      }
+    }
 
     logger.info("Runtime migrations complete");
   } catch (err) {

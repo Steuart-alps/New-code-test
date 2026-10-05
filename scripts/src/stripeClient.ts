@@ -3,6 +3,16 @@ import Stripe from "stripe";
 let connectionSettings: any;
 
 async function getCredentials() {
+  // Standard configuration: keys from the environment, as on any host.
+  const envSecret = process.env.STRIPE_SECRET_KEY;
+  if (envSecret) {
+    return {
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
+      secretKey: envSecret,
+    };
+  }
+
+  // Fallback for Replit deployments: keys from Replit's Stripe connector.
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -11,7 +21,7 @@ async function getCredentials() {
       : null;
 
   if (!xReplitToken) {
-    throw new Error("X-Replit-Token not found for repl/depl");
+    throw new Error("STRIPE_SECRET_KEY is not set (and no Replit Stripe connector is available)");
   }
 
   const connectorName = "stripe";

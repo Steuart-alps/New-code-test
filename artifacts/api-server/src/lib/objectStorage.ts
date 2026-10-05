@@ -13,23 +13,36 @@ import {
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
+// Standard Google Cloud credentials (a service-account JSON in
+// GCS_SERVICE_ACCOUNT_JSON, or GOOGLE_APPLICATION_CREDENTIALS) work on any
+// host. Without them, fall back to the Replit Object Storage sidecar.
+const useStandardGcs = Boolean(
+  process.env.GCS_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS
+);
+
+export const objectStorageClient = useStandardGcs
+  ? new Storage(
+      process.env.GCS_SERVICE_ACCOUNT_JSON
+        ? { credentials: JSON.parse(process.env.GCS_SERVICE_ACCOUNT_JSON) }
+        : {}
+    )
+  : new Storage({
+      credentials: {
+        audience: "replit",
+        subject_token_type: "access_token",
+        token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+        type: "external_account",
+        credential_source: {
+          url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+          format: {
+            type: "json",
+            subject_token_field_name: "access_token",
+          },
+        },
+        universe_domain: "googleapis.com",
       },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+      projectId: "",
+    });
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -473,6 +486,21 @@ async function signObjectURL({
   /** Bound into PUT signature by the storage sidecar when provided. */
   contentType?: string;
 }): Promise<string> {
+  if (useStandardGcs) {
+    if (method === "HEAD") {
+      throw new Error("HEAD signed URLs are not supported with standard GCS credentials");
+    }
+    const [url] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({
+        version: "v4",
+        action: method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read",
+        expires: Date.now() + ttlSec * 1000,
+        ...(method === "PUT" && contentType ? { contentType } : {}),
+      });
+    return url;
+  }
   const request = {
     bucket_name: bucketName,
     object_name: objectName,
