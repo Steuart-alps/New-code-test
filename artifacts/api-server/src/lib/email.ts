@@ -207,7 +207,9 @@ export function buildCalendarInvite(opts: {
 }
 
 export function getPublicAppUrl(): string {
-  const explicit = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "");
+  // RENDER_EXTERNAL_URL is set by Render (the service's onrender.com address),
+  // so a deploy works before a custom domain is configured.
+  const explicit = (process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL)?.replace(/\/+$/, "");
   if (explicit) return explicit;
   return "http://localhost:5173";
 }

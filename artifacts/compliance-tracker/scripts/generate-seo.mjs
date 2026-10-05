@@ -3,7 +3,7 @@
 //
 // Canonical base URL resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. PUBLIC_APP_URL             (the app's public address)
+//   2. PUBLIC_APP_URL, else Render's RENDER_EXTERNAL_URL
 //   3. local dev fallback
 //
 // Because it reads the domain at build time, the production deployment build

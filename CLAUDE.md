@@ -47,6 +47,14 @@ reference and `docs/notes/` holds notes on past decisions and pitfalls — read
 PostgreSQL with a `complytrack` database, and exports a dev `DATABASE_URL` and
 `SESSION_SECRET`.
 
+## Deployment (Render)
+
+`render.yaml` is a Render Blueprint: one always-on web service (API + web app,
+Frankfurt) and a managed Postgres. Build: `scripts/render-build.sh`; pre-deploy:
+`node lib/db/bootstrap.mjs` (creates the base schema only in an empty database);
+start: `node artifacts/api-server/dist/index.mjs`. Keep one instance — scheduled
+jobs run in-process. `TZ=Europe/London` sets the job times.
+
 ## Configuration
 
 All settings are environment variables; `.env.example` lists them.
@@ -58,7 +66,7 @@ All settings are environment variables; `.env.example` lists them.
   `GOOGLE_APPLICATION_CREDENTIALS`, plus `PRIVATE_OBJECT_DIR` /
   `PUBLIC_OBJECT_SEARCH_PATHS` (`api-server/src/lib/objectStorage.ts`).
 - Public URL: `getPublicAppUrl()` in `api-server/src/lib/email.ts` (`PUBLIC_APP_URL`,
-  else localhost) — used for email links, Stripe return URLs and the webhook.
+  else Render's `RENDER_EXTERNAL_URL`, else localhost) — used for email links, Stripe return URLs and the webhook.
 
 ## Rules
 

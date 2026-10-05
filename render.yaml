@@ -1,0 +1,62 @@
+# Render Blueprint: one web service (API + web app in a single process) and a
+# managed PostgreSQL database, both in Frankfurt (EU). Create it in Render via
+# New > Blueprint and select this repository.
+services:
+  - type: web
+    name: complytrack
+    runtime: node
+    region: frankfurt
+    # Always-on paid instance: the API runs scheduled jobs (reminders, billing
+    # reconciliation) in-process, so it must not sleep. Keep ONE instance; the
+    # jobs would run once per instance.
+    plan: starter
+    numInstances: 1
+    buildCommand: bash scripts/render-build.sh
+    # Creates the base schema only when the database is completely empty;
+    # runtime migrations at server start apply everything else.
+    preDeployCommand: node lib/db/bootstrap.mjs
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      # Scheduled job times (08:00 etc.) follow the server clock.
+      - key: TZ
+        value: Europe/London
+      - key: DATABASE_URL
+        fromDatabase:
+          name: complytrack-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      # Set in the dashboard when prompted (or later). PUBLIC_APP_URL can be
+      # added once a custom domain is set up; until then the onrender.com
+      # address is used.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: GCS_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: PRIVATE_OBJECT_DIR
+        sync: false
+      - key: PUBLIC_OBJECT_SEARCH_PATHS
+        sync: false
+
+databases:
+  - name: complytrack-db
+    region: frankfurt
+    plan: basic-256mb
+    databaseName: complytrack
+    user: complytrack
+    postgresMajorVersion: "16"
+    # Only the web service (Render's private network) can connect.
+    ipAllowList: []

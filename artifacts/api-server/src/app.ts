@@ -8,6 +8,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { getPublicAppUrl } from "./lib/email";
 import { sessionMiddleware } from "./lib/session";
 import { loadUser, enforceClientAccess, enforceTwoFactorEnrollment } from "./middleware/requireAuth";
 import { enforceTrialLock } from "./middleware/trialLock";
@@ -54,7 +55,7 @@ app.use(
 
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
-  ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
+  getPublicAppUrl(),
   "http://localhost:3000",
   "http://localhost:5173",
 ];
