@@ -17,7 +17,7 @@ import {
   getServicePriceReadinessBlocker,
   type ServicePricePreflight,
 } from "./lib/services";
-import { sendSystemEmail } from "./lib/email";
+import { getPublicAppUrl, sendSystemEmail } from "./lib/email";
 import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
@@ -57,7 +57,10 @@ async function initStripe(): Promise<string | null> {
     logger.info("Stripe schema ready");
 
     const stripeSync = await getStripeSync();
-    const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+    // Keep the existing Replit webhook address when deployed there: a new URL
+    // registers a second Stripe webhook rather than replacing the first.
+    const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+    const webhookBaseUrl = replitDomain ? `https://${replitDomain}` : getPublicAppUrl();
     await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
     logger.info("Stripe webhook configured");
 

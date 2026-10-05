@@ -35,6 +35,7 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
 import { requireAuth, getClientId, requireRole, requireClientAdmin } from "../middleware/requireAuth";
 
@@ -229,7 +230,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   let checkoutSessionCreated = false;
   try {
     const stripe = await getUncachableStripeClient();
-    const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+    const baseUrl = getPublicAppUrl();
 
     // Per-site billing: prices are always server-resolved (never client-supplied
     // price ids); the client only picks WHICH services, and quantity is the
@@ -626,7 +627,7 @@ router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), a
 
   try {
     const stripe = await getUncachableStripeClient();
-    const baseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+    const baseUrl = getPublicAppUrl();
     const configuration = await getNoRefundPortalConfigId(stripe);
     const session = await stripe.billingPortal.sessions.create({
       customer: client.stripeCustomerId,

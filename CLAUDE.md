@@ -42,14 +42,22 @@ Replit Agent's notes on past decisions and pitfalls — read `.agents/memory/MEM
 PostgreSQL with a `complytrack` database, and exports a dev `DATABASE_URL` and
 `SESSION_SECRET`.
 
-## Replit dependencies still in the code
+## Configuration
 
-- Stripe keys come from Replit's connector service (`api-server/src/lib/stripeClient.ts`,
-  `scripts/src/stripeClient.ts`) — fails outside Replit.
-- File uploads use Replit Object Storage via the sidecar at `127.0.0.1:1106`
+All settings are environment variables; `.env.example` lists them. The code
+is host-agnostic, with Replit kept only as a fallback when the standard
+variable is unset:
+
+- Stripe: `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY`, else Replit's connector
+  (`api-server/src/lib/stripeClient.ts`, `scripts/src/stripeClient.ts`).
+- File storage: Google Cloud Storage via `GCS_SERVICE_ACCOUNT_JSON` or
+  `GOOGLE_APPLICATION_CREDENTIALS`, else the Replit sidecar at `127.0.0.1:1106`
   (`api-server/src/lib/objectStorage.ts`).
-- Public URLs derive from `REPLIT_DOMAINS` / `REPLIT_DEV_DOMAIN`; Vite configs load
-  `@replit/vite-plugin-*` (dev only, gated on `REPL_ID`).
+- Public URL: `getPublicAppUrl()` in `api-server/src/lib/email.ts` —
+  `PUBLIC_APP_URL`, else `REPLIT_DOMAINS`, else localhost. Use it rather than
+  reading `REPLIT_DOMAINS` directly.
+- `.replit`, the `@replit/vite-plugin-*` plugins (gated on `REPL_ID`) and the
+  mobile `dev` script remain for the Replit deployment; use `dev:local` elsewhere.
 
 ## Rules
 

@@ -58,6 +58,7 @@ const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
 
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
+  ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
   ...replitDeploymentOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
