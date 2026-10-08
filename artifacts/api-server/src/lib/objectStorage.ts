@@ -35,18 +35,48 @@ export type {
   AllowedUploadType,
 } from "./uploadValidation";
 
-function createObjectStorageClient(): Storage {
-  const options: ConstructorParameters<typeof Storage>[0] = {};
-  const projectId = process.env.GCS_PROJECT_ID?.trim();
+const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+const gcsServiceAccountJson = process.env.GCS_SERVICE_ACCOUNT_JSON?.trim();
+const projectId = process.env.GCS_PROJECT_ID?.trim();
 
-  if (projectId) {
-    options.projectId = projectId;
+// Use normal Google credentials for explicit service-account/ADC settings, or
+// outside Replit where local gcloud ADC or workload identity may be available.
+// In Replit, retain the Object Storage sidecar fallback when no GCS credentials
+// are configured.
+const useStandardGcs = Boolean(
+  gcsServiceAccountJson ||
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  projectId ||
+  !process.env.REPL_ID
+);
+
+function createObjectStorageClient(): Storage {
+  if (useStandardGcs) {
+    const options: ConstructorParameters<typeof Storage>[0] = {};
+    if (projectId) options.projectId = projectId;
+    if (gcsServiceAccountJson) {
+      options.credentials = JSON.parse(gcsServiceAccountJson);
+    }
+    return new Storage(options);
   }
 
-  // The Google SDK uses its normal Application Default Credentials chain:
-  // GOOGLE_APPLICATION_CREDENTIALS, workload identity, or local gcloud ADC.
-  // Credentials are intentionally never parsed or stored by the application.
-  return new Storage(options);
+  return new Storage({
+    credentials: {
+      audience: "replit",
+      subject_token_type: "access_token",
+      token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+      type: "external_account",
+      credential_source: {
+        url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+        format: {
+          type: "json",
+          subject_token_field_name: "access_token",
+        },
+      },
+      universe_domain: "googleapis.com",
+    },
+    projectId: "",
+  });
 }
 
 export const objectStorageClient = createObjectStorageClient();
@@ -129,6 +159,22 @@ export class ObjectStorageService {
   constructor() {}
 
   getPublicObjectSearchPaths(): Array<string> {
+    const configuredPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS?.trim();
+    if (configuredPaths) {
+      const paths = Array.from(
+        new Set(
+          configuredPaths
+            .split(",")
+            .map((path) => path.trim())
+            .filter((path) => path.length > 0),
+        ),
+      );
+      if (paths.length === 0) {
+        throw new Error("PUBLIC_OBJECT_SEARCH_PATHS must contain at least one non-empty path");
+      }
+      return paths;
+    }
+
     const bucket = getConfiguredBucket("public");
     const prefixes = (process.env.GCS_PUBLIC_PREFIXES || "public")
       .split(",")
@@ -142,6 +188,11 @@ export class ObjectStorageService {
   }
 
   getPrivateObjectDir(): string {
+    const configuredDir = process.env.PRIVATE_OBJECT_DIR?.trim();
+    if (configuredDir) {
+      return configuredDir;
+    }
+
     const bucket = getConfiguredBucket("private");
     const prefix = normalizePrefix(process.env.GCS_PRIVATE_PREFIX || "private");
     return prefix ? `/${bucket}/${prefix}` : `/${bucket}`;
@@ -673,17 +724,45 @@ async function signObjectURL({
   /** Bound into a GCS V4 PUT signature when provided. */
   contentType?: string;
 }): Promise<string> {
-  const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
-  const [signedUrl] = await objectStorageClient
-    .bucket(bucketName)
-    .file(objectName)
-    .getSignedUrl({
-      version: "v4",
-      action,
-      expires: Date.now() + ttlSec * 1000,
-      ...(method === "PUT" && contentType ? { contentType } : {}),
-    });
-  return signedUrl;
+  if (useStandardGcs) {
+    const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+    const [signedUrl] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({
+        version: "v4",
+        action,
+        expires: Date.now() + ttlSec * 1000,
+        ...(method === "PUT" && contentType ? { contentType } : {}),
+      });
+    return signedUrl;
+  }
+
+  const request = {
+    bucket_name: bucketName,
+    object_name: objectName,
+    method,
+    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
+    ...(contentType ? { content_type: contentType } : {}),
+  };
+  const response = await fetch(
+    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Failed to sign object URL, errorcode: ${response.status}, make sure you're running on Replit`
+    );
+  }
+  const json = await response.json() as { signed_url: string };
+  return json.signed_url;
 }
 
 function getConfiguredBucket(kind: "private" | "public"): string {
