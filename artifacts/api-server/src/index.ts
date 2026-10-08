@@ -450,7 +450,7 @@ process.on("uncaughtException", async (err: Error) => {
     }
   }
   // Give the event loop a tick so pino can flush, then exit so the process
-  // manager (or Replit) can restart the server cleanly.
+  // manager can restart the server cleanly.
   setTimeout(() => process.exit(1), 500);
 });
 

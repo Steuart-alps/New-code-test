@@ -75,8 +75,8 @@ app.use(
 );
 
 // HTTP security headers — applied to all responses.
-// crossOriginEmbedderPolicy is disabled so cross-origin
-// resources (e.g. Stripe, object storage) keep loading without CORP headers.
+// crossOriginEmbedderPolicy is disabled: it would block any
+// cross-origin resource that does not send a Cross-Origin-Resource-Policy header.
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
