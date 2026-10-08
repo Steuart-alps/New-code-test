@@ -1,3 +1,7 @@
+# Project notes
+
+Decisions and pitfalls recorded during development (originally Replit Agent memory). One file per topic; read the relevant ones before changing that area.
+
 - [Billing architecture](billing-architecture.md) — per-site Stripe pricing, account = client, subscription looked up dynamically; billing endpoints bypass openapi.
 - [Stripe discount redemptions](stripe-discount-redemptions.md) — recurring code uses token-bound Checkout reservations; reconcile Stripe before releasing any timed-out claim.
 - [No-proration billing outbox](billing-no-proration.md) — added sites billed via per-site event outbox + idempotent claiming; never charge from quantity deltas; skip only strictly pre-subscription rows.
@@ -29,7 +33,7 @@
 - [API test readiness](api-test-readiness.md) — integration tests must wait for `/readyz`; `/healthz` becomes available before runtime migrations and Stripe initialization finish.
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
-- [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
+- [Post-merge pnpm contention](post-merge-pnpm-contention.md) — (historical: Replit post-merge hook, now removed) skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
 - [Concurrent task reconciliation](concurrent-task-reconciliation.md) — task merges can drop untracked main-workspace helpers; recheck status and typecheck immediately after reconciliation.
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.

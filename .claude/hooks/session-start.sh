@@ -1,7 +1,7 @@
 #!/bin/bash
 # SessionStart hook for Claude Code cloud sessions: installs workspace
 # dependencies and provisions a local PostgreSQL database so typecheck and the
-# DB-backed api-server tests can run (replaces the Replit postgresql-16 module).
+# DB-backed api-server tests can run.
 set -euo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then

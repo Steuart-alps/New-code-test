@@ -2,9 +2,8 @@
 //
 // Resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. https://<first REPLIT_DOMAINS entry>   (the deployment's own address)
-//   3. RENDER_EXTERNAL_URL         (Render's onrender.com address)
-//   4. local dev fallback
+//   2. PUBLIC_APP_URL, else Render's RENDER_EXTERNAL_URL
+//   3. local dev fallback
 export function resolveBaseUrl() {
   if (process.env.PUBLIC_SITE_URL) {
     return {
@@ -12,18 +11,9 @@ export function resolveBaseUrl() {
       source: "PUBLIC_SITE_URL",
     };
   }
-  const domains = (process.env.REPLIT_DOMAINS ?? "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
-  if (domains.length > 0) {
-    return { baseUrl: `https://${domains[0]}`, source: "REPLIT_DOMAINS" };
-  }
-  if (process.env.RENDER_EXTERNAL_URL) {
-    return {
-      baseUrl: process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, ""),
-      source: "RENDER_EXTERNAL_URL",
-    };
+  const appUrl = process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL;
+  if (appUrl) {
+    return { baseUrl: appUrl.replace(/\/+$/, ""), source: "PUBLIC_APP_URL" };
   }
   return { baseUrl: "http://localhost:21186", source: "localhost-fallback" };
 }
@@ -33,7 +23,7 @@ export function assertCanonicalForProduction(source) {
   if (source === "localhost-fallback" && process.env.NODE_ENV === "production") {
     throw new Error(
       "[seo] No canonical site URL available for production build. " +
-        "Set PUBLIC_SITE_URL (custom domain), or build on Render or Replit.",
+        "Set PUBLIC_SITE_URL (custom domain) or PUBLIC_APP_URL.",
     );
   }
 }

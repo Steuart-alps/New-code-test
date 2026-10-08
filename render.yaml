@@ -30,6 +30,9 @@ services:
         value: "24"
       - key: NODE_ENV
         value: production
+      # Scheduled job times (reminder emails etc.) follow the server clock.
+      - key: TZ
+        value: Europe/London
       - key: DATABASE_URL
         fromDatabase:
           name: complytrack-db

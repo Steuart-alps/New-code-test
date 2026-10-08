@@ -44,7 +44,7 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
+# Caches and test bundles
 .cache/
 .local/
 artifacts/api-server/tests/.build-*/

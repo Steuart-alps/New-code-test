@@ -29,7 +29,7 @@ export function markApplicationReady(blocker: string | null = null): void {
   applicationReady = blocker === null;
 }
 
-// Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
+// Trust the hosting proxy chain so express-session sees HTTPS and sets secure cookies
 app.set("trust proxy", 1);
 
 app.use(
@@ -52,18 +52,11 @@ app.use(
   }),
 );
 
-const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
-  .split(",")
-  .map(d => d.trim())
-  .filter(Boolean)
-  .flatMap(d => [`https://${d}`, `http://${d}`]);
-
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
   // Render sets this to the service's own onrender.com address.
   ...(process.env.RENDER_EXTERNAL_URL ? [process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, "")] : []),
-  ...replitDeploymentOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
 ];
@@ -82,12 +75,12 @@ app.use(
 );
 
 // HTTP security headers — applied to all responses.
-// crossOriginEmbedderPolicy is disabled because Replit's proxy/iframe chain
-// sets its own COEP headers; enabling ours would conflict and break previews.
+// crossOriginEmbedderPolicy is disabled so cross-origin
+// resources (e.g. Stripe, object storage) keep loading without CORP headers.
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
-    contentSecurityPolicy: false, // API-only server — no HTML is served here.
+    contentSecurityPolicy: false, // The web app sets no CSP; see the static serving below.
   }),
 );
 
@@ -189,7 +182,7 @@ app.use(enforceClientAccess);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers / Replit can reach it directly.
+// from the /api prefix so load balancers can reach it directly.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 app.get("/readyz", (_req, res) => {
   if (!applicationReady) {
