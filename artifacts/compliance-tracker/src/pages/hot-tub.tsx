@@ -31,6 +31,7 @@ import { createHotTubLogPdf } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
+import { beginApiMutation } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,12 +128,14 @@ const DAILY_SESSION_TYPES: CheckType[] = ["water_chemistry", "temperature"];
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 async function apiFetch(path: string, opts?: RequestInit) {
+  const mutationSucceeded = beginApiMutation(opts?.method, path);
   const res = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
   });
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
+  mutationSucceeded();
   if (res.status === 204) return null;
   return res.json();
 }

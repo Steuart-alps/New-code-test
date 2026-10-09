@@ -23,8 +23,41 @@ export async function getCsrfToken(): Promise<string | null> {
   return csrfRequest;
 }
 
+type MutationObserver = (method: string, url: string) => (() => void) | void;
+let mutationObserver: MutationObserver | null = null;
+
+/** Mirrors the generated client's setMutationObserver for hand-written fetches. */
+export function setApiFetchMutationObserver(observer: MutationObserver | null): void {
+  mutationObserver = observer;
+}
+
+/**
+ * Call before sending a hand-written POST/PUT/PATCH; call the returned
+ * function only after the response succeeded. Never throws.
+ */
+export function beginApiMutation(method: string | undefined, url: string): () => void {
+  const verb = (method ?? "GET").toUpperCase();
+  let onSuccess: (() => void) | void = undefined;
+  if (mutationObserver && ["POST", "PUT", "PATCH"].includes(verb)) {
+    try {
+      onSuccess = mutationObserver(verb, url);
+    } catch {
+      // Observers must never affect the request.
+    }
+  }
+  return () => {
+    if (!onSuccess) return;
+    try {
+      onSuccess();
+    } catch {
+      // Observers must never affect the response.
+    }
+  };
+}
+
 export async function apiFetch(path: string, init?: RequestInit) {
   const method = (init?.method ?? "GET").toUpperCase();
+  const mutationSucceeded = beginApiMutation(method, path);
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
   if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && !headers.has("Authorization")) {
@@ -41,6 +74,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
     // request will obtain a fresh token rather than reusing stale state.
     csrfToken = null;
   }
+  if (res.ok) mutationSucceeded();
   return res;
 }
 
