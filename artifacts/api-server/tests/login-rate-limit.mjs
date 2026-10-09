@@ -9,7 +9,9 @@
 //   5. with a shared store, reset-link failures are capped across instances,
 //      successes are released, and store faults have explicit responses
 //
-// No database is required — the limiter is pure IP/email counting.
+// No database is required — the limiter is pure IP/email counting. The real
+// PostgreSQL shared store is covered by tests/login-rate-limit-postgres.mjs
+// (pnpm run test:login-rate-limit-postgres).
 //
 // The runner (run-login-rate-limit.sh) esbuild-bundles the TS middleware to a
 // temp .mjs and points LIMITER_MODULE at it before invoking this file.
