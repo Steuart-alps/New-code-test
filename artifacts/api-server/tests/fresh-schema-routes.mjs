@@ -416,6 +416,141 @@ async function main() {
     "created probe check must appear in the probe list",
   );
 
+  // Compliance register: the list annotates each item with the latest related
+  // certificate expiry, so it reads the legacy `certificates` table even when
+  // no certificate exists. Cover empty history, a tenant-owned certificate and
+  // a foreign tenant's certificate that must never leak into this register.
+  const tenantCookie = cookie;
+  const compliancePath = "/compliance-items";
+  const contractorPath = "/contractors";
+  const contractor = await request("POST", contractorPath, {
+    name: "Fresh Schema Electrical",
+    email: `fresh-schema-contractor-${stamp}@test.local`,
+  });
+  expectStatus("POST", contractorPath, contractor, 201);
+
+  const uncertifiedItem = await request("POST", compliancePath, {
+    title: `Fresh schema uncertified item ${stamp}`,
+    siteId,
+    contractorId: contractor.data.id,
+  });
+  expectStatus("POST", compliancePath, uncertifiedItem, 201);
+
+  const emptyHistoryRegister = await request("GET", compliancePath);
+  expectStatus("GET", compliancePath, emptyHistoryRegister, 200);
+  const emptyHistoryRow = Array.isArray(emptyHistoryRegister.data)
+    ? emptyHistoryRegister.data.find((row) => row.id === uncertifiedItem.data.id)
+    : undefined;
+  expect(
+    "GET", compliancePath, emptyHistoryRegister,
+    emptyHistoryRow && emptyHistoryRow.latestCertExpiryDate === null,
+    "an item without certificate history must list with a null latest certificate expiry",
+  );
+
+  const certifiedItem = await request("POST", compliancePath, { title: `Fresh schema certified item ${stamp}`, siteId });
+  expectStatus("POST", compliancePath, certifiedItem, 201);
+  const ownCertificatesPath = `/items/${certifiedItem.data.id}/certificates`;
+  const ownFileUrl = `/objects/uploads/tenant-${clientId}/schema-fixture.pdf`;
+  const ownCertificate = await request("POST", ownCertificatesPath, {
+    name: "Fresh schema EICR",
+    fileUrl: ownFileUrl,
+    issueDate: "2026-01-15T00:00:00.000Z",
+    expiryDate: "2031-01-15T00:00:00.000Z",
+    notes: "Tenant-owned evidence",
+  });
+  expectStatus("POST", ownCertificatesPath, ownCertificate, 201);
+  expect(
+    "POST", ownCertificatesPath, ownCertificate,
+    ownCertificate.data?.itemId === certifiedItem.data.id
+      && ownCertificate.data?.contractorId === null
+      && ownCertificate.data?.fileUrl === ownFileUrl
+      && ownCertificate.data?.notes === "Tenant-owned evidence",
+    "item certificate must keep its owner and evidence metadata",
+  );
+  const ownCertificates = await request("GET", ownCertificatesPath);
+  expectStatus("GET", ownCertificatesPath, ownCertificates, 200);
+  expect(
+    "GET", ownCertificatesPath, ownCertificates,
+    Array.isArray(ownCertificates.data) && ownCertificates.data.length === 1
+      && ownCertificates.data[0].fileUrl === ownFileUrl,
+    "item certificate history must return the saved certificate",
+  );
+
+  // A second, unrelated tenant with a later-expiring certificate.
+  cookie = "";
+  const foreignEmail = `fresh-schema-foreign-${stamp}@test.local`;
+  const foreignRegistered = await request("POST", registerPath, {
+    name: "Fresh Schema Foreign Manager",
+    email: foreignEmail,
+    password,
+  });
+  expectStatus("POST", registerPath, foreignRegistered, 200);
+  const foreignVerifyPath = `/auth/verify-email?token=${encodeURIComponent(foreignRegistered.data?.verificationToken)}`;
+  expectStatus("GET", foreignVerifyPath, await request("GET", foreignVerifyPath), 200);
+  expectStatus("POST", loginPath, await request("POST", loginPath, { email: foreignEmail, password }), 200);
+  const foreignMe = await request("GET", "/auth/me");
+  expectStatus("GET", "/auth/me", foreignMe, 200);
+  const foreignClientId = (foreignMe.data.user ?? foreignMe.data).clientId;
+  expect(
+    "GET", "/auth/me", foreignMe,
+    Number.isInteger(foreignClientId) && foreignClientId !== clientId,
+    "the second registration must belong to a separate tenant",
+  );
+
+  const foreignItem = await request("POST", compliancePath, { title: `Fresh schema foreign item ${stamp}` });
+  expectStatus("POST", compliancePath, foreignItem, 201);
+  const foreignCertificatesPath = `/items/${foreignItem.data.id}/certificates`;
+  const foreignFileUrl = `/objects/uploads/tenant-${foreignClientId}/schema-fixture.pdf`;
+  const foreignCertificate = await request("POST", foreignCertificatesPath, {
+    name: "Foreign tenant certificate",
+    fileUrl: foreignFileUrl,
+    expiryDate: "2039-06-30T00:00:00.000Z",
+    notes: "Foreign tenant evidence",
+  });
+  expectStatus("POST", foreignCertificatesPath, foreignCertificate, 201);
+
+  // The foreign tenant can neither read nor add to the first tenant's history.
+  expectStatus("GET", ownCertificatesPath, await request("GET", ownCertificatesPath), 404);
+  expectStatus("POST", ownCertificatesPath, await request("POST", ownCertificatesPath, {
+    name: "Cross-tenant write",
+    expiryDate: "2045-01-01T00:00:00.000Z",
+  }), 404);
+  const foreignRegister = await request("GET", compliancePath);
+  expectStatus("GET", compliancePath, foreignRegister, 200);
+  // Registration seeds starter items, so assert on ownership, not counts.
+  const foreignRows = Array.isArray(foreignRegister.data) ? foreignRegister.data : [];
+  expect(
+    "GET", compliancePath, foreignRegister,
+    foreignRows.length > 0
+      && foreignRows.every((row) => row.clientId === foreignClientId)
+      && foreignRows.find((row) => row.id === foreignItem.data.id)?.latestCertExpiryDate === "2039-06-30T00:00:00.000Z"
+      && !foreignRows.some((row) => row.id === certifiedItem.data.id || row.id === uncertifiedItem.data.id),
+    "the foreign tenant register must contain only its own items and certificate expiry",
+  );
+
+  cookie = tenantCookie;
+  expectStatus("GET", foreignCertificatesPath, await request("GET", foreignCertificatesPath), 404);
+  const tenantRegister = await request("GET", compliancePath);
+  expectStatus("GET", compliancePath, tenantRegister, 200);
+  const tenantRows = Array.isArray(tenantRegister.data) ? tenantRegister.data : [];
+  const registerById = new Map(tenantRows.map((row) => [row.id, row]));
+  expect(
+    "GET", compliancePath, tenantRegister,
+    tenantRows.every((row) => row.clientId === clientId)
+      && registerById.get(uncertifiedItem.data.id)?.latestCertExpiryDate === null
+      && registerById.get(certifiedItem.data.id)?.latestCertExpiryDate === "2031-01-15T00:00:00.000Z"
+      && !registerById.has(foreignItem.data.id),
+    "the register must show only this tenant's items and certificate expiries",
+  );
+  const serializedRegister = JSON.stringify(tenantRegister.data);
+  expect(
+    "GET", compliancePath, tenantRegister,
+    !serializedRegister.includes("2039-06-30")
+      && !serializedRegister.includes(foreignFileUrl)
+      && !serializedRegister.includes("Foreign tenant"),
+    "foreign tenant certificate metadata must not appear in the register",
+  );
+
   console.log(`${assertions} fresh-schema HTTP assertions passed.`);
 }
 
