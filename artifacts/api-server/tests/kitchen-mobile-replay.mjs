@@ -70,5 +70,29 @@ try {
   assert.equal(saved.coldFood[0].tempPm, '5', 'old acknowledged replay never overwrites a later edit');
   assert.equal(saved.hotHolding.length, 1);
   assert.equal(saved.deliveries.length, 2);
-  console.log('KitchenTrack POST/PUT replay, concurrent deduplication, payload integrity, dates and authenticated-owner boundaries passed.');
+
+  // Receipt lookup used before a rejected device entry is restored for editing.
+  const receiptPath = (entryId, { siteId = site.data.id, recordDate = date } = {}) =>
+    `/food-safety/mobile-entries/${encodeURIComponent(entryId)}?recordDate=${recordDate}${siteId === null ? '' : `&siteId=${siteId}`}`;
+  let lookup = await owner.request('GET', receiptPath(createBody.mobileEntryId));
+  assert.equal(lookup.status, 200);
+  assert.deepEqual([lookup.data.receipted, lookup.data.recordId], [true, id], 'an applied create is reported as received');
+  lookup = await owner.request('GET', receiptPath(updateBody.mobileEntryId));
+  assert.equal(lookup.data.receipted, true, 'an applied update is reported as received');
+  const neverSent = randomUUID();
+  lookup = await owner.request('GET', receiptPath(neverSent));
+  assert.deepEqual([lookup.data.receipted, lookup.data.recordId], [false, null], 'an entry never applied can be restored');
+  assert.equal((await staff.request('GET', receiptPath(createBody.mobileEntryId))).data.receipted, false,
+    "another user's receipt is not visible");
+  const foreign = await other.request('GET', receiptPath(createBody.mobileEntryId));
+  assert.equal(foreign.status, 400, 'another client cannot name this site');
+  assert.equal((await other.request('GET', receiptPath(createBody.mobileEntryId, { siteId: null }))).data.receipted, false,
+    "another client's organisation diary has no such receipt");
+  assert.equal((await owner.request('GET', receiptPath(createBody.mobileEntryId, { recordDate: isoDay(-1) }))).data.receipted, false,
+    'receipts are scoped to the diary date');
+  assert.equal((await owner.request('GET', receiptPath(createBody.mobileEntryId, { siteId: null }))).data.receipted, false,
+    'receipts are scoped to the diary site');
+  assert.equal((await owner.request('GET', receiptPath('short'))).status, 400, 'entry identifiers are validated');
+  assert.equal((await owner.request('GET', `/food-safety/mobile-entries/${neverSent}?recordDate=nope&siteId=${site.data.id}`)).status, 400);
+  console.log('KitchenTrack POST/PUT replay, concurrent deduplication, payload integrity, dates and authenticated-owner boundaries, and receipt lookup scope passed.');
 } finally { await pool.end(); }

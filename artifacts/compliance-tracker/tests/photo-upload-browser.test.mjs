@@ -375,7 +375,8 @@ async function uploadAndAssert(input, scope, entityType, entityId) {
   assert.equal(association.entityId, entityId);
   assert.match(association.objectPath, new RegExp(`/${entityType}/${entityId}/`));
   assert.deepEqual(association, expectedAssociationBody(entityType, entityId, association.objectPath));
-  await scope.locator('img[alt="Check photo"]').first().waitFor({ state: "visible" });
+  // Thumbnails are decorative (alt=""); each photo's named control carries its label.
+  await scope.getByRole("button", { name: /^View photo \d+ of \d+$/ }).first().waitFor({ state: "visible" });
   return association;
 }
 

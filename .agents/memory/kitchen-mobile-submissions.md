@@ -26,3 +26,9 @@ Release the receipt-capable API before distributing a mobile build that replays 
 **Why:** Older API validation strips unknown submission identifiers. Its ordinary PUT path can append again after an ambiguous response, so the new queue requires the matching server release.
 
 **How to apply:** Include the API receipt migration and mobile bundle in the same publishing milestone, with the API available before native clients update.
+
+A rejected (failed) device entry may be turned back into an editable draft only after `GET /food-safety/mobile-entries/:entryId` (scoped to the caller, client, site and date) confirms the server never applied it. The entry then becomes `restored`: terminal, never sent, original payload kept unchanged. The draft is reviewed on the latest diary and controls and saved under a new entry ID. Unfinished forms are kept per client/user/site/date and offered for restore; earlier days' drafts are only viewable/discardable, never moved to today.
+
+**Why:** A rejection can come from controls tightened while the device was offline; staff need to correct and resend, but an entry the server did accept must never be re-entered or rewritten, and an old diary may be locked.
+
+**How to apply:** Never restore without the receipt check, never mutate a restored entry's payload, and keep form drafts owner-scoped and cleared on save or confirmed discard.

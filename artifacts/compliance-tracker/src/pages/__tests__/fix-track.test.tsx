@@ -4,6 +4,7 @@ import { Children, isValidElement, type ReactElement, type ReactNode } from "rea
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildPriorityBoardColumns,
+  daysPastTarget,
   elapsedBoardDays,
   FixTrackBoard,
   type BoardStatusMeta,
@@ -192,4 +193,61 @@ test("selecting a board card invokes the edit action with that issue", () => {
   card.props.onClick?.({});
   assert.equal(selected.length, 1);
   assert.strictEqual(selected[0], target);
+});
+test("columns put the most urgent trade first, whatever order the API returned", () => {
+  // API order deliberately differs from the expected severity order.
+  const issues = [
+    issue(1, "general", "low", 40),
+    issue(2, "plumbing", "medium", 20),
+    issue(3, "electrical", "high", 10),
+    issue(4, "general", "medium", 35),
+    issue(5, "roofing", "urgent", 3),
+    issue(6, "plumbing", "urgent", 8),
+    issue(7, "electrical", "low", 60),
+    issue(8, "heating", "high", 10),
+    issue(9, "carpentry", "urgent", 1, "resolved"),
+  ];
+  const expected = ["plumbing", "roofing", "electrical", "heating", "general"];
+  assert.deepEqual(buildPriorityBoardColumns(issues).map(column => column.key), expected,
+    "highest open priority, then the oldest job at that priority, then trade key (electrical/heating tie)");
+  assert.deepEqual(buildPriorityBoardColumns([...issues].reverse()).map(column => column.key), expected,
+    "equally urgent groups keep a stable order");
+  assert.deepEqual(buildPriorityBoardColumns(issues).find(column => column.key === "electrical")?.items.map(item => item.id), [3, 7],
+    "card order inside a column is unchanged; an older low job does not lift its column");
+  const { markup } = renderBoard(issues);
+  const rendered = [...markup.matchAll(/fix-track-board-column-([a-z]+)/g)].map(match => match[1]);
+  assert.deepEqual(rendered, expected);
+});
+
+test("overdue cards show local calendar days past target alongside the reported age", () => {
+  const withTarget = (id: number, targetDaysAgo: number, isOverdue: boolean) => ({
+    ...issue(id, "electrical", "high", 20, "reported", isOverdue), targetDate: reportDate(targetDaysAgo),
+  });
+  const pastTarget = (id: number, markup: string) =>
+    markup.match(new RegExp(`fix-track-board-past-target-${id}"[^>]*>([^<]+)<`))?.[1] ?? null;
+
+  const dueToday = withTarget(201, 0, false);
+  const firstDay = withTarget(202, 1, true);
+  const week = withTarget(203, 7, true);
+  const future = withTarget(204, -5, false);
+  const noTarget = issue(205, "electrical", "high", 20);
+  assert.equal(daysPastTarget(dueToday, fixedToday), null, "due today is not past target");
+  assert.equal(daysPastTarget(firstDay, fixedToday), 1);
+  assert.equal(daysPastTarget(future, fixedToday), null);
+  assert.equal(daysPastTarget(noTarget, fixedToday), null);
+  assert.equal(daysPastTarget({ ...firstDay, isOverdue: false }, fixedToday), null, "only when the server says overdue");
+
+  const { markup } = renderBoard([dueToday, firstDay, week, future, noTarget]);
+  assert.equal(pastTarget(201, markup), null);
+  assert.equal(pastTarget(202, markup), "1 day past target");
+  assert.equal(pastTarget(203, markup), "7 days past target");
+  assert.equal(pastTarget(204, markup), null);
+  assert.equal(pastTarget(205, markup), null);
+  assert.match(markup, /No target date/, "the no-target label is kept");
+  assert.match(markup, /20 days open/, "the reported-age label is kept");
+
+  // UK clocks go forward 29 Mar 2026 (23-hour day) and back 25 Oct (25-hour day).
+  assert.equal(daysPastTarget({ targetDate: "2026-03-29", isOverdue: true }, new Date(2026, 2, 30, 0, 30)), 1);
+  assert.equal(daysPastTarget({ targetDate: "2026-10-25", isOverdue: true }, new Date(2026, 9, 26, 0, 10)), 1);
+  assert.equal(daysPastTarget({ targetDate: "2026-03-01", isOverdue: true }, new Date(2026, 10, 1, 8)), 245);
 });
