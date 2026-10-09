@@ -10,6 +10,7 @@ export {
   AddPrivacyRetentionVerificationParams,
   GetFoodSafetyRecordByDateParams,
   GetStorageUsageResponse,
+  ListFeedbackReportHistoryParams,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   SavePATPresetTemplateBody,

@@ -6,6 +6,8 @@
 //   2. successful attempts still consume quota
 //   3. registration allows 5 attempts per IP per hour, independently of login
 //   4. reset-password limiter counts 400 (invalid-token guesses) as failures
+//   5. with a shared store, reset-link failures are capped across instances,
+//      successes are released, and store faults have explicit responses
 //
 // No database is required — the limiter is pure IP/email counting.
 //
@@ -119,6 +121,71 @@ app.post("/auth/shared-store-missing", missingStoreLimit, (_req, res) => {
   unavailableHandlerCalls++;
   res.status(401).json({ error: "must not reach credentials" });
 });
+
+// Shared reset-password limiter: attempts are reserved before the handler and
+// released afterwards unless the response is a counted failure.
+const resetEntries = new Map();
+let resetStoreDown = false;
+let resetReleaseDown = false;
+let resetReleaseCalls = 0;
+const resetStore = {
+  async consume(key, windowMs, max) {
+    if (resetStoreDown) throw new Error("controlled reset store outage");
+    const now = Date.now();
+    let entry = resetEntries.get(key);
+    if (!entry || now >= entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs, windowId: `w-${now}-${Math.random()}` };
+      resetEntries.set(key, entry);
+    }
+    entry.count = Math.min(entry.count + 1, max + 1);
+    return {
+      count: entry.count,
+      retryAfterSeconds: Math.max(0, Math.ceil((entry.resetAt - now) / 1000)),
+      windowId: entry.windowId,
+    };
+  },
+  async release(key, windowId) {
+    resetReleaseCalls++;
+    if (resetReleaseDown) throw new Error("controlled release outage");
+    const entry = resetEntries.get(key);
+    if (entry && entry.windowId === windowId) entry.count = Math.max(0, entry.count - 1);
+  },
+};
+const sharedResetOptions = {
+  windowMs: 15 * 60 * 1000, max: 10, namespace: "reset-password",
+  failureStatuses: [400, 401], store: resetStore,
+};
+const nodeAResetLimit = makeLoginRateLimit(sharedResetOptions);
+const nodeBResetLimit = makeLoginRateLimit(sharedResetOptions);
+let resetHandlerCalls = 0;
+const resetHandler = (req, res) => {
+  resetHandlerCalls++;
+  if (req.body?.token === "valid") res.json({ ok: true });
+  else if (req.body?.token === "unauthorized") res.status(401).json({ error: "unauthorized" });
+  else res.status(400).json({ error: "invalid token" });
+};
+app.post("/node-a/auth/reset-password", nodeAResetLimit, resetHandler);
+app.post("/node-b/auth/reset-password", nodeBResetLimit, resetHandler);
+// Production-only shared store: outside production this stays in-memory and
+// must never touch the store.
+let devStoreCalls = 0;
+const devResetLimit = makeLoginRateLimit({
+  ...sharedResetOptions,
+  store: {
+    async consume() { devStoreCalls++; throw new Error("dev must not use the shared store"); },
+    async release() { devStoreCalls++; },
+  },
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+app.post("/dev/auth/reset-password", devResetLimit, resetHandler);
+
+let storeWithoutReleaseRejected = false;
+try {
+  makeLoginRateLimit({ failureStatuses: [400], store: { async consume() { return { count: 1, retryAfterSeconds: 1 }; } } });
+} catch {
+  storeWithoutReleaseRejected = true;
+}
 
 const server = http.createServer(app);
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -238,6 +305,70 @@ try {
   }
   check("reset-password token guessing trips per-IP cap (429)", resetTripped);
   check("reset-password 429 has Retry-After", Number(resetRetryAfter) > 0);
+
+  // 5. shared reset-password limiter across two instances ---------------------
+  const waitForReleases = async (expected) => {
+    for (let i = 0; i < 50 && resetReleaseCalls < expected; i++) await new Promise((r) => setTimeout(r, 10));
+  };
+  const ip5 = "203.0.113.70";
+  let crossInstanceFailures = 0;
+  for (let i = 0; i < 5; i++) {
+    if ((await post("/node-a/auth/reset-password", { token: `a-${i}`, password: "longenough" }, ip5)).status === 400) crossInstanceFailures++;
+    if ((await post("/node-b/auth/reset-password", { token: "unauthorized", password: "longenough" }, ip5)).status === 401) crossInstanceFailures++;
+  }
+  check("10 invalid/unauthorized reset attempts across instances are answered", crossInstanceFailures === 10);
+  const crossBlocked = await post("/node-b/auth/reset-password", { token: "valid", password: "longenough" }, ip5);
+  check("11th reset attempt on either instance is 429", crossBlocked.status === 429, `got ${crossBlocked.status}`);
+  check("shared reset 429 has a 15-minute Retry-After",
+    Number(crossBlocked.retryAfter) > 14 * 60 && Number(crossBlocked.retryAfter) <= 15 * 60, `retry-after=${crossBlocked.retryAfter}`);
+
+  const ip6 = "203.0.113.71";
+  for (let i = 0; i < 9; i++) await post("/node-a/auth/reset-password", { token: `b-${i}`, password: "longenough" }, ip6);
+  let successes = 0;
+  for (let i = 0; i < 15; i++) {
+    const before = resetReleaseCalls;
+    const r = await post(i % 2 ? "/node-a/auth/reset-password" : "/node-b/auth/reset-password", { token: "valid", password: "longenough" }, ip6);
+    if (r.status === 200) successes++;
+    await waitForReleases(before + 1);
+  }
+  check("successful resets are not limited after 9 failures", successes === 15, `successes=${successes}`);
+  const tenthFailure = await post("/node-b/auth/reset-password", { token: "b-9", password: "longenough" }, ip6);
+  check("successful resets are not counted (10th failure still answered)", tenthFailure.status === 400, `got ${tenthFailure.status}`);
+  const afterTenth = await post("/node-a/auth/reset-password", { token: "b-10", password: "longenough" }, ip6);
+  check("failure after the 10th is 429", afterTenth.status === 429, `got ${afterTenth.status}`);
+
+  const ip7 = "203.0.113.72";
+  const concurrent = await Promise.all(Array.from({ length: 30 }, (_, i) =>
+    post(i % 2 ? "/node-a/auth/reset-password" : "/node-b/auth/reset-password", { token: `c-${i}`, password: "longenough" }, ip7)));
+  check("30 concurrent guesses across instances: exactly 10 reach the handler",
+    concurrent.filter((r) => r.status === 400).length === 10 && concurrent.filter((r) => r.status === 429).length === 20,
+    concurrent.map((r) => r.status).join(","));
+
+  resetStoreDown = true;
+  const handlerCallsBeforeOutage = resetHandlerCalls;
+  const resetOutage = await post("/node-a/auth/reset-password", { token: "valid", password: "longenough" }, "203.0.113.73");
+  resetStoreDown = false;
+  check("reset store outage returns 503", resetOutage.status === 503, `got ${resetOutage.status}`);
+  check("reset store outage does not run the reset handler", resetHandlerCalls === handlerCallsBeforeOutage);
+
+  resetReleaseDown = true;
+  const ip8 = "203.0.113.74";
+  const releaseCallsBefore = resetReleaseCalls;
+  const successDuringReleaseOutage = await post("/node-a/auth/reset-password", { token: "valid", password: "longenough" }, ip8);
+  await waitForReleases(releaseCallsBefore + 1);
+  resetReleaseDown = false;
+  check("release outage still delivers the successful response", successDuringReleaseOutage.status === 200);
+  const keptEntry = [...resetEntries.entries()].find(([key]) => key.endsWith(ip8))?.[1];
+  check("release outage keeps the attempt counted (fails closed)", keptEntry?.count === 1, `count=${keptEntry?.count}`);
+
+  check("shared store without release is rejected for failure counters", storeWithoutReleaseRejected);
+
+  _resetLoginRateLimit();
+  const ip9 = "203.0.113.75";
+  for (let i = 0; i < 10; i++) await post("/dev/auth/reset-password", { token: `d-${i}`, password: "longenough" }, ip9);
+  const devBlocked = await post("/dev/auth/reset-password", { token: "d-10", password: "longenough" }, ip9);
+  check("development reset limiter stays in-memory with the same 10-attempt cap", devBlocked.status === 429);
+  check("development reset limiter never calls the shared store", devStoreCalls === 0);
 } finally {
   server.close();
 }

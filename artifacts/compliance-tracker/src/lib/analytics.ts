@@ -1,3 +1,4 @@
+import { isServiceEntitled } from "./service-action-outcome";
 type AnalyticsData = Record<string, string | number | boolean>;
 
 declare global {
@@ -60,7 +61,7 @@ export function trackServiceActionOutcome(
   result: { ok: boolean; entitled?: unknown; paymentPending?: boolean },
 ): boolean {
   if (result.ok !== true || result.paymentPending
-    || (action === "add" && result.entitled !== true)) return false;
+    || (action === "add" && !isServiceEntitled(serviceKey, result.entitled))) return false;
   trackEvent("service_action_succeeded", { service_key: serviceKey, action });
   return true;
 }

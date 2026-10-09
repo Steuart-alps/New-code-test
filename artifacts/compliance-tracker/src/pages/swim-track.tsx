@@ -226,6 +226,7 @@ function SessionDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: session ? "Session updated" : "Session logged" });
       onSaved(); onClose();
@@ -393,6 +394,7 @@ function SurveillanceDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
       onSaved(); onClose();
@@ -507,6 +509,7 @@ function FirstAidDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: check ? "Check updated" : "First-aid check saved" });
       onSaved(); onClose();
@@ -634,6 +637,7 @@ function IncidentDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: incident ? "Incident updated" : "Incident logged" });
       onSaved(); onClose();
