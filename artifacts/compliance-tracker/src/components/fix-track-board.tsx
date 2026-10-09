@@ -24,19 +24,26 @@ export interface BoardBadgeMeta {
 
 export type BoardStatusMeta = BoardBadgeMeta;
 
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const priorityRank = (priority: string) => PRIORITY_RANK[priority] ?? 99;
+
+/**
+ * Open issues grouped into trade columns. Cards: priority, then oldest
+ * reported. Columns: their highest open priority, then the oldest job at
+ * that priority, then trade key, so the most urgent trade is always first
+ * and equally urgent groups keep a stable order whatever order the API
+ * returned.
+ */
 export function buildPriorityBoardColumns<Issue extends FixTrackBoardIssue>(issues: Issue[]) {
   const openIssues = issues.filter(issue => issue.status === "reported" || issue.status === "in_progress");
-  const priorityRank: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+  const byCard = (a: Issue, b: Issue) =>
+    priorityRank(a.priority) - priorityRank(b.priority)
+    || new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
 
   return [...new Set(openIssues.map(issue => issue.issueType))]
-    .map(key => ({
-      key,
-      items: openIssues.filter(issue => issue.issueType === key).sort((a, b) => {
-        const priorityDifference = (priorityRank[a.priority] ?? 99) - (priorityRank[b.priority] ?? 99);
-        return priorityDifference || new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
-      }),
-    }))
-    .filter(column => column.items.length > 0);
+    .map(key => ({ key, items: openIssues.filter(issue => issue.issueType === key).sort(byCard) }))
+    .filter(column => column.items.length > 0)
+    .sort((a, b) => byCard(a.items[0], b.items[0]) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 function startOfLocalDay(value: string | Date): Date {
@@ -45,14 +52,30 @@ function startOfLocalDay(value: string | Date): Date {
   return date;
 }
 
-/** Count whole local calendar days, never negative, for issue-age labels. */
-export function elapsedBoardDays(from: string, to = new Date()): number {
+/** Signed whole local calendar days from `from` to `to` (DST-safe). */
+function localCalendarDaysBetween(from: string | Date, to: string | Date): number {
   const dayMs = 86_400_000;
   const localDayOrdinal = (value: string | Date) => {
     const date = startOfLocalDay(value);
     return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs);
   };
-  return Math.max(0, localDayOrdinal(to) - localDayOrdinal(from));
+  return localDayOrdinal(to) - localDayOrdinal(from);
+}
+
+/** Count whole local calendar days, never negative, for issue-age labels. */
+export function elapsedBoardDays(from: string, to = new Date()): number {
+  return Math.max(0, localCalendarDaysBetween(from, to));
+}
+
+/**
+ * Local calendar days past the target date, or null when there is nothing to
+ * show: no target, or not overdue. The server decides overdue (target before
+ * today), so a target due today is never "past target".
+ */
+export function daysPastTarget(issue: Pick<FixTrackBoardIssue, "targetDate" | "isOverdue">, today = new Date()): number | null {
+  if (!issue.targetDate || !issue.isOverdue) return null;
+  const days = localCalendarDaysBetween(issue.targetDate, today);
+  return days > 0 ? days : null;
 }
 
 interface FixTrackBoardProps<Issue extends FixTrackBoardIssue> {
@@ -96,6 +119,7 @@ export function FixTrackBoard<Issue extends FixTrackBoardIssue>({
                 const priorityMeta = priorities[issue.priority] ?? priorities.medium;
                 const statusMeta = statuses[issue.status] ?? statuses.reported;
                 const daysOpen = elapsedBoardDays(issue.reportedDate, today);
+                const pastTarget = daysPastTarget(issue, today);
                 return (
                   <button
                     key={issue.id}
@@ -132,6 +156,11 @@ export function FixTrackBoard<Issue extends FixTrackBoardIssue>({
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 flex-shrink-0" />
                           <span>No target date</span>
+                        </div>
+                      )}
+                      {pastTarget !== null && (
+                        <div data-testid={`fix-track-board-past-target-${issue.id}`} className="font-medium text-red-700">
+                          {pastTarget} {pastTarget === 1 ? "day" : "days"} past target
                         </div>
                       )}
                       <div className="flex items-center justify-between gap-2 pt-1">
