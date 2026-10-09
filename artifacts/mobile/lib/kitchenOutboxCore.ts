@@ -1,5 +1,9 @@
 export interface KitchenOwner { clientId: number; userId: number }
-export type KitchenDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
+export type KitchenDeliveryState = 'queued' | 'sending' | 'sent' | 'failed' | 'restored';
+/** 'sent' (confirmed by the server) and 'restored' (a rejected entry turned
+ *  back into an editable draft; its original payload is kept unchanged) are
+ *  terminal: neither is sent again or blocks a new entry for its diary. */
+const isTerminal = (state: KitchenDeliveryState) => state === 'sent' || state === 'restored';
 export interface KitchenEntry {
   entryId: string;
   owner: KitchenOwner;
@@ -74,14 +78,14 @@ export class KitchenOutbox {
       || (entry.recordId === null
         ? entry.body.recordDate !== entry.recordDate
         : entry.body.mobileRecordDate !== entry.recordDate || !entry.body.mobileTemperatureLog)
-      || !['queued', 'sending', 'sent', 'failed'].includes(entry.state)
+      || !['queued', 'sending', 'sent', 'failed', 'restored'].includes(entry.state)
       || typeof entry.createdAt !== 'string'
     )) throw new Error('Saved KitchenTrack entries could not be read. The device copy has not been removed.');
     return value as KitchenEntry[];
   }
   private async write(owner: KitchenOwner, entries: KitchenEntry[]) {
-    const sent = entries.filter(entry => entry.state === 'sent').slice(-20);
-    const kept = entries.filter(entry => entry.state !== 'sent').concat(sent);
+    const terminal = entries.filter(entry => isTerminal(entry.state)).slice(-20);
+    const kept = entries.filter(entry => !isTerminal(entry.state)).concat(terminal);
     await this.deps.storage.setItem(kitchenOutboxKey(owner), JSON.stringify(kept));
     this.publish(owner, kept);
   }
@@ -131,7 +135,7 @@ export class KitchenOutbox {
         }
         return existing;
       }
-      if (entries.some(row => row.state !== 'sent'
+      if (entries.some(row => !isTerminal(row.state)
         && row.siteId === entry.siteId && row.recordDate === entry.recordDate)) {
         throw new Error('This diary already has a saved device entry. Review its delivery state before saving again.');
       }
@@ -151,6 +155,40 @@ export class KitchenOutbox {
           ? { ...entry, state: 'queued', error: undefined } : entry));
     });
     void this.replay();
+  }
+  /**
+   * Turn a rejected (failed) entry back into an editable draft. Before
+   * anything changes, `wasReceived` asks the server whether it already applied
+   * this entry for this user. If it did, the entry is recorded as sent and
+   * nothing is restored, so an acknowledged reading is never re-entered or
+   * rewritten. Otherwise the entry becomes 'restored': it is never sent, its
+   * original payload is kept unchanged on the device, and a copy is returned
+   * for the form to re-check against the latest diary and controls. The form
+   * saves under a new entry identifier.
+   */
+  async restoreToDraft(entryId: string, wasReceived: (entry: KitchenEntry) => Promise<boolean>): Promise<KitchenEntry> {
+    const session = this.session;
+    if (!session) throw new Error('Sign in to restore saved KitchenTrack entries.');
+    const before = (await this.serial(() => this.read(session.owner))).find(row => row.entryId === entryId);
+    if (!before || before.state !== 'failed') throw new Error('Only a failed device entry can be restored for editing.');
+    // The receipt check is a network call, so it runs outside the storage lock.
+    const received = await wasReceived(JSON.parse(JSON.stringify(before)));
+    return this.serial(async () => {
+      if (this.session?.generation !== session.generation) throw new Error('The signed-in account changed. Nothing was restored.');
+      const entries = await this.read(session.owner);
+      const current = entries.find(row => row.entryId === entryId);
+      if (!current || current.state !== 'failed' || JSON.stringify(current.body) !== JSON.stringify(before.body)) {
+        throw new Error('This entry changed while it was being restored. Nothing was restored.');
+      }
+      if (received) {
+        await this.write(session.owner, entries.map(row =>
+          row.entryId === entryId ? { ...row, state: 'sent', error: undefined } : row));
+        throw new Error('The server already recorded these readings, so they were not restored. Review today’s diary instead.');
+      }
+      await this.write(session.owner, entries.map(row =>
+        row.entryId === entryId ? { ...row, state: 'restored', error: undefined } : row));
+      return JSON.parse(JSON.stringify(current)) as KitchenEntry;
+    });
   }
   async removeFailed(entryId: string) {
     const owner = this.session?.owner;
