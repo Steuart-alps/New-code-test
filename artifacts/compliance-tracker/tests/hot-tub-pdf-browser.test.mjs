@@ -132,6 +132,45 @@ const excludedRows = [
   }),
 ];
 const checks = [...expectedRows, ...excludedRows];
+
+// Synthetic multilingual fixture (no customer data), served after the
+// default fixture's checks by switching `fixture` and reloading the page.
+const multilingualSites = [{ id: 44, name: "Ωμέγα Spa Αθήνα" }, { id: 55, name: "Санаторий Łódź" }];
+const multilingualTub = {
+  ...activeTub, id: 801, siteId: 44, siteName: multilingualSites[0].name, name: "Zoë Ångström Jacuzzi",
+};
+const multilingualOtherTub = {
+  ...activeTub, id: 802, siteId: 55, siteName: multilingualSites[1].name, name: "Ванна Ελένη",
+};
+const multilingualStaff = ["Zoë Ångström", "Łukasz Żółkiewski", "Ελένη Παπαδοπούλου", "Тест Иванова"];
+const multilingualRows = Array.from({ length: 70 }, (_, index) => {
+  const marker = `MLROW${String(index + 1).padStart(3, "0")}`;
+  return makeCheck(1001 + index, {
+    siteId: 44,
+    hotTubId: multilingualTub.id,
+    checkDate: `2024-07-${String((index % 31) + 1).padStart(2, "0")}T09:00:00.000Z`,
+    location: "Σάουνα / Сауна",
+    performedBy: multilingualStaff[index % multilingualStaff.length],
+    notes: index === 0
+      ? `UnicodeProbe Тест ${marker} ΑΡΧΗ_ΣΗΜΕΙΩΣΗΣ ${"Długa notatka — длинная заметка — μακρά σημείωση ".repeat(300)}КОНЕЦ_ЗАМЕТКИ_ΤΕΛΟΣ`
+      : `UnicodeProbe Тест ${marker} Ελληνικά Łódź Zoë`,
+  });
+});
+// Decomposed input (e + combining diaeresis) must come out composed.
+multilingualRows[1].performedBy = "Zoe\u0308 Decomposed";
+const multilingualOtherSiteRow = makeCheck(1071, {
+  siteId: 55,
+  hotTubId: multilingualOtherTub.id,
+  notes: "UnicodeProbe Тест MLROW071 other site",
+});
+const unsupportedRow = makeCheck(1072, {
+  siteId: 44,
+  hotTubId: multilingualTub.id,
+  notes: "UnicodeProbe Тест UNSUPPORTED_ROW_SECRET 漢字 🙂",
+});
+const multilingualChecks = [...multilingualRows, multilingualOtherSiteRow, unsupportedRow];
+const multilingualUserName = "Zoë Łukasz-Ελένη Тестова";
+let fixture = "default";
 const vite = spawn("pnpm", ["exec", "vite", "--config", "vite.config.ts", "--host", "127.0.0.1"], {
   cwd: root,
   env: {
@@ -179,7 +218,7 @@ function compact(text) {
   return text.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
 }
 
-async function readPdf(filePath) {
+async function readPdf(filePath, { fonts = false } = {}) {
   const bytes = await readFile(filePath);
   assert.equal(bytes.subarray(0, 5).toString("ascii"), "%PDF-", "download must contain PDF bytes");
   const loadingTask = getDocument({
@@ -189,18 +228,27 @@ async function readPdf(filePath) {
   try {
     const document = await loadingTask.promise;
     const pages = [];
+    // With `fonts`, also record which font draws each text item.
+    const pageItems = [];
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       const pdfPage = await document.getPage(pageNumber);
+      if (fonts) await pdfPage.getOperatorList();
       const content = await pdfPage.getTextContent();
       pages.push(content.items.map(item => ("str" in item ? item.str : "")).join(" "));
+      if (fonts) {
+        pageItems.push(content.items.filter(item => item.str?.trim()).map(item => {
+          const font = pdfPage.commonObjs.get(item.fontName);
+          return { str: item.str, fontId: item.fontName, fontName: font.name, missingFile: font.missingFile };
+        }));
+      }
     }
-    return { bytes, pages, text: pages.join("\n") };
+    return { bytes, pages, pageItems, text: pages.join("\n") };
   } finally {
     await loadingTask.destroy();
   }
 }
 
-async function downloadPdf(label) {
+async function downloadPdf(label, readOptions) {
   const downloadPromise = page.waitForEvent("download", { timeout: 20000 });
   await page.getByRole("button", { name: "Download PDF", exact: true }).click();
   const download = await downloadPromise;
@@ -208,7 +256,7 @@ async function downloadPdf(label) {
   assert.match(filename, /^[^/\\]+\.pdf$/i, `${label} download should have a .pdf filename`);
   const filePath = join(temporaryDirectory, `${label}.pdf`);
   await download.saveAs(filePath);
-  return { filename, ...await readPdf(filePath) };
+  return { filename, ...await readPdf(filePath, readOptions) };
 }
 
 async function assertExportMembership(label, expectedIds) {
@@ -307,7 +355,7 @@ try {
         user: {
           id: 7,
           email: "manager@example.test",
-          name: "Browser Manager",
+          name: fixture === "multilingual" ? multilingualUserName : "Browser Manager",
           role: "client_admin",
           clientId: 42,
           departmentId: null,
@@ -326,10 +374,15 @@ try {
       });
     }
     if (pathname === "/sites" || pathname === "/api/sites") {
-      return jsonResponse(route, [{ id: 11, name: "Main site" }, { id: 22, name: "Other site" }]);
+      return jsonResponse(route, fixture === "multilingual"
+        ? multilingualSites
+        : [{ id: 11, name: "Main site" }, { id: 22, name: "Other site" }]);
     }
     if (pathname === "/hot-tub/tubs" || pathname === "/api/hot-tub/tubs") {
       const active = searchParams.get("active");
+      if (fixture === "multilingual") {
+        return jsonResponse(route, active === "false" ? [] : [multilingualTub, multilingualOtherTub]);
+      }
       const tubs = active === "true"
         ? [activeTub, otherActiveTub]
         : active === "false"
@@ -338,7 +391,8 @@ try {
       return jsonResponse(route, tubs);
     }
     if (isHotTubApiRequest) {
-      return jsonResponse(route, pathname.endsWith("/hot-tub") ? checks : []);
+      const fixtureChecks = fixture === "multilingual" ? multilingualChecks : checks;
+      return jsonResponse(route, pathname.endsWith("/hot-tub") ? fixtureChecks : []);
     }
     if (pathname === "/hot-tub/config" || pathname === "/api/hot-tub/config") {
       return jsonResponse(route, {
@@ -659,6 +713,128 @@ try {
   await page.reload();
   await applyFilters(chunkRetry);
   await assertRetryMatches("module-retry-after-reload", chunkRetry, chunkFailed);
+
+  // ── Multilingual text preservation ──────────────────────────────────────────
+  // The embedded Noto Sans must keep non-Latin staff names, notes, site and tub
+  // labels and search filters as real, extractable text, and refuse (with an
+  // explicit error) characters it has no glyph for instead of dropping them.
+  fixture = "multilingual";
+  await page.reload();
+  const multilingualSearch = "Тест MLROW";
+  await page.locator("#hot-tub-filter-from").fill("2024-07-01");
+  await page.locator("#hot-tub-filter-to").fill("2024-07-31");
+  await filterComboboxes.nth(0).click();
+  await page.getByRole("option", { name: multilingualSites[0].name, exact: true }).click();
+  await page.getByRole("button", { name: multilingualTub.name, exact: true }).click();
+  await searchBox.fill(multilingualSearch);
+  await page.getByText(`Showing ${multilingualRows.length} of ${multilingualChecks.length} records`, { exact: true })
+    .waitFor({ state: "visible" });
+
+  // The fonts are fetched lazily with jsPDF; a failed font fetch reports the
+  // same reload/try-again message, and a fetch failure is not cached, so the
+  // next attempt in the same document succeeds.
+  const fontRequests = [];
+  let fontAborts = 0;
+  const fontRoute = /\/NotoSans-(Regular|Bold)\.ttf(\?|$)/;
+  await page.route(fontRoute, route => {
+    fontRequests.push(route.request().url());
+    if (fontAborts === 0 && /Bold/.test(route.request().url())) {
+      fontAborts += 1;
+      return route.abort("internetdisconnected");
+    }
+    return route.fallback();
+  });
+  await assertFailedAttempt("font fetch failure", /could not be loaded.*reload the page/i);
+  assert.equal(fontAborts, 1, "the bold font request should have been aborted once");
+  await failureToast.locator("[toast-close]").click();
+  await failureToast.waitFor({ state: "hidden", timeout: 5000 });
+
+  const multilingualPdf = await downloadPdf("multilingual-log", { fonts: true });
+  await page.unroute(fontRoute);
+  assert.ok(fontRequests.some(url => /Regular/.test(url)) && fontRequests.some(url => /Bold/.test(url)),
+    "both font faces should be fetched for an export");
+  const mlText = multilingualPdf.text;
+  // Every visible string (title, metadata, headings, cells, footer) is drawn
+  // with an embedded Noto Sans face, never a built-in standard font. The bold
+  // headings use a different embedded face from the regular body text.
+  const allItems = multilingualPdf.pageItems.flat();
+  for (const item of allItems) {
+    assert.equal(item.fontName, "NotoSans", `"${item.str}" must use the embedded font, not ${item.fontName}`);
+    assert.equal(item.missingFile, false, `"${item.str}" must use an embedded font file`);
+  }
+  const fontOf = text => allItems.find(item => item.str === text)?.fontId;
+  const boldFont = fontOf("Performed by");
+  const regularFont = fontOf("Pass");
+  assert.ok(boldFont && regularFont && boldFont !== regularFont, "headings must use the bold face");
+  assert.equal(fontOf("Hot Tub & Spa Maintenance Log"), boldFont, "the title must use the bold face");
+  assert.equal(fontOf(`Records: ${multilingualRows.length}`), regularFont, "metadata must use the regular face");
+  assert.equal(fontOf(`Page 1 of ${multilingualPdf.pages.length}`), regularFont, "the footer must use the regular face");
+  assert.ok(mlText.includes("Hot Tub & Spa Maintenance Log"), "multilingual report keeps its title");
+  assert.ok(mlText.includes(multilingualUserName), "generated-by name must survive as original text");
+  assert.ok(mlText.includes(`Site: ${multilingualSites[0].name}`), "site filter label must survive");
+  assert.ok(mlText.includes(`Tub: ${multilingualTub.name}`), "tub filter label must survive");
+  assert.ok(mlText.includes(`Search: "${multilingualSearch}"`), "search filter must survive");
+  assert.ok(mlText.includes(`Records: ${multilingualRows.length}`), "record count must match the UI");
+  assert.ok(mlText.includes("UnicodeProbe Тест"), "the UnicodeProbe Тест cell text must be preserved");
+  // Narrow columns wrap words (even mid-word), so compare these cells with
+  // whitespace removed; every original character must still be present.
+  const squash = text => text.replace(/\s+/g, "");
+  const mlSquashed = squash(mlText);
+  for (const name of multilingualStaff) {
+    assert.ok(mlSquashed.includes(squash(name)), `staff name "${name}" must survive as original text`);
+  }
+  assert.ok(mlSquashed.includes(squash("Zoë Decomposed")), "decomposed input must be exported in composed form");
+  assert.ok(mlSquashed.includes(squash(multilingualTub.name)), "tub label cells must survive");
+  assert.ok(mlSquashed.includes(squash(multilingualSites[0].name)), "site label cells must survive");
+  assert.ok(mlSquashed.includes(squash("Σάουνα / Сауна")), "location cells must survive");
+  for (const row of multilingualRows.slice(1)) {
+    assert.ok(mlText.includes(row.notes), `note "${row.notes}" must survive as original text`);
+  }
+  assert.ok(!mlText.includes("MLROW071"), "the other site's record must be excluded");
+  assert.ok(!mlText.includes("UNSUPPORTED_ROW_SECRET"), "the unmatched record must be excluded");
+
+  // Pagination: every page repeats the headings and numbers itself, and the
+  // long multilingual note runs across pages with its head and tail intact.
+  const mlPages = multilingualPdf.pages;
+  assert.ok(mlPages.length > 2, "the long multilingual note should span several pages");
+  for (const [index, pageText] of mlPages.entries()) {
+    assert.ok(pageText.includes(`Page ${index + 1} of ${mlPages.length}`), `page ${index + 1} footer`);
+    assert.ok(pageText.includes("Hot Tub & Spa Maintenance Log"), `page ${index + 1} title`);
+    for (const header of headers) {
+      assert.ok(compact(pageText).includes(compact(header)), `page ${index + 1} should repeat "${header}"`);
+    }
+  }
+  const mlHeadPage = mlPages.findIndex(text => text.includes("ΑΡΧΗ_ΣΗΜΕΙΩΣΗΣ"));
+  const mlTailPage = mlPages.findIndex(text => text.includes("КОНЕЦ_ЗАМЕТКИ_ΤΕΛΟΣ"));
+  assert.ok(mlHeadPage >= 0, "the long note's beginning must survive");
+  assert.ok(mlTailPage > mlHeadPage, "the long note's end must survive on a later page");
+  assert.ok(mlPages.slice(mlHeadPage, mlTailPage + 1).every(text => text.includes("длинная заметка")),
+    "every page the long note spans must carry its Cyrillic text");
+  assert.ok(mlText.includes("Długa notatka — длинная заметка — μακρά σημείωση"),
+    "a full line of the long note must survive");
+
+  // A record with characters outside the embedded font blocks the export with
+  // an explicit, actionable error that names the characters, not the record.
+  await searchBox.fill("Тест");
+  await page.getByText(`Showing ${multilingualRows.length + 1} of ${multilingualChecks.length} records`, { exact: true })
+    .waitFor({ state: "visible" });
+  const unsupportedMessage = await assertFailedAttempt("unsupported characters", /PDF font cannot show/i);
+  for (const fragment of ['"漢" (U+6F22)', '"字" (U+5B57)', '"🙂" (U+1F642)', "try again"]) {
+    assert.ok(unsupportedMessage.includes(fragment), `unsupported-character error should include ${fragment}`);
+  }
+  for (const secret of ["UNSUPPORTED_ROW_SECRET", "UnicodeProbe"]) {
+    assert.ok(!unsupportedMessage.includes(secret), "the error must not reveal record content");
+  }
+  // Leaving the record out lets the export succeed again.
+  await searchBox.fill(multilingualSearch);
+  await page.getByText(`Showing ${multilingualRows.length} of ${multilingualChecks.length} records`, { exact: true })
+    .waitFor({ state: "visible" });
+  const recoveredPdf = await downloadPdf("multilingual-after-unsupported");
+  await failureToast.waitFor({ state: "hidden", timeout: 2000 });
+  assert.ok(recoveredPdf.text.includes(`Records: ${multilingualRows.length}`));
+  assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), []);
+  assert.deepEqual(dialogEvents, []);
+  assert.equal(popupEvents.length, 0);
 
   console.log(`HotTub PDF ${browserName} browser regression passed (${expectedRows.length} filtered rows, ${populatedPdf.pages.length} PDF pages).`);
 } catch (error) {
