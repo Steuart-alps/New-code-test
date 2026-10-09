@@ -2408,6 +2408,36 @@ async function migrateTwoFactor() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_passkeys_user" ON "passkeys" ("user_id")`);
+  // Durable outbox for the two-factor reset security alert. Queued in the
+  // reset's transaction; holds only the user id and reset time (no secrets).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "two_factor_reset_notifications" (
+      "id" serial PRIMARY KEY,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "delivery_key" text NOT NULL,
+      "reset_at" timestamp NOT NULL,
+      "status" text NOT NULL DEFAULT 'pending',
+      "claim_token" text,
+      "attempts" integer NOT NULL DEFAULT 0,
+      "next_attempt_at" timestamp NOT NULL DEFAULT now(),
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "sent_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_two_factor_reset_notifications_delivery_key"
+    ON "two_factor_reset_notifications" ("delivery_key")
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_two_factor_reset_notifications_open"
+    ON "two_factor_reset_notifications" ("user_id")
+    WHERE "status" IN ('pending', 'sending')
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_two_factor_reset_notifications_due"
+    ON "two_factor_reset_notifications" ("status", "next_attempt_at")
+  `);
 }
 
 // ---- Staff roster ----
