@@ -10,8 +10,8 @@ import { requireAuth } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
   loginRateLimit,
-  makeLoginRateLimit,
   registrationRateLimit,
+  resetPasswordRateLimit,
 } from "../lib/loginRateLimit";
 import { createDatabaseLoginRateLimitStore } from "../lib/loginRateLimitStore";
 import { db } from "@workspace/db";
@@ -632,13 +632,9 @@ const ResetPasswordBody = z.object({
   password: z.string().min(8),
 });
 
-// Guard token-guessing on reset-password: an invalid/expired token returns 400
-// (not 401), so count 400 as a failed attempt here in addition to 401.
-const resetPasswordRateLimit = makeLoginRateLimit({
-  namespace: "reset-password",
-  failureStatuses: [400, 401],
-});
-
+// resetPasswordRateLimit guards token guessing: an invalid/expired token
+// returns 400 (not 401), so both count as failed attempts. In production the
+// counter is shared across API instances (see lib/loginRateLimit.ts).
 router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => {
   const body = ResetPasswordBody.safeParse(req.body);
   if (!body.success) {

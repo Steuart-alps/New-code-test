@@ -15,6 +15,7 @@
     "test:mobile-login-error": "node tests/mobile-login-error.mjs",
     "test:auth-query-isolation": "node tests/auth-query-isolation.mjs",
     "test:staged-photo-evidence": "node tests/staged-photo-evidence.mjs",
+    "test:pat-screen": "node tests/pat-screen.mjs",
     "test:kitchen-site-scope": "pnpm run test:kitchen-diary-scope && pnpm run test:kitchen-temperature-flow && pnpm run test:kitchen-outbox && pnpm run test:kitchen-form-drafts && pnpm run test:cleaning-draft",
     "test:kitchen-form-drafts": "node tests/kitchen-form-drafts.mjs",
     "test:kitchen-diary-scope": "node tests/kitchen-diary-scope.mjs",

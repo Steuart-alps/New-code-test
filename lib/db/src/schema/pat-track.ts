@@ -136,6 +136,13 @@ export const patReplacementsTable = pgTable("pat_replacements", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   roomId: integer("room_id").notNull().references(() => patRoomsTable.id, { onDelete: "cascade" }),
+  // Room/site identity captured by a trigger when the replacement is recorded
+  // (or corrected to another room of the same site); not a live join.
+  roomNameSnapshot: text("room_name_snapshot"),
+  siteIdSnapshot: integer("site_id_snapshot"),
+  siteNameSnapshot: text("site_name_snapshot"),
+  // recorded | corrected | legacy_backfill | legacy_unavailable
+  snapshotSource: text("snapshot_source").notNull().default("recorded"),
   applianceName: text("appliance_name").notNull(),
   replacedOn: date("replaced_on").notNull(),
   replacementDetails: text("replacement_details"),
@@ -153,12 +160,29 @@ export const patFailuresTable = pgTable("pat_failures", {
   // or is later renamed.
   locationText: text("location_text"),
   roomNameSnapshot: text("room_name_snapshot"),
+  // recorded | legacy_backfill | legacy_edit_recapture | legacy_unavailable.
+  // A trigger keeps the location, room and certificate fixed after insertion.
+  snapshotSource: text("snapshot_source").notNull().default("recorded"),
   applianceName: text("appliance_name").notNull(),
   actionTaken: text("action_taken"),
   resolution: text("resolution"),
   resolvedDate: date("resolved_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Append-only supplemental corrections. The failure's own snapshot is never
+// rewritten; screens and exports show the latest correction beside it.
+export const patFailureLocationCorrectionsTable = pgTable("pat_failure_location_corrections", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  failureId: integer("failure_id").notNull().references(() => patFailuresTable.id, { onDelete: "cascade" }),
+  previousLocationText: text("previous_location_text"),
+  correctedLocationText: text("corrected_location_text").notNull(),
+  reason: text("reason").notNull(),
+  correctedBy: integer("corrected_by").references(() => usersTable.id, { onDelete: "set null" }),
+  correctedByName: text("corrected_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type PatAppliance = typeof patAppliancesTable.$inferSelect;
