@@ -11,7 +11,6 @@ import { apiFetch } from "@/lib/api";
  */
 export type FormOptionKey =
   | "incident_types"
-  | "incident_severities"
   | "fixtrack_issue_types"
   | "fixtrack_trades"
   | "premises_inspection_types"
@@ -23,8 +22,11 @@ export type FormOptionKey =
 export interface FormOptionsResponse {
   options: Record<string, string[]>;
   defaults: Record<string, string[]>;
+  disabled: Record<string, string[]>;
   customised: Record<string, boolean>;
 }
+
+const EMPTY_OPTIONS: string[] = [];
 
 /** Route every request through the shared, active-client-aware apiFetch. */
 export function useFormOptionsApi() {
@@ -54,5 +56,5 @@ export function useFormOptions() {
 
 /** Convenience accessor for one list; falls back to an empty array while loading. */
 export function pickOptions(data: FormOptionsResponse | undefined, key: FormOptionKey): string[] {
-  return data?.options?.[key] ?? [];
+  return data?.options?.[key] ?? EMPTY_OPTIONS;
 }

@@ -233,6 +233,17 @@ export default function LoginPage() {
                        ? "Enter one of the recovery codes you saved when you enabled two-factor authentication."
                        : "Open your authenticator app and enter the 6-digit code."}
                   </p>
+                   {!usingRecoveryCode && (
+                     <div className="mb-6 rounded-sm border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                       <p className="font-medium text-[#162D42]">This code is not sent by text or email.</p>
+                       <p className="mt-1">
+                         ComplyTrack uses an authenticator app such as Google Authenticator, Authy, 1Password or Microsoft Authenticator.
+                       </p>
+                       <p className="mt-2">
+                         If this is your first sign-in and you were never shown a setup QR code, ask your account administrator to reset your two-factor authentication so you can enrol it again.
+                       </p>
+                     </div>
+                   )}
                   <form onSubmit={handleTotp} className="space-y-5">
                     <div className="space-y-2">
                        <div className="flex items-center justify-between">

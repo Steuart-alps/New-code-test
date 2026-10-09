@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -23,12 +23,14 @@ import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   Waves, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX,
   Pencil, Trash2, Lock, ThermometerSun, Beaker, Search, Building2,
-  Filter, Settings2, ToggleLeft, ToggleRight, Printer,
+  Filter, Settings2, ToggleLeft, ToggleRight, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { printHtmlDocument } from "@/lib/download";
+import { downloadBlob } from "@/lib/download";
+import { createHotTubLogPdf } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +46,7 @@ export const CHECK_TYPES = [
 
 type CheckType = (typeof CHECK_TYPES)[number];
 type CheckResult = "pass" | "fail";
-type CheckStatus = "ok" | "due_soon" | "overdue" | "never";
+type CheckStatus = "ok" | "due_soon" | "overdue" | "never" | "plan_required";
 
 interface HotTub {
   id: number;
@@ -77,7 +79,7 @@ interface HotTubCheck {
 
 interface StatusRow {
   checkType: string;
-  frequencyDays: number;
+  frequencyDays: number | null;
   lastDate: string | null;
   dueDate: string | null;
   status: CheckStatus;
@@ -85,6 +87,11 @@ interface StatusRow {
 }
 
 interface Site { id: number; name: string; }
+interface HotTubConfig {
+  operatingRanges?: { ph?: { min: number; max: number }; sanitiser?: { min: number; max: number }; temperature?: { max: number } };
+}
+
+type TubActivityFilter = "all" | "active" | "inactive";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,23 +106,13 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
 };
 
 const CHECK_TYPE_HINTS: Record<CheckType, string> = {
-  water_chemistry:       "pH 7.2–7.8 · Free chlorine 3–5 ppm (or bromine 4–6 ppm). Log at least twice daily when in use.",
-  temperature:           "Must not exceed 40°C. Check and log daily. Maintain ≥35°C for bather comfort.",
-  filter_clean:          "Rinse cartridge weekly; deep-clean monthly. Replace when visually degraded.",
+  water_chemistry:       "Record pH and sanitiser against this site's operating controls and approved monitoring plan.",
+  temperature:           "Record water temperature against the site's approved operating controls.",
+  filter_clean:          "Record cleaning and replacement according to the site's written scheme.",
   cover_inspection:      "Check cover is undamaged, seals intact and there is no excess heat loss.",
-  drain_refill:          "Full drain and disinfect every 3 months, or sooner when TDS exceeds recommended levels.",
-  microbiological_test:  "Quarterly water sample for bacteria count per PWTAG / HSG282 guidance.",
-  risk_assessment:       "Annual review of the HSG282 / PWTAG spa pool risk assessment.",
-};
-
-const FREQ_LABELS: Record<CheckType, string> = {
-  water_chemistry:       "3× daily",
-  temperature:           "3× daily",
-  filter_clean:          "Weekly",
-  cover_inspection:      "Weekly",
-  drain_refill:          "Quarterly",
-  microbiological_test:  "Quarterly",
-  risk_assessment:       "Annual",
+  drain_refill:          "Drain, clean and disinfect when required by the site's written scheme.",
+  microbiological_test:  "Record sampling against the site's risk-assessed sampling plan.",
+  risk_assessment:       "Review the spa risk assessment with a competent person after material changes.",
 };
 
 const SESSION_LABELS: Record<string, string> = {
@@ -233,6 +230,7 @@ export default function HotTubPage() {
   const [filterFrom, setFilterFrom] = useState(() => defaultDateRange().from);
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
   const [search, setSearch] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [showManageTubs, setShowManageTubs] = useState(false);
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
@@ -240,6 +238,13 @@ export default function HotTubPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [staffRosterId, setStaffRosterId] = useState<number | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const configSiteId = filterSite !== "all" ? Number(filterSite) : undefined;
+  const { data: operatingConfig } = useQuery<HotTubConfig>({
+    queryKey: ["hot-tub-config", configSiteId],
+    queryFn: () => apiFetch(`/hot-tub/config${configSiteId ? `?siteId=${configSiteId}` : ""}`),
+    enabled: !!activeClientId,
+  });
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -250,9 +255,9 @@ export default function HotTubPage() {
   });
 
   const { data: statuses = [] } = useQuery<StatusRow[]>({
-    queryKey: ["hot-tub-status", activeClientId],
-    queryFn: () => apiFetch("/hot-tub/status"),
-    enabled: !!activeClientId && hasHotTub,
+    queryKey: ["hot-tub-status", activeClientId, filterSite],
+    queryFn: () => apiFetch(`/hot-tub/status?siteId=${filterSite}`),
+    enabled: !!activeClientId && hasHotTub && filterSite !== "all",
     retry: (count, err: any) => err?.status !== 403 && count < 3,
   });
 
@@ -296,15 +301,13 @@ export default function HotTubPage() {
     return rows;
   }, [checks, filterType, filterSite, filterTub, filterFrom, filterTo, search, tubMap]);
 
-  // ── Export printable log (for health inspections) ────────────────────────────
+  // ── Download PDF log (for health inspections) ────────────────────────────────
 
   const siteName = (id: number | null) =>
     id == null ? "—" : sites.find(s => s.id === id)?.name ?? `Site #${id}`;
 
-  const esc = (s: string | null | undefined) =>
-    (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  const handleExportLog = () => {
+  const handleExportLog = async () => {
+    if (exportingPdf) return;
     // Respect the current on-page filters
     const rows = [...filtered].sort((a, b) => (a.checkDate < b.checkDate ? 1 : -1));
 
@@ -316,48 +319,34 @@ export default function HotTubPage() {
       filterParts.push(`Date range: ${filterFrom ? fmt(filterFrom) : "earliest"} to ${filterTo ? fmt(filterTo) : "latest"}`);
     }
     if (search.trim()) filterParts.push(`Search: "${search.trim()}"`);
-    const filterLine = filterParts.length ? `Filters applied — ${filterParts.join(" · ")}` : "All records";
-
-    const resultLabel = (r: string) =>
-      r === "pass" ? "Pass" : "Fail";
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Hot Tub Maintenance Log</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #999; padding-bottom: 4px; }
-  .meta { font-size: 11px; color: #555; margin-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 6px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .empty { font-size: 11px; color: #777; font-style: italic; }
-  @page { size: landscape; margin: 10mm; }
-  @media print { body { margin: 0; } }
-</style></head><body>
-<h1>Hot Tub &amp; Spa Maintenance Log</h1>
-<div class="meta">${esc(user?.name ?? "")} — generated ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} — for health inspection</div>
-<div class="meta">${esc(filterLine)}</div>
-<div class="meta">Records: ${rows.length}</div>
-
-<h2>Maintenance records</h2>
-${rows.length === 0 ? `<p class="empty">No records match the current filter.</p>` : `<table>
-<tr><th>Date</th><th>Session</th><th>Tub</th><th>Check</th><th>Result</th><th>pH</th><th>Sanitiser (ppm)</th><th>Temp (°C)</th><th>Location</th><th>Performed by</th><th>Notes</th></tr>
-${rows.map(r => `<tr>
-  <td>${fmt(r.checkDate)}</td>
-  <td>${esc(r.session ? (SESSION_LABELS[r.session] ?? r.session) : "")}</td>
-  <td>${esc(r.hotTubId ? (tubMap.get(r.hotTubId)?.name ?? "") : "")}</td>
-  <td>${esc(CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType)}</td>
-  <td>${esc(resultLabel(r.result))}</td>
-  <td>${esc(r.phValue)}</td>
-  <td>${esc(r.sanitiserLevel)}</td>
-  <td>${esc(r.temperature)}</td>
-  <td>${esc(r.location)}</td>
-  <td>${esc(r.performedBy)}</td>
-  <td>${esc(r.notes)}</td>
-</tr>`).join("")}
-</table>`}
-</body></html>`;
-    printHtmlDocument(html);
+    const generatedAt = new Date();
+    setExportingPdf(true);
+    try {
+      const blob = await createHotTubLogPdf({
+        generatedAt,
+        generatedBy: user?.name ?? "",
+        filters: filterParts,
+        rows: rows.map(r => [
+          fmt(r.checkDate),
+          r.session ? (SESSION_LABELS[r.session] ?? r.session) : "",
+          siteName(r.siteId),
+          r.hotTubId ? (tubMap.get(r.hotTubId)?.name ?? "") : "",
+          CHECK_TYPE_LABELS[r.checkType as CheckType] ?? r.checkType,
+          r.result === "pass" ? "Pass" : "Fail",
+          r.phValue ?? "", r.sanitiserLevel ?? "", r.temperature ?? "",
+          r.location ?? "", r.performedBy ?? "", r.notes ?? "",
+        ]),
+      });
+      downloadBlob(blob, `hot-tub-maintenance-log-${dateInputValue(generatedAt)}.pdf`);
+    } catch (error) {
+      toast({
+        title: "PDF download failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -402,6 +391,12 @@ ${rows.map(r => `<tr>
 
   async function handleSave() {
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
+    if (form.checkType === "water_chemistry" && (!form.phValue || !form.sanitiserLevel)) {
+      toast({ title: "pH and sanitiser readings are required", variant: "destructive" }); return;
+    }
+    if (form.checkType === "temperature" && !form.temperature) {
+      toast({ title: "Temperature reading is required", variant: "destructive" }); return;
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -419,13 +414,22 @@ ${rows.map(r => `<tr>
         staffRosterId: staffRosterId,
         notes: form.notes.trim() || null,
       };
+      const ranges = operatingConfig?.operatingRanges;
+      const outOfRange =
+        (body.phValue != null && ranges?.ph && (body.phValue < ranges.ph.min || body.phValue > ranges.ph.max)) ||
+        (body.sanitiserLevel != null && ranges?.sanitiser && (body.sanitiserLevel < ranges.sanitiser.min || body.sanitiserLevel > ranges.sanitiser.max)) ||
+        (body.temperature != null && ranges?.temperature && body.temperature > ranges.temperature.max);
+      if (outOfRange && !window.confirm("One or more readings are outside the effective operating range. Save anyway? The server will determine the result.")) {
+        setSaving(false);
+        return;
+      }
       if (editItem) {
         const { checkType, ...updateBody } = body;
-        await apiFetch(`/hot-tub/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
-        toast({ title: "Record updated" });
+        const response = await apiFetch(`/hot-tub/${editItem.id}`, { method: "PUT", body: JSON.stringify(updateBody) });
+        toast({ title: "Record updated", description: `Server outcome: ${response?.result ?? body.result}.` });
       } else {
-        await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
-        toast({ title: "Record saved" });
+        const response = await apiFetch("/hot-tub", { method: "POST", body: JSON.stringify(body) });
+        toast({ title: "Record saved", description: `Server outcome: ${response?.result ?? body.result}.` });
       }
       invalidate();
       setShowDialog(false);
@@ -486,14 +490,16 @@ ${rows.map(r => `<tr>
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Button variant="outline" onClick={handleExportLog} className="gap-2 rounded-sm"
-            title="Open the filtered maintenance log to print or save as PDF">
-            <Printer className="w-4 h-4" /> Download PDF
+            disabled={isLoading || exportingPdf} aria-busy={exportingPdf}
+            title="Download the filtered maintenance log as a PDF file">
+            <Download className="w-4 h-4" /> {exportingPdf ? "Preparing PDF…" : "Download PDF"}
           </Button>
           {canAdmin && (
             <Button variant="outline" onClick={() => setShowManageTubs(true)} className="gap-2 rounded-sm">
               <Settings2 className="w-4 h-4" /> Manage Tubs
             </Button>
           )}
+          {canAdmin && <Button variant="outline" onClick={() => setShowConfig(true)} className="gap-2 rounded-sm">Operating limits</Button>}
           <Button onClick={openAdd} className="gap-2 rounded-sm">
             <Plus className="w-4 h-4" /> Record Check
           </Button>
@@ -540,23 +546,31 @@ ${rows.map(r => `<tr>
         </div>
       )}
 
+      {sites.length > 0 && <div className="flex items-center gap-2"><Label>Monitoring site</Label>
+        <Select value={filterSite} onValueChange={setFilterSite}>
+          <SelectTrigger className="w-56"><SelectValue placeholder="Select a site" /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Select a site</SelectItem>
+            {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>}
+      <WaterMonitoringPlan module="hot-tub" siteId={filterSite === "all" ? undefined : Number(filterSite)}
+        checks={CHECK_TYPE_LABELS} unit="days" canManage={canAdmin}
+        onChanged={() => qc.invalidateQueries({ queryKey: ["hot-tub-status", activeClientId, filterSite] })} />
       {/* Status overview */}
-      {statuses.length > 0 && (
+      {filterSite !== "all" && statuses.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {statuses.map(s => {
             const isDaily = DAILY_SESSION_TYPES.includes(s.checkType as CheckType);
             const sessions = s.sessionsToday;
-            // For daily types, derive status from session completion too
-            const allDone = isDaily && sessions && sessions.morning && sessions.midday && sessions.evening;
-            const someDone = isDaily && sessions && (sessions.morning || sessions.midday || sessions.evening);
-            const effectiveStatus = isDaily
-              ? (allDone ? "ok" : someDone ? "due_soon" : s.status)
-              : s.status;
+            // Session dots are informational; only the approved plan drives due states.
+            const effectiveStatus = s.status;
             const statusCfg = {
               ok:        { bg: "bg-emerald-50 border-emerald-200", text: "text-emerald-700", icon: CheckCircle2 },
               due_soon:  { bg: "bg-amber-50 border-amber-200",   text: "text-amber-700",   icon: Clock },
               overdue:   { bg: "bg-rose-50 border-rose-200",     text: "text-rose-700",    icon: AlertTriangle },
               never:     { bg: "bg-slate-50 border-slate-200",   text: "text-slate-500",   icon: CalendarX },
+              plan_required: { bg: "bg-slate-50 border-slate-200", text: "text-slate-500", icon: CalendarX },
             }[effectiveStatus];
             const Icon = statusCfg.icon;
             return (
@@ -576,10 +590,10 @@ ${rows.map(r => `<tr>
                   {CHECK_TYPE_LABELS[s.checkType as CheckType] ?? s.checkType}
                 </div>
                 <div className={cn("text-xs mt-1", statusCfg.text)}>
-                  {FREQ_LABELS[s.checkType as CheckType]}
+                  {s.frequencyDays == null ? "Plan required" : `Every ${s.frequencyDays} days`}
                 </div>
                 {/* Session dots for 3× daily checks */}
-                {isDaily && sessions && (
+                {isDaily && sessions && s.frequencyDays === 1 && (
                   <div className="flex items-center gap-1.5 mt-2">
                     {(["morning", "midday", "evening"] as const).map(sess => (
                       <span
@@ -1008,8 +1022,50 @@ ${rows.map(r => `<tr>
         onChanged={refetchTubs}
         sites={sites}
       />
+      <HotTubConfigDialog open={showConfig} onClose={() => setShowConfig(false)} siteId={configSiteId} />
     </AppLayout>
   );
+}
+
+function HotTubConfigDialog({ open, onClose, siteId }: { open: boolean; onClose: () => void; siteId?: number }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [ranges, setRanges] = useState({ ph: { min: 7.2, max: 7.8 }, sanitiser: { min: 3, max: 5 }, temperature: { max: 40 } });
+  const { data } = useQuery<HotTubConfig>({
+    queryKey: ["hot-tub-config-dialog", siteId],
+    queryFn: () => apiFetch(`/hot-tub/config${siteId ? `?siteId=${siteId}` : ""}`),
+    enabled: open,
+  });
+  useEffect(() => {
+    if (data?.operatingRanges) setRanges(r => ({ ...r, ...data.operatingRanges, ph: { ...r.ph, ...data.operatingRanges?.ph }, sanitiser: { ...r.sanitiser, ...data.operatingRanges?.sanitiser }, temperature: { ...r.temperature, ...data.operatingRanges?.temperature } }));
+  }, [data]);
+  async function save() {
+    if (!siteId) { toast({ title: "Choose a site first", description: "Operating limits are site-specific.", variant: "destructive" }); return; }
+    if (!window.confirm("Save these site operating limits? They are local controls and do not override the written operating procedure or benchmark guidance.")) return;
+    try {
+      const response = await apiFetch(`/hot-tub/config?siteId=${siteId}`, { method: "PUT", body: JSON.stringify({ operatingRanges: ranges }) });
+      toast({ title: "Operating limits saved", description: response?.disclaimer ?? "Site limits updated." });
+      qc.invalidateQueries({ queryKey: ["hot-tub-config"] });
+      qc.invalidateQueries({ queryKey: ["hot-tub-status"] });
+      qc.invalidateQueries({ queryKey: ["water-monitoring-plan", "hot-tub"] });
+      onClose();
+    } catch (e: any) { toast({ title: "Save failed", description: e.message, variant: "destructive" }); }
+  }
+  return <Dialog open={open} onOpenChange={v => !v && onClose()}>
+    <DialogContent className="max-w-md">
+      <DialogHeader><DialogTitle>Site operating limits</DialogTitle></DialogHeader>
+      <p className="text-xs text-muted-foreground">Effective local limits for review only; they do not override the written scheme or benchmark guidance.</p>
+      {([["pH", "ph", "min", "max"], ["Sanitiser (ppm)", "sanitiser", "min", "max"]] as const).map(([label, key, minKey, maxKey]) =>
+        <div key={key} className="grid grid-cols-[1fr_90px_90px] gap-2 items-center">
+          <Label>{label}</Label>
+          <Input type="number" step="0.1" value={ranges[key][minKey]} onChange={e => setRanges(r => ({ ...r, [key]: { ...r[key], min: Number(e.target.value) } }))} />
+          <Input type="number" step="0.1" value={ranges[key][maxKey]} onChange={e => setRanges(r => ({ ...r, [key]: { ...r[key], max: Number(e.target.value) } }))} />
+        </div>
+      )}
+      <div className="grid grid-cols-[1fr_90px] gap-2 items-center"><Label>Maximum temperature (°C)</Label><Input type="number" step="0.1" value={ranges.temperature.max} onChange={e => setRanges(r => ({ ...r, temperature: { max: Number(e.target.value) } }))} /></div>
+      <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={save}>Save limits</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 }
 
 // ─── Manage Tubs Dialog ───────────────────────────────────────────────────────
@@ -1027,10 +1083,11 @@ function ManageTubsDialog({
 }) {
   const { toast } = useToast();
   const { activeClientId } = useAuth();
+  const [activityFilter, setActivityFilter] = useState<TubActivityFilter>("all");
 
   const { data: tubs = [], refetch } = useQuery<HotTub[]>({
-    queryKey: ["hot-tubs-mgmt", activeClientId],
-    queryFn: () => apiFetch("/hot-tub/tubs"),
+    queryKey: ["hot-tubs-mgmt", activeClientId, activityFilter],
+    queryFn: () => apiFetch(`/hot-tub/tubs${activityFilter === "all" ? "" : `?active=${activityFilter === "active"}`}`),
     enabled: open && !!activeClientId,
   });
 
@@ -1095,10 +1152,24 @@ function ManageTubsDialog({
           </DialogTitle>
         </DialogHeader>
 
+        <Select value={activityFilter} onValueChange={v => setActivityFilter(v as TubActivityFilter)}>
+          <SelectTrigger className="rounded-sm">
+            <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All tubs</SelectItem>
+            <SelectItem value="active">Active tubs</SelectItem>
+            <SelectItem value="inactive">Inactive tubs</SelectItem>
+          </SelectContent>
+        </Select>
+
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
           {tubs.length === 0 && !adding && (
             <p className="text-sm text-muted-foreground text-center py-6">
-              No tubs registered yet. Add your first one below.
+              {activityFilter === "all"
+                ? "No tubs registered yet. Add your first one below."
+                : `No ${activityFilter} tubs found.`}
             </p>
           )}
 

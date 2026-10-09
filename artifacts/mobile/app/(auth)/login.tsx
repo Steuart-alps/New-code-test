@@ -16,6 +16,7 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
+import { isInvalidMobileLoginChallenge } from '@/lib/api';
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -60,7 +61,7 @@ export default function LoginScreen() {
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Sign-in failed. Please try again.';
-      if (message.toLowerCase().includes('invalid or has expired')) {
+      if (isInvalidMobileLoginChallenge(err)) {
         setPendingToken(null);
         setCode('');
       }

@@ -12,6 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
+import { aquaTrackAccess } from '@/components/aqua-track-logic';
 
 interface CheckModule {
   id: string;
@@ -60,6 +61,14 @@ const MODULES: CheckModule[] = [
     ],
   },
   {
+    id: 'hot-tub',
+    label: 'HotTubTrack',
+    subtitle: 'Hot-tub water safety checks',
+    icon: 'droplet',
+    iconColor: '#06b6d4',
+    checks: ['Water chemistry', 'Temperature', 'Cover inspection'],
+  },
+  {
     id: 'kitchen',
     label: 'KitchenTrack',
     subtitle: 'Food safety diary',
@@ -97,6 +106,14 @@ const MODULES: CheckModule[] = [
     checks: ['Pick appliance', 'Pass / fail', 'Test date', 'Notes'],
   },
   {
+    id: 'green',
+    label: 'GreenTrack',
+    subtitle: 'Pre-use grounds equipment check',
+    icon: 'tool',
+    iconColor: '#6f8750',
+    checks: ['Choose machine', 'Check safety points', 'Fuel / charge', 'Sign off'],
+  },
+  {
     id: 'aqua',
     label: 'AquaTrack',
     subtitle: 'Pool checks & swim sessions',
@@ -120,10 +137,13 @@ export default function ChecksScreen() {
   const router = useRouter();
   const { hasService } = useAuth();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const aquaAccess = aquaTrackAccess(hasService);
   const visibleModules = MODULES.filter(
     (mod) =>
       (mod.id !== 'incident' || hasService('incidenttrack')) &&
-      (mod.id !== 'pat' || hasService('pattrack')),
+      (mod.id !== 'pat' || hasService('pattrack')) &&
+      (mod.id !== 'green' || hasService('greentrack')) &&
+      (mod.id !== 'aqua' || aquaAccess.any),
   );
 
   return (
@@ -165,8 +185,12 @@ export default function ChecksScreen() {
                 router.push('/checks/pat' as any);
               } else if (mod.id === 'cleaning') {
                 router.push('/checks/cleaning' as any);
+              } else if (mod.id === 'green') {
+                router.push('/checks/green' as any);
               } else if (mod.id === 'safe-track') {
                 router.push('/checks/safe-track' as any);
+              } else if (mod.id === 'hot-tub') {
+                router.push('/checks/hot-tub' as any);
               } else {
                 router.push(`/checks/${mod.id}` as any);
               }

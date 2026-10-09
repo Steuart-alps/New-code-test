@@ -196,7 +196,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     staffRosterId: performer?.staffRosterId ?? null,
     managerNote: data.managerNote ?? null,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser!.id,
   } as any).returning();
   res.status(201).json(row);
 });

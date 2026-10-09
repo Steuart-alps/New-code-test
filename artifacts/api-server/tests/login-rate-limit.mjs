@@ -23,7 +23,17 @@ if (!LIMITER_MODULE) {
   process.exit(1);
 }
 
-const { loginRateLimit, registrationRateLimit, makeLoginRateLimit, _resetLoginRateLimit } = await import(LIMITER_MODULE);
+const { makeLoginRateLimit, _resetLoginRateLimit } = await import(LIMITER_MODULE);
+const loginRateLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  namespace: "login",
+});
+const registrationRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  namespace: "register",
+});
 
 let passed = 0;
 const failures = [];
@@ -52,6 +62,62 @@ const resetLimiter = makeLoginRateLimit({ failureStatuses: [400, 401] });
 app.post("/auth/reset-password", resetLimiter, (req, res) => {
   if (req.body?.token === "valid") res.json({ ok: true });
   else res.status(400).json({ error: "invalid token" });
+});
+
+// Model two API instances using separate middleware objects and one shared
+// atomic store. This exercises the production store contract without requiring
+// a database in the limiter unit suite.
+const sharedEntries = new Map();
+const sharedCalls = [];
+const sharedStore = {
+  async consume(key, windowMs, max) {
+    sharedCalls.push({ key, windowMs, max });
+    const now = Date.now();
+    let entry = sharedEntries.get(key);
+    if (!entry || now >= entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs };
+      sharedEntries.set(key, entry);
+    }
+    entry.count = Math.min(entry.count + 1, max + 1);
+    return {
+      count: entry.count,
+      retryAfterSeconds: Math.max(0, Math.ceil((entry.resetAt - now) / 1000)),
+    };
+  },
+};
+const nodeALoginLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, namespace: "login", store: sharedStore,
+});
+const nodeBLoginLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, namespace: "login", store: sharedStore,
+});
+const nodeARegistrationLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000, max: 5, namespace: "register", store: sharedStore,
+});
+const nodeBRegistrationLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000, max: 5, namespace: "register", store: sharedStore,
+});
+app.post("/node-a/auth/login", nodeALoginLimit, (_req, res) => res.status(401).json({ error: "bad" }));
+app.post("/node-b/auth/login", nodeBLoginLimit, (_req, res) => res.status(401).json({ error: "bad" }));
+app.post("/node-a/auth/register", nodeARegistrationLimit, (_req, res) => res.status(201).json({ ok: true }));
+app.post("/node-b/auth/register", nodeBRegistrationLimit, (_req, res) => res.status(201).json({ ok: true }));
+
+const failingStoreLimit = makeLoginRateLimit({
+  namespace: "login",
+  store: { async consume() { throw new Error("controlled shared-store outage"); } },
+});
+const missingStoreLimit = makeLoginRateLimit({
+  namespace: "login",
+  requireStore: true,
+});
+let unavailableHandlerCalls = 0;
+app.post("/auth/shared-store-down", failingStoreLimit, (_req, res) => {
+  unavailableHandlerCalls++;
+  res.status(401).json({ error: "must not reach credentials" });
+});
+app.post("/auth/shared-store-missing", missingStoreLimit, (_req, res) => {
+  unavailableHandlerCalls++;
+  res.status(401).json({ error: "must not reach credentials" });
 });
 
 const server = http.createServer(app);
@@ -126,6 +192,35 @@ try {
   check("registration 429 sets Retry-After", Number(blockedRegistration.retryAfter) > 0);
   const independentLogin = await post("/auth/login", { email: "user3@example.com", password: "wrong" }, ip3);
   check("registration quota does not consume login quota", independentLogin.status === 401, `got ${independentLogin.status}`);
+
+  // 4. separate API instances share the same login and registration buckets --
+  _resetLoginRateLimit();
+  const sharedIp = "203.0.113.55";
+  for (let i = 0; i < 5; i++) {
+    await post("/node-a/auth/login", { password: "wrong" }, sharedIp);
+    await post("/node-b/auth/login", { password: "wrong" }, sharedIp);
+  }
+  const sharedLoginBlocked = await post("/node-a/auth/login", { password: "wrong" }, sharedIp);
+  check("login attempts across two instances exhaust one shared quota", sharedLoginBlocked.status === 429);
+  check("shared login store receives the 15-minute window",
+    sharedCalls.some((call) => call.key.startsWith("login:") && call.windowMs === 15 * 60 * 1000 && call.max === 10));
+
+  _resetLoginRateLimit();
+  for (let i = 0; i < 3; i++) await post("/node-a/auth/register", {}, sharedIp);
+  for (let i = 0; i < 2; i++) await post("/node-b/auth/register", {}, sharedIp);
+  const sharedRegistrationBlocked = await post("/node-b/auth/register", {}, sharedIp);
+  check("registration attempts across two instances exhaust one shared quota", sharedRegistrationBlocked.status === 429);
+  check("shared registration store receives the one-hour window",
+    sharedCalls.some((call) => call.key.startsWith("register:") && call.windowMs === 60 * 60 * 1000 && call.max === 5));
+
+  // Shared storage failures deny requests explicitly; credentials/registration
+  // never run against a silently unprotected in-memory fallback.
+  const sharedStoreUnavailable = await post("/auth/shared-store-down", {}, "203.0.113.56");
+  check("shared store outage returns 503", sharedStoreUnavailable.status === 503);
+  check("shared store outage does not call credential handler", unavailableHandlerCalls === 0);
+  const sharedStoreUnconfigured = await post("/auth/shared-store-missing", {}, "203.0.113.57");
+  check("required but unconfigured store returns 503", sharedStoreUnconfigured.status === 503);
+  check("missing store does not call credential handler", unavailableHandlerCalls === 0);
 
   // 4. reset-password counts 400 (invalid token guesses) ---------------------
   // reset-password submits token+password (no email), so only the per-IP cap

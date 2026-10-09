@@ -1,1 +1,6 @@
-export { detectUploadType, validateUploadContent, validatePdfInWorker } from "../src/lib/objectStorage";
+export {
+  detectIssueVideoType,
+  detectUploadType,
+  validateUploadContent,
+  validatePdfInWorker,
+} from "../src/lib/uploadValidation";

@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
+import { sitesTable } from "@workspace/db/schema";
+import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
 
 const router = Router();
 
@@ -14,6 +16,25 @@ function rows(result: any): any[] {
   return result.rows;
 }
 
+async function checkSiteAccess(
+  siteId: number | null,
+  clientId: number,
+  departmentId: number | null,
+): Promise<"required" | "invalid" | "forbidden" | null> {
+  if (siteId === null) return departmentId === null ? null : "required";
+  if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
+
+  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+    .from(sitesTable)
+    .where(sql`${sitesTable.id} = ${siteId} AND ${sitesTable.clientId} = ${clientId}`)
+    .limit(1);
+  if (!site) return "invalid";
+  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+    return "forbidden";
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SESSIONS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -21,13 +42,29 @@ function rows(result: any): any[] {
 router.get("/sessions", async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { siteId, limit = "100" } = req.query as Record<string, string>;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const { limit = "100" } = req.query as Record<string, string>;
+    const rawSiteId = req.query.siteId;
+    const hasSiteFilter = rawSiteId !== undefined && rawSiteId !== "";
+    const requestedSiteId = hasSiteFilter ? Number(rawSiteId) : null;
+    if (hasSiteFilter && (
+      typeof rawSiteId !== "string"
+      || !Number.isSafeInteger(requestedSiteId)
+      || requestedSiteId! <= 0
+    )) {
+      return res.status(400).json({ error: "Invalid siteId" });
+    }
+    const departmentId = getActiveDepartmentId(req);
     const result = await db.execute(sql`
       SELECT s.*, si.name AS site_name
       FROM swim_sessions s
       LEFT JOIN sites si ON si.id = s.site_id
       WHERE s.client_id = ${clientId}
-        ${siteId ? sql`AND s.site_id = ${siteId}` : sql``}
+        ${hasSiteFilter ? sql`AND s.site_id = ${requestedSiteId}` : sql``}
+        ${departmentId !== null ? sql`AND (s.site_id IS NULL OR s.site_id IN (
+          SELECT id FROM sites WHERE client_id = ${clientId}
+            AND (department_id IS NULL OR department_id = ${departmentId})
+        ))` : sql``}
       ORDER BY s.session_date DESC, s.open_time DESC NULLS LAST
       LIMIT ${parseInt(limit, 10)}
     `);
@@ -40,35 +77,59 @@ router.get("/sessions", async (req, res) => {
 router.post("/sessions", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
-       siteId, sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
+       sessionDate, sessionType, lifeguardName, lifeguardRosterId, openTime, closeTime,
       maxBathers, batherCountPeak, preSessionResult, preSessionNotes,
-      poolClosed, closureReason, notes,
+       poolClosed, closureReason, notes, photoUploadIds,
     } = req.body;
     if (!sessionDate) return res.status(400).json({ error: "sessionDate is required" });
+    const rawSiteId = req.body.siteId;
+    const siteId = rawSiteId == null ? null : Number(rawSiteId);
+    if (rawSiteId != null && (
+      (typeof rawSiteId !== "number" && typeof rawSiteId !== "string")
+      || !Number.isSafeInteger(siteId)
+      || siteId! <= 0
+    )) {
+      return res.status(400).json({ error: "Invalid siteId" });
+    }
+    const siteAccess = await checkSiteAccess(siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+    if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
     const performer = await resolveStaffRoster(clientId, lifeguardRosterId, lifeguardName);
     if (lifeguardRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     const canonicalPreSessionResult = preSessionResult === "fail" ? "fail" : "pass";
     const canonicalResult = poolClosed === true ? "fail" : canonicalPreSessionResult;
-    const dbResult = await db.execute(sql`
-      INSERT INTO swim_sessions (
-        client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
-        open_time, close_time, max_bathers, bather_count_peak,
-        pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result
-      ) VALUES (
-        ${clientId}, ${siteId ?? null}, ${sessionDate},
-         ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-        ${openTime ?? null}, ${closeTime ?? null},
-        ${maxBathers ?? null}, ${batherCountPeak ?? null},
-        ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
-        ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
-        ${notes?.trim() ?? null}, ${canonicalResult}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(dbResult)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "swim_session",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const dbResult = await tx.execute(sql`
+        INSERT INTO swim_sessions (
+          client_id, site_id, session_date, session_type, lifeguard_name, lifeguard_roster_id,
+          open_time, close_time, max_bathers, bather_count_peak,
+          pre_session_result, pre_session_notes, pool_closed, closure_reason, notes, result, created_by
+        ) VALUES (
+          ${clientId}, ${siteId ?? null}, ${sessionDate},
+           ${sessionType ?? "public_swim"}, ${performer?.performedBy ?? lifeguardName?.trim() ?? null}, ${performer?.staffRosterId ?? null},
+          ${openTime ?? null}, ${closeTime ?? null},
+          ${maxBathers ?? null}, ${batherCountPeak ?? null},
+          ${canonicalPreSessionResult}, ${preSessionNotes?.trim() ?? null},
+          ${poolClosed ?? false}, ${closureReason?.trim() ?? null},
+          ${notes?.trim() ?? null}, ${canonicalResult}, ${req.currentUser!.id}
+        )
+        RETURNING *
+      `);
+      return rows(dbResult)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create session" });
   }
 });
@@ -151,25 +212,36 @@ router.get("/surveillance", async (req, res) => {
 router.post("/surveillance", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-     const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+     const { sessionId, siteId, checkDate, checkTime, batherCount, scanCompleted, observations, checkedBy, checkedByRosterId, photoUploadIds } = req.body;
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
 
     const canonicalResult = scanCompleted === false ? "fail" : "pass";
-    const dbResult = await db.execute(sql`
-      INSERT INTO swim_surveillance_checks (
-        client_id, session_id, site_id, check_date, check_time,
-         bather_count, scan_completed, observations, checked_by, checked_by_roster_id, result
-      ) VALUES (
-        ${clientId}, ${sessionId ?? null}, ${siteId ?? null}, ${checkDate},
-        ${checkTime ?? null}, ${batherCount ?? null}, ${scanCompleted ?? true},
-         ${observations?.trim() ?? null}, ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${canonicalResult}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(dbResult)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "swim_surveillance_check",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const dbResult = await tx.execute(sql`
+        INSERT INTO swim_surveillance_checks (
+          client_id, session_id, site_id, check_date, check_time,
+           bather_count, scan_completed, observations, checked_by, checked_by_roster_id, result
+        ) VALUES (
+          ${clientId}, ${sessionId ?? null}, ${siteId ?? null}, ${checkDate},
+          ${checkTime ?? null}, ${batherCount ?? null}, ${scanCompleted ?? true},
+           ${observations?.trim() ?? null}, ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${canonicalResult}
+        )
+        RETURNING *
+      `);
+      return rows(dbResult)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create surveillance check" });
   }
 });
@@ -240,10 +312,11 @@ router.get("/first-aid", async (req, res) => {
 router.post("/first-aid", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
       siteId, checkDate, aedOk, firstAidKitOk, rescuePoleOk,
       throwBagOk, spineBoardOk, ringBuoyOk, oxygenKitOk,
-       checkedBy, checkedByRosterId, defectsFound, notes,
+       checkedBy, checkedByRosterId, defectsFound, notes, photoUploadIds,
     } = req.body;
      const performer = await resolveStaffRoster(clientId, checkedByRosterId, checkedBy);
      if (checkedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
@@ -253,23 +326,33 @@ router.post("/first-aid", denyViewers, async (req, res) => {
       .every(v => v !== false);
     const result = allOk ? "pass" : "fail";
 
-    const dbResult = await db.execute(sql`
-      INSERT INTO swim_first_aid_checks (
-        client_id, site_id, check_date, aed_ok, first_aid_kit_ok,
-        rescue_pole_ok, throw_bag_ok, spine_board_ok, ring_buoy_ok, oxygen_kit_ok,
-         checked_by, checked_by_roster_id, defects_found, notes, result
-      ) VALUES (
-        ${clientId}, ${siteId ?? null}, ${checkDate},
-        ${aedOk ?? true}, ${firstAidKitOk ?? true},
-        ${rescuePoleOk ?? true}, ${throwBagOk ?? true}, ${spineBoardOk ?? true},
-        ${ringBuoyOk ?? true}, ${oxygenKitOk ?? true},
-         ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${defectsFound?.trim() ?? null},
-        ${notes?.trim() ?? null}, ${result}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(dbResult)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "swim_first_aid_check",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const dbResult = await tx.execute(sql`
+        INSERT INTO swim_first_aid_checks (
+          client_id, site_id, check_date, aed_ok, first_aid_kit_ok,
+          rescue_pole_ok, throw_bag_ok, spine_board_ok, ring_buoy_ok, oxygen_kit_ok,
+           checked_by, checked_by_roster_id, defects_found, notes, result
+        ) VALUES (
+          ${clientId}, ${siteId ?? null}, ${checkDate},
+          ${aedOk ?? true}, ${firstAidKitOk ?? true},
+          ${rescuePoleOk ?? true}, ${throwBagOk ?? true}, ${spineBoardOk ?? true},
+          ${ringBuoyOk ?? true}, ${oxygenKitOk ?? true},
+           ${performer?.performedBy ?? checkedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${defectsFound?.trim() ?? null},
+          ${notes?.trim() ?? null}, ${result}
+        )
+        RETURNING *
+      `);
+      return rows(dbResult)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create first-aid check" });
   }
 });
@@ -374,30 +457,41 @@ router.get("/incidents", async (req, res) => {
 router.post("/incidents", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
       siteId, incidentDate, incidentTime, incidentType, severity,
       personsInvolved, description, actionTaken, reportedTo,
-      reportedDate, outcome, notes,
+      reportedDate, outcome, notes, photoUploadIds,
     } = req.body;
     if (!incidentDate) return res.status(400).json({ error: "incidentDate is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
-    const dbResult = await db.execute(sql`
-      INSERT INTO swim_incidents (
-        client_id, site_id, incident_date, incident_time, incident_type, severity,
-        persons_involved, description, action_taken, reported_to,
-        reported_date, outcome, notes
-      ) VALUES (
-        ${clientId}, ${siteId ?? null}, ${incidentDate}, ${incidentTime ?? null},
-        ${incidentType ?? "near_miss"}, ${severity ?? "low"},
-        ${personsInvolved?.trim() ?? null}, ${description.trim()},
-        ${actionTaken?.trim() ?? null}, ${reportedTo?.trim() ?? null},
-        ${reportedDate ?? null}, ${outcome?.trim() ?? null}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(dbResult)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "swim_incident",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const dbResult = await tx.execute(sql`
+        INSERT INTO swim_incidents (
+          client_id, site_id, incident_date, incident_time, incident_type, severity,
+          persons_involved, description, action_taken, reported_to,
+          reported_date, outcome, notes
+        ) VALUES (
+          ${clientId}, ${siteId ?? null}, ${incidentDate}, ${incidentTime ?? null},
+          ${incidentType ?? "near_miss"}, ${severity ?? "low"},
+          ${personsInvolved?.trim() ?? null}, ${description.trim()},
+          ${actionTaken?.trim() ?? null}, ${reportedTo?.trim() ?? null},
+          ${reportedDate ?? null}, ${outcome?.trim() ?? null}, ${notes?.trim() ?? null}
+        )
+        RETURNING *
+      `);
+      return rows(dbResult)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create incident" });
   }
 });

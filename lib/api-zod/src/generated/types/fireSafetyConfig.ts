@@ -5,6 +5,7 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { FireControlProfile } from './fireControlProfile';
 
 export interface FireSafetyConfig {
   fire_alarm_zones?: string;
@@ -12,4 +13,8 @@ export interface FireSafetyConfig {
   fire_show_drill?: string;
   fire_default_performer?: string;
   fire_escape_routes?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  fire_frequency_days?: string;
+  siteId?: number | null;
+  controlProfile?: FireControlProfile;
 }

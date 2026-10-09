@@ -1,16 +1,73 @@
 /**
- * Daily SafeTrack acknowledgement reminder job.
+ * SafeTrack acknowledgement reminder job.
  *
- * One tenant-scoped digest is claimed per day before delivery, which prevents
- * concurrent schedulers from sending duplicate manager notifications.
+ * Each tenant can choose a daily or weekly cadence and a local delivery time.
+ * One tenant-scoped digest is claimed per cadence window before delivery.
  */
 import { db } from "@workspace/db";
-import { clientsTable } from "@workspace/db/schema";
+import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
+
+export const SAFE_TRACK_REMINDER_FREQUENCY_SETTING = "safeTrackReminderFrequency";
+export const SAFE_TRACK_REMINDER_TIME_SETTING = "safeTrackReminderTime";
+export const DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY = "daily" as const;
+export const DEFAULT_SAFE_TRACK_REMINDER_TIME = "08:50";
+export const DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE = "Europe/London";
+
+export type SafeTrackReminderFrequency = "daily" | "weekly";
+
+export interface SafeTrackReminderSettings {
+  frequency: SafeTrackReminderFrequency;
+  time: string;
+  timeZone: string;
+}
+
+export function parseSafeTrackReminderSettings(
+  settings: Record<string, string | null | undefined> = {},
+): SafeTrackReminderSettings {
+  const frequency = settings[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] === "weekly"
+    ? "weekly"
+    : DEFAULT_SAFE_TRACK_REMINDER_FREQUENCY;
+  const time = /^\d{2}:[0-5]\d$/.test(settings[SAFE_TRACK_REMINDER_TIME_SETTING] ?? "")
+    ? settings[SAFE_TRACK_REMINDER_TIME_SETTING]!
+    : DEFAULT_SAFE_TRACK_REMINDER_TIME;
+  let timeZone = settings.accountTimezone?.trim() || DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone }).format();
+  } catch {
+    timeZone = DEFAULT_SAFE_TRACK_REMINDER_TIMEZONE;
+  }
+  return { frequency, time, timeZone };
+}
+
+function localScheduleParts(now: Date, timeZone: string): { minutes: number; weekday: string } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    minutes: Number(values.hour) * 60 + Number(values.minute),
+    weekday: values.weekday,
+  };
+}
+
+export function isSafeTrackReminderDue(
+  now: Date,
+  settings: SafeTrackReminderSettings,
+): boolean {
+  const [hour, minute] = settings.time.split(":").map(Number);
+  const local = localScheduleParts(now, settings.timeZone);
+  if (local.minutes < hour * 60 + minute) return false;
+  return settings.frequency === "daily" || local.weekday === "Mon";
+}
 
 export interface OutstandingDocSummary {
   title: string;
@@ -20,6 +77,17 @@ export interface OutstandingDocSummary {
   outstandingCount: number;
   acknowledgedCount: number;
   staffTotal: number;
+}
+
+export interface OutstandingStaffReminder {
+  staffRosterId: number;
+  staffName: string;
+  email: string;
+  documents: Array<{
+    title: string;
+    docType: OutstandingDocSummary["docType"];
+    siteName: string | null;
+  }>;
 }
 
 interface RequiredDocument {
@@ -127,24 +195,173 @@ export async function getOutstandingSafeTrackAcknowledgements(
   });
 }
 
+/**
+ * Return outstanding required documents grouped by roster member. This is
+ * separate from the manager digest so an individual reminder never discloses
+ * another staff member's sign-off status.
+ */
+export async function getOutstandingSafeTrackStaffReminders(
+  clientId: number,
+): Promise<OutstandingStaffReminder[]> {
+  const result = await db.execute(sql`
+    SELECT staff.id AS staff_roster_id,
+           COALESCE(
+             NULLIF(trim(staff.name), ''),
+             NULLIF(trim(concat_ws(' ', staff.first_name, staff.last_name)), ''),
+             'staff member'
+           ) AS staff_name,
+           trim(staff.email) AS email,
+           d.title,
+           d.doc_type,
+           doc_site.name AS site_name
+    FROM (
+      SELECT id, title, site_id, department_id, 'ra'::text AS document_type,
+             'Risk Assessment'::text AS doc_type
+      FROM safe_risk_assessments
+      WHERE client_id = ${clientId} AND requires_acknowledgement = true
+      UNION ALL
+      SELECT id, title, site_id, department_id, 'sop'::text,
+             'SOP'::text
+      FROM safe_sops
+      WHERE client_id = ${clientId} AND requires_acknowledgement = true
+      UNION ALL
+      SELECT id, title, site_id, department_id, 'handbook'::text,
+             'Handbook'::text
+      FROM safe_handbook
+      WHERE client_id = ${clientId} AND requires_acknowledgement = true
+    ) d
+    JOIN staff_roster staff
+      ON staff.client_id = ${clientId}
+     AND staff.active = true
+     AND (d.site_id IS NULL OR staff.site_id = d.site_id)
+    LEFT JOIN sites staff_site
+      ON staff_site.id = staff.site_id
+     AND staff_site.client_id = ${clientId}
+    LEFT JOIN sites doc_site
+      ON doc_site.id = d.site_id
+     AND doc_site.client_id = ${clientId}
+    WHERE NULLIF(trim(staff.email), '') IS NOT NULL
+      AND (
+        d.department_id IS NULL
+        OR staff_site.department_id = d.department_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM safe_track_acknowledgements ack
+        WHERE ack.client_id = ${clientId}
+          AND ack.document_type = d.document_type
+          AND ack.document_id = d.id
+          AND ack.staff_roster_id = staff.id
+      )
+    ORDER BY staff.id, d.title
+  `);
+
+  const grouped = new Map<number, OutstandingStaffReminder>();
+  for (const row of (result.rows ?? []) as any[]) {
+    const staffRosterId = Number(row.staff_roster_id);
+    const email = String(row.email ?? "").trim().toLowerCase();
+    if (!Number.isSafeInteger(staffRosterId) || !email || !/.+@.+\..+/.test(email)) continue;
+
+    let reminder = grouped.get(staffRosterId);
+    if (!reminder) {
+      reminder = {
+        staffRosterId,
+        staffName: String(row.staff_name ?? "staff member"),
+        email,
+        documents: [],
+      };
+      grouped.set(staffRosterId, reminder);
+    }
+    reminder.documents.push({
+      title: String(row.title),
+      docType: row.doc_type as OutstandingDocSummary["docType"],
+      siteName: row.site_name ? String(row.site_name) : null,
+    });
+  }
+  return [...grouped.values()];
+}
+
+export const MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES = 90_000;
+const MAX_NAMES_PER_MANAGER_ROW = 8;
+const MAX_NAME_CHARS_IN_MANAGER_ROW = 120;
+const MAX_TITLE_CHARS_IN_MANAGER_ROW = 300;
+
+function renderManagerRow(doc: OutstandingDocSummary): string {
+  const names = doc.outstanding
+    .slice(0, MAX_NAMES_PER_MANAGER_ROW)
+    .map((name) => esc(name.slice(0, MAX_NAME_CHARS_IN_MANAGER_ROW)))
+    .join(", ");
+  const remaining = Math.max(0, doc.outstandingCount - Math.min(doc.outstanding.length, MAX_NAMES_PER_MANAGER_ROW));
+  const waitingOn = remaining > 0
+    ? `${names ? `${names}, ` : ""}and ${remaining} more staff`
+    : names;
+
+  return `
+    <tr><td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
+      <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(doc.title.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px;">
+        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName.slice(0, MAX_TITLE_CHARS_IN_MANAGER_ROW))}` : ""} ·
+        ${doc.acknowledgedCount}/${doc.staffTotal} acknowledged
+      </div>
+      <div style="font-size:12px;color:#b45309;margin-top:4px;">
+        Waiting on: ${waitingOn || `${doc.outstandingCount} staff`}
+      </div>
+    </td></tr>`;
+}
+
+function managerEmailHtml(
+  visibleDocs: OutstandingDocSummary[],
+  allDocs: OutstandingDocSummary[],
+  appUrl: string,
+): string {
+  const totalOutstanding = allDocs.reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  const hiddenDocs = allDocs.length - visibleDocs.length;
+  const hiddenOutstanding = allDocs
+    .slice(visibleDocs.length)
+    .reduce((sum, doc) => sum + doc.outstandingCount, 0);
+  const overflowNotice = hiddenDocs > 0
+    ? `<p style="font-size:12px;color:#b45309;">Additional documents not shown here: ${hiddenDocs} document${hiddenDocs === 1 ? "" : "s"} with ${hiddenOutstanding} outstanding acknowledgement${hiddenOutstanding === 1 ? "" : "s"}. Open the secure register for the complete list.</p>`
+    : "";
+  const rows = visibleDocs.map(renderManagerRow).join("");
+
+  return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
+    <h2 style="color:#0f172a;">SafeTrack acknowledgements outstanding</h2>
+    <p>${totalOutstanding} outstanding acknowledgement${totalOutstanding === 1 ? "" : "s"} across ${allDocs.length} required document${allDocs.length === 1 ? "" : "s"}. Open the secure register to review and follow up.</p>
+    ${overflowNotice}
+    <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
+    <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open the secure SafeTrack register</a></p>
+    <p style="font-size:12px;color:#64748b;">Sign in to review the complete acknowledgement details and follow up.</p>
+  </body></html>`;
+}
+
 function buildEmailHtml(docs: OutstandingDocSummary[], appUrl: string): string {
+  const visibleDocs: OutstandingDocSummary[] = [];
+  for (const doc of docs) {
+    const candidate = managerEmailHtml([...visibleDocs, doc], docs, appUrl);
+    if (Buffer.byteLength(candidate, "utf8") > MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES) break;
+    visibleDocs.push(doc);
+  }
+  return managerEmailHtml(visibleDocs, docs, appUrl);
+}
+
+function buildStaffEmailHtml(
+  staffName: string,
+  docs: OutstandingStaffReminder["documents"],
+  appUrl: string,
+): string {
   const rows = docs.map((doc) => `
     <tr><td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
       <div style="font-weight:600;font-size:14px;color:#0f172a;">${esc(doc.title)}</div>
       <div style="font-size:12px;color:#64748b;margin-top:2px;">
-        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName)}` : ""} ·
-        ${doc.acknowledgedCount}/${doc.staffTotal} acknowledged
-      </div>
-      <div style="font-size:12px;color:#b45309;margin-top:4px;">
-        Waiting on: ${doc.outstanding.map(esc).join(", ")}
+        ${esc(doc.docType)}${doc.siteName ? ` · ${esc(doc.siteName)}` : ""}
       </div>
     </td></tr>`).join("");
   return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#334155;">
-    <h2 style="color:#0f172a;">SafeTrack acknowledgements outstanding</h2>
-    <p>Required SafeTrack documents still need staff acknowledgement. Open the secure register to review and follow up.</p>
+    <h2 style="color:#0f172a;">Your SafeTrack sign-offs are outstanding</h2>
+    <p>Hello ${esc(staffName)}, the following required records still need your acknowledgement.</p>
     <table style="width:100%;border-collapse:collapse;"><tbody>${rows}</tbody></table>
     <p style="margin-top:24px;"><a href="${appUrl}/safe-track" style="background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;">Open SafeTrack</a></p>
-    <p style="font-size:12px;color:#64748b;">Sign in to review acknowledgement details and follow up.</p>
+    <p style="font-size:12px;color:#64748b;">Please sign in and complete the outstanding sign-offs.</p>
   </body></html>`;
 }
 
@@ -160,25 +377,31 @@ export interface SafeTrackAckReminderDependencies {
   now?: () => Date;
   appUrl?: () => string;
   listClients?: () => Promise<{ id: number; name: string }[]>;
+  getSettings?: (clientId: number) => Promise<Record<string, string | null | undefined>>;
   isSafeTrackEntitled?: (clientId: number) => Promise<boolean>;
   getOutstanding?: (clientId: number) => Promise<OutstandingDocSummary[]>;
+  getStaffOutstanding?: (clientId: number) => Promise<OutstandingStaffReminder[]>;
   getRecipients?: (clientId: number) => Promise<{ emails: string[] }>;
-  claim?: (clientId: number) => Promise<number | null>;
+  claim?: (clientId: number, frequency: SafeTrackReminderFrequency) => Promise<number | null>;
   release?: (claimId: number) => Promise<void>;
   send?: typeof sendSystemEmail;
 }
 
-async function claimReminder(clientId: number): Promise<number | null> {
+async function claimReminder(
+  clientId: number,
+  frequency: SafeTrackReminderFrequency,
+): Promise<number | null> {
   // The transaction-scoped advisory lock serialises claims for this tenant.
   // The lock is released at commit, after the recent-row check and insert are
   // visible together; concurrent scheduler processes therefore cannot both
-  // decide that a weekly reminder is due.
+  // decide that a reminder is due.
   return db.transaction(async (tx) => {
     const locked = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(${clientId}) AS locked`);
     if (!((locked.rows ?? [])[0] as any)?.locked) return null;
     const recent = await tx.execute(sql`
       SELECT 1 FROM safe_track_ack_reminder_log
-       WHERE client_id = ${clientId} AND sent_at > now() - interval '1 day'
+       WHERE client_id = ${clientId}
+         AND sent_at > now() - (${frequency === "weekly" ? 7 : 1} * interval '1 day')
       LIMIT 1
     `);
     if ((recent.rows ?? []).length) return null;
@@ -202,11 +425,18 @@ export async function runSafeTrackAckReminderJob(
   const result: SafeTrackAckReminderJobResult = {
     clientsChecked: 0, clientsAlerted: 0, emailsSent: 0, remindersClaimed: 0, errors: 0,
   };
+  const now = dependencies.now ?? (() => new Date());
   const listClients = dependencies.listClients ?? (() => db.select({ id: clientsTable.id, name: clientsTable.name }).from(clientsTable).where(eq(clientsTable.active, true)));
+  const getSettings = dependencies.getSettings ?? (async (clientId: number) => {
+    const rows = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
+      .from(appSettingsTable)
+      .where(eq(appSettingsTable.clientId, clientId));
+    return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  });
   const isSafeTrackEntitled = dependencies.isSafeTrackEntitled ?? defaultEntitlement;
   const getOutstanding = dependencies.getOutstanding ?? getOutstandingSafeTrackAcknowledgements;
+  const getStaffOutstanding = dependencies.getStaffOutstanding ?? getOutstandingSafeTrackStaffReminders;
   const getRecipients = dependencies.getRecipients ?? getNotificationEmails;
-  const claim = dependencies.claim ?? claimReminder;
   const release = dependencies.release ?? (async (claimId: number) => { await db.execute(sql`DELETE FROM safe_track_ack_reminder_log WHERE id = ${claimId}`); });
   const send = dependencies.send ?? sendSystemEmail;
   const appUrl = dependencies.appUrl?.() ?? getPublicAppUrl();
@@ -216,26 +446,54 @@ export async function runSafeTrackAckReminderJob(
     let claimId: number | null = null;
     try {
       if (!await isSafeTrackEntitled(client.id)) continue;
+      const reminderSettings = parseSafeTrackReminderSettings(await getSettings(client.id));
+      if (!isSafeTrackReminderDue(now(), reminderSettings)) continue;
       const outstanding = await getOutstanding(client.id);
       if (!outstanding.length) continue;
+      const staffOutstanding = await getStaffOutstanding(client.id);
       const recipients = await getRecipients(client.id);
-      const emails = [...new Set(recipients.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
-      if (!emails.length) continue;
-      claimId = await claim(client.id);
+      const managerEmails = [...new Set(recipients.emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+      const staffEmails = [...new Map(staffOutstanding.map((reminder) => [reminder.email, reminder])).values()];
+      if (!managerEmails.length && !staffEmails.length) continue;
+      claimId = await (dependencies.claim
+        ? dependencies.claim(client.id, reminderSettings.frequency)
+        : claimReminder(client.id, reminderSettings.frequency));
       if (!claimId) continue;
       result.remindersClaimed++;
 
-      const subject = `SafeTrack: ${outstanding.length} required document${outstanding.length === 1 ? "" : "s"} awaiting acknowledgement`;
-      const html = buildEmailHtml(outstanding, appUrl);
       let delivered = 0;
-      for (const email of emails) {
+      const managerSubject = `SafeTrack: ${outstanding.length} required document${outstanding.length === 1 ? "" : "s"} awaiting acknowledgement`;
+      for (const email of managerEmails) {
         try {
-          await send({ to: email, subject, html });
+          await send({
+            to: email,
+            subject: managerSubject,
+            html: buildEmailHtml(outstanding, appUrl),
+            idempotencyKey: `safe-track-manager-${client.id}-${claimId}-${email}`,
+          });
           delivered++;
           result.emailsSent++;
         } catch (err) {
           result.errors++;
           logger.warn({ err, clientId: client.id, email }, "Failed to send SafeTrack acknowledgement reminder");
+        }
+      }
+      for (const reminder of staffEmails) {
+        try {
+          await send({
+            to: reminder.email,
+            subject: "SafeTrack: your required sign-offs are outstanding",
+            html: buildStaffEmailHtml(reminder.staffName, reminder.documents, appUrl),
+            idempotencyKey: `safe-track-staff-${client.id}-${claimId}-${reminder.staffRosterId}`,
+          });
+          delivered++;
+          result.emailsSent++;
+        } catch (err) {
+          result.errors++;
+          logger.warn(
+            { err, clientId: client.id, staffRosterId: reminder.staffRosterId, email: reminder.email },
+            "Failed to send SafeTrack staff acknowledgement reminder",
+          );
         }
       }
       if (!delivered) {
@@ -244,6 +502,12 @@ export async function runSafeTrackAckReminderJob(
         continue;
       }
       result.clientsAlerted++;
+      logger.info({
+        clientId: client.id,
+        docs: outstanding.length,
+        managerEmails: managerEmails.length,
+        staffEmails: staffEmails.length,
+      }, "SafeTrack acknowledgement reminders sent");
     } catch (err) {
       if (claimId) {
         try { await release(claimId); } catch (releaseErr) { logger.error({ err: releaseErr, clientId: client.id }, "Failed to release SafeTrack acknowledgement claim"); }

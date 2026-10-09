@@ -1,4 +1,8 @@
 import { Router } from "express";
+import { createHash } from "node:crypto";
+import type { Request, Response, NextFunction } from "express";
+import { kitchenTemperatureRulesSchema, DEFAULT_KITCHEN_TEMPERATURE_RULES, parseKitchenTemperatureRules } from "@workspace/api-zod/kitchen-temperature";
+import { KitchenTemperatureError, recordKitchenTemperatureActions } from "../lib/kitchenTemperatureActions";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
@@ -11,6 +15,12 @@ const router = Router();
 // Rows are user-defined shapes, but must be flat objects of primitive values
 const rowSchema = z.record(z.union([z.string().max(500), z.number(), z.boolean(), z.null()]));
 const rowsSchema = z.array(rowSchema).max(200);
+const mobileEntryIdSchema = z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional();
+type MobileReceipt = { entryId: string; userId: number; fingerprint: string };
+const submissionFingerprint = (data: unknown) =>
+  createHash("sha256").update(JSON.stringify(data)).digest("hex");
+const findMobileReceipt = (receipts: MobileReceipt[], entryId: string | undefined, userId: number) =>
+  entryId ? receipts.find(receipt => receipt.entryId === entryId && receipt.userId === userId) : undefined;
 const mobileTemperatureLogSchema = z.object({
   coldFood: rowsSchema,
   expectedColdFood: rowsSchema,
@@ -41,13 +51,36 @@ const recordFieldsSchema = z.object({
   staffRosterId: z.number().int().positive().nullable().optional(),
   submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
 });
+const diaryRecordSnapshotSchema = z.object({
+  deliveries: rowsSchema.optional(),
+  coldFood: rowsSchema.optional(),
+  hotTemperature: rowsSchema.optional(),
+  cooling: rowsSchema.optional(),
+  reheating: rowsSchema.optional(),
+  hotHolding: rowsSchema.optional(),
+  sousVide: rowsSchema.optional(),
+  cookingLimit: z.string().nullable().optional(),
+  coolingLimit: z.string().nullable().optional(),
+  reheatingLimit: z.string().nullable().optional(),
+  hotHoldingLimit: z.string().nullable().optional(),
+  correctives: z.string().nullable().optional(),
+  managerSignature: z.string().nullable().optional(),
+  performedBy: z.string().nullable().optional(),
+  staffRosterId: z.number().int().positive().nullable().optional(),
+  submittedAt: z.string().datetime({ offset: true }).nullable().optional(),
+}).partial();
 const updateRecordSchema = recordFieldsSchema.extend({
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  expectedRecord: diaryRecordSnapshotSchema.optional(),
   mobileTemperatureLog: mobileTemperatureLogSchema.optional(),
+  mobileEntryId: mobileEntryIdSchema,
+  mobileRecordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const createRecordSchema = recordFieldsSchema.extend({
   recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   submittedAt: z.string().datetime({ offset: true }).optional(),
+  mobileEntryId: mobileEntryIdSchema,
 });
 
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
@@ -70,15 +103,18 @@ const SECTION_SHOW_KEYS = [
 const CONFIG_KEYS = [
   "food_num_fridges",
   "food_num_freezers",
+  "food_jurisdiction",
   "food_cooking_limit",
   "food_cooling_limit",
   "food_reheating_limit",
   "food_hot_holding_limit",
+  "food_temperature_rules",
   // Template keys — stored as JSON strings
   "food_cold_units",            // JSON: [{name, type:"fridge"|"freezer"}]
   "food_default_hot_items",     // JSON: ["item1", "item2"]
   "food_default_holding_items", // JSON: ["item1", "item2"]
   "food_default_sv_items",      // JSON: ["item1", "item2"]
+  "food_probe_names",           // JSON: ["Probe 1", "Blue probe"]
   // Section visibility — "true"|"false", default true
   ...SECTION_SHOW_KEYS,
 ] as const;
@@ -86,14 +122,19 @@ const CONFIG_KEYS = [
 const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_num_fridges: "2",
   food_num_freezers: "2",
+  // Keep the historical 82°C default for existing accounts. Administrators
+  // can select England/Wales to use the 75°C limit.
+  food_jurisdiction: "scotland",
   food_cooking_limit: "Above 75°C (10 seconds)",
   food_cooling_limit: "8°C within 90 minutes",
   food_reheating_limit: "Above 82°C",
   food_hot_holding_limit: "Above 63°C",
+  food_temperature_rules: JSON.stringify(DEFAULT_KITCHEN_TEMPERATURE_RULES),
   food_cold_units: "",
   food_default_hot_items: "",
   food_default_holding_items: "",
   food_default_sv_items: "",
+  food_probe_names: "",
   food_show_deliveries: "true",
   food_show_cold_food: "true",
   food_show_hot_temperature: "true",
@@ -102,6 +143,121 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_hot_holding: "true",
   food_show_sous_vide: "true",
 };
+
+const FOOD_JURISDICTIONS = ["scotland", "england_wales"] as const;
+type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
+const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
+  scotland: "Above 82°C",
+  england_wales: "Above 75°C",
+};
+
+const DIARY_MERGE_FIELDS = [
+  "deliveries",
+  "coldFood",
+  "hotTemperature",
+  "cooling",
+  "reheating",
+  "hotHolding",
+  "sousVide",
+  "cookingLimit",
+  "coolingLimit",
+  "reheatingLimit",
+  "hotHoldingLimit",
+  "correctives",
+  "managerSignature",
+  "performedBy",
+  "staffRosterId",
+  "submittedAt",
+] as const;
+
+function stableValue(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableValue((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableValue(left) === stableValue(right);
+}
+
+function appendOnlySuffix(base: unknown, current: unknown): unknown[] | null {
+  if (!Array.isArray(base) || !Array.isArray(current) || current.length < base.length) return null;
+  for (let index = 0; index < base.length; index++) {
+    if (!valuesEqual(base[index], current[index])) return null;
+  }
+  const suffix = current.slice(base.length);
+  if (suffix.every(row =>
+    row && typeof row === "object" && typeof (row as Record<string, unknown>)._entryId === "string",
+  )) return suffix;
+  return null;
+}
+
+function rowAlreadyPresent(rows: unknown[], candidate: unknown): boolean {
+  const candidateId = candidate && typeof candidate === "object"
+    ? (candidate as Record<string, unknown>)._entryId
+    : undefined;
+  return rows.some(row => {
+    const rowId = row && typeof row === "object"
+      ? (row as Record<string, unknown>)._entryId
+      : undefined;
+    return typeof candidateId === "string" && typeof rowId === "string"
+      ? candidateId === rowId
+      : valuesEqual(row, candidate);
+  });
+}
+
+/**
+ * Merge a stale web save against the record currently in the database.
+ *
+ * A mobile append is safe to preserve when the current array is exactly the
+ * saved baseline plus rows carrying stable entry IDs. Any concurrent edit to a
+ * baseline row, removal, or unidentifiable append is reported as a conflict.
+ */
+function mergeStaleDiaryUpdate(
+  current: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): { ok: true; updates: Record<string, unknown> } | { ok: false; fields: string[] } {
+  const updates: Record<string, unknown> = {};
+  const conflicts: string[] = [];
+
+  for (const field of DIARY_MERGE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(incoming, field)) continue;
+
+    const incomingValue = incoming[field];
+    const currentValue = current[field];
+    const baselineValue = baseline[field];
+    const currentChanged = !valuesEqual(currentValue, baselineValue);
+    const incomingChanged = !valuesEqual(incomingValue, baselineValue);
+
+    if (!currentChanged) {
+      updates[field] = incomingValue;
+      continue;
+    }
+    if (!incomingChanged || valuesEqual(currentValue, incomingValue)) continue;
+
+    const suffix = appendOnlySuffix(baselineValue, currentValue);
+    if (suffix && Array.isArray(incomingValue)) {
+      updates[field] = [
+        ...incomingValue,
+        ...suffix.filter(row => !rowAlreadyPresent(incomingValue, row)),
+      ];
+      continue;
+    }
+    conflicts.push(field);
+  }
+
+  return conflicts.length > 0 ? { ok: false, fields: conflicts } : { ok: true, updates };
+}
+
+function reheatingLimitForJurisdiction(value: string | null | undefined): string {
+  return REHEATING_LIMIT_BY_JURISDICTION[
+    value as FoodJurisdiction
+  ] ?? REHEATING_LIMIT_BY_JURISDICTION.scotland;
+}
 
 // ── Per-site override support ─────────────────────────────────────────────────
 // Site-level values are stored in app_settings under a prefixed key:
@@ -213,13 +369,31 @@ function validateConfigPatch(
     if ((SECTION_SHOW_KEYS as readonly string[]).includes(key)) {
       if (raw !== "true" && raw !== "false") return { error: `${key} must be "true" or "false"` };
       out[key] = raw;
+    } else if (key === "food_temperature_rules") {
+      try {
+        const result = kitchenTemperatureRulesSchema.safeParse(JSON.parse(raw));
+        if (!result.success) return { error: "Supply complete, ordered numeric temperature rules" };
+        out[key] = JSON.stringify(result.data);
+      } catch { return { error: "Temperature rules must be valid JSON" }; }
+    } else if (key === "food_jurisdiction") {
+      if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
+        return { error: `${key} must be "scotland" or "england_wales"` };
+      }
+      out[key] = raw;
     } else if (key === "food_cold_units") {
       const r = cleanColdUnits(raw);
       if ("error" in r) return { error: r.error };
       out[key] = r.value;
-    } else if (key === "food_default_hot_items" || key === "food_default_holding_items" || key === "food_default_sv_items") {
+    } else if (
+      key === "food_default_hot_items"
+      || key === "food_default_holding_items"
+      || key === "food_default_sv_items"
+      || key === "food_probe_names"
+    ) {
       const label = key === "food_default_hot_items" ? "Hot items"
-        : key === "food_default_holding_items" ? "Holding items" : "Sous vide items";
+        : key === "food_default_holding_items" ? "Holding items"
+        : key === "food_default_sv_items" ? "Sous vide items"
+        : "Probe";
       const r = cleanNameList(raw, label);
       if ("error" in r) return { error: r.error };
       out[key] = r.value;
@@ -269,22 +443,38 @@ router.get("/config", requireAuth, async (req, res) => {
     if (!clientStored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
     if (!clientStored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
   }
+  if (clientStored.has("food_jurisdiction") && !clientStored.has("food_reheating_limit")) {
+    config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
+  }
 
   // Overlay site-level values on top of the client-level config.
   const siteOverrides: string[] = [];
   if (site.siteId !== null) {
     const prefix = `${SITE_PREFIX}${site.siteId}.`;
+    let siteJurisdictionOverride = false;
+    let siteReheatingOverride = false;
     for (const row of rows) {
       if (!row.key.startsWith(prefix) || row.value == null) continue;
       const baseKey = row.key.slice(prefix.length);
       if (CONFIG_KEYS.includes(baseKey as (typeof CONFIG_KEYS)[number])) {
         config[baseKey] = row.value;
         siteOverrides.push(baseKey);
+        if (baseKey === "food_jurisdiction") siteJurisdictionOverride = true;
+        if (baseKey === "food_reheating_limit") siteReheatingOverride = true;
       }
+    }
+    if (siteJurisdictionOverride && !siteReheatingOverride) {
+      config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
+    }
+    if (!clientStored.has("food_temperature_rules") && !siteOverrides.includes("food_temperature_rules")) {
+      config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
     }
     return res.json({ ...config, _siteOverrides: siteOverrides });
   }
 
+  if (!clientStored.has("food_temperature_rules")) {
+    config.food_temperature_rules = JSON.stringify(parseKitchenTemperatureRules(null, config.food_jurisdiction));
+  }
   res.json(config);
 });
 
@@ -303,6 +493,19 @@ router.put("/config", requireAuth, requireClientAdmin, denyViewers, async (req, 
 
   const validated = validateConfigPatch((req.body ?? {}) as Record<string, unknown>);
   if ("error" in validated) return res.status(400).json({ error: validated.error });
+
+  // Selecting a jurisdiction also selects its standard reheating limit unless
+  // the caller explicitly supplied a legacy/custom limit. This keeps existing
+  // custom templates intact while making the new selector deterministic.
+  const rawUpdates = (req.body ?? {}) as Record<string, unknown>;
+  if (
+    validated.values.food_jurisdiction
+    && !Object.prototype.hasOwnProperty.call(rawUpdates, "food_reheating_limit")
+  ) {
+    validated.values.food_reheating_limit = reheatingLimitForJurisdiction(
+      validated.values.food_jurisdiction,
+    );
+  }
 
   const storageKeyOf = (baseKey: string) =>
     site.siteId !== null ? siteKeyFor(site.siteId, baseKey) : baseKey;
@@ -376,6 +579,26 @@ router.delete("/config", requireAuth, requireClientAdmin, denyViewers, async (re
 
   res.json({ ...DEFAULT_CONFIG });
 });
+
+/** Resolve the configured jurisdiction for a diary scope. Site-level settings
+ * take precedence over the client-level setting, matching GET /config. */
+async function resolveReheatingLimit(
+  clientId: number,
+  siteId: number | null,
+  requestedLimit?: string,
+): Promise<string> {
+  if (requestedLimit !== undefined) return requestedLimit;
+
+  const rows = await db
+    .select({ key: appSettingsTable.key, value: appSettingsTable.value })
+    .from(appSettingsTable)
+    .where(eq(appSettingsTable.clientId, clientId));
+  const clientJurisdiction = rows.find((row) => row.key === "food_jurisdiction")?.value;
+  const siteJurisdiction = siteId === null
+    ? undefined
+    : rows.find((row) => row.key === siteKeyFor(siteId, "food_jurisdiction"))?.value;
+  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction);
+}
 
 // Drizzle condition selecting the right diary scope: a specific site when
 // siteId is given, otherwise the whole-organisation diary (site_id IS NULL).
@@ -582,8 +805,10 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
 
   const data = parsed.data;
+  const fingerprint = submissionFingerprint({ siteId, data });
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
+  const reheatingLimit = await resolveReheatingLimit(clientId, siteId, data.reheatingLimit);
 
   // Check if record already exists for this date within the same diary scope.
   const [existing] = await db
@@ -592,14 +817,20 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       siteId: foodSafetyRecordsTable.siteId,
       staffRosterId: foodSafetyRecordsTable.staffRosterId,
       performedBy: foodSafetyRecordsTable.performedBy,
+      mobileSubmissionReceipts: foodSafetyRecordsTable.mobileSubmissionReceipts,
     })
     .from(foodSafetyRecordsTable)
     .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, data.recordDate), siteScopeCond(siteId)))
     .limit(1);
 
-  if (existing) return void res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+  if (existing) {
+    const receipt = findMobileReceipt(existing.mobileSubmissionReceipts, data.mobileEntryId, req.currentUser!.id);
+    if (receipt?.fingerprint === fingerprint) return res.json({ id: existing.id, deduplicated: true });
+    return res.status(409).json({ error: "Record already exists for this date", id: existing.id });
+  }
 
-  const [inserted] = await db
+  const inserted = await db.transaction(async tx => {
+  const [created] = await tx
     .insert(foodSafetyRecordsTable)
     .values({
       clientId,
@@ -614,21 +845,26 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       sousVide: data.sousVide ?? [],
       cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
       coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
-      reheatingLimit: data.reheatingLimit ?? "Above 82°C",
+      reheatingLimit,
       hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",
       correctives: data.correctives,
       managerSignature: data.managerSignature,
       performedBy: performer.performedBy,
       staffRosterId: performer.staffRosterId,
       submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
+      mobileSubmissionReceipts: data.mobileEntryId
+        ? [{ entryId: data.mobileEntryId, userId: req.currentUser!.id, fingerprint }] : [],
     })
     .onConflictDoNothing()
     .returning();
+  if (created) await recordKitchenTemperatureActions(tx, null, created, clientId, siteId, req.currentUser!.id);
+  return created;
+  });
 
   if (!inserted) {
     const [winner] = await db
-      .select({ id: foodSafetyRecordsTable.id })
+      .select({ id: foodSafetyRecordsTable.id, mobileSubmissionReceipts: foodSafetyRecordsTable.mobileSubmissionReceipts })
       .from(foodSafetyRecordsTable)
       .where(and(
         eq(foodSafetyRecordsTable.clientId, clientId),
@@ -636,6 +872,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         siteScopeCond(siteId),
       ))
       .limit(1);
+    const receipt = winner && findMobileReceipt(winner.mobileSubmissionReceipts, data.mobileEntryId, req.currentUser!.id);
+    if (receipt?.fingerprint === fingerprint) return res.json({ id: winner!.id, deduplicated: true });
     return res.status(409).json({ error: "Record already exists for this date", id: winner?.id });
   }
 
@@ -685,32 +923,56 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   };
   const rowJson = JSON.stringify(storedRow);
   const userId = (req.session as any).userId ?? null;
+  const reheatingLimit = section === "reheating"
+    ? await resolveReheatingLimit(clientId, siteId)
+    : undefined;
 
+  const outcome = await db.transaction(async tx => {
   // Ensure the day's record exists for this diary scope (ignore the race where
   // another writer creates it first), then append in a single UPDATE. The
   // ON CONFLICT target uses the matching partial unique index for the scope.
   if (siteId === null) {
-    await db.execute(sql`
-      INSERT INTO food_safety_records (client_id, record_date, created_by)
-      VALUES (${clientId}, ${recordDate}, ${userId})
-      ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
-    `);
+    if (reheatingLimit !== undefined) {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, record_date, reheating_limit, created_by)
+        VALUES (${clientId}, ${recordDate}, ${reheatingLimit}, ${userId})
+        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+      `);
+    } else {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, record_date, created_by)
+        VALUES (${clientId}, ${recordDate}, ${userId})
+        ON CONFLICT (client_id, record_date) WHERE site_id IS NULL DO NOTHING
+      `);
+    }
   } else {
-    await db.execute(sql`
-      INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
-      VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
-      ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
-    `);
+    if (reheatingLimit !== undefined) {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, site_id, record_date, reheating_limit, created_by)
+        VALUES (${clientId}, ${siteId}, ${recordDate}, ${reheatingLimit}, ${userId})
+        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+      `);
+    } else {
+      await tx.execute(sql`
+        INSERT INTO food_safety_records (client_id, site_id, record_date, created_by)
+        VALUES (${clientId}, ${siteId}, ${recordDate}, ${userId})
+        ON CONFLICT (client_id, site_id, record_date) WHERE site_id IS NOT NULL DO NOTHING
+      `);
+    }
   }
 
   const scopeCond = siteId === null ? sql`site_id IS NULL` : sql`site_id = ${siteId}`;
+  const [before] = await tx.select().from(foodSafetyRecordsTable).where(and(
+    eq(foodSafetyRecordsTable.clientId, clientId),
+    eq(foodSafetyRecordsTable.recordDate, recordDate), siteScopeCond(siteId),
+  )).for("update");
   const duplicateGuard = entryId
     ? sql`AND NOT EXISTS (
         SELECT 1 FROM jsonb_array_elements(COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb)) AS existing
         WHERE existing->>'_entryId' = ${entryId}
       )`
     : sql``;
-  const result = await db.execute(sql`
+  const result = await tx.execute(sql`
     UPDATE food_safety_records
     SET ${sql.raw(`"${column}"`)} = COALESCE(${sql.raw(`"${column}"`)}, '[]'::jsonb) || ${rowJson}::jsonb,
         updated_at = now()
@@ -720,16 +982,20 @@ router.post("/append", requireAuth, denyViewers, async (req, res) => {
   `);
   const updated = (result.rows ?? [])[0];
   if (!updated && entryId) {
-    const existingResult = await db.execute(sql`
+    const existingResult = await tx.execute(sql`
       SELECT * FROM food_safety_records
       WHERE client_id = ${clientId} AND record_date = ${recordDate} AND ${scopeCond}
       LIMIT 1
     `);
     const existing = existingResult.rows?.[0];
-    if (existing) return res.status(200).json({ ...existing, deduplicated: true });
+    if (existing) return { status: 200, record: { ...existing, deduplicated: true } };
   }
-  if (!updated) return res.status(500).json({ error: "Could not append record" });
-  res.status(201).json(updated);
+  if (!updated) throw new Error("Could not append record");
+  const [after] = await tx.select().from(foodSafetyRecordsTable).where(eq(foodSafetyRecordsTable.id, before.id));
+  await recordKitchenTemperatureActions(tx, before, after, clientId, siteId, req.currentUser!.id);
+  return { status: 201, record: updated };
+  });
+  res.status(outcome.status).json(outcome.record);
 });
 
 // PUT /api/food-safety/:id
@@ -762,6 +1028,11 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if (!parsedUpdate.success) return res.status(400).json({ error: "Invalid data" });
 
   const mobileLog = parsedUpdate.data.mobileTemperatureLog;
+  const mobileEntryId = parsedUpdate.data.mobileEntryId;
+  if (mobileEntryId && (!mobileLog || !parsedUpdate.data.mobileRecordDate)) {
+    return res.status(400).json({ error: "A mobile submission requires its original diary date and readings." });
+  }
+  const fingerprint = submissionFingerprint({ id, data: parsedUpdate.data });
   if (mobileLog) {
     const updated = await db.transaction(async (tx) => {
       const [current] = await tx
@@ -771,6 +1042,13 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
         .limit(1)
         .for("update");
       if (!current) return null;
+      if (mobileEntryId) {
+        if (parsedUpdate.data.mobileRecordDate !== current.recordDate) return { conflict: true as const };
+        const receipt = findMobileReceipt(current.mobileSubmissionReceipts, mobileEntryId, req.currentUser!.id);
+        if (receipt) {
+          return receipt.fingerprint === fingerprint ? current : { conflict: true as const };
+        }
+      }
 
       const currentCold = (current.coldFood ?? []) as Record<string, unknown>[];
       const expectedByUnit = new Map(
@@ -813,10 +1091,16 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
           cooling: append(current.cooling, mobileLog.cooling),
           reheating: append(current.reheating, mobileLog.reheating),
           ...(mobileLog.correctives !== undefined ? { correctives: mobileLog.correctives } : {}),
+          ...(mobileEntryId ? {
+            mobileSubmissionReceipts: current.mobileSubmissionReceipts.concat({
+              entryId: mobileEntryId, userId: req.currentUser!.id, fingerprint,
+            }),
+          } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
         .returning();
+      await recordKitchenTemperatureActions(tx, current, saved, clientId, current.siteId, req.currentUser!.id);
       return saved;
     });
     if (!updated) return res.status(404).json({ error: "Not found" });
@@ -828,27 +1112,80 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     return res.json(updated);
   }
 
-  const updates: any = { updatedAt: new Date() };
-  const { submittedAt, mobileTemperatureLog: _mobileTemperatureLog, ...rest } = parsedUpdate.data;
-  for (const [key, value] of Object.entries(rest)) {
-    if (value !== undefined) updates[key] = value;
-  }
-  if (submittedAt !== undefined) {
-    updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
-  }
-  const performer = await resolveStaffPerformerUpdate(clientId, parsedUpdate.data.staffRosterId, parsedUpdate.data.performedBy,
-    existing.staffRosterId, existing.performedBy);
-  if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  updates.staffRosterId = performer.staffRosterId;
-  updates.performedBy = performer.performedBy;
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(foodSafetyRecordsTable)
+      .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+      .limit(1)
+      .for("update");
+    if (!current) return { kind: "not_found" as const };
 
-  const [updated] = await db
-    .update(foodSafetyRecordsTable)
-    .set(updates)
-    .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
-    .returning();
+    const {
+      submittedAt,
+      expectedUpdatedAt,
+      expectedRecord,
+      mobileTemperatureLog: _mobileTemperatureLog,
+      mobileEntryId: _mobileEntryId,
+      mobileRecordDate: _mobileRecordDate,
+      ...rest
+    } = parsedUpdate.data;
+    const updates: Record<string, unknown> = {};
+    const stale = expectedUpdatedAt
+      && current.updatedAt.toISOString() !== new Date(expectedUpdatedAt).toISOString();
 
-  res.json(updated);
+    if (stale) {
+      if (!expectedRecord) {
+        return { kind: "conflict" as const, fields: ["record"], record: current };
+      }
+      const merged = mergeStaleDiaryUpdate(
+        current as Record<string, unknown>,
+        expectedRecord as Record<string, unknown>,
+        { ...rest, ...(submittedAt !== undefined ? { submittedAt: submittedAt ? new Date(submittedAt) : null } : {}) },
+      );
+      if (!merged.ok) return { kind: "conflict" as const, fields: merged.fields, record: current };
+      Object.assign(updates, merged.updates);
+    } else {
+      for (const [key, value] of Object.entries(rest)) {
+        if (value !== undefined) updates[key] = value;
+      }
+      if (submittedAt !== undefined) {
+        updates.submittedAt = submittedAt ? new Date(submittedAt) : null;
+      }
+    }
+
+    const performer = await resolveStaffPerformerUpdate(
+      clientId,
+      parsedUpdate.data.staffRosterId,
+      parsedUpdate.data.performedBy,
+      current.staffRosterId,
+      current.performedBy,
+    );
+    if (!performer) return { kind: "invalid_performer" as const };
+    updates.staffRosterId = performer.staffRosterId;
+    updates.performedBy = performer.performedBy;
+    updates.updatedAt = new Date();
+
+    const [updated] = await tx
+      .update(foodSafetyRecordsTable)
+      .set(updates)
+      .where(and(eq(foodSafetyRecordsTable.id, id), eq(foodSafetyRecordsTable.clientId, clientId)))
+      .returning();
+    await recordKitchenTemperatureActions(tx, current, updated, clientId, current.siteId, req.currentUser!.id);
+    return { kind: "updated" as const, record: updated };
+  });
+
+  if (result.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (result.kind === "conflict") {
+    return res.status(409).json({
+      error: "This diary changed while you were editing. Reload it and review your changes before saving again.",
+      code: "DIARY_CONFLICT",
+      fields: result.fields,
+      record: result.record,
+    });
+  }
+  if (result.kind === "invalid_performer") return res.status(400).json({ error: "Invalid staff roster member" });
+  res.json(result.record);
 });
 
 // ── Status — due/overdue per check type ───────────────────────────────────────
@@ -902,4 +1239,10 @@ router.get("/status", requireAuth, async (req, res) => {
   res.json(statuses);
 });
 
+router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (error instanceof KitchenTemperatureError) return res.status(400).json({
+    error: error.message, code: "KITCHEN_CORRECTIVE_ACTION_REQUIRED",
+  });
+  return next(error);
+});
 export default router;

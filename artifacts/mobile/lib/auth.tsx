@@ -11,6 +11,7 @@ import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import { ApiError, apiFetch, setToken } from './api';
+import { kitchenOutbox, startKitchenReplay } from './kitchenOutbox';
 import {
   clearOtherPendingIssueUploadRecovery,
   clearPendingIssueUploadRecovery,
@@ -64,12 +65,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [services, setServices] = useState<'all' | string[] | null>(null);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const authGeneration = useRef(0);
+  const activeToken = useRef<string | null>(null);
 
   const applyToken = useCallback((t: string | null) => {
+    activeToken.current = t;
+    if (t) kitchenOutbox.updateToken(t);
+    else kitchenOutbox.suspend();
     setToken(t);
     setAuthTokenGetter(t ? () => t : null);
     if (!t) queryClient.clear();
   }, [queryClient]);
+
+  useEffect(() => startKitchenReplay(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['food-safety'] });
+  }), [queryClient]);
+
+  useEffect(() => {
+    if (user?.clientId && activeToken.current) {
+      void kitchenOutbox.activate({ clientId: user.clientId, userId: user.id }, activeToken.current);
+    } else {
+      kitchenOutbox.suspend();
+    }
+    return () => kitchenOutbox.suspend();
+  }, [user]);
 
   function hasService(key: string): boolean {
     if (services === null || services === undefined) return true;
@@ -117,12 +135,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // On mount: restore token from SecureStore and validate with /api/auth/me
   useEffect(() => {
     (async () => {
+      const generation = authGeneration.current;
       try {
         const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+        if (authGeneration.current !== generation) return;
         if (stored) {
           applyToken(stored);
           await refreshSessionIfNeeded(true);
           const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
+          if (authGeneration.current !== generation) return;
           // /api/auth/me returns { user, services } or just the user object
           if (me && typeof me === 'object' && 'user' in me) {
             const full = me as MeResponse;
@@ -144,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           void registerForPushNotifications();
         }
       } catch (error: unknown) {
+        if (authGeneration.current !== generation) return;
         // Clear only a definitively invalid session. Network/server failures
         // retain the credential so foregrounding can retry later.
         if (error instanceof ApiError && error.status === 401) {
@@ -160,16 +182,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Re-check the session whenever the app returns to the foreground.
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-      void (async () => {
+    let restoring = false;
+    const restore = async () => {
+        if (restoring) return;
+        restoring = true;
+        const generation = authGeneration.current;
         try {
           const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+          if (authGeneration.current !== generation) return;
           if (!stored) return;
           applyToken(stored);
           await refreshSessionIfNeeded();
           if (!user) {
             const me = await apiFetch<MeResponse | AuthUser>('/api/auth/me');
+            if (authGeneration.current !== generation) return;
             if (me && typeof me === 'object' && 'user' in me) {
               const full = me as MeResponse;
               if (full.requires2faSetup) {
@@ -189,16 +215,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             void registerForPushNotifications();
           }
         } catch (error: unknown) {
+          if (authGeneration.current !== generation) return;
           if (!(error instanceof ApiError) || error.status !== 401) return;
           await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
           await SecureStore.deleteItemAsync(TOKEN_EXPIRY_KEY).catch(() => {});
           applyToken(null);
           setUser(null);
           setServices(null);
+        } finally {
+          restoring = false;
         }
-      })();
+    };
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void restore();
     });
-    return () => subscription.remove();
+    // An app launched without signal has no validated user yet. Recover that
+    // session after reconnection without requiring another launch or a login.
+    const timer = setInterval(() => {
+      if (!user && AppState.currentState === 'active') void restore();
+    }, 15_000);
+    return () => { subscription.remove(); clearInterval(timer); };
   }, [applyToken, refreshSessionIfNeeded, user]);
 
   const login = useCallback(
@@ -209,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       code?: string,
     ): Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }> => {
       authGeneration.current += 1;
+      kitchenOutbox.suspend();
       const res = pendingToken
         ? await apiFetch<{ token: string; expiresAt: string; user: AuthUser }>(
             '/api/auth/mobile-login/verify-totp',
@@ -266,6 +303,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     // Cancel any detached restore/refresh before the first asynchronous step.
     authGeneration.current += 1;
+    // Isolate, rather than delete, unsent readings. Only the same verified
+    // client/user can restore them; suspend before any asynchronous logout work.
+    kitchenOutbox.suspend();
     // Clear recoverable local photo references before any best-effort network
     // work, so signing out is reliable even while offline.
     await clearPendingIssueUploadRecovery().catch(() => {});

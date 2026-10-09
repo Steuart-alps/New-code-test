@@ -14,6 +14,7 @@ export interface AuthUser {
   active: boolean;
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
+  isDepartmentManager?: boolean;
 }
 
 export type PasskeyOptions = Record<string, unknown>;

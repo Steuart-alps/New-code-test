@@ -1,6 +1,7 @@
 // Integration coverage for DocTrack's upload finalization and private-object ACL.
 // Run against the API/object-storage test environment, like the other route tests.
 import assert from "node:assert/strict";
+import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -46,8 +47,11 @@ let response = await owner("POST", "/doc-track/documents/request-upload", {
   name: "tenant-policy.pdf",
   contentType: "application/pdf",
 });
+if (skipWhenStorageUnavailable(response, "DocTrack object ACL integration")) process.exit(0);
 assert.equal(response.status, 200, "request owner upload URL");
 const { uploadUrl, objectPath } = response.data;
+assert.equal(typeof uploadUrl, "string", "upload URL returned");
+assert.equal(typeof objectPath, "string", "object path returned");
 
 // A signing request reserves a name only; it does not create an object or ACL.
 response = await owner("GET", `/storage${objectPath}`);

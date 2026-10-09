@@ -3,7 +3,6 @@ import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import {
-  useGetContractor,
   useListComplianceItems,
   useSendReminderForItem
 } from "@workspace/api-client-react";
@@ -19,7 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, PriorityBadge, LiabilityBadge, DbsReviewBadge } from "@/components/badges";
 import { ExpiryBadge } from "@/components/badges";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { useAuth } from "@/context/auth-context";
 import { format } from "date-fns";
 import {
   Building, Mail, Phone, MapPin, Pencil, Trash2, ArrowLeft, Send,
@@ -118,28 +118,63 @@ export default function ContractorDetailPage() {
   const params = useParams();
   const id = parseInt(params.id || "0");
   const qc = useQueryClient();
+  const { activeClientId, user } = useAuth();
+  const canResend = user?.role === "consultant" || user?.role === "client_admin";
+  const clientApiFetch = useActiveClientApi();
 
   const [, navigate] = useLocation();
-  const { data: contractor, isLoading: loadingContractor } = useGetContractor(id);
+  const { data: contractor, isLoading: loadingContractor } = useQuery<any>({
+    queryKey: ["contractor", id, activeClientId],
+    queryFn: async () => {
+      const response = await clientApiFetch(`/contractors/${id}`);
+      if (!response.ok) throw new Error("Failed to load contractor");
+      return response.json();
+    },
+    enabled: !!id && !!activeClientId,
+  });
   const { data: items = [] } = useListComplianceItems({ contractorId: id });
 
   // Certificates
   const { data: certs = [], isLoading: loadingCerts } = useQuery<ContractorCert[]>({
-    queryKey: ["contractor-certs", id],
+    queryKey: ["contractor-certs", id, activeClientId],
     queryFn: async () => {
-      const res = await apiFetch(`/contractors/${id}/certificates`);
+      const res = await clientApiFetch(`/contractors/${id}/certificates`);
       if (!res.ok) throw new Error("Failed to load certificates");
       return res.json();
     },
-    enabled: !!id,
+    enabled: !!id && !!activeClientId,
   });
 
-  const { deleteContractor, deleteItem } = useAppMutations();
+  const { deleteItem } = useAppMutations();
+  const deleteContractor = useMutation({
+    mutationFn: async () => {
+      const response = await clientApiFetch(`/contractors/${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete contractor");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contractors"] });
+      navigate("/contractors");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
   const sendReminder = useSendReminderForItem({
     mutation: {
       onSuccess: (data: any) => toast.success(data?.message ?? "Reminder sent"),
       onError: (err: any) => toast.error(err?.message ?? "Failed to send reminder"),
     },
+  });
+  const resendReminder = useMutation({
+    mutationFn: async (itemId: number) => {
+      const response = await clientApiFetch(`/contractors/${id}/reminders/${itemId}/resend`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Unable to resend reminder");
+      return data;
+    },
+    onSuccess: data => {
+      toast.success(data.message);
+      qc.invalidateQueries({ queryKey: ["contractor-email-queue"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   const [isEditContractorOpen, setIsEditContractorOpen] = useState(false);
@@ -189,7 +224,7 @@ export default function ContractorDetailPage() {
       const url = editingCert
         ? `/contractors/${id}/certificates/${editingCert.id}`
         : `/contractors/${id}/certificates`;
-      const res = await apiFetch(url, {
+      const res = await clientApiFetch(url, {
         method: editingCert ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
@@ -205,7 +240,7 @@ export default function ContractorDetailPage() {
 
   const deleteCert = useMutation({
     mutationFn: async (certId: number) => {
-      const res = await apiFetch(`/contractors/${id}/certificates/${certId}`, { method: "DELETE" });
+      const res = await clientApiFetch(`/contractors/${id}/certificates/${certId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
     },
     onSuccess: () => {
@@ -345,9 +380,9 @@ export default function ContractorDetailPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">Time-limited certificates held by this contractor</p>
               </div>
-              <Button size="sm" onClick={openAddCert} className="shadow-sm">
+              {canResend && <Button size="sm" onClick={openAddCert} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Certificate
-              </Button>
+              </Button>}
             </div>
             <div>
               {loadingCerts ? (
@@ -375,14 +410,14 @@ export default function ContractorDetailPage() {
                             : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex justify-end gap-1">
+                          {canResend && <div className="flex justify-end gap-1">
                             <Button variant="ghost" size="icon" onClick={() => openEditCert(cert)}>
                               <Pencil className="w-3.5 h-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteCertId(cert.id)}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
-                          </div>
+                          </div>}
                         </td>
                       </tr>
                     ))}
@@ -430,8 +465,18 @@ export default function ContractorDetailPage() {
                           )}
                         </div>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                        {item.dueDate && contractor.email && (
+                      <div className="flex flex-wrap gap-2" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                        {canResend && item.notificationSentAt && item.status !== "completed" && contractor.email && (
+                          <Button variant="outline" size="sm" data-testid={`resend-reminder-${item.id}`}
+                            disabled={resendReminder.isPending}
+                            title="Queue the latest sent reminder for manager approval"
+                            onClick={() => {
+                              if (window.confirm("Queue the latest sent reminder for manager approval? Any existing calendar attachment will be included.")) resendReminder.mutate(item.id);
+                            }}>
+                            <Mail className="w-4 h-4 mr-1" /> {resendReminder.isPending ? "Queuing…" : "Resend email"}
+                          </Button>
+                        )}
+                        {canResend && item.dueDate && contractor.email && (
                           <Button variant="ghost" size="icon" title="Resend reminder" disabled={sendReminder.isPending}
                             onClick={() => sendReminder.mutate({ itemId: item.id })}>
                             <Send className="w-4 h-4" />
@@ -552,7 +597,7 @@ export default function ContractorDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { deleteContractor.mutate({ id }); window.location.href = "/contractors"; }}>
+              onClick={() => deleteContractor.mutate()}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

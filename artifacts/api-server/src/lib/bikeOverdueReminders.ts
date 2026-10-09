@@ -1,20 +1,40 @@
 /**
  * Overdue bike-hire notification job.
  *
- * Runs daily, sends the initial alert after a missed return, then a conservative
- * weekly repeat while the hire remains active. Database claims make delivery
- * safe when multiple scheduler instances run at once.
+ * Runs daily, sends the initial alert after a missed return, then repeats only
+ * at the client's configured cadence while the hire remains active. Database
+ * claims make delivery safe when multiple scheduler instances run at once.
  */
 
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { sql, type SQLWrapper } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
 
-/** A deliberately conservative cadence: an overdue hire is re-alerted weekly. */
-export const BIKE_OVERDUE_REPEAT_INTERVAL_DAYS = 7;
+const BIKE_OVERDUE_REPEAT_SETTING = "bike_overdue_repeat_interval_days";
+/** Available client-selected repeat intervals; zero means one alert only. */
+export const BIKE_OVERDUE_REPEAT_INTERVALS_DAYS = [1, 3, 7, 14] as const;
+const BIKE_OVERDUE_INTERVAL_OPTIONS = ["1", "3", "7", "14"] as const;
+
+export function parseBikeOverdueRepeatInterval(value: unknown): number | null {
+  if (value === "0") return 0;
+  if (typeof value !== "string" || !(BIKE_OVERDUE_INTERVAL_OPTIONS as readonly string[]).includes(value)) return null;
+  return Number(value);
+}
+
+function configuredRepeatDays(clientId: SQLWrapper) {
+  return sql<number>`COALESCE((
+    SELECT CASE setting.value
+      WHEN '1' THEN 1 WHEN '3' THEN 3 WHEN '7' THEN 7 WHEN '14' THEN 14
+      ELSE 0
+    END
+    FROM app_settings setting
+    WHERE setting.client_id = ${clientId} AND setting.key = ${BIKE_OVERDUE_REPEAT_SETTING}
+    LIMIT 1
+  ), 0)`;
+}
 /** An abandoned worker's claim may be retried after this lease expires. */
 const CLAIM_LEASE_MINUTES = 30;
 
@@ -71,8 +91,9 @@ export async function runBikeOverdueJob(
   const result: BikeOverdueJobResult = { hiresFound: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
   const appUrl = getPublicAppUrl();
 
-  // This merely finds candidates. The UPDATE below is the authoritative,
-  // atomic eligibility check, so concurrent jobs cannot double-send.
+  // Missing or invalid configuration means a single alert only. The UPDATE
+  // below independently rechecks cadence and active hire status under claim.
+  const candidateRepeatDays = configuredRepeatDays(sql.raw("h.client_id"));
   const overdueResult = await db.execute(sql`
     SELECT h.id, h.client_id, h.guest_name AS hirer_name, h.guest_contact AS hirer_contact,
            h.return_date_expected AS expected_return, b.ref AS bike_ref,
@@ -81,7 +102,10 @@ export async function runBikeOverdueJob(
     LEFT JOIN bikes b ON h.bike_id = b.id
     WHERE h.status = 'active' AND h.return_date_expected IS NOT NULL
       AND h.return_date_expected < CURRENT_DATE
-      AND (h.overdue_notified_at IS NULL OR h.overdue_notified_at <= now() - (${BIKE_OVERDUE_REPEAT_INTERVAL_DAYS} * interval '1 day'))
+      AND (
+        h.overdue_notified_at IS NULL OR
+        (${candidateRepeatDays} > 0 AND h.overdue_notified_at <= now() - (${candidateRepeatDays} * interval '1 day'))
+      )
     ORDER BY h.client_id, h.return_date_expected
   `);
   const hires = (overdueResult.rows ?? []) as unknown as OverdueHire[];
@@ -93,6 +117,7 @@ export async function runBikeOverdueJob(
 
   for (const [clientId, clientHires] of byClient) {
     try {
+      const repeatDays = configuredRepeatDays(sql`${clientId}`);
       // This helper both scopes users to this tenant and includes active account
       // admins plus explicitly configured operational managers.
       const { emails, userIds } = await getNotificationEmails(clientId, { includeMaintenanceManagers: true });
@@ -106,7 +131,10 @@ export async function runBikeOverdueJob(
         WHERE id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
           AND client_id = ${clientId} AND status = 'active'
           AND return_date_expected IS NOT NULL AND return_date_expected < CURRENT_DATE
-          AND (overdue_notified_at IS NULL OR overdue_notified_at <= now() - (${BIKE_OVERDUE_REPEAT_INTERVAL_DAYS} * interval '1 day'))
+          AND (
+            overdue_notified_at IS NULL OR
+            (${repeatDays} > 0 AND overdue_notified_at <= now() - (${repeatDays} * interval '1 day'))
+          )
           AND (overdue_notification_claim_token IS NULL OR overdue_notification_claimed_at < now() - (${CLAIM_LEASE_MINUTES} * interval '1 minute'))
         RETURNING id
       `);
@@ -119,6 +147,11 @@ export async function runBikeOverdueJob(
         SELECT id FROM bike_hire_records
         WHERE client_id = ${clientId} AND status = 'active'
           AND overdue_notification_claim_token = ${claimToken}
+          AND return_date_expected IS NOT NULL AND return_date_expected < CURRENT_DATE
+          AND (
+            overdue_notified_at IS NULL OR
+            (${repeatDays} > 0 AND overdue_notified_at <= now() - (${repeatDays} * interval '1 day'))
+          )
       `);
       const activeIds = new Set(((active as any).rows ?? []).map((row: any) => row.id as number));
       const toSend = clientHires.filter((h) => claimedIds.has(h.id) && activeIds.has(h.id));

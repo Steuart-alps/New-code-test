@@ -1,8 +1,6 @@
 import { Storage, File } from "@google-cloud/storage";
 import { Readable } from "stream";
 import { randomUUID } from "crypto";
-import sharp from "sharp";
-import { Worker } from "node:worker_threads";
 import {
   ObjectAclPolicy,
   ObjectPermission,
@@ -10,39 +8,78 @@ import {
   getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
+import { createDownloadToken } from "./downloadUsage";
+import {
+  MAX_RESTRICTED_UPLOAD_BYTES,
+  ObjectContentError,
+  detectIssueVideoType,
+  detectUploadType,
+  validateUploadContent,
+} from "./uploadValidation";
+import type {
+  AllowedIssueMediaType,
+  AllowedIssueVideoType,
+  AllowedUploadType,
+} from "./uploadValidation";
+
+export {
+  ObjectContentError,
+  detectIssueVideoType,
+  detectUploadType,
+  validatePdfInWorker,
+  validateUploadContent,
+} from "./uploadValidation";
+export type {
+  AllowedIssueMediaType,
+  AllowedIssueVideoType,
+  AllowedUploadType,
+} from "./uploadValidation";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+const gcsServiceAccountJson = process.env.GCS_SERVICE_ACCOUNT_JSON?.trim();
+const projectId = process.env.GCS_PROJECT_ID?.trim();
 
-// Standard Google Cloud credentials (a service-account JSON in
-// GCS_SERVICE_ACCOUNT_JSON, or GOOGLE_APPLICATION_CREDENTIALS) work on any
-// host. Without them, fall back to the Replit Object Storage sidecar.
+// Use normal Google credentials for explicit service-account/ADC settings, or
+// outside Replit where local gcloud ADC or workload identity may be available.
+// In Replit, retain the Object Storage sidecar fallback when no GCS credentials
+// are configured.
 const useStandardGcs = Boolean(
-  process.env.GCS_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS
+  gcsServiceAccountJson ||
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  projectId ||
+  !process.env.REPL_ID
 );
 
-export const objectStorageClient = useStandardGcs
-  ? new Storage(
-      process.env.GCS_SERVICE_ACCOUNT_JSON
-        ? { credentials: JSON.parse(process.env.GCS_SERVICE_ACCOUNT_JSON) }
-        : {}
-    )
-  : new Storage({
-      credentials: {
-        audience: "replit",
-        subject_token_type: "access_token",
-        token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-        type: "external_account",
-        credential_source: {
-          url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-          format: {
-            type: "json",
-            subject_token_field_name: "access_token",
-          },
+function createObjectStorageClient(): Storage {
+  if (useStandardGcs) {
+    const options: ConstructorParameters<typeof Storage>[0] = {};
+    if (projectId) options.projectId = projectId;
+    if (gcsServiceAccountJson) {
+      options.credentials = JSON.parse(gcsServiceAccountJson);
+    }
+    return new Storage(options);
+  }
+
+  return new Storage({
+    credentials: {
+      audience: "replit",
+      subject_token_type: "access_token",
+      token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+      type: "external_account",
+      credential_source: {
+        url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+        format: {
+          type: "json",
+          subject_token_field_name: "access_token",
         },
-        universe_domain: "googleapis.com",
       },
-      projectId: "",
-    });
+      universe_domain: "googleapis.com",
+    },
+    projectId: "",
+  });
+}
+
+export const objectStorageClient = createObjectStorageClient();
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -61,15 +98,6 @@ export class ObjectOwnershipError extends Error {
   }
 }
 
-/** The object is present but is not a safe member of a restricted upload set. */
-export class ObjectContentError extends Error {
-  constructor(message = "Uploaded file contents are not an allowed document type") {
-    super(message);
-    this.name = "ObjectContentError";
-    Object.setPrototypeOf(this, ObjectContentError.prototype);
-  }
-}
-
 export class ObjectGenerationError extends Error {
   constructor(message = "Uploaded object changed during validation") {
     super(message);
@@ -78,44 +106,96 @@ export class ObjectGenerationError extends Error {
   }
 }
 
-const MAX_RESTRICTED_UPLOAD_BYTES = 10 * 1024 * 1024;
-const MAX_IMAGE_DIMENSION = 12_000;
+const MAX_ISSUE_VIDEO_UPLOAD_BYTES = 250 * 1024 * 1024;
 /** The reservation namespace is part of the upload security boundary. */
 export function isTenantReservedObjectPath(objectPath: string, tenantId: number | string): boolean {
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
+}
+
+type UsageMetadataFile = Pick<File, "name" | "getMetadata">;
+
+export async function sumOwnedObjectMetadata(
+  files: UsageMetadataFile[],
+  tenantId: number | string,
+): Promise<{ usedBytes: number; objectCount: number }> {
+  const owner = String(tenantId);
+  const uniqueFiles = [...new Map(files.map((file) => [file.name, file])).values()];
+  let usedBytes = 0;
+  let objectCount = 0;
+
+  for (let offset = 0; offset < uniqueFiles.length; offset += 10) {
+    const batch = uniqueFiles.slice(offset, offset + 10);
+    const ownedSizes = await Promise.all(batch.map(async (file) => {
+      const [metadata] = await file.getMetadata();
+      const rawPolicy = metadata.metadata?.["custom:aclPolicy"];
+      if (!rawPolicy) return null;
+
+      let policy: ObjectAclPolicy;
+      try {
+        policy = JSON.parse(String(rawPolicy)) as ObjectAclPolicy;
+      } catch {
+        return null;
+      }
+      if (policy.owner !== owner || policy.visibility !== "private") return null;
+
+      const size = Number(metadata.size);
+      return Number.isSafeInteger(size) && size >= 0 ? size : null;
+    }));
+
+    for (const size of ownedSizes) {
+      if (size === null) continue;
+      if (!Number.isSafeInteger(usedBytes + size)) {
+        throw new Error("Tenant storage usage exceeds the supported range");
+      }
+      usedBytes += size;
+      objectCount += 1;
+    }
+  }
+
+  return { usedBytes, objectCount };
 }
 
 export class ObjectStorageService {
   constructor() {}
 
   getPublicObjectSearchPaths(): Array<string> {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
-    const paths = Array.from(
-      new Set(
-        pathsStr
-          .split(",")
-          .map((path) => path.trim())
-          .filter((path) => path.length > 0)
-      )
-    );
-    if (paths.length === 0) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
+    const configuredPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS?.trim();
+    if (configuredPaths) {
+      const paths = Array.from(
+        new Set(
+          configuredPaths
+            .split(",")
+            .map((path) => path.trim())
+            .filter((path) => path.length > 0),
+        ),
       );
+      if (paths.length === 0) {
+        throw new Error("PUBLIC_OBJECT_SEARCH_PATHS must contain at least one non-empty path");
+      }
+      return paths;
+    }
+
+    const bucket = getConfiguredBucket("public");
+    const prefixes = (process.env.GCS_PUBLIC_PREFIXES || "public")
+      .split(",")
+      .map(normalizePrefix)
+      .filter((prefix) => prefix.length > 0);
+    const paths = Array.from(new Set(prefixes.map((prefix) => `/${bucket}/${prefix}`)));
+    if (paths.length === 0) {
+      throw new Error("GCS_PUBLIC_PREFIXES must contain at least one non-empty prefix");
     }
     return paths;
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
+    const configuredDir = process.env.PRIVATE_OBJECT_DIR?.trim();
+    if (configuredDir) {
+      return configuredDir;
     }
-    return dir;
+
+    const bucket = getConfiguredBucket("private");
+    const prefix = normalizePrefix(process.env.GCS_PRIVATE_PREFIX || "private");
+    return prefix ? `/${bucket}/${prefix}` : `/${bucket}`;
   }
 
   async searchPublicObject(filePath: string): Promise<File | null> {
@@ -135,12 +215,12 @@ export class ObjectStorageService {
     return null;
   }
 
-  async downloadObject(file: File, cacheTtlSec: number = 3600): Promise<Response> {
+  async downloadObject(file: File, cacheTtlSec: number = 3600, byteRange?: { start: number; end: number }): Promise<Response> {
     const [metadata] = await file.getMetadata();
     const aclPolicy = await getObjectAclPolicy(file);
     const isPublic = aclPolicy?.visibility === "public";
 
-    const nodeStream = file.createReadStream();
+    const nodeStream = file.createReadStream(byteRange ? { start: byteRange.start, end: byteRange.end } : undefined);
     const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
     const headers: Record<string, string> = {
@@ -148,24 +228,77 @@ export class ObjectStorageService {
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
     };
     if (metadata.size) {
-      headers["Content-Length"] = String(metadata.size);
+      const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);
+      headers["Content-Length"] = String(length);
+      if (byteRange) {
+        headers["Content-Range"] = `bytes ${byteRange.start}-${byteRange.end}/${metadata.size}`;
+      }
     }
 
-    return new Response(webStream, { headers });
+    return new Response(webStream, { status: byteRange ? 206 : 200, headers });
   }
 
-  async getObjectEntityUploadURL(tenantId?: number | string, contentType?: string): Promise<string> {
-    const privateObjectDir = this.getPrivateObjectDir();
-    if (!privateObjectDir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
+  /**
+   * Sum authoritative provider-reported sizes for finalised private objects
+   * owned by one tenant. ACL metadata is the ownership source of truth: request
+   * sizes and attachment-table metadata can be missing or client supplied.
+   */
+  async getTenantStorageUsage(tenantId: number | string, referencedPaths: string[] = []): Promise<{
+    usedBytes: number;
+    objectCount: number;
+  }> {
+    if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_FAKE_USAGE === "1") {
+      const syntheticBytes = Number(tenantId);
+      if (!Number.isSafeInteger(syntheticBytes) || syntheticBytes < 0) {
+        throw new Error("Test tenant ID cannot be represented as storage usage");
+      }
+      return { usedBytes: syntheticBytes, objectCount: 1 };
     }
+    const { bucketName, objectName: privatePrefix } = parseObjectPath(this.getPrivateObjectDir());
+    const root = privatePrefix.replace(/\/$/, "");
+    const bucket = objectStorageClient.bucket(bucketName);
+    const tenantPrefixes = [
+      `${root}/uploads/tenant-${tenantId}/`,
+      `${root}/finalized/tenant-${tenantId}/`,
+    ];
+    const listings = await Promise.all(
+      tenantPrefixes.map((prefix) => bucket.getFiles({ prefix })),
+    );
+    const tenantFiles = listings.flatMap(([files]) => files);
+    const tenantPrefixSet = tenantPrefixes.map((prefix) => `/objects/${prefix.slice(root.length + 1)}`);
+    const legacyFiles = await Promise.all(referencedPaths
+      .filter((objectPath) => !tenantPrefixSet.some((prefix) => objectPath.startsWith(prefix)))
+      .map(async (objectPath) => {
+        try {
+          return await this.getObjectEntityFile(objectPath);
+        } catch (error) {
+          if (error instanceof ObjectNotFoundError) return null;
+          throw error;
+        }
+      }));
+
+    return sumOwnedObjectMetadata(
+      [...tenantFiles, ...legacyFiles.filter((file): file is File => file !== null)],
+      tenantId,
+    );
+  }
+
+  async getObjectEntityUploadURL(
+    tenantId?: number | string,
+    contentType?: string,
+    fileExtension = "",
+  ): Promise<string> {
+    if (process.env.NODE_ENV === "test" && process.env.OBJECT_STORAGE_TEST_SIGNING_FAILURE === "1") {
+      throw new Error("TEST_ONLY_PROVIDER_CREDENTIAL_SECRET bucket-internal-name");
+    }
+    if (fileExtension && !/^\.[a-z0-9]{1,10}$/i.test(fileExtension)) {
+      throw new Error("Invalid upload file extension");
+    }
+    const privateObjectDir = this.getPrivateObjectDir();
 
     const objectId = randomUUID();
     const tenantSegment = tenantId === undefined ? "" : `/tenant-${tenantId}`;
-    const fullPath = `${privateObjectDir}/uploads${tenantSegment}/${objectId}`;
+    const fullPath = `${privateObjectDir}/uploads${tenantSegment}/${objectId}${fileExtension.toLowerCase()}`;
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
 
@@ -328,13 +461,17 @@ export class ObjectStorageService {
     if (bytes.length !== size) throw new ObjectGenerationError("Uploaded object size changed during validation");
     const validated = await validateUploadContent(bytes, allowed);
     const contentType = validated.contentType;
-    if (pinnedMetadata.contentType && pinnedMetadata.contentType !== contentType) {
+    const declaredType = String(pinnedMetadata.contentType ?? "").toLowerCase();
+    const heifInputTypes = new Set(["image/heic", "image/heif"]);
+    const matchingDeclaredType = declaredType === validated.sourceContentType
+      || (heifInputTypes.has(declaredType) && heifInputTypes.has(validated.sourceContentType));
+    if (declaredType && !matchingDeclaredType) {
       throw new ObjectContentError("Uploaded object does not match its content type");
     }
 
     const privateDir = this.getPrivateObjectDir().replace(/\/$/, "");
     const { bucketName, objectName } = parseObjectPath(
-      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}`,
+      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}${uploadTypeExtension(contentType)}`,
     );
     const destination = objectStorageClient.bucket(bucketName).file(objectName);
     try {
@@ -378,6 +515,88 @@ export class ObjectStorageService {
   }
 
   /**
+   * Secure FixTrack media uploads. Images use the existing bounded decoder and
+   * normalization path; videos are signature-checked and copied from one pinned
+   * generation to a fresh immutable tenant key.
+   */
+  async finalizeVerifiedIssueMediaUpload(
+    objectPath: string,
+    tenantId: number | string,
+  ): Promise<{ objectPath: string; contentType: AllowedIssueMediaType }> {
+    const normalizedPath = this.normalizeObjectEntityPath(objectPath);
+    if (!isTenantReservedObjectPath(normalizedPath, tenantId)) {
+      throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+    }
+
+    const staging = await this.getObjectEntityFile(normalizedPath);
+    const [metadata] = await staging.getMetadata();
+    const contentType = String(metadata.contentType ?? "").toLowerCase() as AllowedIssueMediaType;
+    const imageTypes = new Set<AllowedUploadType>([
+      "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif",
+    ]);
+    if (contentType.startsWith("image/") && imageTypes.has(contentType as AllowedUploadType)) {
+      return this.finalizeVerifiedTenantUpload(normalizedPath, tenantId, imageTypes);
+    }
+
+    const videoTypes = new Set<AllowedIssueVideoType>(["video/mp4", "video/quicktime", "video/webm"]);
+    if (!videoTypes.has(contentType as AllowedIssueVideoType)) {
+      throw new ObjectContentError("Choose a JPEG, PNG, WebP, MP4, MOV, or WebM file");
+    }
+
+    const generation = String(metadata.generation ?? "");
+    const metageneration = String(metadata.metageneration ?? "");
+    const size = Number(metadata.size);
+    if (!generation || !metageneration || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ISSUE_VIDEO_UPLOAD_BYTES) {
+      throw new ObjectContentError(`Video must be between 1 byte and ${MAX_ISSUE_VIDEO_UPLOAD_BYTES} bytes`);
+    }
+
+    const pinned = staging.bucket.file(staging.name, {
+      generation,
+      preconditionOpts: {
+        ifGenerationMatch: generation,
+        ifMetagenerationMatch: metageneration,
+      },
+    });
+    const [pinnedMetadata] = await pinned.getMetadata();
+    if (String(pinnedMetadata.generation) !== generation || String(pinnedMetadata.metageneration) !== metageneration) {
+      throw new ObjectGenerationError();
+    }
+    const [prefix] = await pinned.download({ start: 0, end: 8191 });
+    if (detectIssueVideoType(prefix) !== contentType) {
+      throw new ObjectContentError("Video contents do not match their declared format");
+    }
+
+    const privateDir = this.getPrivateObjectDir().replace(/\/$/, "");
+    const { bucketName, objectName } = parseObjectPath(
+      `${privateDir}/finalized/tenant-${tenantId}/${randomUUID()}${uploadTypeExtension(contentType)}`,
+    );
+    const destination = objectStorageClient.bucket(bucketName).file(objectName);
+    try {
+      await pinned.copy(destination, { preconditionOpts: { ifGenerationMatch: 0 } });
+    } catch (error: any) {
+      if (error?.code === 409 || error?.code === 412) throw new ObjectGenerationError();
+      throw error;
+    }
+
+    const finalPath = this.normalizeObjectEntityPath(
+      `https://storage.googleapis.com/${bucketName}/${objectName}`,
+    );
+    const [destinationMetadata] = await destination.getMetadata();
+    await destination.setMetadata(
+      { contentType },
+      {
+        preconditionOpts: {
+          ifGenerationMatch: destinationMetadata.generation,
+          ifMetagenerationMatch: destinationMetadata.metageneration,
+        },
+      },
+    );
+    await this.setTenantObjectAcl(finalPath, tenantId);
+    await pinned.delete({ ignoreNotFound: true }).catch(() => {});
+    return { objectPath: finalPath, contentType };
+  }
+
+  /**
    * Backfills an ACL for a pre-tenant-namespace object. Callers may use this
    * only after establishing ownership from a tenant-scoped DB row; it never
    * overwrites an existing owner's ACL.
@@ -413,7 +632,12 @@ export class ObjectStorageService {
    * getObjectEntityUploadURL / normalizeObjectEntityPath.
    * objectPath must start with /objects/  (e.g. /objects/uploads/<uuid>).
    */
-  async getSignedDownloadURL(objectPath: string, ttlSec = 900, allowedTypes?: ReadonlySet<AllowedUploadType>): Promise<string> {
+  async getSignedDownloadURL(
+    objectPath: string,
+    ttlSec = 900,
+    allowedTypes?: ReadonlySet<AllowedUploadType>,
+    expectedTenantId?: number | string,
+  ): Promise<string> {
     // Resolve through getObjectEntityFile so callers cannot get a signed URL
     // for a nonexistent private object.
     const objectFile = await this.getObjectEntityFile(objectPath);
@@ -426,12 +650,26 @@ export class ObjectStorageService {
       const [bytes] = await objectFile.download({ validation: "crc32c" });
       await validateUploadContent(bytes, allowedTypes);
     }
-    return signObjectURL({
-      bucketName: objectFile.bucket.name,
-      objectName: objectFile.name,
-      method: "GET",
-      ttlSec,
-    });
+    const acl = await getObjectAclPolicy(objectFile);
+    const clientId = Number(acl?.owner);
+    if (acl?.visibility !== "private" || !Number.isSafeInteger(clientId) || clientId <= 0) {
+      throw new ObjectOwnershipError("Private object has no tenant owner");
+    }
+    if (expectedTenantId !== undefined && acl.owner !== String(expectedTenantId)) {
+      throw new ObjectOwnershipError("Object does not belong to the record's tenant");
+    }
+    return createDownloadToken(objectPath, clientId, ttlSec);
+  }
+
+  /** Require the stored object ACL owner to match the tenant on its DB record. */
+  async assertTenantObjectOwnership(
+    objectFile: File,
+    tenantId: number | string,
+  ): Promise<void> {
+    const acl = await getObjectAclPolicy(objectFile);
+    if (acl?.visibility !== "private" || acl.owner !== String(tenantId)) {
+      throw new ObjectOwnershipError("Object does not belong to the record's tenant");
+    }
   }
 
   async canAccessObjectEntity({
@@ -483,24 +721,23 @@ async function signObjectURL({
   objectName: string;
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
-  /** Bound into PUT signature by the storage sidecar when provided. */
+  /** Bound into a GCS V4 PUT signature when provided. */
   contentType?: string;
 }): Promise<string> {
   if (useStandardGcs) {
-    if (method === "HEAD") {
-      throw new Error("HEAD signed URLs are not supported with standard GCS credentials");
-    }
-    const [url] = await objectStorageClient
+    const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+    const [signedUrl] = await objectStorageClient
       .bucket(bucketName)
       .file(objectName)
       .getSignedUrl({
         version: "v4",
-        action: method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read",
+        action,
         expires: Date.now() + ttlSec * 1000,
         ...(method === "PUT" && contentType ? { contentType } : {}),
       });
-    return url;
+    return signedUrl;
   }
+
   const request = {
     bucket_name: bucketName,
     object_name: objectName,
@@ -521,152 +758,41 @@ async function signObjectURL({
   );
   if (!response.ok) {
     throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `Failed to sign object URL, errorcode: ${response.status}, make sure you're running on Replit`
     );
   }
-
   const json = await response.json() as { signed_url: string };
   return json.signed_url;
 }
 
-export type AllowedUploadType = "application/pdf" | "image/jpeg" | "image/png";
-
-
-/** Magic-byte/format checks intentionally do not trust filename or MIME. */
-export function detectUploadType(bytes: Buffer): AllowedUploadType | null {
-  // PDF requires a conforming header. %%EOF cannot reliably be in a bounded
-  // prefix, but this rejects arbitrary bytes merely prefixed with "%PDF-".
-  if (bytes.length >= 9 && /^%PDF-[12]\.\d(?:\r?\n|[\x20\t])/.test(bytes.subarray(0, 10).toString("ascii"))) return "application/pdf";
-  // JPEG: SOI, a legal non-standalone marker, and a complete first marker
-  // segment contained in our bounded read. This is enough structural evidence
-  // to reject MIME-spoofed arbitrary byte streams without loading the file.
-  if (bytes.length >= 8 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    const marker = bytes[3];
-    const segmentLength = bytes.readUInt16BE(4);
-    if (marker >= 0xc0 && marker <= 0xfe && marker !== 0xd8 && marker !== 0xd9 && marker !== 0xff
-      && segmentLength >= 2 && segmentLength + 4 <= bytes.length) return "image/jpeg";
+function getConfiguredBucket(kind: "private" | "public"): string {
+  const bucket = (
+    kind === "private" ? process.env.GCS_PRIVATE_BUCKET : process.env.GCS_PUBLIC_BUCKET
+  )?.trim() || process.env.GCS_BUCKET_NAME?.trim();
+  if (!bucket) {
+    throw new Error(
+      `GCS_${kind === "private" ? "PRIVATE" : "PUBLIC"}_BUCKET or GCS_BUCKET_NAME must be configured`,
+    );
   }
-  // PNG signature plus mandatory first IHDR chunk (length=13, type=IHDR).
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (bytes.length >= 24 && png.every((byte, index) => bytes[index] === byte)
-    && bytes.readUInt32BE(8) === 13 && bytes.subarray(12, 16).toString("ascii") === "IHDR"
-    && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0) return "image/png";
-  return null;
+  return bucket;
 }
 
-export async function validateUploadContent(
-  bytes: Buffer,
-  allowed: ReadonlySet<AllowedUploadType>,
-): Promise<{ contentType: AllowedUploadType; normalizedBytes?: Buffer }> {
-  if (bytes.length <= 0 || bytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("File size is not allowed");
-  const type = detectUploadType(bytes);
-  if (!type || !allowed.has(type)) throw new ObjectContentError();
-  try {
-    if (type === "application/pdf") {
-      await validatePdf(bytes);
-      return { contentType: type };
-    }
-    if (type === "image/png") validatePngChunkChecksums(bytes);
-    const image = sharp(bytes, {
-      // libvips reports checksum/decompression damage as warnings for some PNG
-      // chunks. Treat warnings as fatal so a successful re-encode cannot mask
-      // corruption in attacker-supplied input.
-      failOn: "warning",
-      limitInputPixels: MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION,
-      pages: 1,
-      sequentialRead: true,
-    });
-    const metadata = await image.metadata();
-    if (metadata.format !== (type === "image/jpeg" ? "jpeg" : "png")
-      || metadata.pages && metadata.pages !== 1
-      || !metadata.width || !metadata.height
-      || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION) {
-      throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
-    }
-    // Full decode is forced by re-encoding, unlike metadata-only inspection.
-    const normalizedBytes = type === "image/jpeg"
-      ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
-      : await image.rotate().png({ compressionLevel: 9 }).toBuffer();
-    if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
-    return { contentType: type, normalizedBytes };
-  } catch (error) {
-    if (error instanceof ObjectContentError) throw error;
-    throw new ObjectContentError(type === "application/pdf" ? "PDF structure is invalid" : "Image data is invalid");
-  }
+function normalizePrefix(prefix: string): string {
+  return prefix.trim().replace(/^\/+|\/+$/g, "");
 }
 
-function validatePngChunkChecksums(bytes: Buffer): void {
-  let offset = 8;
-  let chunkIndex = 0;
-  while (offset + 12 <= bytes.length) {
-    const length = bytes.readUInt32BE(offset);
-    const chunkEnd = offset + 12 + length;
-    if (chunkEnd > bytes.length) throw new ObjectContentError("PNG chunk is truncated");
-    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
-    if (chunkIndex === 0 && (type !== "IHDR" || length !== 13)) {
-      throw new ObjectContentError("PNG header is invalid");
-    }
-    const expected = bytes.readUInt32BE(offset + 8 + length);
-    const actual = crc32(bytes.subarray(offset + 4, offset + 8 + length));
-    if (actual !== expected) throw new ObjectContentError("PNG checksum is invalid");
-    offset = chunkEnd;
-    chunkIndex++;
-    if (type === "IEND") {
-      if (length !== 0) throw new ObjectContentError("PNG end chunk is invalid");
-      return; // Deliberately allow trailing data; normalized output strips it.
-    }
-  }
-  throw new ObjectContentError("PNG end chunk is missing");
-}
-
-function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-async function validatePdf(bytes: Buffer) {
-  await validatePdfInWorker(bytes);
-}
-
-export async function validatePdfInWorker(
-  bytes: Buffer,
-  options: { timeoutMs?: number; testMode?: "timeout" | "oom" } = {},
-): Promise<void> {
-  const timeoutMs = Math.max(50, Math.min(options.timeoutMs ?? 4_000, 10_000));
-  const workerUrl = new URL("./pdf-validation-worker.mjs", import.meta.url);
-  await new Promise<void>((resolve, reject) => {
-    const worker = new Worker(workerUrl, {
-      workerData: { bytes: new Uint8Array(bytes), testMode: options.testMode },
-      resourceLimits: {
-        maxOldGenerationSizeMb: 64,
-        maxYoungGenerationSizeMb: 16,
-        stackSizeMb: 2,
-      },
-    });
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void worker.terminate();
-      error ? reject(new ObjectContentError(error.message)) : resolve();
-    };
-    const timer = setTimeout(() => finish(new Error("PDF validation timed out")), timeoutMs);
-    worker.once("message", (message: { ok?: boolean; error?: string }) =>
-      message.ok ? finish() : finish(new Error(message.error || "PDF validation failed")));
-    worker.once("error", (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      finish(new Error(`PDF validation worker failed: ${message}`));
-    });
-    worker.once("exit", (code) => {
-      if (!settled) finish(new Error(`PDF validation worker exited unexpectedly (${code})`));
-    });
-  });
+function uploadTypeExtension(contentType: AllowedIssueMediaType): string {
+  const extensions: Record<AllowedIssueMediaType, string> = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "image/avif": ".avif",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+  };
+  return extensions[contentType];
 }

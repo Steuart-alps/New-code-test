@@ -1,6 +1,12 @@
 // End-to-end coverage for DocTrack's current acknowledgement status and the
 // Pest Control PAT preset's tenant-scoped template API.
+import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
+import { skipWhenStorageUnavailable } from "./storage-test-availability.mjs";
+
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const execFile = promisify(execFileCallback);
 let cookie = "";
 let failures = 0;
 
@@ -66,6 +72,83 @@ async function main() {
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   check("manager has client context", clientId != null);
 
+  const allowedOrigin = "http://localhost:5173";
+  const allowedPreflight = await fetch(`${BASE}/sites`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: allowedOrigin,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  check("CORS permits the exact configured origin",
+    allowedPreflight.headers.get("access-control-allow-origin") === allowedOrigin);
+  const foreignOrigin = "http://localhost:5173.attacker.invalid";
+  const blockedPreflight = await fetch(`${BASE}/sites`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: foreignOrigin,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  check("CORS does not accept an origin that only shares a hostname prefix",
+    blockedPreflight.headers.get("access-control-allow-origin") !== foreignOrigin);
+
+  const issueSignOff = () => request("POST", "/doc-track/sign-off-info");
+  const signOffCreated = await issueSignOff();
+  requireSuccess("manager creates an expiring sign-off link", signOffCreated, 201);
+  const firstSignOffToken = signOffCreated.data?.token;
+  check("sign-off token has high entropy", /^[a-f0-9]{64}$/.test(firstSignOffToken ?? ""));
+  check("sign-off link expires in the future", new Date(signOffCreated.data?.expiresAt).getTime() > Date.now());
+  const publicInfo = await request("GET", `/sign-off/${firstSignOffToken}/info`);
+  requireSuccess("active sign-off token resolves with the manager's session cookie", publicInfo, 200);
+
+  const fingerprint = createHash("sha256").update(firstSignOffToken).digest("hex");
+  const evidence = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT count(*) FROM public_link_access_evidence WHERE client_id=${Number(clientId)} AND link_type='sign_off' AND token_fingerprint='${fingerprint}'`,
+  ]);
+  check("valid public sign-off access leaves a hashed access-evidence row",
+    Number(evidence.stdout.trim()) >= 1, evidence.stdout.trim());
+
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `UPDATE clients SET sign_off_token_expires_at=now()-interval '1 minute' WHERE id=${Number(clientId)} AND sign_off_token='${firstSignOffToken}'`,
+  ]);
+  check("expired sign-off token is rejected",
+    (await request("GET", `/sign-off/${firstSignOffToken}/info`)).status === 404);
+
+  const renewedSignOff = await issueSignOff();
+  requireSuccess("manager can renew an expired sign-off link", renewedSignOff, 201);
+  check("renewal rotates the bearer token", renewedSignOff.data?.token !== firstSignOffToken);
+  check("replaced token is invalid immediately",
+    (await request("GET", `/sign-off/${firstSignOffToken}/info`)).status === 404);
+  requireSuccess("renewed token resolves", await request("GET", `/sign-off/${renewedSignOff.data?.token}/info`), 200);
+
+  const rateLimitLink = await issueSignOff();
+  requireSuccess("manager can rotate a sign-off link again", rateLimitLink, 201);
+  let rateLimitRequestsPassed = true;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const attemptResponse = await request("GET", `/sign-off/${rateLimitLink.data?.token}/info`);
+    if (attemptResponse.status !== 200) rateLimitRequestsPassed = false;
+  }
+  check("public sign-off link permits requests up to its per-token limit", rateLimitRequestsPassed);
+  check("public sign-off link is rate-limited after 60 requests",
+    (await request("GET", `/sign-off/${rateLimitLink.data?.token}/info`)).status === 429);
+
+  const finalSignOff = await issueSignOff();
+  requireSuccess("manager can renew after a rate-limited token", finalSignOff, 201);
+  const rotatedTokenLookup = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `SELECT count(*) FROM clients WHERE id=${Number(clientId)} AND sign_off_token='${rateLimitLink.data?.token}'`,
+  ]);
+  check("rotation replaces the prior bearer token",
+    Number(rotatedTokenLookup.stdout.trim()) === 0);
+  requireSuccess("manager revokes the renewed link", await request("DELETE", "/doc-track/sign-off-info"), 204);
+  check("revoked sign-off token is rejected",
+    (await request("GET", `/sign-off/${finalSignOff.data?.token}/info`)).status === 404);
+
   const kitchenDepartment = await request("POST", "/departments", { name: "Kitchen" });
   requireSuccess("create Kitchen department", kitchenDepartment, 201);
   const primarySite = await request("POST", "/sites", {
@@ -76,6 +159,12 @@ async function main() {
     name: "DocTrack other site", departmentId: kitchenDepartment.data?.id,
   });
   requireSuccess("create other site", otherSite, 201);
+  const otherDepartment = await request("POST", "/departments", { name: "DocTrack other department" });
+  requireSuccess("create other department", otherDepartment, 201);
+  const otherDepartmentSite = await request("POST", "/sites", {
+    name: "DocTrack other department site", departmentId: otherDepartment.data?.id,
+  });
+  requireSuccess("create other department site", otherDepartmentSite, 201);
   const staff = await request("POST", "/staff-roster", {
     name: "Alex Staff", email: `doc-active-${Date.now()}@test.local`,
     siteId: primarySite.data?.id, department: "Kitchen",
@@ -96,11 +185,86 @@ async function main() {
     siteId: primarySite.data?.id, department: "Housekeeping",
   });
   requireSuccess("create other-department roster staff", otherDepartmentStaff, 201);
+
+  // This fixture does not depend on object storage, so personal-signoff
+  // regressions still run in environments where upload signing is unavailable.
+  const staffEmail = staff.data?.email;
+  requireSuccess("create linked staff account", await request("POST", "/users", {
+    name: "A different account display name", email: staffEmail,
+    password: "password-123", role: "client_staff", clientId,
+    departmentId: kitchenDepartment.data?.id,
+  }), 201);
+  const fixtureResult = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement,department)
+     VALUES (${Number(clientId)},${Number(primarySite.data?.id)},'Staff signoff fixture','policy','fixture.pdf','application/pdf','fixtures/staff-signoff.pdf',true,true,'Kitchen')
+     RETURNING id`,
+  ]);
+  const fixtureId = Number(fixtureResult.stdout.trim().split("\n")[0]);
+  check("fixture document inserted", Number.isInteger(fixtureId) && fixtureId > 0);
+  cookie = "";
+  requireSuccess("log in linked staff", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  let personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("personal list shows only eligible pending documents, despite a different display name",
+    personal.status === 200 && personal.data?.rosterLinked === true
+      && personal.data?.pending?.some((d) => d.id === fixtureId));
+  const signed = await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, {
+    self: true, signature: "Typed signature", staffRosterId: otherSiteStaff.data?.id,
+    staffName: "Forged name",
+  });
+  check("self sign-off cannot impersonate another roster entry",
+    signed.status === 201 && signed.data?.created === 1
+      && signed.data?.records?.[0]?.staff_roster_id === staff.data?.id);
+  check("repeat self sign-off is idempotent",
+    (await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, { self: true })).data?.created === 0);
+  personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("completed list contains the acknowledgement date",
+    personal.data?.pending?.every((d) => d.id !== fixtureId)
+      && !!personal.data?.completed?.find((d) => d.id === fixtureId)?.acknowledged_at);
+  cookie = managerCookie;
+  const managerList = await request("GET", "/doc-track/documents");
+  check("manager acknowledgement totals use the self sign-off evidence",
+    Number(managerList.data?.find((d) => d.id === fixtureId)?.acknowledged_count) === 1);
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `UPDATE train_track_records SET expiry_date=CURRENT_DATE-1
+     WHERE id=${Number(signed.data?.records?.[0]?.train_track_record_id)}`,
+  ]);
+  cookie = "";
+  requireSuccess("log in linked staff after expiry", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  personal = await request("GET", "/doc-track/acknowledgements/my");
+  check("expired annual sign-off returns to the pending list",
+    personal.data?.pending?.some((d) => d.id === fixtureId));
+  const renewedFixture = await request("POST", `/doc-track/documents/${fixtureId}/acknowledge`, { self: true });
+  check("staff can renew an expired annual acknowledgement",
+    renewedFixture.status === 201 && renewedFixture.data?.created === 1);
+  cookie = managerCookie;
+  check("manager without a matching roster sees an unlinked personal view",
+    (await request("GET", "/doc-track/acknowledgements/my")).data?.rosterLinked === false);
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `DELETE FROM doc_track_documents WHERE id=${fixtureId} AND client_id=${Number(clientId)};
+     DELETE FROM train_track_records WHERE id IN
+       (${Number(signed.data?.records?.[0]?.train_track_record_id)},
+        ${Number(renewedFixture.data?.records?.[0]?.train_track_record_id)}) AND client_id=${Number(clientId)}`,
+  ]);
+
   const uploadRequest = await request("POST", "/doc-track/documents/request-upload", {
     name: "annual-safety-policy.pdf",
     contentType: "application/pdf",
   });
+  if (skipWhenStorageUnavailable(uploadRequest, "DocTrack sign-off integration")) return;
   requireSuccess("request document upload", uploadRequest, 200);
+  check("document upload URL is returned", typeof uploadRequest.data?.uploadUrl === "string");
+  check("document object path is returned", typeof uploadRequest.data?.objectPath === "string");
+  if (typeof uploadRequest.data?.uploadUrl !== "string" || typeof uploadRequest.data?.objectPath !== "string") {
+    throw new Error("request document upload returned an invalid payload");
+  }
   const uploaded = await fetch(uploadRequest.data.uploadUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/pdf" },
@@ -150,6 +314,9 @@ async function main() {
     }), 200);
     check(`${label} staff self acknowledgement is denied`,
       (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "forged" })).status === 403);
+    const privateList = await request("GET", "/doc-track/acknowledgements/my");
+    check(`${label} staff cannot see an ineligible document in their personal list`,
+      privateList.status === 200 && !privateList.data?.pending?.some((item) => item.id === document.data?.id));
     cookie = managerCookie;
   }
 
@@ -210,10 +377,31 @@ async function main() {
   let overviewRow = overview.data?.documents?.find((item) => item.id === document.data?.id);
   check("expired annual sign-off appears outstanding", overviewRow?.outstanding?.some((item) => item.id === staff.data?.id));
 
+  cookie = "";
+  requireSuccess("log in linked staff", await request("POST", "/auth/login", {
+    email: staffEmail, password: "password-123",
+  }), 200);
+  const pendingMine = await request("GET", "/doc-track/acknowledgements/my");
+  check("personal list shows only the expired in-scope annual document",
+    pendingMine.status === 200 && pendingMine.data?.rosterLinked === true
+      && pendingMine.data?.pending?.some((item) => item.id === document.data?.id)
+      && !pendingMine.data?.completed?.some((item) => item.id === document.data?.id));
   const renewed = await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
-    acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "Alex Staff" }],
+    self: true, signature: "Typed staff signature", staffRosterId: otherSiteStaff.data?.id,
+    staffName: "Forged name",
   });
-  check("renew expired annual acknowledgement", renewed.status === 201 && renewed.data?.created === 1);
+  check("linked staff renews only their own expired acknowledgement", renewed.status === 201 && renewed.data?.created === 1
+    && renewed.data.records[0]?.staff_roster_id === staff.data?.id);
+  const completedMine = await request("GET", "/doc-track/acknowledgements/my");
+  check("renewal moves document to completed with its acknowledgement date",
+    completedMine.status === 200
+      && !completedMine.data?.pending?.some((item) => item.id === document.data?.id)
+      && !!completedMine.data?.completed?.find((item) => item.id === document.data?.id)?.acknowledged_at);
+  check("repeat self sign-off is idempotent",
+    (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { self: true })).data?.created === 0);
+  cookie = managerCookie;
+  check("manager without a linked roster sees no personal records",
+    (await request("GET", "/doc-track/acknowledgements/my")).data?.rosterLinked === false);
   check(
     "renewal creates a replacement TrainTrack sign-off",
     typeof renewed.data?.records?.[0]?.train_track_record_id === "number"
@@ -235,24 +423,61 @@ async function main() {
   const pdfText = managerExport.bytes?.toString() ?? "";
   check("PDF contains document and acknowledged staff", pdfText.includes("Annual safety policy") && pdfText.includes("Alex Staff"));
 
-  const staffEmail = `doc-export-staff-${Date.now()}@test.local`;
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement,department)
+     VALUES (${Number(clientId)},${Number(primarySite.data?.id)},'Combined register outstanding fixture','procedure','combined.pdf','application/pdf','fixtures/combined-register.pdf',true,false,'Kitchen')`,
+  ]);
+  const combinedExport = await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`);
+  check("manager can export a combined acknowledgement PDF",
+    combinedExport.status === 200 && combinedExport.contentType === "application/pdf"
+      && combinedExport.disposition?.includes('filename="document-acknowledgement-register.pdf"')
+      && combinedExport.bytes?.subarray(0, 8).toString() === "%PDF-1.4");
+  const combinedPdfText = combinedExport.bytes?.toString() ?? "";
+  check("combined PDF contains separate sections for each required document",
+    combinedPdfText.includes("Annual safety policy")
+      && combinedPdfText.includes("Staff signoff fixture")
+      && combinedPdfText.includes("Combined register outstanding fixture"));
+  check("each register section includes its category and acknowledgement date range",
+    combinedPdfText.includes("Category: policy")
+      && combinedPdfText.includes("Category: procedure")
+      && combinedPdfText.includes("Acknowledgement date range:")
+      && combinedPdfText.includes("No acknowledgements recorded"));
+  const outstandingSectionStart = combinedPdfText.indexOf("Combined register outstanding fixture");
+  const nextSectionStart = combinedPdfText.indexOf("Section ", outstandingSectionStart + 1);
+  const outstandingSection = combinedPdfText.slice(
+    outstandingSectionStart,
+    nextSectionStart === -1 ? undefined : nextSectionStart,
+  );
+  check("combined register separates acknowledged and outstanding staff per document",
+    outstandingSection.includes("Alex Staff") && outstandingSection.includes("Outstanding")
+      && !outstandingSection.includes("Other Site Staff")
+      && !outstandingSection.includes("Other Department Staff")
+      && !outstandingSection.includes("Former Staff"));
+
+  const exportStaffEmail = `doc-export-staff-${Date.now()}@test.local`;
   const viewerEmail = `doc-export-viewer-${Date.now()}@test.local`;
   requireSuccess("create staff user", await request("POST", "/users", {
-    name: "Export Staff", email: staffEmail, password: "password-123", role: "client_staff", clientId,
+    name: "Export Staff", email: exportStaffEmail, password: "password-123", role: "client_staff", clientId,
   }), 201);
   requireSuccess("create viewer user", await request("POST", "/users", {
     name: "Export Viewer", email: viewerEmail, password: "password-123", role: "client_viewer", clientId,
   }), 201);
 
   cookie = "";
-  requireSuccess("log in as staff", await request("POST", "/auth/login", { email: staffEmail, password: "password-123" }), 200);
+  requireSuccess("log in as staff", await request("POST", "/auth/login", { email: exportStaffEmail, password: "password-123" }), 200);
   check("staff cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+  check("staff cannot export the combined acknowledgement PDF",
+    (await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`)).status === 403);
 
   cookie = "";
   requireSuccess("log in as viewer", await request("POST", "/auth/login", { email: viewerEmail, password: "password-123" }), 200);
   check("viewer cannot export aggregate acknowledgement PDF",
     (await request("GET", `/doc-track/documents/${document.data?.id}/acknowledgements/export`)).status === 403);
+  check("viewer cannot export the combined acknowledgement PDF",
+    (await request("GET", `/doc-track/acknowledgements/export?clientId=${Number(clientId)}`)).status === 403);
   check("viewer cannot create TrainTrack records",
     (await request("POST", "/train-track/records", {
       recordType: "internal", staffName: "Viewer", trainingType: "Test",
@@ -262,6 +487,31 @@ async function main() {
     (await request("PATCH", `/train-track/records/${manualTrainRecord.data?.id}`, { notes: "forged" })).status === 403);
   check("viewer cannot acknowledge a DocTrack document",
     (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, { signature: "Viewer" })).status === 403);
+
+  // DocTrack is a site-scoped PATCH handler: department-scoped staff may edit
+  // metadata on an in-scope document, but cannot move it into another dept.
+  cookie = managerCookie;
+  requireSuccess("log in as site-scoped DocTrack staff", await request("POST", "/auth/login", {
+    email: otherSiteStaff.data?.email, password: "password-123",
+  }), 200);
+  const staffDocPatch = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    description: "Scoped staff metadata edit",
+  });
+  check("scoped staff can PATCH current DocTrack document", staffDocPatch.status === 200);
+  const staffDocMove = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    siteId: otherDepartmentSite.data?.id,
+  });
+  check("scoped staff cannot PATCH DocTrack site", staffDocMove.status === 403);
+  cookie = managerCookie;
+  const documentAfterMove = await request("GET", "/doc-track/documents");
+  check("rejected DocTrack move keeps original site",
+    documentAfterMove.data?.some?.((row) =>
+      row.id === document.data?.id && row.site_id === primarySite.data?.id));
+  const managerDocMove = await request("PATCH", `/doc-track/documents/${document.data?.id}`, {
+    siteId: otherDepartmentSite.data?.id,
+  });
+  check("admin can PATCH DocTrack site", managerDocMove.status === 200);
+  check("admin DocTrack move changes site", managerDocMove.data?.site_id === otherDepartmentSite.data?.id);
 
   // A record ID from another account must neither be visible nor mutable.
   cookie = "";
@@ -288,6 +538,8 @@ async function main() {
     (await request("POST", `/doc-track/documents/${document.data?.id}/acknowledge`, {
       acknowledgements: [{ staffRosterId: staff.data?.id, staffName: "forged" }],
     })).status === 404);
+  check("other tenant's personal list cannot reveal the first tenant's documents",
+    !(await request("GET", "/doc-track/acknowledgements/my")).data?.pending?.some((item) => item.id === document.data?.id));
 
   cookie = managerCookie;
   const preset = await request("PUT", "/pat-track/preset-templates/pest-control", {

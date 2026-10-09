@@ -30,6 +30,7 @@ export async function getUserById(id: number): Promise<SafeUser | null> {
       totpSecret: usersTable.totpSecret,
       totpEnabled: usersTable.totpEnabled,
       isMaintenanceManager: usersTable.isMaintenanceManager,
+      isDepartmentManager: usersTable.isDepartmentManager,
       createdAt: usersTable.createdAt,
       updatedAt: usersTable.updatedAt,
     })

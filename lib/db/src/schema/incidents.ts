@@ -37,6 +37,7 @@ export const incidentsTable = pgTable("incidents", {
   hseReference: text("hse_reference"),
   hseReportDate: date("hse_report_date"),
   immediateActions: text("immediate_actions"),
+  investigationFindings: text("investigation_findings"),
   correctiveActions: text("corrective_actions"),
   reportedBy: text("reported_by").notNull(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),

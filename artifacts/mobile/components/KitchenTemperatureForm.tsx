@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -7,35 +7,39 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Platform,
 } from 'react-native';
+import { assessKitchenTemperatures, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { kitchenOutbox, newKitchenEntryId, useKitchenOutbox } from '@/lib/kitchenOutbox';
+import { KitchenQueueStatus } from './KitchenQueueStatus';
+import { DEFAULT_DIARY_SITE, kitchenDiaryScope } from './kitchen-diary-scope';
+import {
+  requestDiaryScopeChange,
+  shouldHydrateDiaryDraft,
+} from './kitchen-diary-draft-logic';
+import {
+  configuredUnits,
+  deviceLocalCalendarDate,
+  hydrateColdReadings,
+  type ColdReading,
+  type FoodSafetyColdConfig,
+} from './kitchen-temperature-form-logic';
 import {
   canSaveTemperatureForm,
   hasAnyValue,
   shouldIncludeHotHolding,
 } from '@/components/kitchen-temperature-logic';
 
-interface ColdUnit {
-  name: string;
-  type: 'fridge' | 'freezer';
-}
-
 interface Site {
   id: number;
   name: string;
-}
-
-interface ColdReading {
-  unit: string;
-  tempAm: string;
-  tempPm: string;
-  correctiveAction: string;
 }
 
 interface DeliveryReading {
@@ -59,11 +63,10 @@ interface CoreTemperatureReading {
   timeFinish: string;
 }
 
-interface FoodSafetyConfig {
-  food_cold_units?: string | null;
-  food_num_fridges?: string | null;
-  food_num_freezers?: string | null;
+interface FoodSafetyConfig extends FoodSafetyColdConfig {
+  food_temperature_rules?: string | null;
   food_hot_holding_limit?: string | null;
+  food_reheating_limit?: string | null;
   food_show_deliveries?: string | null;
   food_show_cold_food?: string | null;
   food_show_hot_temperature?: string | null;
@@ -101,50 +104,32 @@ const EMPTY_CORE_READING: CoreTemperatureReading = {
 };
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function configuredUnits(config?: FoodSafetyConfig): ColdUnit[] {
-  if (config?.food_cold_units) {
-    try {
-      const units = JSON.parse(config.food_cold_units) as ColdUnit[];
-      if (Array.isArray(units) && units.length > 0) return units;
-    } catch {
-      // Invalid saved configuration falls back to the configured unit counts.
-    }
-  }
-  const fridgeCount = Math.max(0, Number(config?.food_num_fridges ?? 2) || 0);
-  const freezerCount = Math.max(0, Number(config?.food_num_freezers ?? 2) || 0);
-  return [
-    ...Array.from({ length: fridgeCount }, (_, index) => ({
-      name: `Fridge ${index + 1}`,
-      type: 'fridge' as const,
-    })),
-    ...Array.from({ length: freezerCount }, (_, index) => ({
-      name: `Freezer ${index + 1}`,
-      type: 'freezer' as const,
-    })),
-  ];
+  return deviceLocalCalendarDate(new Date());
 }
 
 function currentTime(): string {
   return new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
-function siteQuery(siteId: number | null): string {
-  return siteId === null ? '' : `&siteId=${siteId}`;
-}
-
-function siteOnlyQuery(siteId: number | null): string {
-  return siteId === null ? '' : `?siteId=${siteId}`;
-}
-
 export function KitchenTemperatureForm() {
+  return (
+    <View style={{ flex: 1 }}>
+      <KitchenQueueStatus />
+      <KitchenTemperatureFields />
+    </View>
+  );
+}
+
+function KitchenTemperatureFields() {
   const colors = useColors();
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const date = today();
-  const [siteId, setSiteId] = useState<number | null>(null);
+  const outbox = useKitchenOutbox();
+  const submissionId = useRef<string | null>(null);
+  const [date] = useState(today);
+  const [siteId, setSiteId] = useState<number | null>(DEFAULT_DIARY_SITE);
+  const scope = kitchenDiaryScope(siteId, date);
+  const pendingForDiary = outbox.entries.some(entry =>
+    entry.siteId === siteId && entry.recordDate === date && entry.state !== 'sent');
   const [coldFood, setColdFood] = useState<ColdReading[]>([]);
   const [initialColdFood, setInitialColdFood] = useState<ColdReading[]>([]);
   const [delivery, setDelivery] = useState<DeliveryReading>(EMPTY_DELIVERY);
@@ -155,6 +140,18 @@ export function KitchenTemperatureForm() {
   const [correctives, setCorrectives] = useState('');
   const [initialCorrectives, setInitialCorrectives] = useState<string | null>(null);
   const [loadedRecordId, setLoadedRecordId] = useState<number | null | undefined>(undefined);
+  const [isDirty, setIsDirty] = useState(false);
+  const dirtyRef = useRef(false);
+
+  const markDirty = () => {
+    submissionId.current = null;
+    dirtyRef.current = true;
+    setIsDirty(true);
+  };
+  const clearDirty = () => {
+    dirtyRef.current = false;
+    setIsDirty(false);
+  };
 
   const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -166,8 +163,8 @@ export function KitchenTemperatureForm() {
     isError: configError,
     refetch: refetchConfig,
   } = useQuery<FoodSafetyConfig>({
-    queryKey: ['food-safety', 'config', siteId],
-    queryFn: () => apiFetch(`/api/food-safety/config${siteOnlyQuery(siteId)}`),
+    queryKey: scope.configKey,
+    queryFn: () => apiFetch(scope.configUrl),
   });
   const units = useMemo(() => configuredUnits(config), [config]);
 
@@ -177,25 +174,20 @@ export function KitchenTemperatureForm() {
     isError: recordError,
     refetch: refetchRecord,
   } = useQuery<FoodSafetyRecord | null>({
-    queryKey: ['food-safety', 'today', siteId, date],
-    queryFn: () => apiFetch(`/api/food-safety?date=${date}${siteQuery(siteId)}`),
+    queryKey: scope.recordKey,
+    queryFn: () => apiFetch(scope.recordUrl),
   });
 
   useEffect(() => {
-    if (!config || existingRecord === undefined) return;
-    const nextColdFood = units.map((unit) => {
-      const saved = existingRecord?.coldFood?.find((row) => row.unit === unit.name);
-      return saved ?? {
-        unit: unit.name,
-        tempAm: '',
-        tempPm: '',
-        correctiveAction: '',
-      };
-    });
+    if (
+      !config
+      || existingRecord === undefined
+      || !shouldHydrateDiaryDraft(dirtyRef.current)
+    ) return;
+    const { coldFood: nextColdFood, initialColdFood: nextInitialColdFood } =
+      hydrateColdReadings(units, existingRecord?.coldFood);
     setColdFood(nextColdFood);
-    setInitialColdFood(
-      existingRecord?.coldFood?.filter((row) => units.some((unit) => unit.name === row.unit)) ?? [],
-    );
+    setInitialColdFood(nextInitialColdFood);
     setDelivery(EMPTY_DELIVERY);
     setHotHolding({
       ...EMPTY_HOT_HOLDING,
@@ -207,10 +199,14 @@ export function KitchenTemperatureForm() {
     setCorrectives(existingRecord?.correctives ?? '');
     setInitialCorrectives(existingRecord?.correctives ?? null);
     setLoadedRecordId(existingRecord?.id ?? null);
+    clearDirty();
   }, [config, existingRecord, units]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (loadedRecordId === undefined) throw new Error('Wait for the selected diary to load.');
+      if (temperatureAssessment.error) throw new Error(temperatureAssessment.error);
+      if (temperatureAssessment.failures.some(f => !f.actionTaken)) throw new Error('Record the corrective action taken for the failed readings before saving.');
       const hasValues = (row: object) =>
         Object.values(row).some((value) => typeof value === 'string' && value.trim());
       const deliveryRow = config?.food_show_deliveries !== 'false' && hasValues(delivery)
@@ -246,20 +242,19 @@ export function KitchenTemperatureForm() {
           expectedCorrectives: initialCorrectives,
         },
       };
-      return apiFetch(
-        loadedRecordId === null
-          ? `/api/food-safety${siteOnlyQuery(siteId)}`
-          : `/api/food-safety/${loadedRecordId}`,
-        {
-          method: loadedRecordId === null ? 'POST' : 'PUT',
-          body: JSON.stringify(body),
-        },
-      );
+      if (pendingForDiary) throw new Error('This diary already has a saved device entry. Wait for delivery or review the failed entry first.');
+      submissionId.current ??= newKitchenEntryId();
+      return kitchenOutbox.enqueue({
+        entryId: submissionId.current, siteId, recordDate: date, recordId: loadedRecordId, body,
+      });
     },
-    onSuccess: async () => {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await queryClient.invalidateQueries({ queryKey: ['food-safety'] });
-      Alert.alert('Saved', 'Today’s KitchenTrack temperatures have been saved.', [
+    onSuccess: async (entry) => {
+      clearDirty();
+      submissionId.current = null;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(entry.state === 'sent' ? 'Sent' : 'Saved on this device',
+        entry.state === 'sent' ? 'The server has confirmed these readings.'
+          : 'The readings are queued for delivery. KitchenTrack delivery shows “Sent” only after the server confirms them.', [
         { text: 'Done', onPress: () => router.back() },
       ]);
     },
@@ -270,7 +265,31 @@ export function KitchenTemperatureForm() {
   });
 
   const loading = configLoading || recordLoading || loadedRecordId === undefined;
-  const canSave = canSaveTemperatureForm(
+  const waitingForCreatedDiary = loadedRecordId === null && outbox.entries.some(entry =>
+    entry.siteId === siteId && entry.recordDate === date && entry.state === 'sent' && entry.recordId === null);
+  const temperatureAssessment = (() => {
+    try {
+      const before = loadedRecordId === null ? null : {
+        ...existingRecord, coldFood: initialColdFood, correctives: initialCorrectives,
+      };
+      const append = (section: string, row: object) =>
+        [...(((existingRecord as unknown as Record<string, unknown>)?.[section] ?? []) as object[]), row];
+      const after = {
+        coldFood, correctives,
+        deliveries: config?.food_show_deliveries === 'false' ? existingRecord?.deliveries ?? [] : append('deliveries', delivery),
+        hotHolding: config?.food_show_hot_holding === 'false' ? existingRecord?.hotHolding ?? [] : append('hotHolding', hotHolding),
+        hotTemperature: config?.food_show_hot_temperature === 'false' ? (before as Record<string, unknown>)?.hotTemperature ?? [] : append('hotTemperature', cooking),
+        cooling: config?.food_show_cooling === 'false' ? (before as Record<string, unknown>)?.cooling ?? [] : append('cooling', cooling),
+        reheating: config?.food_show_reheating === 'false' ? (before as Record<string, unknown>)?.reheating ?? [] : append('reheating', reheating),
+      };
+      const rules = parseKitchenTemperatureRules(config?.food_temperature_rules);
+      return { failures: assessKitchenTemperatures(before, after, rules, units), error: '', rules };
+    } catch (error) {
+      return { failures: [] as KitchenTemperatureFailure[], error: error instanceof Error ? error.message : 'The temperature rules could not be evaluated.', rules: null };
+    }
+  })();
+  const canSave = !temperatureAssessment.error && temperatureAssessment.failures.every(f => !!f.actionTaken)
+    && !pendingForDiary && !waitingForCreatedDiary && !outbox.error && canSaveTemperatureForm(
     { coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives },
     {
       deliveries: config?.food_show_deliveries !== 'false',
@@ -281,7 +300,35 @@ export function KitchenTemperatureForm() {
     },
   );
 
-  if (configError || recordError) {
+  const switchSite = (nextSiteId: number | null) => {
+    submissionId.current = null;
+    clearDirty();
+    setLoadedRecordId(undefined);
+    setSiteId(nextSiteId);
+  };
+
+  const requestSiteChange = (nextSiteId: number | null) => {
+    const decision = requestDiaryScopeChange(siteId, nextSiteId, isDirty || dirtyRef.current, saveMutation.isPending);
+    if (decision.kind === 'ignore') return;
+    if (decision.kind === 'switch') {
+      switchSite(decision.siteId);
+      return;
+    }
+    Alert.alert(
+      'Discard unsaved readings?',
+      'Switching sites will discard the readings entered for this diary.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        {
+          text: 'Discard changes',
+          style: 'destructive',
+          onPress: () => switchSite(decision.siteId),
+        },
+      ],
+    );
+  };
+
+  if ((configError || recordError) && (loadedRecordId === undefined || !config)) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.background }]}>
         <Feather name="wifi-off" size={28} color={colors.mutedForeground} />
@@ -335,10 +382,9 @@ export function KitchenTemperatureForm() {
                   backgroundColor: siteId === null ? colors.primary + '1a' : colors.card,
                 },
               ]}
+              disabled={saveMutation.isPending}
               onPress={() => {
-                if (siteId === null) return;
-                setLoadedRecordId(undefined);
-                setSiteId(null);
+                requestSiteChange(null);
               }}
             >
               <Text style={[styles.siteChipText, { color: siteId === null ? colors.primary : colors.mutedForeground }]}>
@@ -355,10 +401,9 @@ export function KitchenTemperatureForm() {
                     backgroundColor: siteId === site.id ? colors.primary + '1a' : colors.card,
                   },
                 ]}
+                disabled={saveMutation.isPending}
                 onPress={() => {
-                  if (siteId === site.id) return;
-                  setLoadedRecordId(undefined);
-                  setSiteId(site.id);
+                  requestSiteChange(site.id);
                 }}
               >
                 <Text style={[styles.siteChipText, { color: siteId === site.id ? colors.primary : colors.mutedForeground }]}>
@@ -379,6 +424,14 @@ export function KitchenTemperatureForm() {
         </View>
       ) : null}
 
+      {waitingForCreatedDiary ? (
+        <TouchableOpacity onPress={() => void refetchRecord()}>
+          <Text style={[styles.helper, { color: colors.primary }]}>
+            Your diary was sent. Tap to refresh it before adding more readings.
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       {config?.food_show_cold_food !== 'false' ? (
         <>
       <SectionTitle icon="box" title="Fridges and freezers" color={colors.foreground} />
@@ -389,18 +442,26 @@ export function KitchenTemperatureForm() {
             <TemperatureInput
               label="AM °C"
               value={reading.tempAm}
-              onChange={(value) => setColdFood((rows) => rows.map((row, rowIndex) =>
-                rowIndex === index ? { ...row, tempAm: value } : row
-              ))}
+              onChange={(value) => {
+                markDirty();
+                setColdFood((rows) => rows.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, tempAm: value } : row
+                ));
+              }}
             />
             <TemperatureInput
               label="PM °C"
               value={reading.tempPm}
-              onChange={(value) => setColdFood((rows) => rows.map((row, rowIndex) =>
-                rowIndex === index ? { ...row, tempPm: value } : row
-              ))}
+              onChange={(value) => {
+                markDirty();
+                setColdFood((rows) => rows.map((row, rowIndex) =>
+                  rowIndex === index ? { ...row, tempPm: value } : row
+                ));
+              }}
             />
           </View>
+          <TextInputField label="Corrective action taken (required if outside limits)" value={reading.correctiveAction}
+            onChange={(value) => { markDirty(); setColdFood(rows => rows.map((row, rowIndex) => rowIndex === index ? { ...row, correctiveAction: value } : row)); }} />
         </View>
       ))}
         </>
@@ -410,13 +471,13 @@ export function KitchenTemperatureForm() {
         <>
       <SectionTitle icon="sun" title="Hot holding" color={colors.foreground} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <TextInputField label="Food item" value={hotHolding.item} onChange={(item) => setHotHolding((row) => ({ ...row, item }))} />
+        <TextInputField label="Food item" value={hotHolding.item} onChange={(item) => { markDirty(); setHotHolding((row) => ({ ...row, item })); }} />
         <View style={styles.inputRow}>
-          <TemperatureInput label="Core °C" value={hotHolding.coreTemp} onChange={(coreTemp) => setHotHolding((row) => ({ ...row, coreTemp }))} />
-          <TextInputField label="Time" value={hotHolding.timeOfCheck} onChange={(timeOfCheck) => setHotHolding((row) => ({ ...row, timeOfCheck }))} placeholder="HH:mm" compact />
+          <TemperatureInput label="Core °C" value={hotHolding.coreTemp} onChange={(coreTemp) => { markDirty(); setHotHolding((row) => ({ ...row, coreTemp })); }} />
+          <TextInputField label="Time" value={hotHolding.timeOfCheck} onChange={(timeOfCheck) => { markDirty(); setHotHolding((row) => ({ ...row, timeOfCheck })); }} placeholder="HH:mm" compact />
         </View>
         <Text style={[styles.helper, { color: colors.mutedForeground }]}>
-          Target: {config?.food_hot_holding_limit ?? 'Above 63°C'}
+          Target: {temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.hotHolding) : 'Review numeric rules'}
         </Text>
       </View>
         </>
@@ -426,31 +487,46 @@ export function KitchenTemperatureForm() {
         <>
       <SectionTitle icon="truck" title="Delivery check" color={colors.foreground} />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <TextInputField label="Supplier" value={delivery.supplier} onChange={(supplier) => setDelivery((row) => ({ ...row, supplier }))} />
-        <TextInputField label="Items" value={delivery.items} onChange={(items) => setDelivery((row) => ({ ...row, items }))} />
+        <TextInputField label="Supplier" value={delivery.supplier} onChange={(supplier) => { markDirty(); setDelivery((row) => ({ ...row, supplier })); }} />
+        <TextInputField label="Items" value={delivery.items} onChange={(items) => { markDirty(); setDelivery((row) => ({ ...row, items })); }} />
         <View style={styles.inputRow}>
-          <TemperatureInput label="Chilled °C" value={delivery.tempChilled} onChange={(tempChilled) => setDelivery((row) => ({ ...row, tempChilled }))} />
-          <TemperatureInput label="Frozen °C" value={delivery.tempFrozen} onChange={(tempFrozen) => setDelivery((row) => ({ ...row, tempFrozen }))} />
+          <TemperatureInput label="Chilled °C" value={delivery.tempChilled} onChange={(tempChilled) => { markDirty(); setDelivery((row) => ({ ...row, tempChilled })); }} />
+          <TemperatureInput label="Frozen °C" value={delivery.tempFrozen} onChange={(tempFrozen) => { markDirty(); setDelivery((row) => ({ ...row, tempFrozen })); }} />
         </View>
+        <TextInputField label="Corrective action taken (required for failed deliveries)" value={delivery.correctiveActions}
+          onChange={(value) => { markDirty(); setDelivery(row => ({ ...row, correctiveActions: value })); }} />
       </View>
         </>
       ) : null}
 
       {config?.food_show_hot_temperature !== 'false' ? (
-        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={setCooking} />
+        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }} />
       ) : null}
       {config?.food_show_cooling !== 'false' ? (
-        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={setCooling} />
+        <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
       ) : null}
       {config?.food_show_reheating !== 'false' ? (
-        <CoreTemperatureCard title="Reheating" icon="rotate-cw" value={reheating} onChange={setReheating} />
+        <CoreTemperatureCard
+          title="Reheating"
+          icon="rotate-cw"
+          target={`Target: ${temperatureAssessment.rules ? temperatureRangeLabel(temperatureAssessment.rules.reheating) : 'Review numeric rules'}`}
+          value={reheating}
+          onChange={(value) => { markDirty(); setReheating(value); }}
+        />
       ) : null}
 
       <SectionTitle icon="tool" title="Corrective actions" color={colors.foreground} />
+      {temperatureAssessment.error ? <Text accessibilityRole="alert" style={{ color: colors.destructive }}>{temperatureAssessment.error}</Text> : null}
+      {temperatureAssessment.failures.length ? <View style={[styles.notice, { borderColor: colors.destructive }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.destructive }}>Outside configured limits — record what you did for each failure. A manager must verify the follow-up evidence.</Text>
+          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {failure.value}{failure.unit}</Text>)}
+        </View>
+      </View> : null}
       <TextInput
         style={[styles.textArea, { color: colors.foreground, backgroundColor: colors.card, borderColor: colors.border }]}
         value={correctives}
-        onChangeText={setCorrectives}
+        onChangeText={(value) => { markDirty(); setCorrectives(value); }}
         placeholder="Record any action taken for readings outside safe limits"
         placeholderTextColor={colors.mutedForeground}
         multiline
@@ -486,11 +562,13 @@ function SectionTitle({ icon, title, color }: { icon: React.ComponentProps<typeo
 function CoreTemperatureCard({
   title,
   icon,
+  target,
   value,
   onChange,
 }: {
   title: string;
   icon: React.ComponentProps<typeof Feather>['name'];
+  target?: string;
   value: CoreTemperatureReading;
   onChange: React.Dispatch<React.SetStateAction<CoreTemperatureReading>>;
 }) {
@@ -505,6 +583,7 @@ function CoreTemperatureCard({
           <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
           <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
         </View>
+        {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
       </View>
     </>
   );
@@ -539,7 +618,7 @@ function TextInputField({
         onChangeText={onChange}
         placeholder={placeholder}
         placeholderTextColor={colors.mutedForeground}
-        keyboardType={numeric ? 'decimal-pad' : 'default'}
+        keyboardType={numeric ? (Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'decimal-pad') : 'default'}
       />
     </View>
   );

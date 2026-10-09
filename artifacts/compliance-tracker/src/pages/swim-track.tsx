@@ -1,7 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useToast } from "@/hooks/use-toast";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
+import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,19 +24,18 @@ import {
 } from "lucide-react";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { getApiErrorMessage } from "@/lib/api";
 
-const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
-async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
-  }
-  return res.json();
+function useSwimTrackApi() {
+  const request = useActiveClientApi();
+  return useCallback(async <T = any,>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await request(path, init);
+    if (!response.ok) {
+      throw new Error(await getApiErrorMessage(response, `Request failed: ${response.status}`));
+    }
+    return response.json() as Promise<T>;
+  }, [request]);
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -167,6 +168,8 @@ function SessionDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useSwimTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("swim_session", open && !session);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
      siteId: "", sessionDate: today, sessionType: "public_swim", lifeguardName: "", lifeguardRosterId: null as number | null,
@@ -195,6 +198,7 @@ function SessionDialog({
   };
 
   const handleSave = async () => {
+    if (!session && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.sessionDate) { toast({ title: "Session date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -218,7 +222,10 @@ function SessionDialog({
       if (session) {
         await apiFetch(`/swim-track/sessions/${session.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/sessions", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/swim-track/sessions", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: session ? "Session updated" : "Session logged" });
       onSaved(); onClose();
@@ -229,7 +236,7 @@ function SessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
         <DialogHeader><DialogTitle>{session ? "Edit Session" : "Log Pool Session"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -325,10 +332,11 @@ function SessionDialog({
             <Textarea className="mt-1 rounded-sm" rows={2} value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          {!session && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : session ? "Save changes" : "Log session"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!session && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : session ? "Save changes" : "Log session"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -344,6 +352,8 @@ function SurveillanceDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useSwimTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("swim_surveillance_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const now = new Date().toTimeString().slice(0, 5);
   const blank = {
@@ -362,6 +372,7 @@ function SurveillanceDialog({
   } : blank);
 
   const handleSave = async () => {
+    if (!check && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -378,7 +389,10 @@ function SurveillanceDialog({
       if (check) {
         await apiFetch(`/swim-track/surveillance/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/surveillance", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/swim-track/surveillance", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: check ? "Check updated" : "Surveillance check logged" });
       onSaved(); onClose();
@@ -389,7 +403,7 @@ function SurveillanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit Surveillance Check" : "Log Surveillance Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -438,10 +452,11 @@ function SurveillanceDialog({
               onChange={e => setForm(f => ({ ...f, observations: e.target.value }))}
               placeholder="Anything to note during this surveillance check…" />
           </div>
+          {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Log check"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!check && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : check ? "Save changes" : "Log check"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -457,6 +472,8 @@ function FirstAidDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useSwimTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("swim_first_aid_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const blankItems = Object.fromEntries(FIRST_AID_ITEMS.map(i => [i.key, true]));
   const blank = { siteId: "", checkDate: today, checkedBy: "", checkedByRosterId: null as number | null, defectsFound: "", notes: "", ...blankItems };
@@ -473,6 +490,7 @@ function FirstAidDialog({
   } : blank);
 
   const handleSave = async () => {
+    if (!check && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.checkDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -485,7 +503,10 @@ function FirstAidDialog({
       if (check) {
         await apiFetch(`/swim-track/first-aid/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/first-aid", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/swim-track/first-aid", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: check ? "Check updated" : "First-aid check saved" });
       onSaved(); onClose();
@@ -496,7 +517,7 @@ function FirstAidDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-md rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
         <DialogHeader><DialogTitle>{check ? "Edit First-Aid Check" : "First-Aid Readiness Check"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1">
           <div className="grid grid-cols-2 gap-3">
@@ -548,10 +569,11 @@ function FirstAidDialog({
             <Textarea className="mt-1 rounded-sm" rows={2} value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          {!check && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Save check"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!check && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))}>{saving ? "Saving…" : check ? "Save changes" : "Save check"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -567,6 +589,8 @@ function IncidentDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useSwimTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("swim_incident", open && !incident);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     siteId: "", incidentDate: today, incidentTime: "", incidentType: "near_miss", severity: "low",
@@ -587,6 +611,7 @@ function IncidentDialog({
   } : blank);
 
   const handleSave = async () => {
+    if (!incident && (!photoEvidence.ready || photoEvidence.uploading)) return;
     if (!form.incidentDate) { toast({ title: "Date is required", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
@@ -605,7 +630,10 @@ function IncidentDialog({
       if (incident) {
         await apiFetch(`/swim-track/incidents/${incident.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/swim-track/incidents", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/swim-track/incidents", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: incident ? "Incident updated" : "Incident logged" });
       onSaved(); onClose();
@@ -616,7 +644,7 @@ function IncidentDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={reset}>
+      <DialogContent className="max-w-lg rounded-sm max-h-[90vh] overflow-y-auto" onOpenAutoFocus={() => { reset(); photoEvidence.reset(); }}>
         <DialogHeader><DialogTitle>{incident ? "Edit Incident" : "Log Incident / Near Miss"}</DialogTitle></DialogHeader>
         <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
@@ -705,10 +733,11 @@ function IncidentDialog({
             <Textarea className="mt-1 rounded-sm" rows={2} value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          {!incident && <RequiredRecordPhotoEvidence evidence={photoEvidence} />}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving} className={form.severity === "critical" ? "bg-destructive hover:bg-destructive/90" : ""}>
+          <Button onClick={handleSave} disabled={saving || (!incident && (photoEvidence.loading || photoEvidence.uploading || !photoEvidence.ready))} className={form.severity === "critical" ? "bg-destructive hover:bg-destructive/90" : ""}>
             {saving ? "Saving…" : incident ? "Save changes" : "Log incident"}
           </Button>
         </DialogFooter>
@@ -722,10 +751,12 @@ function IncidentDialog({
 type Tab = "sessions" | "surveillance" | "first-aid" | "incidents";
 
 export default function SwimTrackPage() {
-  const { user } = useAuth();
+  const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const apiFetch = useSwimTrackApi();
+  const { requirements: photoRequirements, isLoading: photoRequirementsLoading, error: photoRequirementsError, retry: retryPhotoRequirements } = usePhotoRequirements();
 
   const [activeTab, setActiveTab] = useState<Tab>("sessions");
   const [search, setSearch] = useState("");
@@ -740,31 +771,31 @@ export default function SwimTrackPage() {
   const [deleteId, setDeleteId] = useState<{ type: string; id: number } | null>(null);
 
   const { data: sites = [] } = useQuery({
-    queryKey: ["sites"],
+    queryKey: ["sites", activeClientId],
     queryFn: () => apiFetch<{ id: number; name: string }[]>("/sites"),
   });
   const { data: status, refetch: refetchStatus } = useQuery({
-    queryKey: ["swim-status"],
+    queryKey: ["swim-status", user?.id, activeClientId],
     queryFn: () => apiFetch<StatusData>("/swim-track/status"),
     refetchInterval: 60_000,
   });
   const { data: sessions = [], isLoading: sessionsLoading } = useQuery({
-    queryKey: ["swim-sessions"],
+    queryKey: ["swim-sessions", user?.id, activeClientId],
     queryFn: () => apiFetch<SwimSession[]>("/swim-track/sessions"),
     enabled: activeTab === "sessions",
   });
   const { data: surveillance = [], isLoading: surveillanceLoading } = useQuery({
-    queryKey: ["swim-surveillance"],
+    queryKey: ["swim-surveillance", user?.id, activeClientId],
     queryFn: () => apiFetch<SurveillanceCheck[]>("/swim-track/surveillance"),
     enabled: activeTab === "surveillance",
   });
   const { data: firstAidChecks = [], isLoading: firstAidLoading } = useQuery({
-    queryKey: ["swim-first-aid"],
+    queryKey: ["swim-first-aid", user?.id, activeClientId],
     queryFn: () => apiFetch<FirstAidCheck[]>("/swim-track/first-aid"),
     enabled: activeTab === "first-aid",
   });
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({
-    queryKey: ["swim-incidents"],
+    queryKey: ["swim-incidents", user?.id, activeClientId],
     queryFn: () => apiFetch<Incident[]>("/swim-track/incidents"),
     enabled: activeTab === "incidents",
   });
@@ -830,6 +861,15 @@ export default function SwimTrackPage() {
   return (
     <AppLayout title="SwimTrack">
       <div className="space-y-6">
+
+        {photoRequirementsError && (
+          <div role="alert" className="flex items-center justify-between gap-3 rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <span>Could not load photo requirements: {photoRequirementsError.message}</span>
+            <Button type="button" variant="outline" size="sm" onClick={retryPhotoRequirements} disabled={photoRequirementsLoading}>
+              Retry
+            </Button>
+          </div>
+        )}
 
         {/* ── Status strip ─────────────────────────────────────────────── */}
         {status && (
@@ -994,7 +1034,9 @@ export default function SwimTrackPage() {
                             : <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Open</span>}
                         </td>
                         <td className="py-2 px-2">
-                          <CheckPhotoUploader entityType="swim_session" entityId={s.id} compact />
+                          <CheckPhotoUploader entityType="swim_session" entityId={s.id}
+                            required={photoRequirements.swim_session?.required ?? false}
+                            minPhotos={photoRequirements.swim_session?.minPhotos ?? 1} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"
@@ -1070,7 +1112,9 @@ export default function SwimTrackPage() {
                           {c.observations ?? "—"}
                         </td>
                         <td className="py-2 px-2">
-                          <CheckPhotoUploader entityType="swim_surveillance_check" entityId={c.id} compact />
+                          <CheckPhotoUploader entityType="swim_surveillance_check" entityId={c.id}
+                            required={photoRequirements.swim_surveillance_check?.required ?? false}
+                            minPhotos={photoRequirements.swim_surveillance_check?.minPhotos ?? 1} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"
@@ -1165,7 +1209,9 @@ export default function SwimTrackPage() {
                                 </span>}
                           </td>
                           <td className="py-2 px-2">
-                            <CheckPhotoUploader entityType="swim_first_aid_check" entityId={f.id} compact />
+                            <CheckPhotoUploader entityType="swim_first_aid_check" entityId={f.id}
+                              required={photoRequirements.swim_first_aid_check?.required ?? false}
+                              minPhotos={photoRequirements.swim_first_aid_check?.minPhotos ?? 1} compact />
                           </td>
                           <td className="py-2 text-right">
                             <Button size="icon" variant="ghost" className="h-7 w-7"
@@ -1251,7 +1297,9 @@ export default function SwimTrackPage() {
                             : <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-full">Open</span>}
                         </td>
                         <td className="py-2 px-2">
-                          <CheckPhotoUploader entityType="swim_incident" entityId={i.id} compact />
+                          <CheckPhotoUploader entityType="swim_incident" entityId={i.id}
+                            required={photoRequirements.swim_incident?.required ?? false}
+                            minPhotos={photoRequirements.swim_incident?.minPhotos ?? 1} compact />
                         </td>
                         <td className="py-2 text-right">
                           <Button size="icon" variant="ghost" className="h-7 w-7"

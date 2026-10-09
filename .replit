@@ -24,10 +24,6 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "trial-reminders"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "test-trial-reminders"
 
 [[workflows.workflow.tasks]]
@@ -48,10 +44,6 @@ args = "test-config"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "repo-typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "build-api-server"
 
 [[workflows.workflow.tasks]]
@@ -60,18 +52,115 @@ args = "build-web"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "typecheck"
-
-[[workflows.workflow]]
-name = "trial-reminders"
-author = "agent"
+args = "api-typecheck"
 
 [[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run test:trial-reminders"
+task = "workflow.run"
+args = "web-typecheck"
 
-[workflows.workflow.metadata]
-outputType = "console"
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "api-codegen-drift"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "mobile-kitchen-site-scope"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "track-record-lock"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "fresh-schema-regression"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "induction-print"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "private-file-acl"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "hot-tub-pdf-export"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test-twofa-recovery"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "recovery-code-browser"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "service-price-readiness"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "photo-upload-browser"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "billing-addon-catalog"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "billing-addon-settings-browser"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "staged-photo-creation"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "required-track-photos-browser"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "pat-evidence-retention"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "content-filter-endpoints"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "fix-track-priority"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "feedback-triage"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "feedback-inbox-browser"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "quote-reminder-approval"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "contractor-token-security"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "contractor-key-rotation"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-mobile-replay"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-temperature-actions"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "kitchen-inspection-register-export"
 
 [[workflows.workflow]]
 name = "test-trial-reminders"
@@ -129,26 +218,15 @@ args = "cd artifacts/api-server && pnpm run test:config:ci"
 isValidation = true
 
 [[workflows.workflow]]
-name = "repo-typecheck"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run typecheck"
-
-[workflows.workflow.metadata]
-isValidation = true
-
-[[workflows.workflow]]
 name = "build-api-server"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run build"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd artifacts/api-server && source tests/api-integration-lock.sh && pnpm run build"
 
 [[workflows.workflow]]
 name = "build-web"
@@ -183,6 +261,314 @@ args = "pnpm run typecheck"
 [workflows.workflow.metadata]
 isValidation = true
 
+[[workflows.workflow]]
+name = "api-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "web-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "api-codegen-drift"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run check:api-codegen"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "mobile-kitchen-site-scope"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mobile run test:kitchen-site-scope"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "track-record-lock"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:track-record-lock"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "fresh-schema-regression"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:schema:fresh"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "induction-print"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:induction-print"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "private-file-acl"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:private-file-acl"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "hot-tub-pdf-export"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:hot-tub-pdf"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "test-twofa-recovery"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:twofa-recovery"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "recovery-code-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:recovery-code-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "service-price-readiness"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run check:service-prices"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "photo-upload-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:photo-upload-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "billing-addon-catalog"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:billing-addon-catalog"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "billing-addon-settings-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:billing-addon-settings-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "staged-photo-creation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:staged-photo-creation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "required-track-photos-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:required-track-photos-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "pat-evidence-retention"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:pat-dept-isolation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "content-filter-endpoints"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:content-filter"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "fix-track-priority"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:fix-track-priority"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "feedback-triage"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:feedback-triage"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "feedback-inbox-browser"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/compliance-tracker run test:feedback-inbox-browser"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "quote-reminder-approval"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:fix-track-contractor-approval"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "contractor-token-security"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:contractor-token-security"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "contractor-key-rotation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:contractor-key-rotation"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-mobile-replay"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-mobile-replay"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-temperature-actions"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-temperature-actions"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "kitchen-inspection-register-export"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run test:kitchen-inspection-export"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -194,9 +580,17 @@ timeoutMs = 180000
 
 [nix]
 channel = "stable-25_05"
+packages = ["glib", "gtk3", "gtk4", "pango", "cairo", "gdk-pixbuf", "harfbuzz", "vulkan-loader", "icu", "libxml2", "nspr", "sqlite", "libxslt", "lcms2", "libevent", "libopus", "flite", "libwebp", "libavif", "libjpeg", "libepoxy", "libsecret", "enchant", "hyphen", "xorg.libX11", "xorg.libxcb", "xorg.libXext", "xorg.libXrandr", "xorg.libXcomposite", "xorg.libXcursor", "xorg.libXdamage", "xorg.libXfixes", "xorg.libXi", "libxkbcommon", "wayland", "mesa", "atk", "at-spi2-atk", "gst_all_1.gstreamer", "gst_all_1.gst-plugins-base", "gst_all_1.gst-plugins-good", "gst_all_1.gst-plugins-bad", "gst_all_1.gst-plugins-ugly", "libdrm", "libgbm", "alsa-lib", "libvpx", "libmanette", "gst_all_1.gst-libav", "woff2", "libjpeg_turbo", "libglvnd", "icu74", "libgcc", "harfbuzzFull", "libjpeg8", "libGL", "libGLX"]
 
 [userenv]
 
 [userenv.shared]
 FEEDBACK_RECIPIENT_EMAIL = "Info@alpsconsultancy.co.uk"
 CONTRACTOR_TOKEN_ENCRYPTION_KEY_VERSION = "2026-09-01"
+GCS_PROJECT_ID = "project-ea358f54-678e-42e7-814"
+GCS_BUCKET_NAME = "alpscomplytrack"
+TWILIO_VERIFY_SERVICE_SID = "VAa8456cf2efe3b6e6acf2d5a61c447820"
+
+[userenv.production]
+PUBLIC_APP_URL = "https://complytrack.alpsconsultancy.co.uk"
+ADMIN_EMAIL = "info@alpsconsultancy.co.uk"

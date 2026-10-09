@@ -46,7 +46,7 @@ function previousEncryptionKeys(): Record<string, string> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("CONTRACTOR_TOKEN_ENCRYPTION_PREVIOUS_KEYS must be a JSON object");
   }
-  const keys: Record<string, string> = {};
+  const keys: Record<string, string> = Object.create(null);
   for (const [version, secret] of Object.entries(parsed)) {
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(version) || typeof secret !== "string" || secret.length < 32) {
       throw new Error("Every previous contractor token encryption key needs a URL-safe version and at least 32 characters");
@@ -112,9 +112,8 @@ export function decryptTokenPayload(encoded: string): Record<string, string> {
     const current = currentEncryptionKey();
     const secret = version === current.version
       ? current.secret
-      : version === "session-v1"
-        ? process.env.SESSION_SECRET
-        : previousEncryptionKeys()[version];
+      : previousEncryptionKeys()[version]
+        ?? (version === "session-v1" ? process.env.SESSION_SECRET : undefined);
     if (!secret) throw new Error(`No contractor token encryption key is available for version ${version}`);
     const aad = parts[0] === ENVELOPE_VERSION ? `${ENVELOPE_VERSION}.${version}` : undefined;
     return decryptWithSecret(ivText, tagText, ciphertextText, secret, aad);

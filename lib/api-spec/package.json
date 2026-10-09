@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "codegen": "orval --config ./orval.config.ts"
+    "codegen": "node ./node_modules/orval/dist/bin/orval.mjs --config ./orval.config.ts"
   },
   "devDependencies": {
     "orval": "8.22.0"

@@ -9,6 +9,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: audit-log
+    description: Compliance change history
   - name: compliance-items
     description: Compliance item operations
   - name: categories
@@ -35,7 +37,64 @@ tags:
     description: PAT testing register operations (appliance inventory and test results)
   - name: premises-track
     description: PremisesTrack premises safety inspection operations
+  - name: privacy-governance
+    description: Customer privacy-governance records and rights workflows
 paths:
+  /feedback:
+    get:
+      operationId: listFeedbackReports
+      tags: [feedback]
+      summary: List feedback for the selected client (administrators only)
+      parameters:
+        - in: query
+          name: clientId
+          schema: { type: integer }
+        - in: query
+          name: category
+          schema: { type: string, enum: [feedback, bug, feature] }
+        - in: query
+          name: status
+          schema: { type: string, enum: [new, reviewing, resolved] }
+      responses:
+        "200":
+          description: Reports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReport" }
+        "403":
+          description: Not an administrator or not authorised for this client
+  /feedback/{id}:
+    patch:
+      operationId: updateFeedbackReport
+      tags: [feedback]
+      summary: Update the status or internal response for a report in the selected client
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeedbackReportUpdate" }
+      responses:
+        "200":
+          description: Updated report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackReport" }
+        "400":
+          description: Invalid status or note
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found in the selected client
   /healthz:
     get:
       operationId: healthCheck
@@ -48,6 +107,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /audit-log:
+    get:
+      operationId: listAuditLog
+      tags: [audit-log]
+      summary: List the latest changes in a compliance module
+      description: Returns at most 50 changes, newest first.
+      parameters:
+        - in: query
+          name: module
+          required: true
+          schema:
+            type: string
+            enum: [fire, legionella, kitchen, fix, safe, train, doc, incidents]
+      responses:
+        "200":
+          description: Most recent changes in the selected module
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
 
   /categories:
     get:
@@ -706,6 +789,156 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppSettings"
 
+  /privacy-governance:
+    get:
+      operationId: getPrivacyGovernance
+      tags: [privacy-governance]
+      summary: Get the current client's privacy-governance records
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Privacy profile, processing records, rights requests and incident records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyGovernanceResponse"
+
+  /privacy-governance/program:
+    put:
+      operationId: savePrivacyProgram
+      tags: [privacy-governance]
+      summary: Save the client's controller and processor responsibilities
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyProgramInput"
+      responses:
+        "200":
+          description: Saved privacy profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyProgram"
+
+  /privacy-governance/records:
+    post:
+      operationId: createPrivacyRecord
+      tags: [privacy-governance]
+      summary: Add a processing, rights, retention, processor or breach record
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "201":
+          description: Created privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/records/{kind}/{id}:
+    put:
+      operationId: updatePrivacyRecord
+      tags: [privacy-governance]
+      summary: Update a privacy record without changing its tenant
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [activity, rights_request, retention, processor, breach]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRecordInput"
+      responses:
+        "200":
+          description: Updated privacy record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRecord"
+
+  /privacy-governance/retention-schedules/{id}/verifications:
+    post:
+      operationId: addPrivacyRetentionVerification
+      tags: [privacy-governance]
+      summary: Record evidence of deletion, an active legal hold or a deletion exception
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+      responses:
+        "201":
+          description: Recorded verification evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivacyRetentionVerification"
+
+  /storage/usage:
+    get:
+      operationId: getStorageUsage
+      tags: [storage]
+      summary: Get storage usage for the current account
+      responses:
+        "200":
+          description: Current retained storage usage and warning configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageUsage"
+
   /notifications/send-reminders:
     post:
       operationId: sendReminders
@@ -954,6 +1187,12 @@ paths:
       operationId: getFireSafetyConfig
       tags: [fire-safety]
       summary: Get Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific FireTrack control profile.
+          schema:
+            type: integer
       responses:
         "200":
           description: Fire safety configuration
@@ -965,6 +1204,12 @@ paths:
       operationId: updateFireSafetyConfig
       tags: [fire-safety]
       summary: Update Fire safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific FireTrack control profile.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -984,6 +1229,12 @@ paths:
       operationId: getLegionellaConfig
       tags: [legionella]
       summary: Get Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
       responses:
         "200":
           description: Water safety configuration
@@ -995,6 +1246,12 @@ paths:
       operationId: updateLegionellaConfig
       tags: [legionella]
       summary: Update Water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Save the site-specific LegionellaTrack control profile.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -1008,6 +1265,115 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LegionellaConfig"
+
+  /hot-tub:
+    get:
+      operationId: listHotTubChecks
+      tags: [legionella]
+      summary: List hot tub water safety logbook entries
+      parameters:
+        - in: query
+          name: checkType
+          schema:
+            $ref: "#/components/schemas/HotTubCheckType"
+        - in: query
+          name: siteId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of hot tub checks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HotTubCheck"
+    post:
+      operationId: createHotTubCheck
+      tags: [legionella]
+      summary: Record a hot tub water safety check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHotTubCheckRequest"
+      responses:
+        "201":
+          description: Created check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
+
+  /hot-tub/config:
+    get:
+      operationId: getHotTubConfig
+      tags: [legionella]
+      summary: Get hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          description: Return the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+    put:
+      operationId: updateHotTubConfig
+      tags: [legionella]
+      summary: Update hot tub water safety configuration
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          description: Save the site-specific HotTubTrack control profile.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HotTubConfigUpdate"
+      responses:
+        "200":
+          description: Updated hot tub configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubConfig"
+
+  /hot-tub/{id}:
+    put:
+      operationId: updateHotTubCheck
+      tags: [legionella]
+      summary: Update a hot tub check entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateHotTubCheckRequest"
+      responses:
+        "200":
+          description: Updated check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotTubCheck"
 
   /bike-track/config:
     get:
@@ -1735,6 +2101,132 @@ paths:
                 items:
                   $ref: "#/components/schemas/LegionellaStatus"
 
+  /legionella/monitoring-plan:
+    get:
+      operationId: getLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Read the site's approved or review-required monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateLegionellaMonitoringPlan
+      tags: [legionella]
+      summary: Approve the site plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /hot-tub/monitoring-plan:
+    get:
+      operationId: getHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Read the site's spa monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updateHotTubMonitoringPlan
+      tags: [hot-tub]
+      summary: Approve the spa plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
+  /pool-track/monitoring-plan:
+    get:
+      operationId: getPoolMonitoringPlan
+      tags: [pool-track]
+      summary: Read the site's pool monitoring plan
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Site monitoring plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+    put:
+      operationId: updatePoolMonitoringPlan
+      tags: [pool-track]
+      summary: Approve the pool plan or flag a material change
+      parameters:
+        - in: query
+          name: siteId
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WaterMonitoringPlanInput"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WaterMonitoringPlanResult"
+
   /legionella/{id}:
     put:
       operationId: updateLegionellaCheck
@@ -1775,6 +2267,30 @@ paths:
 
 components:
   schemas:
+    FeedbackReport:
+      type: object
+      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, submitterName]
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        category: { type: string, enum: [feedback, bug, feature] }
+        summary: { type: string }
+        details: { type: string }
+        pagePath: { type: [string, "null"] }
+        emailStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string }
+        updatedAt: { type: [string, "null"], format: date-time }
+        updatedBy: { type: [integer, "null"] }
+        submitterName: { type: [string, "null"] }
+    FeedbackReportUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        status: { type: string, enum: [new, reviewing, resolved] }
+        internalNote: { type: string, maxLength: 5000 }
     HealthStatus:
       type: object
       properties:
@@ -1782,6 +2298,38 @@ components:
           type: string
       required:
         - status
+
+    AuditLogEntry:
+      type: object
+      required: [id, tableName, rowId, action, changedBy, changedAt, diff, actorName]
+      properties:
+        id:
+          type: integer
+        tableName:
+          type: string
+        rowId:
+          type: integer
+        action:
+          type: string
+          enum: [create, update, delete]
+        changedBy:
+          type: [integer, "null"]
+        changedAt:
+          type: string
+          format: date-time
+        diff:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AuditFieldChange"
+        actorName:
+          type: [string, "null"]
+
+    AuditFieldChange:
+      type: object
+      required: [before, after]
+      properties:
+        before: {}
+        after: {}
 
     ErrorResponse:
       type: object
@@ -2233,6 +2781,605 @@ components:
         - contractorsCount
         - certificatesExpiringSoon
 
+    PrivacyProgramInput:
+      type: object
+      properties:
+        customerRole:
+          type: string
+          enum: [controller, joint_controller, processor, mixed]
+        controllerName:
+          type: string
+          nullable: true
+        controllerContact:
+          type: string
+          nullable: true
+        dpoContact:
+          type: string
+          nullable: true
+        noticeUrl:
+          type: string
+          nullable: true
+        noticeVersion:
+          type: string
+          nullable: true
+        noticeReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        processorAgreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        processorAgreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        responsibilitiesNotes:
+          type: string
+          nullable: true
+        privacyOwner:
+          type: string
+          nullable: true
+      required:
+        - customerRole
+        - controllerName
+        - controllerContact
+        - dpoContact
+        - noticeUrl
+        - noticeVersion
+        - noticeReviewedAt
+        - processorAgreementStatus
+        - processorAgreementReviewedAt
+        - responsibilitiesNotes
+        - privacyOwner
+
+    PrivacyProgram:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProgramInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessingActivityInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [activity]
+        name:
+          type: string
+          minLength: 1
+        purpose:
+          type: string
+          minLength: 1
+        dataSubjects:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        article6Basis:
+          type: string
+          enum: [consent, contract, legal_obligation, vital_interests, public_task, legitimate_interests, other]
+        article6Rationale:
+          type: string
+          nullable: true
+        specialCategoryData:
+          type: boolean
+        article9Condition:
+          type: string
+          nullable: true
+        article9Rationale:
+          type: string
+          nullable: true
+        recipients:
+          type: string
+          nullable: true
+        transferDetails:
+          type: string
+          nullable: true
+        retentionCriteria:
+          type: string
+          minLength: 1
+        securityMeasures:
+          type: string
+          nullable: true
+        dpiaClassification:
+          type: string
+          enum: [not_screened, not_required, required, in_progress, completed]
+        dpiaRationale:
+          type: string
+          nullable: true
+        dpiaCompletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, name, purpose, dataSubjects, dataCategories, article6Basis, article6Rationale, specialCategoryData, article9Condition, article9Rationale, recipients, transferDetails, retentionCriteria, securityMeasures, dpiaClassification, dpiaRationale, dpiaCompletedAt, owner, reviewDueAt, active]
+
+    PrivacyProcessingActivity:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRightsRequestInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [rights_request]
+        requestType:
+          type: string
+          enum: [access, rectification, erasure, restriction, portability, objection, other]
+        subjectName:
+          type: string
+          minLength: 1
+        subjectContact:
+          type: string
+          nullable: true
+        scopeDescription:
+          type: string
+          minLength: 1
+        receivedAt:
+          type: string
+          format: date-time
+        extendedDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        extensionReason:
+          type: string
+          nullable: true
+        identityStatus:
+          type: string
+          enum: [not_started, in_progress, verified, failed]
+        identityMethod:
+          type: string
+          nullable: true
+        identityEvidence:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [received, in_progress, waiting_for_information, completed, refused, withdrawn]
+        decision:
+          type: string
+          enum: [granted, partially_granted, refused, not_applicable]
+          nullable: true
+        decisionRationale:
+          type: string
+          nullable: true
+        responseSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        responseEvidence:
+          type: string
+          nullable: true
+      required: [kind, requestType, subjectName, subjectContact, scopeDescription, receivedAt, extendedDueAt, extensionReason, identityStatus, identityMethod, identityEvidence, status, decision, decisionRationale, responseSentAt, responseEvidence]
+
+    PrivacyRightsRequest:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            dueAt:
+              type: string
+              format: date-time
+            identityVerifiedAt:
+              type: string
+              format: date-time
+              nullable: true
+            identityVerifiedBy:
+              type: integer
+              nullable: true
+            decidedAt:
+              type: string
+              format: date-time
+              nullable: true
+            decidedBy:
+              type: integer
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, dueAt, identityVerifiedAt, identityVerifiedBy, decidedAt, decidedBy, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRetentionScheduleInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [retention]
+        recordCategory:
+          type: string
+          minLength: 1
+        scopeDescription:
+          type: string
+          minLength: 1
+        retentionPeriod:
+          type: string
+          minLength: 1
+        retentionTrigger:
+          type: string
+          minLength: 1
+        justification:
+          type: string
+          minLength: 1
+        legalHoldActive:
+          type: boolean
+        legalHoldReason:
+          type: string
+          nullable: true
+        deletionException:
+          type: boolean
+        deletionExceptionReason:
+          type: string
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, recordCategory, scopeDescription, retentionPeriod, retentionTrigger, justification, legalHoldActive, legalHoldReason, deletionException, deletionExceptionReason, reviewDueAt, active]
+
+    PrivacyRetentionSchedule:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyProcessorInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [processor]
+        organizationName:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [processor, subprocessor]
+        parentProcessor:
+          type: string
+          nullable: true
+        serviceDescription:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        processingCountries:
+          type: string
+          minLength: 1
+        transferMechanism:
+          type: string
+          enum: [not_assessed, no_restricted_transfer, adequacy, uk_idta, eu_scc, uk_addendum, other]
+        transferSafeguards:
+          type: string
+          nullable: true
+        transferAssessment:
+          type: string
+          nullable: true
+        agreementStatus:
+          type: string
+          enum: [not_assessed, in_place, pending, not_required]
+        agreementReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        transferReviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        active:
+          type: boolean
+      required: [kind, organizationName, role, parentProcessor, serviceDescription, dataCategories, processingCountries, transferMechanism, transferSafeguards, transferAssessment, agreementStatus, agreementReviewedAt, transferReviewedAt, reviewDueAt, active]
+
+    PrivacyProcessor:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyBreachInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [breach]
+        discoveredAt:
+          type: string
+          format: date-time
+        occurredFrom:
+          type: string
+          format: date-time
+          nullable: true
+        occurredTo:
+          type: string
+          format: date-time
+          nullable: true
+        description:
+          type: string
+          minLength: 1
+        dataCategories:
+          type: string
+          minLength: 1
+        affectedSubjectsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        affectedRecordsEstimate:
+          type: integer
+          minimum: 0
+          nullable: true
+        riskLevel:
+          type: string
+          enum: [under_assessment, unlikely, risk, high_risk]
+        assessmentStatus:
+          type: string
+          enum: [assessing, contained, closed]
+        assessmentRationale:
+          type: string
+          nullable: true
+        containmentSteps:
+          type: string
+          nullable: true
+        authorityNotificationRequired:
+          type: boolean
+          nullable: true
+        authorityNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        authorityNotificationReference:
+          type: string
+          nullable: true
+        individualNotificationRequired:
+          type: boolean
+          nullable: true
+        individualNotificationDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        individualsNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        evidence:
+          type: string
+          nullable: true
+      required: [kind, discoveredAt, occurredFrom, occurredTo, description, dataCategories, affectedSubjectsEstimate, affectedRecordsEstimate, riskLevel, assessmentStatus, assessmentRationale, containmentSteps, authorityNotificationRequired, authorityNotifiedAt, authorityNotificationReference, individualNotificationRequired, individualNotificationDueAt, individualsNotifiedAt, evidence]
+
+    PrivacyBreach:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            authorityNotificationDueAt:
+              type: string
+              format: date-time
+            assessedAt:
+              type: string
+              format: date-time
+              nullable: true
+            assessedBy:
+              type: integer
+              nullable: true
+            closedAt:
+              type: string
+              format: date-time
+              nullable: true
+            createdBy:
+              type: integer
+              nullable: true
+            updatedBy:
+              type: integer
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, authorityNotificationDueAt, assessedAt, assessedBy, closedAt, createdBy, updatedBy, createdAt, updatedAt]
+
+    PrivacyRecordInput:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivityInput"
+        - $ref: "#/components/schemas/PrivacyRightsRequestInput"
+        - $ref: "#/components/schemas/PrivacyRetentionScheduleInput"
+        - $ref: "#/components/schemas/PrivacyProcessorInput"
+        - $ref: "#/components/schemas/PrivacyBreachInput"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivityInput"
+          rights_request: "#/components/schemas/PrivacyRightsRequestInput"
+          retention: "#/components/schemas/PrivacyRetentionScheduleInput"
+          processor: "#/components/schemas/PrivacyProcessorInput"
+          breach: "#/components/schemas/PrivacyBreachInput"
+
+    PrivacyRecord:
+      oneOf:
+        - $ref: "#/components/schemas/PrivacyProcessingActivity"
+        - $ref: "#/components/schemas/PrivacyRightsRequest"
+        - $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        - $ref: "#/components/schemas/PrivacyProcessor"
+        - $ref: "#/components/schemas/PrivacyBreach"
+      discriminator:
+        propertyName: kind
+        mapping:
+          activity: "#/components/schemas/PrivacyProcessingActivity"
+          rights_request: "#/components/schemas/PrivacyRightsRequest"
+          retention: "#/components/schemas/PrivacyRetentionSchedule"
+          processor: "#/components/schemas/PrivacyProcessor"
+          breach: "#/components/schemas/PrivacyBreach"
+
+    PrivacyRetentionVerificationInput:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum: [deletion_verified, legal_hold_confirmed, exception_confirmed]
+        recordsReviewed:
+          type: string
+          minLength: 1
+        verificationMethod:
+          type: string
+          minLength: 1
+        evidence:
+          type: string
+          minLength: 1
+      required: [outcome, recordsReviewed, verificationMethod, evidence]
+
+    PrivacyRetentionVerification:
+      allOf:
+        - $ref: "#/components/schemas/PrivacyRetentionVerificationInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            clientId:
+              type: integer
+            scheduleId:
+              type: integer
+            verifiedBy:
+              type: integer
+              nullable: true
+            verifiedAt:
+              type: string
+              format: date-time
+          required: [id, clientId, scheduleId, verifiedBy, verifiedAt]
+
+    PrivacyGovernanceResponse:
+      type: object
+      properties:
+        program:
+          anyOf:
+            - $ref: "#/components/schemas/PrivacyProgram"
+            - type: "null"
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessingActivity"
+        rightsRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRightsRequest"
+        retentionSchedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionSchedule"
+        retentionVerifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyRetentionVerification"
+        processors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyProcessor"
+        breaches:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivacyBreach"
+      required: [program, activities, rightsRequests, retentionSchedules, retentionVerifications, processors, breaches]
+
     AppSettings:
       type: object
       properties:
@@ -2257,9 +3404,83 @@ components:
         defaultLeadTimeDays:
           type: string
           nullable: true
+        contractorComplianceLeadTimeDays:
+          type: string
+          nullable: true
         companyName:
           type: string
           nullable: true
+        accountTimezone:
+          type: string
+          nullable: true
+        storageWarningThresholdBytes:
+          type: string
+          pattern: "^[0-9]+$"
+          nullable: true
+
+    StorageUsage:
+      type: object
+      required:
+        - usedBytes
+        - objectCount
+        - warningThresholdBytes
+        - warning
+        - monthlyDownloadBytes
+        - monthlyDownloadTrackingAvailable
+        - month
+        - estimatedCost
+      properties:
+        usedBytes:
+          type: integer
+          minimum: 0
+        objectCount:
+          type: integer
+          minimum: 0
+        warningThresholdBytes:
+          type: integer
+          minimum: 1
+        warning:
+          type: boolean
+        monthlyDownloadBytes:
+          type: ["integer", "null"]
+          minimum: 0
+        monthlyDownloadTrackingAvailable:
+          type: boolean
+        month:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        estimatedCost:
+          type: object
+          nullable: true
+          required: [currency, storageMinorUnits, downloadMinorUnits, totalMinorUnits, includedStorageBytes, excessStorageBytes, providerMinorUnits, markupMinorUnits, markupPercent]
+          properties:
+            currency:
+              type: string
+              enum: [USD]
+            storageMinorUnits:
+              type: integer
+              minimum: 0
+            downloadMinorUnits:
+              type: integer
+              minimum: 0
+            totalMinorUnits:
+              type: integer
+              minimum: 0
+            includedStorageBytes:
+              type: integer
+              minimum: 0
+            excessStorageBytes:
+              type: integer
+              minimum: 0
+            providerMinorUnits:
+              type: integer
+              minimum: 0
+            markupMinorUnits:
+              type: integer
+              minimum: 0
+            markupPercent:
+              type: number
+              minimum: 0
 
     SendRemindersResponse:
       type: object
@@ -2474,6 +3695,29 @@ components:
           type: string
         fire_escape_routes:
           type: string
+        fire_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        controlProfile:
+          $ref: "#/components/schemas/FireControlProfile"
+
+    FireControlProfile:
+      type: object
+      properties:
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentDate: { type: string, format: date, nullable: true }
+        nextReviewDate: { type: string, format: date, nullable: true }
+        responsiblePerson: { type: string, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        evacuationPeepArrangements: { type: string, nullable: true }
+        maintenanceEvidenceReference: { type: string, nullable: true }
+        defectClosureVerification: { type: string, nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
 
     LegionellaConfig:
       type: object
@@ -2484,6 +3728,173 @@ components:
           type: string
         water_sentinel_outlets:
           type: string
+        water_frequency_days:
+          type: string
+          description: JSON object mapping check types to risk-assessed intervals in days.
+        siteId:
+          type: integer
+          nullable: true
+        effectiveTemperatureLimits:
+          type: object
+          description: Effective minimum and maximum temperatures for each temperature check type.
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
+        controlProfile:
+          $ref: "#/components/schemas/LegionellaControlProfile"
+
+    LegionellaControlProfile:
+      type: object
+      properties:
+        systemInventoryReference: { type: string, nullable: true }
+        writtenControlSchemeReference: { type: string, nullable: true }
+        riskAssessmentReference: { type: string, nullable: true }
+        riskAssessmentReviewDate: { type: string, format: date, nullable: true }
+        competentPerson: { type: string, nullable: true }
+        samplingLabRecordReference: { type: string, nullable: true }
+        controlLimitsRationale: { type: string, nullable: true }
+        remedialVerificationReference: { type: string, nullable: true }
+        schemeReviewDate: { type: string, format: date, nullable: true }
+        ukNation: { type: string, enum: [england, scotland, wales, northern_ireland], nullable: true }
+        frequencyDays:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 3650 }
+        temperatureLimits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TemperatureLimit"
+
+    TemperatureLimit:
+      type: object
+      properties:
+        min: { type: number }
+        max: { type: number }
+
+    HotTubCheckType:
+      type: string
+      enum: [water_chemistry, temperature, filter_clean, cover_inspection, drain_refill, microbiological_test, risk_assessment]
+
+    HotTubCheck:
+      type: object
+      properties:
+        id: { type: integer }
+        clientId: { type: integer }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result:
+          type: string
+          description: New records use pass or fail; historical action_required records remain readable.
+          enum: [pass, fail, action_required]
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, clientId, checkType, checkDate, result, createdAt, updatedAt]
+
+    CreateHotTubCheckRequest:
+      type: object
+      description: pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                const: water_chemistry
+          then:
+            required: [phValue, sanitiserLevel]
+        - if:
+            properties:
+              checkType:
+                const: temperature
+          then:
+            required: [temperature]
+      properties:
+        checkType:
+          $ref: "#/components/schemas/HotTubCheckType"
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+      required: [checkType, checkDate, result]
+
+    UpdateHotTubCheckRequest:
+      type: object
+      description: For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.
+      properties:
+        checkDate: { type: string }
+        result: { type: string, enum: [pass, fail] }
+        session:
+          type: string
+          enum: [morning, midday, evening]
+          nullable: true
+        phValue: { type: number, nullable: true }
+        sanitiserLevel: { type: number, nullable: true }
+        temperature: { type: number, nullable: true }
+        siteId: { type: integer, nullable: true }
+        hotTubId: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        performedBy: { type: string, nullable: true }
+
+    HotTubConfig:
+      type: object
+      properties:
+        siteId: { type: integer, nullable: true }
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+        controlProfile:
+          type: object
+          nullable: true
+          additionalProperties: true
+        disclaimer: { type: string }
+      required: [siteId, operatingRanges, disclaimer]
+
+    HotTubConfigUpdate:
+      type: object
+      properties:
+        operatingRanges:
+          $ref: "#/components/schemas/HotTubOperatingRanges"
+
+    HotTubOperatingRanges:
+      type: object
+      properties:
+        ph:
+          type: object
+          properties:
+            min: { type: number, minimum: 0, maximum: 14 }
+            max: { type: number, minimum: 0, maximum: 14 }
+          required: [min, max]
+        sanitiser:
+          type: object
+          properties:
+            min: { type: number, minimum: 0 }
+            max: { type: number, minimum: 0 }
+          required: [min, max]
+        temperature:
+          type: object
+          properties:
+            max: { type: number, exclusiveMinimum: 0, maximum: 40 }
+          required: [max]
+      required: [ph, sanitiser, temperature]
 
     BikeTrackConfig:
       type: object
@@ -2494,6 +3905,9 @@ components:
           type: string
         bike_require_helmet:
           type: string
+        bike_overdue_repeat_interval_days:
+          type: string
+          enum: ['0', '1', '3', '7', '14']
 
     GreenTrackConfig:
       type: object
@@ -2869,6 +4283,9 @@ components:
     FoodSafetyConfig:
       type: object
       properties:
+        food_temperature_rules:
+          type: string
+          description: Validated JSON containing numeric min/max ranges and maximum cooling minutes; authoritative for new readings.
         food_cold_units:
           type: string
           nullable: true
@@ -2879,6 +4296,9 @@ components:
           type: string
           nullable: true
         food_default_sv_items:
+          type: string
+          nullable: true
+        food_probe_names:
           type: string
           nullable: true
         food_show_deliveries:
@@ -2907,6 +4327,13 @@ components:
           nullable: true
         food_num_freezers:
           type: string
+          nullable: true
+        food_jurisdiction:
+          description: Food-safety jurisdiction used to choose the standard reheating limit.
+          type: string
+          enum:
+            - scotland
+            - england_wales
           nullable: true
         food_cooking_limit:
           type: string
@@ -3069,6 +4496,10 @@ components:
     CreateFoodSafetyRecordRequest:
       type: object
       properties:
+        mobileEntryId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{12,100}$'
+          description: Stable device submission identifier retained across retries.
         recordDate:
           type: string
         deliveries:
@@ -3103,6 +4534,20 @@ components:
     UpdateFoodSafetyRecordRequest:
       type: object
       properties:
+        mobileEntryId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{12,100}$'
+          description: Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.
+        mobileRecordDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Original device-local diary date; must match the target record.
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+          description: Updated-at value returned when the web diary was loaded.
+        expectedRecord:
+          $ref: "#/components/schemas/FoodSafetyRecordSnapshot"
         mobileTemperatureLog:
           $ref: "#/components/schemas/MobileTemperatureLog"
         deliveries:
@@ -3131,6 +4576,62 @@ components:
           type: string
         submittedAt:
           type: string
+          format: date-time
+          nullable: true
+
+    FoodSafetyRecordSnapshot:
+      type: object
+      description: The web diary baseline used for safe three-way merging.
+      properties:
+        deliveries:
+          type: array
+          items: {}
+        coldFood:
+          type: array
+          items: {}
+        hotTemperature:
+          type: array
+          items: {}
+        cooling:
+          type: array
+          items: {}
+        reheating:
+          type: array
+          items: {}
+        hotHolding:
+          type: array
+          items: {}
+        sousVide:
+          type: array
+          items: {}
+        cookingLimit:
+          type: string
+          nullable: true
+        coolingLimit:
+          type: string
+          nullable: true
+        reheatingLimit:
+          type: string
+          nullable: true
+        hotHoldingLimit:
+          type: string
+          nullable: true
+        correctives:
+          type: string
+          nullable: true
+        managerSignature:
+          type: string
+          nullable: true
+        performedBy:
+          type: string
+          nullable: true
+        staffRosterId:
+          type: integer
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     MobileTemperatureLog:
       type: object
@@ -3186,6 +4687,7 @@ components:
           type: string
         result:
           type: string
+          description: New records use pass or fail; historical action_required records remain readable.
           enum: [pass, fail, action_required]
         temperature:
           type: string
@@ -3216,6 +4718,14 @@ components:
 
     CreateLegionellaCheckRequest:
       type: object
+      description: temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+      allOf:
+        - if:
+            properties:
+              checkType:
+                enum: [calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, cold_nonsent_temp]
+          then:
+            required: [temperature]
       properties:
         checkType:
           $ref: "#/components/schemas/LegionellaCheckType"
@@ -3223,7 +4733,7 @@ components:
           type: string
         result:
           type: string
-          enum: [pass, fail, action_required]
+          enum: [pass, fail]
         temperature:
           type: number
           nullable: true
@@ -3246,12 +4756,13 @@ components:
 
     UpdateLegionellaCheckRequest:
       type: object
+      description: For an existing temperature check, temperature is required. New results use pass or fail.
       properties:
         checkDate:
           type: string
         result:
           type: string
-          enum: [pass, fail, action_required]
+          enum: [pass, fail]
         temperature:
           type: number
           nullable: true
@@ -3274,7 +4785,7 @@ components:
         checkType:
           $ref: "#/components/schemas/LegionellaCheckType"
         frequencyDays:
-          type: integer
+          type: ["integer", "null"]
         lastDate:
           type: string
           nullable: true
@@ -3287,9 +4798,39 @@ components:
           nullable: true
         status:
           type: string
-          enum: [ok, due_soon, overdue, never]
+          enum: [ok, due_soon, overdue, never, plan_required]
       required:
         - checkType
         - frequencyDays
         - lastResult
         - status
+
+    WaterMonitoringPlanInput:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [approve, flag_change]
+        riskAssessmentReference:
+          type: string
+        writtenSchemeReference:
+          type: string
+        competentPerson:
+          type: string
+        materialChangeNote:
+          type: string
+        frequencies:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [action]
+
+    WaterMonitoringPlanResult:
+      type: object
+      properties:
+        profile:
+          type: object
+          additionalProperties: true
+        approved:
+          type: boolean
+      required: [profile, approved]

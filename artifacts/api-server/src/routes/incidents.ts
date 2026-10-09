@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import {
   incidentsTable, incidentRiddorEventsTable, sitesTable, appSettingsTable, usersTable,
-  INCIDENT_STATUSES, EMPLOYMENT_TYPES,
+  INCIDENT_STATUSES, INCIDENT_SEVERITIES, EMPLOYMENT_TYPES,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
@@ -13,11 +13,10 @@ import { appendAuditEvent } from "../lib/audit";
 const router = Router();
 
 const createSchema = z.object({
-  // incidentType/severity are validated against the client's effective option
-  // list at request time (custom or default) rather than a fixed enum, so each
-  // client can customise these vocabularies. Kept as trimmed strings here.
+  // Incident type is validated against the client's effective option list.
+  // Severity remains fixed because serious/fatal values drive summary metrics.
   incidentType: z.string().min(1).max(60).default("accident"),
-  severity: z.string().min(1).max(60).default("minor"),
+  severity: z.enum(INCIDENT_SEVERITIES).default("minor"),
   status: z.enum(INCIDENT_STATUSES).default("open"),
   incidentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   incidentTime: z.string().max(10).nullable().optional(),
@@ -35,6 +34,7 @@ const createSchema = z.object({
   hseReference: z.string().max(200).nullable().optional(),
   hseReportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   immediateActions: z.string().max(5000).nullable().optional(),
+  investigationFindings: z.string().max(10000).nullable().optional(),
   correctiveActions: z.string().max(5000).nullable().optional(),
   reportedBy: z.string().min(1).max(200),
   siteId: z.number().int().nullable().optional(),
@@ -51,7 +51,6 @@ const createSchema = z.object({
 // against the current, tenant-scoped option list.
 const updateSchema = createSchema.partial().extend({
   incidentType: z.string().min(1).optional(),
-  severity: z.string().min(1).optional(),
 });
 
 function allowedSites(clientId: number, deptId: number) {
@@ -67,13 +66,19 @@ function validateRiddorRecord(data: {
   riddorReportable?: boolean; reportedToHse?: boolean; riddorRationale?: string | null;
   hseReference?: string | null; hseReportDate?: string | null; submittedAt?: string | null;
   submissionEvidence?: string | null;
-}) {
-  if ((data.riddorReportable || data.reportedToHse) && !data.riddorRationale?.trim()) {
+}, requireSubmission = true) {
+  if (!data.riddorRationale?.trim()) {
     return "Record the rationale for the RIDDOR decision";
   }
+  if (data.reportedToHse && !data.riddorReportable) return "Only a reportable incident can be marked submitted to HSE";
+  if (!data.reportedToHse && (data.submittedAt !== undefined && data.submittedAt !== null ||
+    data.submissionEvidence !== undefined && data.submissionEvidence !== null && !!data.submissionEvidence.trim()))
+    return "Submission time and evidence require a reported HSE submission";
   if (data.reportedToHse) {
     if (!data.hseReference?.trim()) return "An HSE submission reference is required";
     if (!data.hseReportDate) return "The HSE submission date is required";
+  }
+  if (data.reportedToHse && requireSubmission) {
     if (!data.submittedAt) return "The HSE submission time is required";
     if (!data.submissionEvidence?.trim()) return "Record the submission evidence or its secure location";
   }
@@ -98,9 +103,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   if (status && (INCIDENT_STATUSES as readonly string[]).includes(status))
     conditions.push(eq(incidentsTable.status, status));
-  // severity/incidentType filters are free-form (per-client customisable),
-  // so accept any non-empty value and let the equality match narrow results.
-  if (severity)
+  if (severity && (INCIDENT_SEVERITIES as readonly string[]).includes(severity))
     conditions.push(eq(incidentsTable.severity, severity));
   if (incidentType)
     conditions.push(eq(incidentsTable.incidentType, incidentType));
@@ -168,12 +171,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", issues: parsed.error.issues });
   const data = parsed.data;
 
-  const [allowedTypes, allowedSeverities] = await Promise.all([
-    getEffectiveOptionList(clientId, "incident_types"),
-    getEffectiveOptionList(clientId, "incident_severities"),
-  ]);
+  const allowedTypes = await getEffectiveOptionList(clientId, "incident_types");
   if (!allowedTypes.includes(data.incidentType)) return res.status(400).json({ error: "Invalid incident type" });
-  if (!allowedSeverities.includes(data.severity)) return res.status(400).json({ error: "Invalid severity" });
 
   if (!await canAccessSite(clientId, data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
@@ -224,38 +223,50 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     const allowedTypes = await getEffectiveOptionList(clientId, "incident_types");
     if (!allowedTypes.includes(parsed.data.incidentType)) return res.status(400).json({ error: "Invalid incident type" });
   }
-  if (parsed.data.severity !== undefined && parsed.data.severity !== existing.severity) {
-    const allowedSeverities = await getEffectiveOptionList(clientId, "incident_severities");
-    if (!allowedSeverities.includes(parsed.data.severity)) return res.status(400).json({ error: "Invalid severity" });
-  }
-
   if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
   const { riddorRationale, submittedAt, submissionEvidence, ...updateData } = parsed.data;
   const riddorChanged = ["riddorReportable", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
-  const hasRiddorRecord = riddorChanged || riddorRationale !== undefined || submittedAt !== undefined || submissionEvidence !== undefined;
+  const hasRiddorRecord = riddorChanged || !!riddorRationale?.trim() || !!submittedAt || !!submissionEvidence?.trim();
+  if ((updateData.reportedToHse ?? existing.reportedToHse) && !(updateData.riddorReportable ?? existing.riddorReportable))
+    return res.status(400).json({ error: "Only a reportable incident can be marked submitted to HSE" });
+  const newSubmission = (updateData.reportedToHse ?? existing.reportedToHse) &&
+    (!existing.reportedToHse || (updateData.hseReference !== undefined && updateData.hseReference !== existing.hseReference) ||
+      (updateData.hseReportDate !== undefined && updateData.hseReportDate !== existing.hseReportDate));
+  if ((submittedAt !== undefined || submissionEvidence !== undefined) && !newSubmission)
+    return res.status(400).json({ error: "Submission time and evidence require a new or corrected HSE submission" });
   if (hasRiddorRecord) {
     const riddorError = validateRiddorRecord({
       riddorReportable: updateData.riddorReportable ?? existing.riddorReportable,
       reportedToHse: updateData.reportedToHse ?? existing.reportedToHse,
       riddorRationale,
-      hseReference: updateData.hseReference ?? existing.hseReference,
-      hseReportDate: updateData.hseReportDate ?? existing.hseReportDate,
+      hseReference: updateData.hseReference === undefined ? existing.hseReference : updateData.hseReference,
+      hseReportDate: updateData.hseReportDate === undefined ? existing.hseReportDate : updateData.hseReportDate,
       submittedAt,
       submissionEvidence,
-    });
+    }, newSubmission);
     if (riddorError) return res.status(400).json({ error: riddorError });
   }
   const actor = (req as any).currentUser;
   const decisionAt = new Date();
   const updated = await db.transaction(async (tx) => {
+    if (updateData.status === "closed") {
+      await tx.execute(sql`SELECT id FROM incidents WHERE id = ${id} AND client_id = ${clientId} FOR UPDATE`);
+      const pending = await tx.execute(sql`
+        SELECT 1 FROM compliance_actions
+        WHERE client_id = ${clientId} AND source_track = 'IncidentTrack'
+          AND source_record_id = ${String(id)} AND status <> 'verified' LIMIT 1
+      `);
+      if (pending.rows.length) return null;
+    }
     const [incident] = await tx.update(incidentsTable)
       .set({ ...updateData, updatedAt: new Date() })
       .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).returning();
+    if (!incident) return null;
     if (hasRiddorRecord) {
       await tx.insert(incidentRiddorEventsTable).values({
-        clientId, incidentId: id, eventType: incident.reportedToHse ? "submission" : "decision",
+        clientId, incidentId: id, eventType: newSubmission ? "submission" : "decision",
         actorId: actor?.id ?? null, decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
         riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse, rationale: riddorRationale?.trim() ?? null,
         hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
@@ -264,6 +275,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     return incident;
   });
+  if (!updated) return res.status(409).json({ error: "Linked corrective actions changed; reload before closing this incident" });
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: id, action: "updated", before: existing, after: updated });
   res.json(updated);
 });
@@ -316,6 +328,28 @@ router.get("/:id/riddor-history", requireAuth, async (req, res) => {
     .leftJoin(usersTable, eq(incidentRiddorEventsTable.actorId, usersTable.id))
     .where(and(eq(incidentRiddorEventsTable.clientId, clientId), eq(incidentRiddorEventsTable.incidentId, id)))
     .orderBy(desc(incidentRiddorEventsTable.createdAt), desc(incidentRiddorEventsTable.id)));
+});
+
+// The incident file includes the live, tenant-scoped status of each linked
+// corrective action. Verification remains controlled by Compliance Hub.
+router.get("/:id/actions", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  const id = Number(req.params.id);
+  if (!clientId || !Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Invalid request" });
+  const [incident] = await db.select().from(incidentsTable)
+    .where(and(eq(incidentsTable.id, id), eq(incidentsTable.clientId, clientId))).limit(1);
+  if (!incident) return res.status(404).json({ error: "Not found" });
+  if (!await canAccessSite(clientId, incident.siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Forbidden" });
+  const result = await db.execute(sql`
+    SELECT id, title, status, owner_name AS "ownerName", corrective_action AS "correctiveAction",
+      evidence_reference AS "evidenceReference", verification_notes AS "verificationNotes",
+      verified_at AS "verifiedAt", verified_by AS "verifiedBy"
+    FROM compliance_actions
+    WHERE client_id = ${clientId} AND source_track = 'IncidentTrack'
+      AND source_record_id = ${String(id)}
+    ORDER BY created_at, id
+  `);
+  res.json(result.rows);
 });
 
 // ── Template config ───────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import {
   useGetGreenTrackConfig,
@@ -29,28 +30,28 @@ import {
   Tractor, Plus, AlertTriangle, CheckCircle2, Clock, Wrench,
   Pencil, Trash2, Lock, Search, Building2, Filter, ChevronDown, X,
   ShieldAlert, XCircle, CheckCheck, Gauge, Fuel, ClipboardCheck, Droplet, Settings,
+  Upload, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { RequiredRecordPhotoEvidence, useNewRecordPhotoEvidence } from "@/components/required-record-photo-evidence";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
+import { getApiErrorMessage } from "@/lib/api";
+import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-
-async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${baseUrl}/api${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `Request failed: ${res.status}`);
-  }
-  return res.json();
+function useGreenTrackApi() {
+  const request = useActiveClientApi();
+  return useCallback(async <T = any,>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await request(path, init);
+    if (!response.ok) {
+      throw new Error(await getApiErrorMessage(response, `Request failed: ${response.status}`));
+    }
+    return response.json() as Promise<T>;
+  }, [request]);
 }
 
 function fmt(d: string | null | undefined) {
@@ -161,12 +162,19 @@ function GreenConfigDialog() {
 const MACHINE_TYPE_LABELS: Record<string, string> = {
   ride_on_cylinder:  "Ride-on (cylinder)",
   ride_on_rotary:    "Ride-on (rotary)",
+  ride_on:           "Ride-on equipment",
+  pedestrian:        "Pedestrian equipment",
   fairway_mower:     "Fairway mower",
   walk_behind:       "Walk-behind mower",
   tractor:           "Tractor",
   utility_vehicle:   "Utility vehicle",
   sprayer_spreader:  "Sprayer / spreader",
   aerator:           "Aerator",
+  atv_quad:          "ATV / quad bike",
+  blower:            "Blower",
+  chainsaw:          "Chainsaw",
+  hedge_trimmer:     "Hedge trimmer",
+  topdresser:        "Topdresser",
   scarifier:         "Scarifier / verticut",
   roller:            "Roller",
   edger_strimmer:    "Edger / strimmer",
@@ -244,6 +252,15 @@ interface PreUseCheck {
   defectNoted: boolean;
   result: string;
   notes: string | null;
+  checklistItems: Array<{
+    key: string;
+    label: string;
+    section: string;
+    status: "ok" | "fail" | "na";
+    note?: string;
+  }> | null;
+  fuelLevel: string | null;
+  submittedAt: string | null;
 }
 
 interface ServiceRecord {
@@ -397,6 +414,7 @@ function MachineDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const isEdit = !!machine;
   const blank = { name: "", type: "other", make: "", model: "", serialNo: "", year: "", regNo: "", siteId: "", active: true, notes: "" };
   const [form, setForm] = useState(blank);
@@ -517,6 +535,253 @@ function MachineDialog({
   );
 }
 
+type MachineImportRow = {
+  name: string;
+  type: string;
+  make: string | null;
+  model: string | null;
+  serialNo: string | null;
+  year: number | null;
+  regNo: string | null;
+  siteId: number | null;
+  notes: string | null;
+  active: boolean;
+};
+
+function parseCsvRows(text: string): string[][] {
+  const output: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const source = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '"') {
+      if (quoted && source[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && source[i + 1] === "\n") i += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) output.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  if (cell || row.length) {
+    row.push(cell.trim());
+    if (row.some(Boolean)) output.push(row);
+  }
+  return output;
+}
+
+function importHeaderKey(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function parseMachineRosterCsv(
+  text: string,
+  sites: { id: number; name: string }[],
+): { rows: MachineImportRow[]; errors: string[] } {
+  const table = parseCsvRows(text);
+  if (table.length < 2) return { rows: [], errors: ["Add a header row and at least one equipment row."] };
+
+  const aliases: Record<string, string[]> = {
+    name: ["name", "machine_name", "equipment", "equipment_name", "description"],
+    type: ["type", "machine_type", "equipment_type", "category", "class"],
+    make: ["make", "manufacturer"],
+    model: ["model"],
+    serialNo: ["serial_no", "serial_number", "serial", "serialno"],
+    regNo: ["reg_no", "registration", "fleet_no", "fleet_number", "asset_tag", "asset_no"],
+    year: ["year", "manufacture_year"],
+    site: ["site", "site_name", "location"],
+    notes: ["notes", "note"],
+    active: ["active", "status"],
+  };
+  const headers = table[0].map(importHeaderKey);
+  const indexes = Object.fromEntries(Object.entries(aliases).map(([key, names]) => [
+    key,
+    names.map(name => headers.indexOf(name)).find(index => index >= 0) ?? -1,
+  ])) as Record<string, number>;
+  const errors: string[] = [];
+  if (indexes.name < 0) errors.push("The CSV needs a name or equipment column.");
+  if (indexes.type < 0) errors.push("The CSV needs a type or category column.");
+  if (errors.length) return { rows: [], errors };
+
+  const siteByName = new Map(sites.map(site => [site.name.trim().toLowerCase(), site.id]));
+  const rows: MachineImportRow[] = [];
+  table.slice(1).forEach((values, index) => {
+    const rowNumber = index + 2;
+    const value = (key: string) => indexes[key] >= 0 ? values[indexes[key]]?.trim() ?? "" : "";
+    const siteName = value("site");
+    const yearText = value("year");
+    const activeText = value("active").toLowerCase();
+    const siteId = siteName ? siteByName.get(siteName.toLowerCase()) : null;
+    if (!value("name")) errors.push(`Row ${rowNumber}: name is required.`);
+    if (!value("type")) errors.push(`Row ${rowNumber}: type is required.`);
+    if (siteName && siteId === undefined) errors.push(`Row ${rowNumber}: site "${siteName}" was not found.`);
+    if (yearText && (!/^\d{4}$/.test(yearText) || Number(yearText) < 1900 || Number(yearText) > 2100)) {
+      errors.push(`Row ${rowNumber}: year must be between 1900 and 2100.`);
+    }
+    if (!value("name") || !value("type") || (siteName && siteId === undefined)) return;
+    rows.push({
+      name: value("name"),
+      type: value("type"),
+      make: value("make") || null,
+      model: value("model") || null,
+      serialNo: value("serialNo") || null,
+      year: yearText ? Number(yearText) : null,
+      regNo: value("regNo") || null,
+      siteId: siteId ?? null,
+      notes: value("notes") || null,
+      active: !["false", "no", "inactive", "0"].includes(activeText),
+    });
+  });
+  return { rows, errors };
+}
+
+function downloadMachineRosterTemplate() {
+  const csv = [
+    "name,type,make,model,serial_no,reg_no,year,site,notes,active",
+    'Greens mower 1,ride-on,Toro,Reelmaster 5010,RM-001,GT-01,2021,,Main cutting unit,true',
+    'Pedestrian mower 1,pedestrian,Honda,HRX 537,PM-001,GT-02,2022,,Walk-behind mower,true',
+  ].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "greentrack-equipment-template.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function MachineImportDialog({
+  open, onClose, sites, onImported,
+}: {
+  open: boolean;
+  onClose: () => void;
+  sites: { id: number; name: string }[];
+  onImported: () => void;
+}) {
+  const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<MachineImportRow[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  const reset = () => {
+    setFileName("");
+    setRows([]);
+    setErrors([]);
+  };
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    const parsed = parseMachineRosterCsv(await file.text(), sites);
+    setFileName(file.name);
+    setRows(parsed.rows);
+    setErrors(parsed.errors);
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      const result = await apiFetch<{ imported: number; skipped: Array<{ name: string; reason: string }> }>(
+        "/green-track/machines/import",
+        { method: "POST", body: JSON.stringify({ rows }) },
+      );
+      toast({
+        title: "Equipment roster imported",
+        description: `${result.imported} added${result.skipped.length ? `, ${result.skipped.length} already in the fleet` : ""}.`,
+      });
+      onImported();
+      onClose();
+      reset();
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={value => { if (!value && !importing) { onClose(); reset(); } }}>
+      <DialogContent className="max-w-2xl rounded-sm max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Upload equipment roster</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            Import the account&apos;s equipment list once, then staff can select the active machines in GreenTrack.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-sm" onClick={downloadMachineRosterTemplate}>
+              <Download className="w-3.5 h-3.5" /> Download CSV template
+            </Button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm border border-border px-3 py-2 text-sm hover:bg-muted/40">
+              <Upload className="w-3.5 h-3.5" />
+              Choose CSV
+              <input type="file" accept=".csv,text/csv" className="sr-only" onChange={e => void handleFile(e.target.files?.[0])} />
+            </label>
+            {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Required columns: <strong>name</strong> and <strong>type</strong>. Supported broad types include
+            <strong> ride-on</strong>, <strong>pedestrian</strong>, tractor, utility, and other approved GreenTrack types.
+            Optional columns include make, model, serial number, fleet number, year, site, notes, and active.
+          </p>
+          {errors.length > 0 && (
+            <div className="rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              <p className="font-medium">Fix these rows before importing:</p>
+              <ul className="mt-1 list-disc pl-5 space-y-0.5">{errors.slice(0, 8).map(error => <li key={error}>{error}</li>)}</ul>
+              {errors.length > 8 && <p className="mt-1 text-xs">…and {errors.length - 8} more.</p>}
+            </div>
+          )}
+          {rows.length > 0 && (
+            <div className="overflow-hidden rounded-sm border border-border">
+              <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium">
+                Previewing {rows.length} equipment item{rows.length === 1 ? "" : "s"}
+              </div>
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="border-b border-border text-left text-muted-foreground">
+                    <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Identifier</th><th className="px-3 py-2">Site</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {rows.slice(0, 50).map(row => (
+                      <tr key={`${row.name}-${row.serialNo ?? row.regNo ?? row.type}`}>
+                        <td className="px-3 py-2 font-medium">{row.name}</td>
+                        <td className="px-3 py-2">{MACHINE_TYPE_LABELS[row.type.toLowerCase()] ?? row.type}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.serialNo ?? row.regNo ?? "—"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{sites.find(site => site.id === row.siteId)?.name ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length > 50 && <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Showing the first 50 rows.</p>}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { onClose(); reset(); }} disabled={importing}>Cancel</Button>
+          <Button onClick={handleImport} disabled={importing || rows.length === 0 || errors.length > 0}>
+            {importing ? "Importing…" : `Import ${rows.length || ""} equipment`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Pre-use check dialog ─────────────────────────────────────────────────────
 
 const CHECK_ITEMS = [
@@ -540,7 +805,9 @@ function PreUseDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const { data: config } = useGetGreenTrackConfig();
+  const photoEvidence = useNewRecordPhotoEvidence("green_pre_use_check", open && !check);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", checkDate: today, operator: "", operatorRosterId: null as number | null,
@@ -551,15 +818,22 @@ function PreUseDialog({
   };
   const [form, setForm] = useState(blank);
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(check ? {
-    machineId: String(check.machineId), checkDate: check.checkDate,
-    operator: check.operator ?? "", operatorRosterId: (check as any).operatorRosterId ?? (check as any).operator_roster_id ?? null,
-    fluidLevelsOk: check.fluidLevelsOk, tyresOk: check.tyresOk,
-    bladesOk: check.bladesOk, guardsOk: check.guardsOk,
-    controlsOk: check.controlsOk, lightsOk: check.lightsOk,
-    cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(check ? {
+      machineId: String(check.machineId), checkDate: check.checkDate,
+      operator: check.operator ?? "", operatorRosterId: (check as any).operatorRosterId ?? (check as any).operator_roster_id ?? null,
+      fluidLevelsOk: check.fluidLevelsOk, tyresOk: check.tyresOk,
+      bladesOk: check.bladesOk, guardsOk: check.guardsOk,
+      controlsOk: check.controlsOk, lightsOk: check.lightsOk,
+      cleanlinessOk: check.cleanlinessOk, notes: check.notes ?? "",
+    } : blank);
+  };
 
   // N/A is represented at checklist-item level; the completed observation is
   // always canonical pass/fail.
@@ -570,6 +844,7 @@ function PreUseDialog({
   }, [form.fluidLevelsOk, form.tyresOk, form.bladesOk, form.guardsOk, form.controlsOk, form.lightsOk, form.cleanlinessOk]);
 
   const handleSave = async () => {
+    if (!check && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -586,7 +861,10 @@ function PreUseDialog({
       if (check) {
         await apiFetch(`/green-track/pre-use-checks/${check.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/pre-use-checks", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/pre-use-checks", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: check ? "Check updated" : "Pre-use check recorded" });
       onSaved(); onClose();
@@ -658,10 +936,13 @@ function PreUseDialog({
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
               placeholder="Any faults observed, corrective action taken…" />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : check ? "Save changes" : "Record check"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!check && photoEvidenceBlocked)}>
+            {saving ? "Saving…" : check ? "Save changes" : "Record check"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -679,6 +960,8 @@ function ServiceDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("green_service", open && !record);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", serviceDate: today, serviceType: "scheduled",
@@ -687,18 +970,26 @@ function ServiceDialog({
   };
   const [form, setForm] = useState({ ...blank, servicedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(record ? {
-    machineId: String(record.machineId), serviceDate: record.serviceDate,
-    serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
-    nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
-    nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
-    servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
-    costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
-    notes: record.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(record ? {
+      machineId: String(record.machineId), serviceDate: record.serviceDate,
+      serviceType: record.serviceType, hoursAtService: record.hoursAtService ? String(record.hoursAtService) : "",
+      nextServiceHours: record.nextServiceHours ? String(record.nextServiceHours) : "",
+      nextServiceDate: record.nextServiceDate ?? "", workPerformed: record.workPerformed ?? "",
+      servicedBy: record.servicedBy ?? "", servicedByRosterId: (record as any).servicedByRosterId ?? (record as any).serviced_by_roster_id ?? null,
+      costPounds: record.costPence ? (record.costPence / 100).toFixed(2) : "",
+      notes: record.notes ?? "",
+    } : blank);
+  };
 
   const handleSave = async () => {
+    if (!record && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     setSaving(true);
     try {
@@ -716,7 +1007,10 @@ function ServiceDialog({
       if (record) {
         await apiFetch(`/green-track/service-records/${record.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/service-records", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/service-records", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: record ? "Service record updated" : "Service record logged" });
       onSaved(); onClose();
@@ -798,10 +1092,13 @@ function ServiceDialog({
             <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : record ? "Save changes" : "Log service"}</Button>
+          <Button onClick={handleSave} disabled={saving || (!record && photoEvidenceBlocked)}>
+            {saving ? "Saving…" : record ? "Save changes" : "Log service"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -819,6 +1116,8 @@ function DefectDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoEvidence = useNewRecordPhotoEvidence("green_defect", open && !defect);
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", reportDate: today, reportedBy: "", reportedByRosterId: null,
@@ -827,16 +1126,24 @@ function DefectDialog({
   };
   const [form, setForm] = useState({ ...blank, reportedByRosterId: null as number | null });
   const [saving, setSaving] = useState(false);
+  const photoEvidenceBlocked = photoEvidence.enabled && (
+    !photoEvidence.ready || photoEvidence.loading || !!photoEvidence.error || photoEvidence.uploading ||
+    (photoEvidence.required && photoEvidence.uploadIds.length < photoEvidence.minimum)
+  );
 
-  const reset = () => setForm(defect ? {
-    machineId: String(defect.machineId), reportDate: defect.reportDate,
-    reportedBy: defect.reportedBy ?? "", reportedByRosterId: (defect as any).reportedByRosterId ?? (defect as any).reported_by_roster_id ?? null, description: defect.description,
-    severity: defect.severity, outOfService: defect.outOfService,
-    status: defect.status, resolution: defect.resolution ?? "",
-    resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
-  } : blank);
+  const reset = () => {
+    photoEvidence.reset();
+    setForm(defect ? {
+      machineId: String(defect.machineId), reportDate: defect.reportDate,
+      reportedBy: defect.reportedBy ?? "", reportedByRosterId: (defect as any).reportedByRosterId ?? (defect as any).reported_by_roster_id ?? null, description: defect.description,
+      severity: defect.severity, outOfService: defect.outOfService,
+      status: defect.status, resolution: defect.resolution ?? "",
+      resolvedDate: defect.resolvedDate ?? "", notes: defect.notes ?? "",
+    } : blank);
+  };
 
   const handleSave = async () => {
+    if (!defect && photoEvidenceBlocked) return;
     if (!form.machineId) { toast({ title: "Select a machine", variant: "destructive" }); return; }
     if (!form.description.trim()) { toast({ title: "Description is required", variant: "destructive" }); return; }
     setSaving(true);
@@ -851,7 +1158,10 @@ function DefectDialog({
       if (defect) {
         await apiFetch(`/green-track/defects/${defect.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
-        await apiFetch("/green-track/defects", { method: "POST", body: JSON.stringify(body) });
+        await apiFetch("/green-track/defects", {
+          method: "POST",
+          body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
+        });
       }
       toast({ title: defect ? "Defect updated" : "Defect reported" });
       onSaved(); onClose();
@@ -950,10 +1260,11 @@ function DefectDialog({
             <Textarea className="mt-1 rounded-sm" value={form.notes} rows={2}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
+          <RequiredRecordPhotoEvidence evidence={photoEvidence} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}
+          <Button onClick={handleSave} disabled={saving || (!defect && photoEvidenceBlocked)}
             variant={form.severity === "critical" && form.status !== "resolved" ? "destructive" : "default"}>
             {saving ? "Saving…" : defect ? "Save changes" : "Report defect"}
           </Button>
@@ -979,6 +1290,7 @@ function PuwerDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", inspectionDate: today, nextInspectionDate: "",
@@ -1121,6 +1433,7 @@ function FuelLogDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
   const today = new Date().toISOString().split("T")[0];
   const blank = {
     machineId: "", logDate: today, fuelType: "diesel",
@@ -1233,17 +1546,20 @@ function FuelLogDialog({
 
 type Tab = "fleet" | "pre-use" | "services" | "defects" | "puwer" | "fuel" | "actions";
 
-function GreenTrackPageInternal() {
-  const { user } = useAuth();
+export function GreenTrackPageInternal() {
+  const { user, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const apiFetch = useGreenTrackApi();
+  const photoRequirements = usePhotoRequirements();
 
   const [activeTab, setActiveTab] = useState<Tab>("fleet");
   const [search, setSearch] = useState("");
   const [filterMachine, setFilterMachine] = useState("");
 
   // Dialogs
+  const [machineImportDialog, setMachineImportDialog] = useState(false);
   const [machineDialog, setMachineDialog] = useState(false);
   const [editMachine, setEditMachine] = useState<Machine | null>(null);
   const [preUseDialog, setPreUseDialog] = useState(false);
@@ -1260,39 +1576,39 @@ function GreenTrackPageInternal() {
 
   // Queries
   const { data: sites = [] } = useQuery({
-    queryKey: ["sites"], queryFn: () => apiFetch<{ id: number; name: string }[]>("/sites"),
+    queryKey: ["sites", activeClientId], queryFn: () => apiFetch<{ id: number; name: string }[]>("/sites"),
   });
   const { data: machines = [], isLoading: machinesLoading } = useQuery({
-    queryKey: ["green-machines"],
+    queryKey: ["green-machines", activeClientId],
     queryFn: () => apiFetch<Machine[]>("/green-track/machines"),
   });
   const { data: status } = useQuery({
-    queryKey: ["green-status"],
+    queryKey: ["green-status", activeClientId],
     queryFn: () => apiFetch<StatusData>("/green-track/status"),
     refetchInterval: 60_000,
   });
   const { data: preUseChecks = [], isLoading: preUseLoading } = useQuery({
-    queryKey: ["green-pre-use", filterMachine],
+    queryKey: ["green-pre-use", activeClientId, filterMachine],
     queryFn: () => apiFetch<PreUseCheck[]>(`/green-track/pre-use-checks${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "pre-use",
   });
   const { data: serviceRecords = [], isLoading: servicesLoading } = useQuery({
-    queryKey: ["green-services", filterMachine],
+    queryKey: ["green-services", activeClientId, filterMachine],
     queryFn: () => apiFetch<ServiceRecord[]>(`/green-track/service-records${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "services",
   });
   const { data: defects = [], isLoading: defectsLoading } = useQuery({
-    queryKey: ["green-defects", filterMachine],
+    queryKey: ["green-defects", activeClientId, filterMachine],
     queryFn: () => apiFetch<Defect[]>(`/green-track/defects${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "defects",
   });
   const { data: puwerInspections = [], isLoading: puwerLoading } = useQuery({
-    queryKey: ["green-puwer", filterMachine],
+    queryKey: ["green-puwer", activeClientId, filterMachine],
     queryFn: () => apiFetch<PuwerInspection[]>(`/green-track/puwer-inspections${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "puwer",
   });
   const { data: fuelLogs = [], isLoading: fuelLoading } = useQuery({
-    queryKey: ["green-fuel", filterMachine],
+    queryKey: ["green-fuel", activeClientId, filterMachine],
     queryFn: () => apiFetch<FuelLog[]>(`/green-track/fuel-logs${filterMachine ? `?machineId=${filterMachine}` : ""}`),
     enabled: activeTab === "fuel",
   });
@@ -1386,6 +1702,20 @@ function GreenTrackPageInternal() {
   return (
     <AppLayout title="GreenTrack">
       <div className="space-y-6">
+        {photoRequirements.error && (
+          <div role="alert" className="flex items-start justify-between gap-3 rounded-sm border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            <div>
+              <p className="font-medium">Photo requirements could not be loaded.</p>
+              <p className="mt-0.5">{photoRequirements.error.message} Existing record photo uploads may not reflect the configured rules.</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={photoRequirements.retry}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {photoRequirements.isLoading && !photoRequirements.error && (
+          <p role="status" className="text-xs text-muted-foreground">Loading GreenTrack photo requirements…</p>
+        )}
 
         {/* ── Status strip ──────────────────────────────────────────────── */}
         {status && (
@@ -1474,9 +1804,14 @@ function GreenTrackPageInternal() {
               </Select>
             )}
             {activeTab === "fleet" && canAdmin && (
-              <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditMachine(null); setMachineDialog(true); }}>
-                <Plus className="w-3.5 h-3.5" /> Add machine
-              </Button>
+              <>
+                <Button size="sm" variant="outline" className="rounded-sm gap-1.5 h-8" onClick={() => setMachineImportDialog(true)}>
+                  <Upload className="w-3.5 h-3.5" /> Upload roster
+                </Button>
+                <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditMachine(null); setMachineDialog(true); }}>
+                  <Plus className="w-3.5 h-3.5" /> Add machine
+                </Button>
+              </>
             )}
             {activeTab === "pre-use" && (
               <Button size="sm" className="rounded-sm gap-1.5 h-8" onClick={() => { setEditPreUse(null); setPreUseDialog(true); }}>
@@ -1633,10 +1968,11 @@ function GreenTrackPageInternal() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      {["Machine", "Date", "Result", "Operator", "Defect?", "Photos", ""].map(h => (
+                      {["Machine", "Date", "Result", "Operator", "Checklist", "Defect?", "Photos", ""].map(h => (
                         <th key={h} className={cn(
                           "text-left px-4 py-3 font-medium text-muted-foreground text-xs uppercase tracking-wider",
                           h === "Operator" && "hidden md:table-cell",
+                          h === "Checklist" && "hidden lg:table-cell",
                           h === "Photos" && "hidden sm:table-cell",
                           h === "" && "w-20",
                         )}>{h}</th>
@@ -1653,6 +1989,37 @@ function GreenTrackPageInternal() {
                         <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmt(c.checkDate)}</td>
                         <td className="px-4 py-3"><ResultBadge result={c.result} /></td>
                         <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{c.operator ?? "—"}</td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          {(() => {
+                            const items = (c.checklistItems ?? (c as any).checklist_items ?? []) as PreUseCheck["checklistItems"];
+                            const failed = items?.filter(item => item.status === "fail") ?? [];
+                            const answered = items?.length ?? 0;
+                            if (!answered) return <span className="text-xs text-muted-foreground">Legacy 7-point check</span>;
+                            return (
+                              <details className="max-w-[330px]">
+                                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                                  {answered} items · {failed.length ? `${failed.length} failed` : "no failures"}
+                                  {(c.fuelLevel ?? (c as any).fuel_level) ? ` · Fuel ${c.fuelLevel ?? (c as any).fuel_level}` : ""}
+                                </summary>
+                                <div className="mt-2 space-y-1.5 rounded-sm border border-border bg-muted/20 p-2 text-xs">
+                                  {items?.map(item => (
+                                    <div key={item.key} className="flex gap-2">
+                                      <span className={cn(
+                                        "font-semibold uppercase",
+                                        item.status === "fail" ? "text-rose-700" : item.status === "ok" ? "text-emerald-700" : "text-muted-foreground",
+                                      )}>
+                                        {item.status === "na" ? "N/A" : item.status}
+                                      </span>
+                                      <span className="text-muted-foreground">
+                                        {item.label}{item.note ? ` — ${item.note}` : ""}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           {c.defectNoted ? (
                             <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-700 border-amber-200">
@@ -1663,7 +2030,9 @@ function GreenTrackPageInternal() {
                           )}
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
-                          <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact />
+                          <CheckPhotoUploader entityType="green_pre_use_check" entityId={c.id} compact
+                            required={photoRequirements.requirements.green_pre_use_check?.required ?? false}
+                            minPhotos={photoRequirements.requirements.green_pre_use_check?.minPhotos ?? 1} />
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1763,7 +2132,9 @@ function GreenTrackPageInternal() {
                             {s.costPence ? `£${(s.costPence / 100).toFixed(2)}` : "—"}
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
-                            <CheckPhotoUploader entityType="green_service" entityId={s.id} compact />
+                            <CheckPhotoUploader entityType="green_service" entityId={s.id} compact
+                              required={photoRequirements.requirements.green_service?.required ?? false}
+                              minPhotos={photoRequirements.requirements.green_service?.minPhotos ?? 1} />
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1836,7 +2207,9 @@ function GreenTrackPageInternal() {
                           {d.resolvedDate && <div><span className="font-medium">Resolved:</span> {fmt(d.resolvedDate)}</div>}
                           {d.notes && <div><span className="font-medium">Notes:</span> {d.notes}</div>}
                         </div>
-                        <CheckPhotoUploader entityType="green_defect" entityId={d.id} compact />
+                        <CheckPhotoUploader entityType="green_defect" entityId={d.id} compact
+                          required={photoRequirements.requirements.green_defect?.required ?? false}
+                          minPhotos={photoRequirements.requirements.green_defect?.minPhotos ?? 1} />
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm"
@@ -2036,6 +2409,9 @@ function GreenTrackPageInternal() {
         {activeTab === "actions" && (
           <ModuleActionsPanel moduleKey="green" />
         )}
+
+      <MachineImportDialog open={machineImportDialog} onClose={() => setMachineImportDialog(false)}
+        sites={sites} onImported={invalidate} />
 
       <MachineDialog open={machineDialog} onClose={() => { setMachineDialog(false); setEditMachine(null); }}
         machine={editMachine} sites={sites} onSaved={invalidate} />

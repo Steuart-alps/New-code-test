@@ -66,9 +66,12 @@ const runnerLocked = new Set([
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
+  "test:staged-photo-creation", // real routes/helper with in-memory transaction/storage fakes
   "test:login-rate-limit", // isolated temp bundle and in-process Express fixture
   "test:track-summary-routing", // unique temp bundle; pure formatting helpers
   "test:billing-addon-activation", // fake Stripe; unique temp bundle
+  "test:billing-addon-catalog", // fake Stripe/database; in-process Express router
+  "test:private-file-acl", // real routes with isolated provider/database doubles
   "test:service-price-preflight", // read-only source assertions and fake inputs
   "test:biketrack-billing", // fake Stripe/static wiring assertions
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
@@ -93,12 +96,12 @@ for (const name of [...directLocked, ...runnerLocked, ...pure]) {
 
 // Check every direct test entrypoint as well as the package command inventory.
 // A locked entrypoint may run through run-db-workflow directly, or through a
-// self-booting API runner that sources the lock. `login-rate-limit` is the
-// sole standalone pure entrypoint: it launches an in-process Express fixture
-// and has no database, build output, or storage dependency.
+// self-booting API runner that sources the lock. Standalone pure entrypoints
+// use isolated fixtures with no shared database, build output or live storage.
 const pureEntrypoints = new Set([
-  "billing-addon-activation.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
+  "billing-addon-activation.mjs", "billing-addon-catalog.mjs", "biketrack-billing.mjs", "login-rate-limit.mjs",
   "pesttrack-billing.mjs", "service-price-preflight.mjs", "track-summary-routing.mjs",
+  "private-file-acl.mjs", "private-file-acl-fixture.mjs", "staged-photo-creation.mjs",
 ]);
 const entrypoints = require("node:fs").readdirSync("tests").filter((file) => file.endsWith(".mjs"));
 for (const entrypoint of entrypoints) {

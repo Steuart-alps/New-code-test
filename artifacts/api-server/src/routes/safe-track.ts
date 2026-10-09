@@ -14,6 +14,7 @@ import {
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 
 const router = Router();
 
@@ -141,8 +142,8 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "SafeTrack document upload");
   }
 });
 

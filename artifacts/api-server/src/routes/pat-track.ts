@@ -2,8 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { patAppliancesTable, patTestsTable, appSettingsTable } from "@workspace/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
+import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 
 const router = Router();
 
@@ -43,9 +44,28 @@ function resultRows(result: any): any[] {
   return result.rows ?? result ?? [];
 }
 
+function isPatCertificateRoomSiteRace(error: unknown): boolean {
+  const seen = new Set<object>();
+  let candidate = error;
+  while (typeof candidate === "object" && candidate !== null && !seen.has(candidate)) {
+    seen.add(candidate);
+    const postgresError = candidate as { code?: unknown; message?: unknown; cause?: unknown };
+    if (postgresError.code === "23514"
+      && postgresError.message === "PAT room and certificate must belong to the same client and site") return true;
+    candidate = postgresError.cause;
+  }
+  return false;
+}
+
 function csvCell(value: string): string {
   const safeValue = /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safeValue.replace(/"/g, "\"\"")}"`;
+}
+
+async function lockLegacyAppliance(executor: { execute(query: SQL): Promise<any> }, clientId: number, id: number) {
+  return resultRows(await executor.execute(sql`
+    SELECT site_id, active FROM pat_appliances WHERE id=${id} AND client_id=${clientId} FOR UPDATE
+  `))[0] as { site_id: number | null; active: boolean } | undefined;
 }
 
 async function ownedSite(clientId: number, siteId: number | null | undefined) {
@@ -72,13 +92,20 @@ router.get("/appliances", requireAuth, async (req, res) => {
       t.test_date       AS last_test_date,
       t.result          AS last_result,
       t.next_test_date  AS next_test_date,
-      t.tested_by       AS last_tested_by
+       t.tested_by       AS last_tested_by,
+       t.site_id_snapshot AS last_test_site_id,
+       t.site_name_snapshot AS last_test_site_name,
+       t.location_snapshot AS last_test_location,
+       t.snapshot_source AS last_test_location_source
     FROM pat_appliances a
     LEFT JOIN LATERAL (
-      SELECT test_date, result, next_test_date, tested_by
-      FROM pat_tests
-      WHERE appliance_id = a.id AND client_id = a.client_id
-      ORDER BY test_date DESC LIMIT 1
+       SELECT test_date, result, next_test_date, tested_by,
+         site_id_snapshot, site_name_snapshot, location_snapshot, snapshot_source
+       FROM pat_tests t
+       LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+       WHERE t.appliance_id = a.id AND t.client_id = a.client_id
+       ${historicalTestDepartmentScope(departmentId)}
+       ORDER BY t.test_date DESC, t.created_at DESC LIMIT 1
     ) t ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId}
@@ -116,13 +143,17 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
       latest.test_date AS last_test_date,
       latest.result AS last_result,
       latest.tested_by,
-      latest.next_test_date
+       latest.next_test_date,
+       latest.site_name_snapshot, latest.location_snapshot, latest.snapshot_source
     FROM pat_appliances a
     LEFT JOIN LATERAL (
-      SELECT test_date, result, tested_by, next_test_date
-      FROM pat_tests
-      WHERE appliance_id=a.id AND client_id=a.client_id
-      ORDER BY test_date DESC, created_at DESC
+       SELECT test_date, result, tested_by, next_test_date,
+         site_name_snapshot, location_snapshot, snapshot_source
+       FROM pat_tests t
+       LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+       WHERE t.appliance_id=a.id AND t.client_id=a.client_id
+       ${historicalTestDepartmentScope(departmentId)}
+       ORDER BY t.test_date DESC, t.created_at DESC
       LIMIT 1
     ) latest ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
@@ -133,7 +164,7 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
     ORDER BY a.name ASC, a.id ASC
   `);
 
-  const headings = ["Appliance name", "Asset tag", "Type", "Location", "Last test date", "Result", "Tested by", "Next due date", "Status"];
+   const headings = ["Appliance name", "Asset tag", "Type", "Location", "Last test date", "Result", "Tested by", "Next due date", "Status", "Last test site", "Last test location", "Test location source"];
   const rows = resultRows(result).map((row: any) => {
     const nextDue = row.next_test_date ? String(row.next_test_date).slice(0, 10) : "";
     const testResult = row.last_result === "pass" ? "Pass" : row.last_result === "fail" ? "Fail" : "";
@@ -149,7 +180,8 @@ router.get("/register", requireAuth, requireClientAdmin, async (req, res) => {
     return [
       row.name ?? "", row.asset_tag ?? "", row.appliance_type ?? "", row.location ?? "",
       row.last_test_date ? String(row.last_test_date).slice(0, 10) : "", testResult,
-      row.tested_by ?? "", nextDue, registerStatus,
+       row.tested_by ?? "", nextDue, registerStatus,
+       row.site_name_snapshot ?? "", row.location_snapshot ?? "", row.snapshot_source ?? "",
     ].map((value) => csvCell(String(value))).join(",");
   });
   const scope = siteId !== undefined ? `site-${siteId}` : "all-sites";
@@ -196,7 +228,13 @@ router.put("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const targetAccess = await siteAccess(clientId, d.siteId, departmentId);
   if (targetAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (targetAccess === "missing") return res.status(400).json({ error: "Invalid siteId for this client" });
-  const [row] = await db.update(patAppliancesTable)
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, id);
+    if (!locked) return { status: 404, data: { error: "Not found" } };
+    if (await siteAccess(clientId, locked.site_id, departmentId) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    const [row] = await tx.update(patAppliancesTable)
     .set({
       siteId:        d.siteId ?? null,
       name:          d.name,
@@ -209,8 +247,9 @@ router.put("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
     })
     .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)))
     .returning();
-  if (!row) return res.status(404).json({ error: "Not found" });
-  res.json(row);
+    return { status: 200, data: row };
+  });
+  res.status(response.status).json(response.data);
 });
 
 router.delete("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
@@ -221,9 +260,17 @@ router.delete("/appliances/:id", requireAuth, denyViewers, async (req, res) => {
   const access = await applianceAccess(clientId, id, getActiveDepartmentId(req));
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (access === "missing") return res.status(404).json({ error: "Not found" });
-  await db.delete(patAppliancesTable)
-    .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)));
-  res.json({ ok: true });
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, id);
+    if (!locked) return { status: 404, data: { error: "Not found" } };
+    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    await tx.update(patAppliancesTable).set({ active: false, updatedAt: new Date() })
+      .where(and(eq(patAppliancesTable.id, id), eq(patAppliancesTable.clientId, clientId)));
+    return { status: 200, data: { ok: true, archived: true, message: "Appliance retired; test history retained." } };
+  });
+  res.status(response.status).json(response.data);
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -235,24 +282,39 @@ router.get("/tests", requireAuth, async (req, res) => {
   const applianceId = req.query.applianceId ? parseInt(req.query.applianceId as string, 10) : undefined;
   if (req.query.applianceId && isNaN(applianceId!)) return res.status(400).json({ error: "Invalid applianceId" });
   const departmentId = getActiveDepartmentId(req);
+  const siteId = await checkedSiteQuery(req, clientId, departmentId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid siteId for this client" });
+  if (siteId === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceId) {
     const access = await applianceAccess(clientId, applianceId, departmentId);
-    if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
     if (access === "missing") return res.status(400).json({ error: "Appliance not found" });
+    if (access === "forbidden") {
+      // A relocated appliance can still have tests owned by the original scope.
+      const history = resultRows(await db.execute(sql`
+        SELECT t.id FROM pat_tests t
+        JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+        LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+        WHERE t.client_id=${clientId} AND t.appliance_id=${applianceId}
+        ${historicalTestDepartmentScope(departmentId)}
+        ${siteId ? sql`AND t.site_id_snapshot=${siteId}` : sql``} LIMIT 1
+      `));
+      if (!history.length) return res.status(403).json({ error: "Forbidden" });
+    }
   }
 
   const rows = await db.execute(sql`
     SELECT
       t.*,
-      a.name AS appliance_name,
-      a.appliance_type,
-      a.asset_tag
+       t.appliance_name_snapshot AS appliance_name,
+       t.appliance_type_snapshot AS appliance_type,
+       t.asset_tag_snapshot AS asset_tag
     FROM pat_tests t
-    JOIN pat_appliances a ON a.id = t.appliance_id
-    LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
+     JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+     LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
     WHERE t.client_id = ${clientId}
-    ${departmentId !== null ? sql`AND (a.site_id IS NULL OR s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+     ${historicalTestDepartmentScope(departmentId)}
     ${applianceId ? sql`AND t.appliance_id = ${applianceId}` : sql``}
+     ${siteId ? sql`AND t.site_id_snapshot=${siteId}` : sql``}
     ORDER BY t.test_date DESC, t.created_at DESC
     LIMIT 500
   `);
@@ -269,7 +331,14 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const applianceAccessResult = await applianceAccess(clientId, d.applianceId, getActiveDepartmentId(req));
   if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
-  const [row] = await db.insert(patTestsTable).values({
+  const response = await db.transaction(async (tx) => {
+    const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
+    if (!locked) return { status: 400, data: { error: "Appliance not found" } };
+    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
+    const [row] = await tx.insert(patTestsTable).values({
     clientId,
     applianceId:         d.applianceId,
     testDate:            d.testDate,
@@ -281,8 +350,11 @@ router.post("/tests", requireAuth, denyViewers, async (req, res) => {
     insulationMohms:     d.insulationMohms ?? null,
     operatingCurrent:    d.operatingCurrent ?? null,
     notes:               d.notes ?? null,
+    createdBy:            req.currentUser!.id,
   }).returning();
-  res.status(201).json(row);
+    return { status: 201, data: row };
+  });
+  res.status(response.status).json(response.data);
 });
 
 router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
@@ -297,9 +369,13 @@ router.put("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const currentAccess = await testAccess(clientId, id, departmentId);
   if (currentAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (currentAccess === "missing") return res.status(404).json({ error: "Not found" });
-  const applianceAccessResult = await applianceAccess(clientId, d.applianceId, departmentId);
-  if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
-  if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
+  const existing = resultRows(await db.execute(sql`
+    SELECT appliance_id FROM pat_tests WHERE id=${id} AND client_id=${clientId}
+  `))[0];
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (existing.appliance_id !== d.applianceId) {
+    return res.status(409).json({ error: "Historical PAT tests cannot be reassigned to another appliance" });
+  }
   const [row] = await db.update(patTestsTable)
     .set({
       applianceId:         d.applianceId,
@@ -328,9 +404,7 @@ router.delete("/tests/:id", requireAuth, denyViewers, async (req, res) => {
   const access = await testAccess(clientId, id, getActiveDepartmentId(req));
   if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (access === "missing") return res.status(404).json({ error: "Not found" });
-  await db.delete(patTestsTable)
-    .where(and(eq(patTestsTable.id, id), eq(patTestsTable.clientId, clientId)));
-  res.json({ ok: true });
+  res.status(405).json({ error: "PAT tests are retained as compliance evidence and cannot be deleted" });
 });
 
 // ── Status summary ────────────────────────────────────────────────────────────
@@ -353,9 +427,11 @@ router.get("/status", requireAuth, async (req, res) => {
     FROM pat_appliances a
     LEFT JOIN LATERAL (
       SELECT next_test_date, result
-      FROM pat_tests
-      WHERE appliance_id = a.id AND client_id = a.client_id
-      ORDER BY test_date DESC LIMIT 1
+      FROM pat_tests t
+      LEFT JOIN sites s ON s.id=t.site_id_snapshot AND s.client_id=t.client_id
+      WHERE t.appliance_id = a.id AND t.client_id = a.client_id
+      ${historicalTestDepartmentScope(departmentId)}
+      ORDER BY t.test_date DESC, t.created_at DESC LIMIT 1
     ) last ON true
     LEFT JOIN sites s ON s.id=a.site_id AND s.client_id=a.client_id
     WHERE a.client_id = ${clientId} AND a.active = true
@@ -550,10 +626,15 @@ async function applianceAccess(clientId: number, applianceId: number, department
 }
 async function testAccess(clientId: number, testId: number, departmentId: number | null): Promise<AccessResult> {
   const row = resultRows(await db.execute(sql`
-    SELECT a.site_id FROM pat_tests t JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
+    SELECT t.site_id_snapshot, t.department_id_snapshot, t.snapshot_source
+    FROM pat_tests t JOIN pat_appliances a ON a.id=t.appliance_id AND a.client_id=t.client_id
     WHERE t.id=${testId} AND t.client_id=${clientId}
-  `))[0] as { site_id: number | null } | undefined;
-  return row ? siteAccess(clientId, row.site_id, departmentId) : "missing";
+  `))[0] as { site_id_snapshot: number | null; department_id_snapshot: number | null; snapshot_source: string } | undefined;
+  if (!row) return "missing";
+  if (departmentId !== null && (row.snapshot_source === "legacy_unavailable"
+    || (row.department_id_snapshot !== null && row.department_id_snapshot !== departmentId))) return "forbidden";
+  const access = await siteAccess(clientId, row.site_id_snapshot, departmentId);
+  return access === "missing" ? "allowed" : access;
 }
 
 async function checkedSiteQuery(req: any, clientId: number, departmentId: number | null) {
@@ -653,7 +734,49 @@ router.delete("/equipment-templates/:id", requireAuth, denyViewers, async (req,r
 
 router.get("/rooms", requireAuth, async (req,res) => { const clientId=getClientId(req); if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req); const siteId=await checkedSiteQuery(req,clientId,departmentId); if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"}); res.json(resultRows(await db.execute(sql`SELECT r.*,t.name AS template_name,s.name AS site_name FROM pat_rooms r LEFT JOIN pat_equipment_templates t ON t.id=r.template_id AND t.client_id=r.client_id JOIN sites s ON s.id=r.site_id AND s.client_id=r.client_id WHERE r.client_id=${clientId} ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``} ORDER BY r.name`))); });
 router.post("/rooms", requireAuth, denyViewers, async (req,res) => { const clientId=getClientId(req); const p=roomSchema.safeParse(req.body); if(!clientId||!p.success)return res.status(400).json({error:"Invalid data"});const d=p.data,departmentId=getActiveDepartmentId(req);const site=await siteAccess(clientId,d.siteId,departmentId),template=await templateAccess(clientId,d.templateId,departmentId,d.siteId);if(site==="forbidden"||template==="forbidden")return res.status(403).json({error:"Forbidden"});if(site==="missing"||template==="missing")return res.status(400).json({error:"Template must be global or belong to this room's site"});const row=resultRows(await db.execute(sql`INSERT INTO pat_rooms (client_id,site_id,name,area_type,template_id,test_interval_months,active,notes) VALUES (${clientId},${d.siteId},${d.name},${d.areaType??"room"},${d.templateId??null},${d.testIntervalMonths??12},${d.active??true},${d.notes??null}) RETURNING *`))[0];res.status(201).json(row); });
-router.put("/rooms/:id", requireAuth, denyViewers, async (req,res) => {const clientId=getClientId(req),id=Number(req.params.id as string),p=roomSchema.safeParse(req.body);if(!clientId||!Number.isInteger(id)||!p.success)return res.status(400).json({error:"Invalid data"});const d=p.data,departmentId=getActiveDepartmentId(req);const existingAccess=await roomAccess(clientId,id,departmentId);if(existingAccess==="forbidden")return res.status(403).json({error:"Forbidden"});if(existingAccess==="missing")return res.status(404).json({error:"Not found"});const site=await siteAccess(clientId,d.siteId,departmentId),template=await templateAccess(clientId,d.templateId,departmentId,d.siteId);if(site==="forbidden"||template==="forbidden")return res.status(403).json({error:"Forbidden"});if(site==="missing"||template==="missing")return res.status(400).json({error:"Template must be global or belong to this room's site"});const current=await roomOwned(clientId,id);if(!current)return res.status(404).json({error:"Not found"});if(current.site_id!==d.siteId){const history=resultRows(await db.execute(sql`SELECT 1 FROM pat_certificate_rooms WHERE room_id=${id} AND client_id=${clientId} UNION ALL SELECT 1 FROM pat_failures WHERE room_id=${id} AND client_id=${clientId} UNION ALL SELECT 1 FROM pat_replacements WHERE room_id=${id} AND client_id=${clientId} LIMIT 1`))[0];if(history)return res.status(409).json({error:"Room site cannot change while PAT compliance history exists"});}const row=resultRows(await db.execute(sql`UPDATE pat_rooms SET site_id=${d.siteId},name=${d.name},area_type=${d.areaType??"room"},template_id=${d.templateId??null},test_interval_months=${d.testIntervalMonths??12},active=${d.active??true},notes=${d.notes??null},updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *`))[0];res.json(row);});
+router.put("/rooms/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req), id = Number(req.params.id as string), parsed = roomSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || !parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const d = parsed.data, departmentId = getActiveDepartmentId(req);
+  const existingAccess = await roomAccess(clientId, id, departmentId);
+  if (existingAccess === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (existingAccess === "missing") return res.status(404).json({ error: "Not found" });
+  const site = await siteAccess(clientId, d.siteId, departmentId);
+  const template = await templateAccess(clientId, d.templateId, departmentId, d.siteId);
+  if (site === "forbidden" || template === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (site === "missing" || template === "missing") return res.status(400).json({ error: "Template must be global or belong to this room's site" });
+
+  const response = await db.transaction(async tx => {
+    const current = resultRows(await tx.execute(sql`
+      SELECT id, site_id FROM pat_rooms WHERE id=${id} AND client_id=${clientId} FOR UPDATE
+    `))[0] as { id: number; site_id: number } | undefined;
+    if (!current) return { status: 404, data: { error: "Not found" } };
+    const currentSite = resultRows(await tx.execute(sql`
+      SELECT department_id FROM sites WHERE id=${current.site_id} AND client_id=${clientId}
+    `))[0] as { department_id: number | null } | undefined;
+    if (!currentSite) return { status: 404, data: { error: "Not found" } };
+    if (departmentId !== null && currentSite.department_id !== null && currentSite.department_id !== departmentId) {
+      return { status: 403, data: { error: "Forbidden" } };
+    }
+    if (current.site_id !== d.siteId) {
+      const history = resultRows(await tx.execute(sql`
+        SELECT 1 FROM pat_certificate_rooms WHERE room_id=${id} AND client_id=${clientId}
+        UNION ALL SELECT 1 FROM pat_failures WHERE room_id=${id} AND client_id=${clientId}
+        UNION ALL SELECT 1 FROM pat_replacements WHERE room_id=${id} AND client_id=${clientId}
+        LIMIT 1
+      `))[0];
+      if (history) return { status: 409, data: { error: "Room site cannot change while PAT compliance history exists" } };
+    }
+    const row = resultRows(await tx.execute(sql`
+      UPDATE pat_rooms SET site_id=${d.siteId},name=${d.name},area_type=${d.areaType ?? "room"},
+        template_id=${d.templateId ?? null},test_interval_months=${d.testIntervalMonths ?? 12},
+        active=${d.active ?? true},notes=${d.notes ?? null},updated_at=now()
+      WHERE id=${id} AND client_id=${clientId} RETURNING *
+    `))[0];
+    return row ? { status: 200, data: row } : { status: 404, data: { error: "Not found" } };
+  });
+  res.status(response.status).json(response.data);
+});
 router.delete("/rooms/:id", requireAuth, denyViewers, async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string);if(!clientId||!Number.isInteger(id))return res.status(400).json({error:"Invalid request"});const access=await roomAccess(clientId,id,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(404).json({error:"Not found"});const ref=resultRows(await db.execute(sql`SELECT 1 FROM pat_certificate_rooms WHERE room_id=${id} AND client_id=${clientId} UNION ALL SELECT 1 FROM pat_failures WHERE room_id=${id} AND client_id=${clientId} UNION ALL SELECT 1 FROM pat_replacements WHERE room_id=${id} AND client_id=${clientId} LIMIT 1`))[0];if(ref)return res.status(409).json({error:"Room has PAT compliance history and cannot be deleted"});await db.execute(sql`DELETE FROM pat_rooms WHERE id=${id} AND client_id=${clientId}`);res.json({ok:true});});
 
 async function validateCertificateLinks(clientId: number, departmentId: number | null, d: z.infer<typeof certificateSchema>): Promise<AccessResult> {
@@ -670,19 +793,138 @@ async function validateCertificateLinks(clientId: number, departmentId: number |
     // certificate for another site in the same tenant.
     if (document.site_id !== null && document.site_id !== d.siteId) return "missing";
   }
-  if (d.roomIds.length) {
-    for (const roomId of d.roomIds) {
+  const roomIds = [...new Set(d.roomIds)];
+  if (roomIds.length) {
+    for (const roomId of roomIds) {
       const access = await roomAccess(clientId, roomId, departmentId);
       if (access !== "allowed") return access;
     }
-    const found = resultRows(await db.execute(sql`SELECT id FROM pat_rooms WHERE client_id=${clientId} AND site_id=${d.siteId} AND id IN (${sql.join(d.roomIds.map(id => sql`${id}`), sql`, `)})`));
-    if (found.length !== new Set(d.roomIds).size) return "missing";
+    const found = resultRows(await db.execute(sql`SELECT id FROM pat_rooms WHERE client_id=${clientId} AND site_id=${d.siteId} AND id IN (${sql.join(roomIds.map(id => sql`${id}`), sql`, `)})`));
+    if (found.length !== roomIds.length) return "missing";
   }
   return "allowed";
 }
-router.get("/certificates", requireAuth, async(req,res)=>{const clientId=getClientId(req);if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req),siteId=await checkedSiteQuery(req,clientId,departmentId);if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"});res.json(resultRows(await db.execute(sql`SELECT c.*,COALESCE(json_agg(json_build_object('id',r.id,'name',r.name,'area_type',r.area_type)) FILTER (WHERE r.id IS NOT NULL),'[]') AS rooms FROM pat_certificates c JOIN sites s ON s.id=c.site_id AND s.client_id=c.client_id LEFT JOIN pat_certificate_rooms cr ON cr.certificate_id=c.id AND cr.client_id=c.client_id LEFT JOIN pat_rooms r ON r.id=cr.room_id AND r.client_id=c.client_id WHERE c.client_id=${clientId} ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND c.site_id=${siteId}`:sql``} GROUP BY c.id ORDER BY c.visit_date DESC,c.id DESC`)));});
-router.post("/certificates", requireAuth, denyViewers, async(req,res)=>{const clientId=getClientId(req),p=certificateSchema.safeParse(req.body);if(!clientId||!p.success)return res.status(400).json({error:"Invalid data"});const d=p.data,access=await validateCertificateLinks(clientId,getActiveDepartmentId(req),d);if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(400).json({error:"Invalid linked site, room, contractor or document"});const row=await db.transaction(async tx=>{const c=resultRows(await tx.execute(sql`INSERT INTO pat_certificates (client_id,site_id,visit_date,contractor_id,contractor_name,certificate_ref,appliances_tested_count,pass_count,fail_count,next_test_due,document_id,document_link,notes) VALUES (${clientId},${d.siteId},${d.visitDate},${d.contractorId??null},${d.contractorName??null},${d.certificateRef},${d.appliancesTestedCount??0},${d.passCount??0},${d.failCount??0},${d.nextTestDue??null},${d.documentId??null},${d.documentLink??null},${d.notes??null}) RETURNING *`))[0];for(const roomId of d.roomIds)await tx.execute(sql`INSERT INTO pat_certificate_rooms (client_id,certificate_id,room_id) VALUES (${clientId},${c.id},${roomId})`);return c;});res.status(201).json(row);});
-router.put("/certificates/:id", requireAuth, denyViewers, async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string),p=certificateSchema.safeParse(req.body);if(!clientId||!Number.isInteger(id)||!p.success)return res.status(400).json({error:"Invalid data"});const departmentId=getActiveDepartmentId(req),current=await certificateAccess(clientId,id,departmentId);if(current==="forbidden")return res.status(403).json({error:"Forbidden"});if(current==="missing")return res.status(404).json({error:"Not found"});const d=p.data,access=await validateCertificateLinks(clientId,departmentId,d);if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(400).json({error:"Invalid linked site, room, contractor or document"});const crossSiteFailure=resultRows(await db.execute(sql`SELECT f.id FROM pat_failures f JOIN pat_rooms r ON r.id=f.room_id AND r.client_id=f.client_id WHERE f.certificate_id=${id} AND f.client_id=${clientId} AND r.site_id<>${d.siteId} LIMIT 1`))[0];if(crossSiteFailure)return res.status(409).json({error:"Certificate site cannot change while linked failures reference rooms at another site"});const row=await db.transaction(async tx=>{const c=resultRows(await tx.execute(sql`UPDATE pat_certificates SET site_id=${d.siteId},visit_date=${d.visitDate},contractor_id=${d.contractorId??null},contractor_name=${d.contractorName??null},certificate_ref=${d.certificateRef},appliances_tested_count=${d.appliancesTestedCount??0},pass_count=${d.passCount??0},fail_count=${d.failCount??0},next_test_due=${d.nextTestDue??null},document_id=${d.documentId??null},document_link=${d.documentLink??null},notes=${d.notes??null},updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *`))[0];if(!c)return null;await tx.execute(sql`DELETE FROM pat_certificate_rooms WHERE certificate_id=${id} AND client_id=${clientId}`);for(const roomId of d.roomIds)await tx.execute(sql`INSERT INTO pat_certificate_rooms (client_id,certificate_id,room_id) VALUES (${clientId},${id},${roomId})`);return c;});if(!row)return res.status(404).json({error:"Not found"});res.json(row);});
+router.get("/certificates", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const departmentId = getActiveDepartmentId(req), siteId = await checkedSiteQuery(req, clientId, departmentId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid siteId for this client" });
+  if (siteId === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  const rows = resultRows(await db.execute(sql`
+    SELECT c.*,
+      COALESCE(json_agg(json_build_object(
+        'id',r.id,'name',cr.room_name_snapshot,'area_type',r.area_type,'snapshot_source',cr.snapshot_source
+      )) FILTER (WHERE r.id IS NOT NULL),'[]') AS rooms
+    FROM pat_certificates c
+    JOIN sites s ON s.id=c.site_id AND s.client_id=c.client_id
+    LEFT JOIN pat_certificate_rooms cr ON cr.certificate_id=c.id AND cr.client_id=c.client_id
+    LEFT JOIN pat_rooms r ON r.id=cr.room_id AND r.client_id=cr.client_id AND r.site_id=c.site_id
+    WHERE c.client_id=${clientId}
+      ${departmentId !== null ? sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${siteId ? sql`AND c.site_id=${siteId}` : sql``}
+    GROUP BY c.id ORDER BY c.visit_date DESC,c.id DESC
+  `));
+  res.json(rows);
+});
+router.post("/certificates", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req), parsed = certificateSchema.safeParse(req.body);
+  if (!clientId || !parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const d = { ...parsed.data, roomIds: [...new Set(parsed.data.roomIds)] };
+  const access = await validateCertificateLinks(clientId, getActiveDepartmentId(req), d);
+  if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (access === "missing") return res.status(400).json({ error: "Invalid linked site, room, contractor or document" });
+  let row: any;
+  try {
+    row = await db.transaction(async tx => {
+      const c = resultRows(await tx.execute(sql`
+        INSERT INTO pat_certificates (client_id,site_id,visit_date,contractor_id,contractor_name,certificate_ref,
+          appliances_tested_count,pass_count,fail_count,next_test_due,document_id,document_link,notes)
+        VALUES (${clientId},${d.siteId},${d.visitDate},${d.contractorId ?? null},${d.contractorName ?? null},
+          ${d.certificateRef},${d.appliancesTestedCount ?? 0},${d.passCount ?? 0},${d.failCount ?? 0},
+          ${d.nextTestDue ?? null},${d.documentId ?? null},${d.documentLink ?? null},${d.notes ?? null}) RETURNING *
+      `))[0];
+      for (const roomId of d.roomIds) {
+        await tx.execute(sql`INSERT INTO pat_certificate_rooms (client_id,certificate_id,room_id) VALUES (${clientId},${c.id},${roomId})`);
+      }
+      return c;
+    });
+  } catch (error) {
+    if (isPatCertificateRoomSiteRace(error)) {
+      return res.status(409).json({ error: "A covered room changed sites while the certificate was being saved. Refresh and retry." });
+    }
+    throw error;
+  }
+  res.status(201).json(row);
+});
+router.put("/certificates/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req), id = Number(req.params.id as string), parsed = certificateSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || !parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const departmentId = getActiveDepartmentId(req);
+  const current = await certificateAccess(clientId, id, departmentId);
+  if (current === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (current === "missing") return res.status(404).json({ error: "Not found" });
+  const d = { ...parsed.data, roomIds: [...new Set(parsed.data.roomIds)] };
+  const access = await validateCertificateLinks(clientId, departmentId, d);
+  if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (access === "missing") return res.status(400).json({ error: "Invalid linked site, room, contractor or document" });
+
+  let response: { status: number; data: any };
+  try {
+    response = await db.transaction(async tx => {
+      const source = resultRows(await tx.execute(sql`
+        SELECT site_id FROM pat_certificates WHERE id=${id} AND client_id=${clientId} FOR UPDATE
+      `))[0] as { site_id: number } | undefined;
+      if (!source) return { status: 404, data: { error: "Not found" } };
+      const sourceSite = resultRows(await tx.execute(sql`
+        SELECT department_id FROM sites WHERE id=${source.site_id} AND client_id=${clientId}
+      `))[0] as { department_id: number | null } | undefined;
+      if (!sourceSite) return { status: 404, data: { error: "Not found" } };
+      if (departmentId !== null && sourceSite.department_id !== null && sourceSite.department_id !== departmentId) {
+        return { status: 403, data: { error: "Forbidden" } };
+      }
+      const crossSiteFailure = resultRows(await tx.execute(sql`
+        SELECT f.id FROM pat_failures f
+        JOIN pat_rooms r ON r.id=f.room_id AND r.client_id=f.client_id
+        WHERE f.certificate_id=${id} AND f.client_id=${clientId} AND r.site_id<>${d.siteId} LIMIT 1
+      `))[0];
+      if (crossSiteFailure) {
+        return { status: 409, data: { error: "Certificate site cannot change while linked failures reference rooms at another site" } };
+      }
+      const c = resultRows(await tx.execute(sql`
+        UPDATE pat_certificates SET site_id=${d.siteId},visit_date=${d.visitDate},
+          contractor_id=${d.contractorId ?? null},contractor_name=${d.contractorName ?? null},
+          certificate_ref=${d.certificateRef},appliances_tested_count=${d.appliancesTestedCount ?? 0},
+          pass_count=${d.passCount ?? 0},fail_count=${d.failCount ?? 0},next_test_due=${d.nextTestDue ?? null},
+          document_id=${d.documentId ?? null},document_link=${d.documentLink ?? null},notes=${d.notes ?? null},
+          updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *
+      `))[0];
+      if (!c) return { status: 404, data: { error: "Not found" } };
+
+      const existingLinks = resultRows(await tx.execute(sql`
+        SELECT room_id FROM pat_certificate_rooms WHERE certificate_id=${id} AND client_id=${clientId}
+      `)) as { room_id: number }[];
+      const wanted = new Set(d.roomIds);
+      for (const link of existingLinks) {
+        if (!wanted.has(link.room_id)) {
+          await tx.execute(sql`DELETE FROM pat_certificate_rooms WHERE certificate_id=${id} AND client_id=${clientId} AND room_id=${link.room_id}`);
+        }
+      }
+      const retained = new Set(existingLinks.filter(link => wanted.has(link.room_id)).map(link => link.room_id));
+      for (const roomId of wanted) {
+        if (!retained.has(roomId)) {
+          await tx.execute(sql`INSERT INTO pat_certificate_rooms (client_id,certificate_id,room_id) VALUES (${clientId},${id},${roomId})`);
+        }
+      }
+      return { status: 200, data: c };
+    });
+  } catch (error) {
+    if (isPatCertificateRoomSiteRace(error)) {
+      return res.status(409).json({ error: "A covered room changed sites while the certificate was being saved. Refresh and retry." });
+    }
+    throw error;
+  }
+  res.status(response.status).json(response.data);
+});
 router.delete("/certificates/:id",requireAuth,denyViewers,async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string);if(!clientId||!Number.isInteger(id))return res.status(400).json({error:"Invalid request"});const access=await certificateAccess(clientId,id,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(404).json({error:"Not found"});return res.status(405).json({error:"Certificates are retained as compliance evidence and cannot be deleted"});});
 
 router.get("/replacements",requireAuth,async(req,res)=>{const clientId=getClientId(req);if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req),siteId=await checkedSiteQuery(req,clientId,departmentId);if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"});res.json(resultRows(await db.execute(sql`SELECT x.*,r.name AS room_name FROM pat_replacements x JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id JOIN sites s ON s.id=r.site_id AND s.client_id=r.client_id WHERE x.client_id=${clientId} ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``} ORDER BY x.replaced_on DESC`)));});

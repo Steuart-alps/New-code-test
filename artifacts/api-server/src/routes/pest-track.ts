@@ -184,7 +184,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
      signedOffBy:       performer?.performedBy ?? null,
      signedOffByRosterId: performer?.staffRosterId ?? null,
     notes:             d.notes ?? null,
-    createdBy:         (req as any).user?.id ?? null,
+    createdBy:         req.currentUser!.id,
   } as any).returning();
   res.status(201).json(row);
 });
@@ -295,7 +295,7 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
     recordedByRosterId: performer?.staffRosterId ?? null,
     resolved:     d.resolved ?? false,
     notes:        d.notes ?? null,
-    createdBy:    (req as any).user?.id ?? null,
+    createdBy:    req.currentUser!.id,
   } as any).returning();
   res.status(201).json(row);
 });

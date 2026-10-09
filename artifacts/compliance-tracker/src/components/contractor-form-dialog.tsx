@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Contractor } from "@workspace/api-client-react";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -39,10 +39,11 @@ const TRADE_OPTIONS = [
 // ── Form schema ───────────────────────────────────────────────────────────────
 
 const DBS_TYPE_OPTIONS = [
-  "DBS Check (Basic)",
-  "DBS Check (Standard)",
-  "DBS Check (Enhanced)",
-  "PVG Scheme (Scotland)",
+  "Basic",
+  "Standard",
+  "Enhanced",
+  "PVG Scheme",
+  "None",
 ] as const;
 
 const formSchema = z.object({
@@ -82,6 +83,7 @@ export function ContractorFormDialog({
   contractor?: (Contractor & { trades?: string[] }) | null;
 }) {
   const { toast } = useToast();
+  const clientApiFetch = useActiveClientApi();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [trades, setTrades] = useState<string[]>([]);
@@ -157,13 +159,13 @@ export function ContractorFormDialog({
         dbsExpiryDate:         data.dbsExpiryDate || null,
       };
       if (contractor) {
-        const res = await apiFetch(`/contractors/${contractor.id}`, {
+        const res = await clientApiFetch(`/contractors/${contractor.id}`, {
           method: "PUT",
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json()).error ?? "Update failed");
       } else {
-        const res = await apiFetch("/contractors", {
+        const res = await clientApiFetch("/contractors", {
           method: "POST",
           body: JSON.stringify(payload),
         });
@@ -258,10 +260,15 @@ export function ContractorFormDialog({
 
               <div className="col-span-2 sm:col-span-1 space-y-1.5">
                 <Label htmlFor="dbsType">DBS / PVG Check Type</Label>
-                <Select value={form.watch("dbsType") || ""} onValueChange={v => form.setValue("dbsType", v === "_none" ? "" : v)}>
-                  <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="None" /></SelectTrigger>
+                 <Select value={form.watch("dbsType") || ""} onValueChange={v => {
+                   form.setValue("dbsType", v);
+                   if (v === "None") {
+                     form.setValue("dbsIssueDate", "");
+                     form.setValue("dbsExpiryDate", "");
+                   }
+                 }}>
+                   <SelectTrigger id="dbsType" className="rounded-sm"><SelectValue placeholder="Not set" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="_none">None</SelectItem>
                     {DBS_TYPE_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>

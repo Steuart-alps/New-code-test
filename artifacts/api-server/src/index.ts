@@ -1,8 +1,3 @@
-// Sentry must be initialised before anything else so all auto-instrumentation
-// (Express, http, DB calls) is active from the very first request.
-import { initSentry } from "./lib/sentry";
-initSentry();
-
 import app, { markApplicationReady } from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
@@ -77,7 +72,7 @@ async function initStripe(): Promise<string | null> {
         logger.info({ configured: preflight.configured }, "Stripe service-price preflight passed");
       } else {
         logger.error(
-          { missing: preflight.missing, configured: preflight.configured },
+          { missing: preflight.missing, duplicates: preflight.duplicates, issues: preflight.issues, configured: preflight.configured },
           "Stripe service-price preflight failed — affected modules cannot be activated",
         );
       }
@@ -111,7 +106,7 @@ async function initStripe(): Promise<string | null> {
         logger.info({ configured: finalPreflight.configured }, "Stripe service-price preflight passed");
       } else {
         logger.error(
-          { missing: finalPreflight.missing, configured: finalPreflight.configured },
+          { missing: finalPreflight.missing, duplicates: finalPreflight.duplicates, issues: finalPreflight.issues, configured: finalPreflight.configured },
           "Stripe service-price preflight failed — affected modules cannot be activated",
         );
       }
@@ -154,8 +149,8 @@ function startScheduler() {
   });
   logger.info("Contractor reminder scheduler started (daily at 08:00)");
 
-  // Alert managers when contractor insurance is expiring/expired or a DBS
-  // check is out of date (daily at 08:55; each contractor+milestone once).
+  // Alert managers about contractor insurance, DBS/PVG and certificates.
+  // Run at 08:55 London time so 60/30-day date boundaries stay predictable.
   cron.schedule("55 8 * * *", async () => {
     logger.info("Running contractor compliance reminder job...");
     try {
@@ -164,7 +159,7 @@ function startScheduler() {
     } catch (err) {
       logger.error({ err }, "Contractor compliance reminder job failed");
     }
-  });
+  }, { timezone: "Europe/London" });
   logger.info("Contractor compliance reminder scheduler started (daily at 08:55)");
 
   // Alert managers when staff training certificates are expiring within 30 days
@@ -290,9 +285,9 @@ function startScheduler() {
   });
   logger.info("Data deletion scheduler started (daily at 03:00)");
 
-  // Email all client admins a monthly compliance summary on the 1st of each
-  // month at 08:05 — covers the previous calendar month.
-  cron.schedule("5 8 1 * *", async () => {
+  // Check daily at 08:00 UK local time; the job creates new monthly mail
+  // only on the 1st and resumes unfinished deliveries on subsequent days.
+  cron.schedule("0 8 * * *", async () => {
     logger.info("Running monthly compliance summary job...");
     try {
       const result = await runMonthlyComplianceSummaryJob();
@@ -300,8 +295,8 @@ function startScheduler() {
     } catch (err) {
       logger.error({ err }, "Monthly compliance summary job failed");
     }
-  });
-  logger.info("Monthly compliance summary scheduler started (1st of month at 08:05)");
+  }, { timezone: "Europe/London" });
+  logger.info("Monthly compliance summary scheduler started (daily at 08:00 Europe/London)");
 
   // Alert client admins weekly (Monday 09:00) when contractor public liability
   // insurance is expiring within 30 days or has already expired.
@@ -316,10 +311,10 @@ function startScheduler() {
   });
   logger.info("Contractor insurance expiry reminder scheduler started (weekly Monday at 09:00)");
 
-  // Alert client admins daily when staff haven't acknowledged required
-  // SafeTrack documents (risk assessments, SOPs, handbook entries).
+  // Check tenant-specific SafeTrack acknowledgement reminder settings every
+  // five minutes. Each account chooses daily or weekly cadence and local time.
   registerSafeTrackAckReminderSchedule(cron.schedule);
-  logger.info("SafeTrack acknowledgement reminder scheduler started (daily at 08:50)");
+  logger.info("SafeTrack acknowledgement reminder scheduler started (every five minutes)");
 }
 
 async function runTrialReminders() {
@@ -364,8 +359,8 @@ async function runBillingReconciliation() {
 async function notifyAdminOfBillingDrift(corrections: QuantityCorrection[]) {
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   if (!adminEmail) {
-    logger.info(
-      "ADMIN_EMAIL not configured — skipping billing drift notification email",
+    logger.error(
+      "ADMIN_EMAIL not configured — billing drift notification email was not sent",
     );
     return;
   }
@@ -463,6 +458,9 @@ app.listen(port, async (err?: any) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+  if (process.env.NODE_ENV === "production" && !process.env.ADMIN_EMAIL?.trim()) {
+    logger.warn("ADMIN_EMAIL not configured — internal billing and data-deletion notices cannot be delivered");
+  }
   await runRuntimeMigrations();
   const readinessBlocker = await initStripe();
   markApplicationReady(readinessBlocker);

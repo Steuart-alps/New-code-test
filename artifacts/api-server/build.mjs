@@ -16,7 +16,7 @@ async function buildAll() {
 
   await esbuild({
     entryPoints: {
-      index: path.resolve(artifactDir, "src/index.ts"),
+      index: path.resolve(artifactDir, "src/bootstrap.ts"),
       "pdf-validation-worker": path.resolve(artifactDir, "src/workers/pdfValidationWorker.ts"),
     },
     platform: "node",

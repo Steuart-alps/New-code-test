@@ -224,6 +224,10 @@ async function attack(attacker, victim) {
   expectBlocked(`${tag}: POST /categories body clientId`, (await req("POST", "/categories", { name: "sneaky", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: POST /users body clientId`, (await req("POST", "/users", { name: "sneaky", email: `sneak-${Date.now()}@test.local`, password: "password-123", role: "staff", clientId: victim.clientId })).status);
   expectBlocked(`${tag}: PUT /settings body clientId`, (await req("PUT", `/settings?clientId=${victim.clientId}`, { companyName: "hacked" })).status);
+  expectBlocked(`${tag}: cannot assign a foreign manager to track email`,
+    (await req("PUT", "/settings", { trackSummaryRouting: JSON.stringify({
+      hot_tub: { managerIds: [victim.userId], departmentIds: [] },
+    }) })).status);
 
   // ── Billing: no cross-tenant checkout / portal / invoice access ───────────────
   expectBlocked(`${tag}: POST /billing/checkout victim clientId`, (await req("POST", "/billing/checkout", { clientId: victim.clientId })).status);

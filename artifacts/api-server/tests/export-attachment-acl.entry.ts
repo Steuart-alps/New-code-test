@@ -3,5 +3,7 @@ export {
   getAttachmentZipPath,
   fitsAttachmentExportCap,
   isExportAttachmentAuthorized,
+  rawToCsv,
+  attachmentCap,
 } from "../src/routes/export";
 export { ObjectNotFoundError } from "../src/lib/objectStorage";

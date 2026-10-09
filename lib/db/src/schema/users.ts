@@ -25,6 +25,7 @@ export const usersTable = pgTable("users", {
   totpEnabled: boolean("totp_enabled").notNull().default(false),
   totpRecoveryHash: text("totp_recovery_hash"),
   isMaintenanceManager: boolean("is_maintenance_manager").notNull().default(false),
+  isDepartmentManager: boolean("is_department_manager").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

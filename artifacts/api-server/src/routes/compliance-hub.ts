@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { requireAuth, requireClientAdmin, denyViewers, getClientId } from "../middleware/requireAuth";
+import { getActiveDepartmentId } from "../middleware/requireAuth";
 import { GUIDANCE_REVIEWED_AT, UK_COMPLIANCE_GAPS, UK_COMPLIANCE_GUIDANCE } from "../lib/ukComplianceGuidance";
 
 const router: IRouter = Router();
@@ -40,6 +41,8 @@ const ActionUpdateBody = ActionBody.partial().extend({
   status: z.enum(["open", "in_progress", "awaiting_verification", "verified"]).optional(),
   verificationNotes: z.string().trim().max(4000).optional().nullable(),
 });
+
+const WATER_SOURCE_TRACKS = ["LegionellaTrack", "HotTubTrack"] as const;
 
 function clientOrError(req: Parameters<typeof getClientId>[0], res: any): number | null {
   const clientId = getClientId(req);
@@ -116,14 +119,38 @@ router.put("/compliance-hub/profile", requireAuth, requireClientAdmin, async (re
 router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<void> => {
   const clientId = clientOrError(req, res);
   if (!clientId) return;
+  const departmentId = getActiveDepartmentId(req);
   const result = await db.execute(sql`
-    SELECT id, source_track AS "sourceTrack", source_record_id AS "sourceRecordId", title, severity, status,
-      owner_name AS "ownerName", due_date::text AS "dueDate", interim_control AS "interimControl",
-      corrective_action AS "correctiveAction", evidence_reference AS "evidenceReference",
-      verification_notes AS "verificationNotes", verified_by AS "verifiedBy", verified_at AS "verifiedAt",
-      created_at AS "createdAt", updated_at AS "updatedAt"
-    FROM compliance_actions WHERE client_id = ${clientId}
-    ORDER BY CASE WHEN status = 'verified' THEN 1 ELSE 0 END, due_date NULLS LAST, created_at DESC
+    SELECT a.id, a.source_track AS "sourceTrack", a.source_record_id AS "sourceRecordId", a.title, a.severity, a.status,
+      a.owner_name AS "ownerName", a.due_date::text AS "dueDate", a.interim_control AS "interimControl",
+      a.corrective_action AS "correctiveAction", a.evidence_reference AS "evidenceReference",
+      a.verification_notes AS "verificationNotes", a.verified_by AS "verifiedBy", a.verified_at AS "verifiedAt",
+      a.created_at AS "createdAt", a.updated_at AS "updatedAt"
+    FROM compliance_actions a WHERE a.client_id = ${clientId}
+      AND (${departmentId}::integer IS NULL OR a.source_track <> 'IncidentTrack' OR EXISTS (
+        SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+        WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
+      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+        SELECT 1
+        FROM legionella_checks lc
+        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+        WHERE a.source_track = 'LegionellaTrack'
+          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ) OR EXISTS (
+        SELECT 1
+        FROM hot_tub_checks hc
+        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+        WHERE a.source_track = 'HotTubTrack'
+          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
+    ORDER BY CASE WHEN a.status = 'verified' THEN 1 ELSE 0 END, a.due_date NULLS LAST, a.created_at DESC
   `);
   res.json(rows(result));
 });
@@ -137,22 +164,51 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
     return;
   }
   const a = parsed.data;
-  const result = await db.execute(sql`
-    INSERT INTO compliance_actions (
-      client_id, source_track, source_record_id, title, severity, owner_name, due_date,
-      interim_control, corrective_action, evidence_reference, created_by, updated_by
-    ) VALUES (
-      ${clientId}, ${a.sourceTrack}, ${a.sourceRecordId ?? null}, ${a.title}, ${a.severity},
-      ${a.ownerName}, ${a.dueDate ?? null}::date, ${a.interimControl ?? null},
-      ${a.correctiveAction}, ${a.evidenceReference ?? null}, ${req.currentUser!.id}, ${req.currentUser!.id}
-    )
-    RETURNING id, source_track AS "sourceTrack", source_record_id AS "sourceRecordId", title, severity, status,
-      owner_name AS "ownerName", due_date::text AS "dueDate", interim_control AS "interimControl",
-      corrective_action AS "correctiveAction", evidence_reference AS "evidenceReference",
-      verification_notes AS "verificationNotes", verified_by AS "verifiedBy", verified_at AS "verifiedAt",
-      created_at AS "createdAt", updated_at AS "updatedAt"
-  `);
-  res.status(201).json(rows(result)[0]);
+  if (WATER_SOURCE_TRACKS.includes(a.sourceTrack as typeof WATER_SOURCE_TRACKS[number])) {
+    res.status(400).json({ error: "LegionellaTrack and HotTubTrack actions are created automatically from water checks" });
+    return;
+  }
+  const incidentId = a.sourceTrack === "IncidentTrack" ? Number(a.sourceRecordId) : null;
+  if (a.sourceTrack === "IncidentTrack" && (!Number.isSafeInteger(incidentId) || !incidentId || incidentId < 1)) {
+    res.status(400).json({ error: "A valid incident is required" });
+    return;
+  }
+  const departmentId = getActiveDepartmentId(req);
+  const inserted = await db.transaction(async tx => {
+    if (incidentId !== null) {
+      // Closing an incident updates (and locks) this same row. Holding its lock
+      // through the insert prevents a new unverified action racing with closure.
+      const incident = await tx.execute(sql`
+        SELECT i.status FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
+        WHERE i.client_id = ${clientId} AND i.id = ${incidentId}
+          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+        FOR UPDATE OF i
+      `);
+      if (!incident.rows.length || incident.rows[0].status === "closed") return null;
+    }
+    const result = await tx.execute(sql`
+      INSERT INTO compliance_actions (
+        client_id, source_track, source_record_id, title, severity, owner_name, due_date,
+        interim_control, corrective_action, evidence_reference, created_by, updated_by
+      ) VALUES (
+        ${clientId}, ${a.sourceTrack}, ${incidentId !== null ? String(incidentId) : a.sourceRecordId ?? null}, ${a.title}, ${a.severity},
+        ${a.ownerName}, ${a.dueDate ?? null}::date, ${a.interimControl ?? null},
+        ${a.correctiveAction}, ${a.evidenceReference ?? null}, ${req.currentUser!.id}, ${req.currentUser!.id}
+      )
+      RETURNING id, source_track AS "sourceTrack", source_record_id AS "sourceRecordId", title, severity, status,
+        owner_name AS "ownerName", due_date::text AS "dueDate", interim_control AS "interimControl",
+        corrective_action AS "correctiveAction", evidence_reference AS "evidenceReference",
+        verification_notes AS "verificationNotes", verified_by AS "verifiedBy", verified_at AS "verifiedAt",
+        created_at AS "createdAt", updated_at AS "updatedAt"
+    `);
+    return rows(result)[0];
+  });
+  if (!inserted) {
+    res.status(404).json({ error: "Incident not found, closed, or inaccessible; reopen it before linking a new action" });
+    return;
+  }
+  res.status(201).json(inserted);
 });
 
 router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req, res): Promise<void> => {
@@ -169,11 +225,35 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     res.status(400).json({ error: "Provide valid fields to update" });
     return;
   }
+  const departmentId = getActiveDepartmentId(req);
   const existingResult = await db.execute(sql`
-    SELECT evidence_reference, verification_notes, status, created_by FROM compliance_actions
-    WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
+    SELECT a.evidence_reference, a.verification_notes, a.status, a.created_by, a.source_track, a.source_record_id FROM compliance_actions a
+    WHERE a.id = ${id} AND a.client_id = ${clientId}
+      AND (a.source_track <> 'IncidentTrack' OR EXISTS (
+        SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+        WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
+      AND (a.source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+        SELECT 1
+        FROM legionella_checks lc
+        LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+        WHERE a.source_track = 'LegionellaTrack'
+          AND lc.client_id = a.client_id AND lc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ) OR EXISTS (
+        SELECT 1
+        FROM hot_tub_checks hc
+        LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+        WHERE a.source_track = 'HotTubTrack'
+          AND hc.client_id = a.client_id AND hc.id::text = a.source_record_id
+          AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      )) LIMIT 1
   `);
-  const existing = rows<{ evidence_reference: string | null; verification_notes: string | null; status: string; created_by: number | null }>(existingResult)[0];
+  const existing = rows<{ evidence_reference: string | null; verification_notes: string | null; status: string; created_by: number | null; source_track: string; source_record_id: string | null }>(existingResult)[0];
   if (!existing) {
     res.status(404).json({ error: "Corrective action not found" });
     return;
@@ -183,6 +263,26 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     return;
   }
   const a = parsed.data;
+  const existingIsWater = WATER_SOURCE_TRACKS.includes(existing.source_track as typeof WATER_SOURCE_TRACKS[number]);
+  const incomingIsWater = a.sourceTrack !== undefined &&
+    WATER_SOURCE_TRACKS.includes(a.sourceTrack as typeof WATER_SOURCE_TRACKS[number]);
+  if ((existingIsWater && (
+    (a.sourceTrack !== undefined && a.sourceTrack !== existing.source_track) ||
+    (a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)
+  )) || (incomingIsWater && (
+    !existingIsWater ||
+    (a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)
+  ))) {
+    res.status(409).json({ error: "Water action links are established at creation and cannot be reassigned" });
+    return;
+  }
+  if ((existing.source_track === "IncidentTrack" &&
+    (a.sourceTrack !== undefined && a.sourceTrack !== existing.source_track ||
+      a.sourceRecordId !== undefined && a.sourceRecordId !== existing.source_record_id)) ||
+    (existing.source_track !== "IncidentTrack" && a.sourceTrack === "IncidentTrack")) {
+    res.status(409).json({ error: "Incident action links are established at creation and cannot be reassigned" });
+    return;
+  }
   const evidence = a.evidenceReference === undefined ? existing.evidence_reference : a.evidenceReference;
   const verification = a.verificationNotes === undefined ? existing.verification_notes : a.verificationNotes;
   if (a.status === "verified" && (!evidence || !verification)) {
@@ -211,6 +311,31 @@ router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req
     WHERE id = ${id}
       AND client_id = ${clientId}
       AND status <> 'verified'
+       AND (source_track <> 'IncidentTrack' OR EXISTS (
+        SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+        WHERE i.client_id = ${clientId} AND i.id::text = compliance_actions.source_record_id
+          AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
+            (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+       ))
+       AND (source_track NOT IN ('LegionellaTrack', 'HotTubTrack') OR EXISTS (
+         SELECT 1
+         FROM legionella_checks lc
+         LEFT JOIN sites s ON s.id = lc.site_id AND s.client_id = lc.client_id
+         WHERE source_track = 'LegionellaTrack'
+           AND lc.client_id = compliance_actions.client_id
+           AND lc.id::text = compliance_actions.source_record_id
+           AND (${departmentId}::integer IS NULL OR lc.site_id IS NULL OR
+             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+       ) OR EXISTS (
+         SELECT 1
+         FROM hot_tub_checks hc
+         LEFT JOIN sites s ON s.id = hc.site_id AND s.client_id = hc.client_id
+         WHERE source_track = 'HotTubTrack'
+           AND hc.client_id = compliance_actions.client_id
+           AND hc.id::text = compliance_actions.source_record_id
+           AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
+             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
+      ))
       AND (${a.status === "verified"} = false OR status = 'awaiting_verification')
       AND (${a.status === "verified"} = false OR NULLIF(btrim(evidence_reference), '') IS NOT NULL)
     RETURNING id, source_track AS "sourceTrack", source_record_id AS "sourceRecordId", title, severity, status,

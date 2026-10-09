@@ -3,11 +3,9 @@
 //
 // Canonical base URL resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. https://<first REPLIT_DOMAINS entry>   (the deployment's own address)
-//   3. local dev fallback
+//   2. verified production custom domain from site-url.mjs
 //
-// Because it reads the domain at build time, the production deployment build
-// emits files pointing at the live published address automatically.
+// Workspace REPLIT_DOMAINS values are not canonical production addresses.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -21,7 +19,7 @@ const { baseUrl, source } = resolveBaseUrl();
 
 // Never ship a production build with a non-canonical (localhost) host — that would
 // publish broken sitemap/llms URLs. Fail loudly so the deployment is corrected.
-assertCanonicalForProduction(source);
+assertCanonicalForProduction(baseUrl, source);
 const today = new Date().toISOString().slice(0, 10);
 
 // Public, indexable pages. Everything else is behind auth.
@@ -75,9 +73,9 @@ ${publicPages
 
 const llmsTxt = `# ComplyTrack
 
-> Health & Safety compliance tracking for businesses worldwide. ComplyTrack helps companies stay on top of their statutory H&S obligations across one site or many — tracking compliance checks, storing certificates, managing contractors, and sending automated reminders before things fall due.
+> UK health and safety compliance software for businesses managing one site or many. ComplyTrack keeps digital records, audit trails, contractor documents and reminders in one place.
 
-ComplyTrack is a multi-tenant SaaS platform for businesses anywhere in the world managing their own Health & Safety compliance. Each business's data is fully isolated. Businesses can optionally invite their external H&S consultant in with scoped access. Pricing is per site (per building) on a simple monthly subscription.
+ComplyTrack is a multi-tenant SaaS platform for UK businesses managing their own health and safety compliance. Each business's data is isolated. Businesses can optionally invite an external H&S consultant with scoped access. ComplyTrack Core starts at £10 per site per month, with optional compliance modules and a 14-day free trial.
 
 ## Primary pages
 - [Home](${baseUrl}/): What ComplyTrack does, who it serves, and key features.

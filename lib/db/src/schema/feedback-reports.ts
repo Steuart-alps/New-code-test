@@ -11,5 +11,9 @@ export const feedbackReportsTable = pgTable("feedback_reports", {
   details: text("details").notNull(),
   pagePath: text("page_path"),
   emailStatus: text("email_status").notNull().default("pending"),
+  status: text("status").notNull().default("new"),
+  internalNote: text("internal_note").notNull().default(""),
+  updatedBy: integer("updated_by").references(() => usersTable.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

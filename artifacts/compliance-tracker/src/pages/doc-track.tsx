@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
-import { downloadFile, printHtmlDocument } from "@/lib/download";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { downloadFile } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
+import { AuditLog } from "@/components/audit-log";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import {
   CheckCircle2, Clock, Link2, Copy, Check, Printer, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MyDocumentsView } from "@/components/my-documents-view";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -580,7 +582,9 @@ function UploadDialog({
         method: "POST",
         body: JSON.stringify({ name: file.name, contentType: file.type || "application/octet-stream" }),
       });
-      if (!urlRes.ok) throw new Error("Could not get upload URL");
+      if (!urlRes.ok) {
+        throw new Error(await getApiErrorMessage(urlRes, "Could not get upload URL"));
+      }
       const { uploadUrl, objectPath } = await urlRes.json();
 
       // 2. PUT file directly to GCS
@@ -779,121 +783,6 @@ function UploadDialog({
   );
 }
 
-// ─── My Documents (personal view for non-manager staff) ──────────────────────
-
-interface MyDoc {
-  id: number;
-  title: string;
-  category: string;
-  department: string | null;
-  staffRosterId: number;
-}
-
-function MyDocumentsView({ staffName }: { staffName: string }) {
-  const { toast } = useToast();
-  const [myDocs, setMyDocs] = useState<MyDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [acknowledging, setAcknowledging] = useState<number | null>(null);
-
-  function load() {
-    setLoading(true);
-    apiFetch("/doc-track/acknowledgements/outstanding")
-      .then(r => r.ok ? r.json() : { documents: [] })
-      .then(d => {
-        const docs: OutstandingDoc[] = d.documents ?? [];
-        // Filter to only docs where the current user appears in outstanding list (matched by name)
-        const mine: MyDoc[] = docs
-          .filter(doc => doc.outstanding.some(s => s.name === staffName))
-          .map(doc => {
-            const staffEntry = doc.outstanding.find(s => s.name === staffName)!;
-            return { id: doc.id, title: doc.title, category: doc.category, department: doc.department, staffRosterId: staffEntry.id };
-          });
-        setMyDocs(mine);
-      })
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => { load(); }, [staffName]);
-
-  async function handleAcknowledge(docId: number, docTitle: string) {
-    setAcknowledging(docId);
-    try {
-      const res = await apiFetch(`/doc-track/documents/${docId}/acknowledge`, {
-        method: "POST",
-        // Staff identity is resolved by the API from their authenticated email;
-        // never submit a roster identity that could be forged in the client.
-        body: JSON.stringify({ signature: staffName }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      toast({ title: "Acknowledged", description: `"${docTitle}" marked as read.` });
-      load();
-    } catch {
-      toast({ title: "Acknowledgement failed", variant: "destructive" });
-    } finally {
-      setAcknowledging(null);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (myDocs.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
-        <div className="p-4 bg-emerald-50 rounded-2xl">
-          <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-        </div>
-        <div>
-          <p className="font-medium text-base">You&apos;re all caught up!</p>
-          <p className="text-sm text-muted-foreground mt-1">No documents require your acknowledgement right now.</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-        {myDocs.length} document{myDocs.length !== 1 ? "s" : ""} require your acknowledgement. Please read each one and click &ldquo;Acknowledge&rdquo; to confirm you have read it.
-      </p>
-      {myDocs.map(doc => {
-        const cat = CATEGORY_META[doc.category] ?? CATEGORY_META.other;
-        return (
-          <div key={doc.id} className="flex items-center gap-4 p-4 border rounded-lg bg-card">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm">{doc.title}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={cn("inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border", cat.bg, cat.color)}>
-                  {cat.label}
-                </span>
-                {doc.department && (
-                  <span className="text-[11px] text-muted-foreground">{doc.department}</span>
-                )}
-              </div>
-            </div>
-            <Button
-              size="sm"
-              className="flex-shrink-0 gap-1.5"
-              onClick={() => handleAcknowledge(doc.id, doc.title)}
-              disabled={acknowledging === doc.id}
-            >
-              {acknowledging === doc.id
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <CheckSquare className="w-3.5 h-3.5" />}
-              Acknowledge
-            </Button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function DocTrackPage() {
@@ -908,7 +797,9 @@ export default function DocTrackPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [pageView, setPageView] = useState<"library" | "my-docs">("library");
+  const [pageView, setPageView] = useState<"library" | "my-docs" | "audit">(
+    user?.role === "client_admin" || user?.role === "consultant" ? "library" : "my-docs",
+  );
   const [search, setSearch] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Doc | null>(null);
@@ -916,6 +807,8 @@ export default function DocTrackPage() {
   const [ackDoc, setAckDoc] = useState<Doc | null>(null);
   const [outstandingOpen, setOutstandingOpen] = useState(false);
   const [signOffToken, setSignOffToken] = useState<string | null>(null);
+  const [signOffExpiresAt, setSignOffExpiresAt] = useState<string | null>(null);
+  const [signOffLinkBusy, setSignOffLinkBusy] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -932,8 +825,13 @@ export default function DocTrackPage() {
     if (!activeClientId) return;
     load();
     apiFetch("/sites").then(r => r.ok ? r.json() : []).then(setSites);
+    setSignOffToken(null);
+    setSignOffExpiresAt(null);
     apiFetch("/doc-track/sign-off-info").then(r => r.ok ? r.json() : null).then(d => {
-      if (d?.token) setSignOffToken(d.token);
+      if (d?.token) {
+        setSignOffToken(d.token);
+        setSignOffExpiresAt(d.expiresAt ?? null);
+      }
     });
   }, [activeClientId, load]);
 
@@ -947,6 +845,44 @@ export default function DocTrackPage() {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2500);
     });
+  }
+
+  async function createSignOffLink() {
+    setSignOffLinkBusy(true);
+    try {
+      const response = await apiFetch("/doc-track/sign-off-info", { method: "POST" });
+      if (!response.ok) throw new Error("Could not create a sign-off link");
+      const data = await response.json();
+      setSignOffToken(data.token);
+      setSignOffExpiresAt(data.expiresAt ?? null);
+      toast({ title: "Staff sign-off link created" });
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "Could not create a sign-off link",
+        variant: "destructive",
+      });
+    } finally {
+      setSignOffLinkBusy(false);
+    }
+  }
+
+  async function revokeSignOffLink() {
+    if (!window.confirm("Revoke this staff sign-off link? Anyone using it will lose access immediately.")) return;
+    setSignOffLinkBusy(true);
+    try {
+      const response = await apiFetch("/doc-track/sign-off-info", { method: "DELETE" });
+      if (!response.ok && response.status !== 204) throw new Error("Could not revoke the sign-off link");
+      setSignOffToken(null);
+      setSignOffExpiresAt(null);
+      toast({ title: "Staff sign-off link revoked" });
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "Could not revoke the sign-off link",
+        variant: "destructive",
+      });
+    } finally {
+      setSignOffLinkBusy(false);
+    }
   }
 
   // Unique departments from existing docs (for autocomplete in upload dialog)
@@ -1013,11 +949,10 @@ export default function DocTrackPage() {
         </div>
       </div>
 
-      {/* Page view switcher — show for non-manager staff */}
-      {!isManager && (
-        <div className="flex gap-1 mb-6 border-b border-border">
+      {/* Personal sign-offs are available to every account with a roster match. */}
+      <div className="flex gap-1 mb-6 border-b border-border">
           <button
-            onClick={() => setPageView("library")}
+            onClick={() => { setPageView("library"); load(); }}
             className={cn(
               "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
               pageView === "library"
@@ -1038,34 +973,81 @@ export default function DocTrackPage() {
           >
             <BookOpen className="w-4 h-4" /> My Documents
           </button>
-        </div>
-      )}
+          {isManager && <button type="button" data-testid="tab-doc-audit" onClick={() => setPageView("audit")} className={cn("flex items-center px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px", pageView === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>Audit log</button>}
+      </div>
+      {isManager && pageView === "audit" && <AuditLog module="doc" />}
 
       {/* My Documents personal view */}
-      {pageView === "my-docs" && !isManager && user?.name && (
-        <MyDocumentsView staffName={user.name} />
+      {pageView === "my-docs" && (
+        <MyDocumentsView key={activeClientId ?? "none"} canAcknowledge={canMutate} />
       )}
 
       {/* Library view */}
       {pageView === "library" && (
         <>
           {/* Staff self-sign link */}
-          {signOffUrl && (
+          {isManager && (
             <div className="flex items-center gap-3 mb-6 p-3.5 rounded-xl border bg-amber-50 border-amber-200">
               <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-amber-900">Staff self-sign link</p>
-                <p className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+                {signOffUrl ? (
+                  <>
+                    <p data-testid="text-sign-off-link" className="text-xs text-amber-700 truncate mt-0.5">{signOffUrl}</p>
+                    <p data-testid="text-sign-off-expiry" className="text-xs text-amber-800 mt-1">
+                      Expires {signOffExpiresAt ? new Date(signOffExpiresAt).toLocaleDateString("en-GB") : "in 90 days"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-amber-800 mt-0.5">No active link. Create one to let staff sign required documents.</p>
+                )}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
-                onClick={copySignOffLink}
-              >
-                {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {linkCopied ? "Copied!" : "Copy link"}
-              </Button>
+              {signOffUrl ? (
+                <>
+                  <Button
+                    data-testid="button-copy-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 h-8"
+                    onClick={copySignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {linkCopied ? "Copied!" : "Copy link"}
+                  </Button>
+                  <Button
+                    data-testid="button-renew-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 h-8"
+                    onClick={createSignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    Renew
+                  </Button>
+                  <Button
+                    data-testid="button-revoke-sign-off-link"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 h-8 text-destructive"
+                    onClick={revokeSignOffLink}
+                    disabled={signOffLinkBusy}
+                  >
+                    Revoke
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  data-testid="button-create-sign-off-link"
+                  size="sm"
+                  variant="outline"
+                  className="flex-shrink-0 h-8 border-amber-300 text-amber-800 hover:bg-amber-100"
+                  onClick={createSignOffLink}
+                  disabled={signOffLinkBusy}
+                >
+                  {signOffLinkBusy ? "Creating…" : "Create link"}
+                </Button>
+              )}
             </div>
           )}
 
@@ -1167,7 +1149,7 @@ export default function DocTrackPage() {
       )}
 
       {/* Outstanding acknowledgements overview */}
-      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} />
+      <OutstandingDialog open={outstandingOpen} onClose={() => setOutstandingOpen(false)} canExport={isManager} />
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
@@ -1208,56 +1190,44 @@ interface OutstandingDoc {
   acknowledged: { name: string; acknowledgedAt: string | null; signed: boolean }[];
 }
 
-function escapeHtml(s: string | null | undefined) {
-  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function exportAckRegister(docs: OutstandingDoc[]) {
-  const generated = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  const fmtDate = (d: string | null) =>
-    d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Document Acknowledgement Register</title>
-<style>
-  body { font-family: Georgia, serif; color: #1a1a1a; margin: 32px; }
-  h1 { font-size: 20px; margin: 0 0 2px; }
-  h2 { font-size: 14px; margin: 22px 0 6px; }
-  .meta { font-size: 11px; color: #555; }
-  table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 4px; }
-  th, td { border: 1px solid #bbb; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { background: #f0ede2; font-weight: bold; }
-  .out { color: #a15c00; }
-  @media print { body { margin: 12mm; } }
-</style></head><body>
-<h1>Document Acknowledgement Register</h1>
-<div class="meta">Generated ${generated} — for audit purposes</div>
-${docs.map(d => `
-<h2>${escapeHtml(d.title)}${d.department ? ` <span class="meta">(${escapeHtml(d.department)})</span>` : ""}</h2>
-<div class="meta">${d.acknowledgedCount}/${d.staffTotal} staff acknowledged</div>
-<table>
-<tr><th>Staff member</th><th>Status</th><th>Date</th><th>Signed</th></tr>
-${d.acknowledged.map(a => `<tr><td>${escapeHtml(a.name)}</td><td>Acknowledged</td><td>${fmtDate(a.acknowledgedAt)}</td><td>${a.signed ? "Yes" : "—"}</td></tr>`).join("")}
-${d.outstanding.map(s => `<tr class="out"><td>${escapeHtml(s.name)}</td><td>Outstanding</td><td></td><td></td></tr>`).join("")}
-</table>`).join("")}
-${docs.length === 0 ? `<p class="meta">No documents require acknowledgement.</p>` : ""}
-</body></html>`;
-  printHtmlDocument(html);
-  return true;
-}
-
-function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function OutstandingDialog({ open, onClose, canExport }: { open: boolean; onClose: () => void; canExport: boolean }) {
+  const { activeClientId } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState<OutstandingDoc[]>([]);
   const [view, setView] = useState<"outstanding" | "summary">("outstanding");
+  const [exporting, setExporting] = useState(false);
+  const clientScope = activeClientId == null ? "" : `?clientId=${encodeURIComponent(activeClientId)}`;
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     setView("outstanding");
-    apiFetch("/doc-track/acknowledgements/outstanding")
+    apiFetch(`/doc-track/acknowledgements/outstanding${clientScope}`)
       .then(r => (r.ok ? r.json() : { documents: [] }))
       .then(d => setDocs(d.documents ?? []))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [open, clientScope]);
+
+  async function handleExportCombinedRegister() {
+    setExporting(true);
+    try {
+      const response = await apiFetch(`/doc-track/acknowledgements/export${clientScope}`);
+      if (!response.ok) throw new Error("Export failed");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "document-acknowledgement-register.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      toast({ title: "PDF export failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const withOutstanding = docs.filter(d => d.outstanding.length > 0);
   const fullyAcknowledged = docs.filter(d => d.outstanding.length === 0);
@@ -1294,10 +1264,13 @@ function OutstandingDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 All docs ({docs.length})
               </button>
             </div>
-            <Button variant="outline" size="sm" className="ml-auto gap-1.5"
-              onClick={() => exportAckRegister(docs)}>
-              <Download className="w-3.5 h-3.5" /> Export PDF
-            </Button>
+            {canExport && (
+              <Button variant="outline" size="sm" className="ml-auto gap-1.5"
+                onClick={handleExportCombinedRegister} disabled={exporting} aria-busy={exporting}>
+                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                {exporting ? "Preparing…" : "Export PDF"}
+              </Button>
+            )}
           </div>
         )}
 

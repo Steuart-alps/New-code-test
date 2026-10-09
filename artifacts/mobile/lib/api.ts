@@ -9,14 +9,22 @@
 
 let _token: string | null = null;
 
+export const MOBILE_LOGIN_CHALLENGE_INVALID_CODE = 'MOBILE_LOGIN_CHALLENGE_INVALID';
+
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+export function isInvalidMobileLoginChallenge(error: unknown): error is ApiError {
+  return error instanceof ApiError
+    && error.code === MOBILE_LOGIN_CHALLENGE_INVALID_CODE;
 }
 
 export function setToken(token: string | null): void {
@@ -46,9 +54,13 @@ export async function apiFetch<T = unknown>(
     return undefined as T;
   }
   if (!res.ok) {
+    const errorData = data !== null && typeof data === 'object' && !Array.isArray(data)
+      ? data as Record<string, unknown>
+      : undefined;
     throw new ApiError(
-      (data as Record<string, string>)?.error ?? `Request failed (${res.status})`,
+      typeof errorData?.error === 'string' ? errorData.error : `Request failed (${res.status})`,
       res.status,
+      typeof errorData?.code === 'string' ? errorData.code : undefined,
     );
   }
   return data as T;

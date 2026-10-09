@@ -2,9 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql, eq, and } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers } from "../middleware/requireAuth";
-import { appSettingsTable } from "@workspace/db/schema";
+import { sitesTable, appSettingsTable, trackControlProfilesTable, auditEventsTable } from "@workspace/db/schema";
+import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 
 const router = Router();
 
@@ -19,6 +20,7 @@ const FREQUENCY_HOURS: Record<(typeof POOL_CHECK_TYPES)[number], number> = {
   closing: 24,
   weekly: 168,
 };
+router.use("/monitoring-plan", createMonitoringPlanRouter("pool", POOL_CHECK_TYPES, "frequencyHours"));
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -49,7 +51,26 @@ async function getPool(id: number, clientId: number) {
   const result = await db.execute(sql`
     SELECT * FROM pool_checks WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
   `);
-  return (result as any)[0] ?? null;
+  return (result.rows[0] as Record<string, any> | undefined) ?? null;
+}
+
+async function checkSiteAccess(
+  siteId: number | null | undefined,
+  clientId: number,
+  departmentId: number | null,
+): Promise<"required" | "invalid" | "forbidden" | null> {
+  if (siteId == null) return departmentId === null ? null : "required";
+  if (!Number.isSafeInteger(siteId) || siteId <= 0) return "invalid";
+
+  const [site] = await db.select({ departmentId: sitesTable.departmentId })
+    .from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId)))
+    .limit(1);
+  if (!site) return "invalid";
+  if (departmentId !== null && site.departmentId !== null && site.departmentId !== departmentId) {
+    return "forbidden";
+  }
+  return null;
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -59,7 +80,18 @@ router.get("/", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const { checkType, siteId, limit = "100" } = req.query;
+  const { checkType, limit = "100" } = req.query as { checkType?: string; siteId?: unknown; limit?: string };
+  const rawSiteId = req.query.siteId;
+  const hasSiteFilter = rawSiteId !== undefined && rawSiteId !== "";
+  const requestedSiteId = hasSiteFilter ? Number(rawSiteId) : null;
+  if (hasSiteFilter && (
+    typeof rawSiteId !== "string"
+    || !Number.isSafeInteger(requestedSiteId)
+    || requestedSiteId! <= 0
+  )) {
+    return res.status(400).json({ error: "Invalid siteId" });
+  }
+  const departmentId = getActiveDepartmentId(req);
 
   const rows = await db.execute(sql`
     SELECT pc.*, s.name AS site_name
@@ -67,7 +99,11 @@ router.get("/", requireAuth, async (req, res) => {
     LEFT JOIN sites s ON s.id = pc.site_id
     WHERE pc.client_id = ${clientId}
     ${checkType ? sql`AND pc.check_type = ${String(checkType)}` : sql``}
-    ${siteId ? sql`AND pc.site_id = ${Number(siteId)}` : sql``}
+    ${hasSiteFilter ? sql`AND pc.site_id = ${requestedSiteId}` : sql``}
+    ${departmentId !== null ? sql`AND (pc.site_id IS NULL OR pc.site_id IN (
+      SELECT id FROM sites WHERE client_id = ${clientId}
+        AND (department_id IS NULL OR department_id = ${departmentId})
+    ))` : sql``}
     ORDER BY pc.check_date DESC, pc.check_time DESC
     LIMIT ${Number(limit)}
   `);
@@ -81,6 +117,11 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const body = createSchema.parse(req.body);
+  const siteAccess = await checkSiteAccess(body.siteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "required") return res.status(400).json({ error: "siteId is required" });
+  if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+
   const performer = await resolveStaffPerformer(clientId, body.staffRosterId, body.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -89,7 +130,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
        client_id, site_id, check_date, check_time, check_type, staff_roster_id,
       ph_level, free_chlorine, combined_chlorine,
       water_temp_c, air_temp_c, turbidity,
-      pool_open, performed_by, actions_taken, result, notes
+      pool_open, performed_by, actions_taken, result, notes, created_by
     ) VALUES (
       ${clientId},
       ${body.siteId ?? null},
@@ -106,16 +147,18 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
        ${performer.performedBy},
       ${body.actionsTaken ?? null},
       ${body.result},
-      ${body.notes ?? null}
+      ${body.notes ?? null},
+      ${req.currentUser!.id}
     )
     RETURNING *
   `);
 
-  res.status(201).json((result as any)[0]);
+  res.status(201).json(result.rows[0]);
 });
 
 // PUT /pool-track/:id — update check
-router.put("/:id", requireAuth, denyViewers, async (req, res) => {
+router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
+  if (req.params.id === "config") return next();
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
@@ -152,7 +195,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
     RETURNING *
   `);
 
-  res.json((result as any)[0]);
+  res.json(result.rows[0]);
 });
 
 // DELETE /pool-track/:id
@@ -168,7 +211,7 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     RETURNING id
   `);
 
-  if (!(result as any)[0]) return res.status(404).json({ error: "Not found" });
+  if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
 });
 
@@ -178,6 +221,19 @@ router.get("/status", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const { siteId } = req.query;
+  const selectedSiteId = siteId == null || siteId === "" ? null : Number(siteId);
+  if (selectedSiteId !== null && (typeof siteId !== "string" || !Number.isSafeInteger(selectedSiteId) || selectedSiteId < 1))
+    return res.status(400).json({ error: "Invalid site" });
+  if (selectedSiteId === null) return res.json(POOL_CHECK_TYPES.map(checkType => ({
+    checkType, frequencyHours: null, status: "plan_required", lastDate: null, lastTime: null, result: null, dueDate: null,
+  })));
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "invalid") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  const [profileRow] = await db.select({ profile: trackControlProfilesTable.profile }).from(trackControlProfilesTable)
+    .where(and(eq(trackControlProfilesTable.clientId, clientId), eq(trackControlProfilesTable.siteId, selectedSiteId),
+      eq(trackControlProfilesTable.module, "pool"))).limit(1);
+  const frequencies = approvedFrequencies(profileRow?.profile, POOL_CHECK_TYPES, "frequencyHours");
 
   const rows = await db.execute(sql`
     SELECT DISTINCT ON (check_type)
@@ -185,7 +241,7 @@ router.get("/status", requireAuth, async (req, res) => {
       ph_level, free_chlorine, combined_chlorine, water_temp_c, turbidity
     FROM pool_checks
     WHERE client_id = ${clientId}
-    ${siteId ? sql`AND site_id = ${Number(siteId)}` : sql``}
+    AND site_id = ${selectedSiteId}
     ORDER BY check_type, check_date DESC, check_time DESC NULLS LAST
   `);
 
@@ -197,7 +253,9 @@ router.get("/status", requireAuth, async (req, res) => {
 
   const status = POOL_CHECK_TYPES.map(ct => {
     const latest = latestByType[ct];
-    const frequencyHours = FREQUENCY_HOURS[ct];
+    const frequencyHours = frequencies?.[ct] ?? null;
+    if (frequencyHours === null) return { checkType: ct, frequencyHours, status: "plan_required",
+      lastDate: latest?.check_date ?? null, lastTime: latest?.check_time ?? null, result: latest?.result ?? null, dueDate: null };
 
     if (!latest) {
       return { checkType: ct, frequencyHours, status: "never", lastDate: null, lastTime: null, result: null };
@@ -208,13 +266,15 @@ router.get("/status", requireAuth, async (req, res) => {
       ? new Date(`${latest.check_date}T${latest.check_time}`)
       : new Date(latest.check_date);
     const hoursSince = (now.getTime() - lastDt.getTime()) / (1000 * 60 * 60);
-    const checkStatus = hoursSince > frequencyHours * 1.5 ? "overdue"
-      : hoursSince > frequencyHours ? "due_soon"
+    const dueDate = new Date(lastDt.getTime() + frequencyHours * 3600000).toISOString();
+    const checkStatus = hoursSince > frequencyHours ? "overdue"
+      : frequencyHours - hoursSince <= Math.max(1, frequencyHours * 0.2) ? "due_soon"
       : "ok";
 
     return {
       checkType: ct,
       frequencyHours,
+      dueDate,
       status: checkStatus,
       lastDate: latest.check_date,
       lastTime: latest.check_time,
@@ -299,18 +359,47 @@ router.put("/config", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const updates = req.body as Record<string, string>;
-  for (const key of POOL_CONFIG_KEYS) {
-    if (key in updates) {
-      const existing = await db.select({ id: appSettingsTable.clientId }).from(appSettingsTable)
-        .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key))).limit(1);
-      if (existing.length > 0) {
-        await db.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
-          .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
-      } else {
-        await db.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+  if (!updates || typeof updates !== "object" || POOL_CONFIG_KEYS.some(key =>
+    key in updates && typeof updates[key] !== "string")) {
+    return res.status(400).json({ error: "Invalid pool configuration" });
+  }
+  await db.transaction(async tx => {
+    const existingRows = await tx.select().from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
+    const existingByKey = new Map(existingRows.map(row => [row.key, row.value]));
+    const controlKeys = new Set<string>([
+      "pool_ph_min", "pool_ph_max", "pool_free_chlor_min", "pool_free_chlor_max",
+      "pool_temp_min", "pool_temp_max", "pool_track_air_temp",
+    ]);
+    let controlsChanged = false;
+    for (const key of POOL_CONFIG_KEYS) {
+      if (key in updates) {
+        const previous = existingByKey.get(key) ?? POOL_DEFAULT_CONFIG[key];
+        if (controlKeys.has(key) && previous !== updates[key]) controlsChanged = true;
+        if (existingByKey.has(key)) {
+          await tx.update(appSettingsTable).set({ value: updates[key], updatedAt: new Date() })
+            .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, key)));
+        } else {
+          await tx.insert(appSettingsTable).values({ clientId, key, value: updates[key] });
+        }
       }
     }
-  }
+    if (controlsChanged) {
+      const profiles = await tx.select().from(trackControlProfilesTable)
+        .where(and(eq(trackControlProfilesTable.clientId, clientId), eq(trackControlProfilesTable.module, "pool")));
+      for (const row of profiles) {
+        const before = row.profile as Record<string, unknown>;
+        if (!before?.approvedAt) continue;
+        const after = { ...before, approvedAt: null, approvedBy: null, reviewRequired: true,
+          materialChangeNote: "Pool operating controls changed; ask the competent person to review the written scheme" };
+        await tx.update(trackControlProfilesTable).set({ profile: after, updatedAt: new Date() })
+          .where(eq(trackControlProfilesTable.id, row.id));
+        await tx.insert(auditEventsTable).values({
+          clientId, actorId: req.currentUser?.id ?? null, entityType: "pool_monitoring_plan",
+          entityId: row.siteId, action: "review_required", before, after,
+        });
+      }
+    }
+  });
   res.json({ ok: true });
 });
 

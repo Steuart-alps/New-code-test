@@ -1,0 +1,39 @@
+This app is not yet live — no client data exists in production. I want to remove Replit-specific dependencies from object storage and Stripe now, before launch, while the stakes are low.
+
+## 1. Object storage
+Replace the Replit Object Storage sidecar integration in artifacts/api-server/src/lib/objectStorage.ts with direct Google Cloud Storage credentials (service account key) instead of the Replit sidecar/credential exchange. If GCS isn't the right long-term choice, use an S3-compatible provider instead (e.g. AWS S3, Cloudflare R2, or Backblaze B2) with a signed-URL adapter equivalent to what's currently there.
+
+Preserve exactly the current security behavior:
+- Private-by-default objects
+- Tenant ownership checks
+- Custom ACL metadata (custom:aclPolicy)
+- Public vs private asset paths (/api/storage/objects/* vs /api/storage/public-objects/*)
+- Short-lived signed PUT and GET URLs
+- Content-type binding on uploads
+- Cross-tenant ownership rejection
+
+Remove the hardcoded sidecar address (127.0.0.1:1106) and the Replit-specific environment variables (PRIVATE_OBJECT_DIR, PUBLIC_OBJECT_SEARCH_PATHS), replacing them with standard config values for the new provider. Since there's no production data yet, no file migration is needed — just make the new path the only path.
+
+## 2. Stripe
+Remove stripe-replit-sync and the Replit Connector credential retrieval (REPLIT_CONNECTORS_HOSTNAME, REPLIT_IDENTITY, WEB_REPL_RENEWAL, REPLIT_DEPLOYMENT, X-Replit-Token) from stripeClient.ts and scripts/src/stripeClient.ts. Replace with a standard Stripe SDK setup using a STRIPE_SECRET_KEY environment variable.
+
+Rebuild the billing queries currently reading from the synced stripe.products / stripe.prices / stripe.subscriptions tables (in routes/billing.ts, lib/billing.ts, lib/services.ts, lib/offboarding.ts) to either:
+(a) query the Stripe API directly at request time, or
+(b) use application-owned billing tables updated via Stripe webhooks
+
+Prefer whichever approach is simpler given current usage — tell me the tradeoff before implementing if it's not obvious.
+
+Remove the managed webhook creation and Stripe backfill currently run via stripe-replit-sync at API startup, and replace with a standard Stripe webhook endpoint and signature verification.
+
+## 3. Replit URL fallbacks
+Replace REPLIT_DOMAINS / REPLIT_DEV_DOMAIN references with explicit required environment variables: PUBLIC_APP_URL, PUBLIC_SITE_URL, ALLOWED_ORIGINS, PASSKEY_ORIGIN, PASSKEY_RP_ID. This affects app.ts (CORS), index.ts (Stripe webhook URL), routes/billing.ts (checkout/portal return URLs), lib/email.ts, lib/passkeys.ts, and the site-url.mjs / generate-seo.mjs scripts.
+
+## 4. Credential hygiene
+Remove or rotate the seeded development-account credentials currently sitting in replit.md before this is visible to anyone outside the core team.
+
+## 5. Fix the known schema drift
+Resolve the issues already documented in FIXES_NEEDED.md (StaffRoster name field, DocTrack object_path vs file_path, TrainTrack record_type, missing KitchenTrack tables) as part of this work, since they'll affect any fresh deployment regardless of host.
+
+Do not touch the database layer, authentication system, or session handling — those are already portable and working correctly.
+
+Work through this in stages, and confirm with me before starting each major stage (storage, then Stripe, then URL config). Tell me if anything here conflicts with how the app currently behaves in ways I should know about before you proceed.

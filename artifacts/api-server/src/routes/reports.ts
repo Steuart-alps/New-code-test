@@ -3,6 +3,9 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { z } from "zod";
+import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
+import { getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
+import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -56,6 +59,7 @@ async function resolveReportScope(
   clientId: number,
   requestedSiteId: number | undefined,
   requestedDepartmentId: number | undefined,
+  allowCrossDepartmentSite = false,
 ): Promise<ReportScope | null> {
   const activeDepartmentId = getActiveDepartmentId(req);
   if (
@@ -99,7 +103,8 @@ async function resolveReportScope(
       res.status(400).json({ error: "Site not found" });
       return null;
     }
-    if (departmentId !== undefined && Number(site.department_id) !== departmentId) {
+    if (departmentId !== undefined && Number(site.department_id) !== departmentId
+        && !(allowCrossDepartmentSite && activeDepartmentId === null)) {
       res.status(403).json({ error: "Site is outside the selected department scope" });
       return null;
     }
@@ -316,9 +321,22 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
   ) + 1;
   if (totalDays > 366) return res.status(400).json({ error: "Date range cannot exceed 366 days" });
 
-  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId);
+  const scope = await resolveReportScope(req, res, clientId, parsed.data.siteId, parsed.data.departmentId, true);
   if (!scope) return;
-  const { siteId, departmentId } = scope;
+  const { siteId, departmentId, departmentName } = scope;
+
+  if (departmentId !== undefined) {
+    return res.json(await getDepartmentComplianceReport({
+      clientId, from, to, totalDays, siteId,
+      departmentId: departmentId!,
+      departmentName: departmentName!,
+      restrictSitesToDepartment: getActiveDepartmentId(req) !== null,
+    }));
+  }
+
+  if (siteId === undefined && departmentId === undefined) {
+    return res.json(await getUnscopedComplianceReport(clientId, from, to));
+  }
 
   // Build WHERE fragments for site-scoped queries
   const siteWhereClause =
@@ -415,11 +433,12 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
           WHERE client_id = ${clientId} AND session_date    BETWEEN ${from} AND ${to}
             AND site_id IS NOT NULL
         UNION ALL
-        SELECT 'PATtrack', a.site_id
+        SELECT 'PATtrack', t.site_id_snapshot
           FROM pat_tests t
-          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = ${clientId}
-          WHERE t.test_date BETWEEN ${from} AND ${to}
-            AND a.site_id IS NOT NULL
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
       ) sub
       ${moduleWhereClause}
       GROUP BY module, site_id
@@ -462,11 +481,15 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
 
   const { months } = parsed.data;
 
-  // Compute the from/to range: from = first day of (months) months ago, to = yesterday
-  const now   = new Date();
-  const toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1); // yesterday
-  // Start from the beginning of `months` months ago
-  const fromDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+  // Compare complete UK calendar months, not a partly complete current month
+  // (whose full-month denominator would otherwise show a false decline).
+  const ukParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", year: "numeric", month: "numeric",
+  }).formatToParts(new Date());
+  const year = Number(ukParts.find(part => part.type === "year")?.value);
+  const monthIndex = Number(ukParts.find(part => part.type === "month")?.value) - 1;
+  const fromDate = new Date(Date.UTC(year, monthIndex - months, 1));
+  const toDate = new Date(Date.UTC(year, monthIndex, 0));
 
   const from = fromDate.toISOString().slice(0, 10);
   const to   = toDate.toISOString().slice(0, 10);
@@ -487,7 +510,7 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
     ? sql`WHERE client_id = ${clientId} AND department_id = ${departmentId}`
     : sql`WHERE client_id = ${clientId}`;
 
-  const [sitesRes, trendRes] = await Promise.all([
+  const [sitesRes, trendRes, moduleRes] = await Promise.all([
     db.execute(sql`
       SELECT id, name FROM sites
       ${sitesFilter}
@@ -511,6 +534,64 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
       GROUP BY month, s.id, s.name, dc.checklist_type
       ORDER BY month, s.name, dc.checklist_type
     `),
+    db.execute(sql`
+      SELECT to_char(activity.record_date::date, 'YYYY-MM') AS month,
+             s.id AS site_id, COUNT(*)::int AS record_count
+      FROM (
+        SELECT check_date AS record_date, site_id FROM fire_safety_checks
+          WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT check_date, site_id FROM legionella_checks
+          WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT check_date, site_id FROM hot_tub_checks
+          WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT check_date, site_id FROM tree_inspections
+          WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT inspection_date, site_id FROM premises_inspections
+          WHERE client_id = ${clientId} AND inspection_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT visit_date, site_id FROM pest_visits
+          WHERE client_id = ${clientId} AND visit_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT incident_date, site_id FROM incidents
+          WHERE client_id = ${clientId} AND incident_date BETWEEN ${from} AND ${to}
+            AND site_id IS NOT NULL
+        UNION ALL
+        SELECT record_date, site_id FROM food_safety_records
+          WHERE client_id = ${clientId} AND record_date BETWEEN ${from} AND ${to}
+            AND site_id IS NOT NULL
+        UNION ALL
+        SELECT reported_date, site_id FROM fix_track_issues
+          WHERE client_id = ${clientId} AND reported_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT log_date, site_id FROM kitchen_cleaning_logs
+          WHERE client_id = ${clientId} AND log_date BETWEEN ${from} AND ${to}
+            AND site_id IS NOT NULL
+        UNION ALL
+        SELECT check_date, site_id FROM pool_checks
+          WHERE client_id = ${clientId} AND check_date BETWEEN ${from} AND ${to}
+        UNION ALL
+        SELECT session_date, site_id FROM swim_sessions
+          WHERE client_id = ${clientId} AND session_date BETWEEN ${from} AND ${to}
+            AND site_id IS NOT NULL
+        UNION ALL
+        SELECT t.test_date, t.site_id_snapshot FROM pat_tests t
+          JOIN pat_appliances a ON a.id = t.appliance_id AND a.client_id = t.client_id
+          LEFT JOIN sites s ON s.id = t.site_id_snapshot AND s.client_id = t.client_id
+          WHERE t.client_id = ${clientId}
+            AND t.test_date BETWEEN ${from} AND ${to}
+            AND t.site_id_snapshot IS NOT NULL
+            ${departmentId !== undefined ? historicalTestDepartmentScope(departmentId) : sql``}
+      ) activity
+      JOIN sites s ON s.id = activity.site_id AND s.client_id = ${clientId}
+      WHERE true
+        ${siteId !== undefined ? sql`AND s.id = ${siteId}` : sql``}
+        ${departmentId !== undefined ? sql`AND s.department_id = ${departmentId}` : sql``}
+      GROUP BY month, s.id
+    `),
   ]);
 
   const allSites = sitesRes.rows as { id: number; name: string }[];
@@ -518,8 +599,8 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
   // Build the ordered list of YYYY-MM strings for the range
   const monthLabels: string[] = [];
   for (let i = 0; i < months; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - months + 1 + i, 1);
-    monthLabels.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    const d = new Date(Date.UTC(year, monthIndex - months + i, 1));
+    monthLabels.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   }
 
   // Days per month (approximate from calendar)
@@ -534,6 +615,10 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
   for (const r of trendRes.rows as RawRow[]) {
     idx.set(`${r.site_id}:${r.month}:${r.checklist_type}`, Number(r.submitted));
   }
+  const moduleCounts = new Map<string, number>();
+  for (const row of moduleRes.rows as Array<{ month: string; site_id: number | string; record_count: number | string }>) {
+    moduleCounts.set(`${row.site_id}:${row.month}`, Number(row.record_count));
+  }
 
   // Build series — one per site
   const series = allSites.map(site => {
@@ -546,6 +631,7 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
         daysInMonth: days,
         amSubmitted: amSub,
         pmSubmitted: pmSub,
+        moduleRecordCount: moduleCounts.get(`${site.id}:${month}`) ?? 0,
         amPct: days > 0 ? Math.round((amSub / days) * 100) : 0,
         pmPct: days > 0 ? Math.round((pmSub / days) * 100) : 0,
         combinedPct: days > 0 ? Math.round(((amSub + pmSub) / (days * 2)) * 100) : 0,
@@ -554,7 +640,14 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
     return { siteId: site.id, siteName: site.name, data };
   });
 
-  return res.json({ from, to, months: monthLabels, sites: allSites, series });
+  const monthlyTotals = monthLabels.map(month => ({
+    month,
+    moduleRecordCount: series.reduce(
+      (total, site) => total + (site.data.find(point => point.month === month)?.moduleRecordCount ?? 0),
+      0,
+    ),
+  }));
+  return res.json({ from, to, months: monthLabels, sites: allSites, series, monthlyTotals });
 });
 
 export default router;

@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { 
   ShieldCheck,
@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   Smartphone,
   Lock,
+  KeyRound,
   Menu,
   ChevronRight,
   MessageSquareWarning
@@ -24,6 +25,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader, SheetDescri
 import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { FeedbackDialog } from "@/components/feedback-dialog";
+import { CancellationBanner } from "@/components/cancellation-banner";
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -37,6 +39,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/pat-track", moduleKey: "pat" },
   { prefix: "/pest-track", moduleKey: "pest" },
   { prefix: "/fix-track", moduleKey: "fix" },
+  { prefix: "/safe-track", moduleKey: "safe" },
   { prefix: "/premises-track", moduleKey: "premises" },
   { prefix: "/room-track", moduleKey: "room" },
   { prefix: "/doc-track", moduleKey: "doc" },
@@ -49,7 +52,7 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/incidents", moduleKey: "incident" },
 ];
 
-import { getNavGroups, NavGroup, NavItem } from "@/lib/nav-groups";
+import { getNavGroups, isNavItemActive, isNavItemAvailable, type NavGroup } from "@/lib/nav-groups";
 
 function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
@@ -57,12 +60,38 @@ function useNavGroups(): NavGroup[] {
   return getNavGroups({ isConsultant, canAdmin });
 }
 
-function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string }) {
-  const [isOpen, setIsOpen] = useState(group.defaultOpen);
+function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate, layoutIdPrefix, storageScope }: { group: NavGroup; location: string; hasService: (s: string) => boolean; primaryColor: string; onNavigate?: () => void; layoutIdPrefix: string; storageScope: string }) {
+  const storageKey = `complytrack:nav:${storageScope}:${group.id}`;
+  const hasActiveRoute = group.items.some(item => isNavItemActive(item, location));
+  const hasAvailableItems = group.items.some(item => isNavItemAvailable(item, hasService));
+  const [isOpen, setIsOpen] = useState(() => {
+    if (hasActiveRoute) return true;
+    if (!hasAvailableItems) return false;
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved !== null) return saved === "true";
+    } catch {
+      // Private browsing may disable storage; keep the default.
+    }
+    return group.defaultOpen;
+  });
+
+  useEffect(() => {
+    if (hasActiveRoute) setIsOpen(true);
+  }, [location, hasActiveRoute]);
+
+  function toggleOpen(open: boolean) {
+    setIsOpen(open);
+    try {
+      window.localStorage.setItem(storageKey, String(open));
+    } catch {
+      // Navigation still works if storage is unavailable.
+    }
+  }
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="space-y-1">
-      <CollapsibleTrigger className="flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-semibold text-sidebar-foreground/40 uppercase tracking-widest hover:text-sidebar-foreground/60 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm">
+    <Collapsible open={isOpen} onOpenChange={toggleOpen} className="space-y-1">
+      <CollapsibleTrigger className={cn("flex items-center justify-between w-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest hover:text-sidebar-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-foreground/30 rounded-sm", hasActiveRoute ? "text-sidebar-foreground" : "text-sidebar-foreground/60")}>
         <span>{group.title}</span>
         <ChevronRight className={cn("w-3 h-3 transition-transform duration-200", isOpen && "rotate-90")} />
       </CollapsibleTrigger>
@@ -77,10 +106,8 @@ function NavSidebarGroup({ group, location, hasService, primaryColor, onNavigate
               className="space-y-1 overflow-hidden"
             >
               {group.items.map((item) => {
-                const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
-                const isLocked = item.serviceKeys
-                  ? !item.serviceKeys.some(hasService)
-                  : item.serviceKey ? !hasService(item.serviceKey) : false;
+                const isActive = isNavItemActive(item, location);
+                const isLocked = !isNavItemAvailable(item, hasService);
                 const isComingSoon = item.comingSoon === true;
                 const inner = (
                   <div className={cn(
@@ -129,6 +156,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const { user, client, logout, activeClientId, hasService } = useAuth();
   const isConsultant = useIsConsultant();
   const navGroups = useNavGroups();
+  const navStorageScope = `${user?.id ?? "guest"}:${activeClientId ?? client?.id ?? "none"}`;
   const [showAppDialog, setShowAppDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -160,12 +188,13 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
           {navGroups.map((group) => (
             <NavSidebarGroup
-              key={group.id}
+              key={`${navStorageScope}:${group.id}`}
               group={group}
               location={location}
               hasService={hasService}
               primaryColor={primaryColor}
               layoutIdPrefix="desktop"
+              storageScope={navStorageScope}
             />
           ))}
         </nav>
@@ -309,12 +338,13 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                   <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-6 scrollbar-hide">
                     {navGroups.map((group) => (
                       <NavSidebarGroup
-                        key={group.id}
+                        key={`${navStorageScope}:${group.id}`}
                         group={group}
                         location={location}
                         hasService={hasService}
                         primaryColor={primaryColor}
                         layoutIdPrefix="mobile"
+                        storageScope={navStorageScope}
                         onNavigate={() => setMobileMenuOpen(false)}
                       />
                     ))}
@@ -349,6 +379,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
           </div>
           
           <div className="flex items-center gap-4">
+            <Link
+              href="/account-security"
+              className="flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"
+              aria-label="Account security"
+              title="Account security"
+              data-testid="link-account-security"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>Security</span>
+            </Link>
             {isConsultant && (
               <div className="hidden sm:flex items-center gap-2 text-xs text-[#162D42] bg-[#F7F2E4] border border-border px-3 py-1.5 rounded-sm">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary" />
@@ -386,6 +426,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             transition={{ duration: 0.4, ease: "easeOut" }}
             className="max-w-7xl mx-auto space-y-8"
           >
+            <CancellationBanner />
             {location !== "/compliance-hub" && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
                 <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>

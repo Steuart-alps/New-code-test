@@ -522,27 +522,36 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [canManageContractorEmails]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setChecklistLoading(true);
     setError(null);
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
-      const res = await apiFetch(`/dashboard/summary${params}`);
+      const res = await apiFetch(`/dashboard/summary${params}`, { signal });
       if (!res.ok) throw new Error(await res.text());
       const json = await res.json();
-        setTracks(json.tracks ?? []);
-        setChecklistTotals(json.checklistTotals ?? null);
+      if (signal.aborted) return;
+      setTracks(json.tracks ?? []);
+      setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
+      if (signal.aborted) return;
       setError(String(e));
       setChecklistTotals(null);
+      setTracks([]);
     } finally {
-      setLoading(false);
-      setChecklistLoading(false);
+      if (!signal.aborted) {
+        setLoading(false);
+        setChecklistLoading(false);
+      }
     }
   }, [siteId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);

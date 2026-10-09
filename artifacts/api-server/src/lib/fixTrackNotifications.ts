@@ -68,6 +68,9 @@ async function dispatchContractorEmail(opts: Parameters<typeof sendEmail>[0]): P
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
+      text: opts.text,
+      icsAttachment: opts.icsAttachment,
+      icsFilename: opts.icsFilename,
       idempotencyKey: opts.idempotencyKey,
     })}\n`);
     return;

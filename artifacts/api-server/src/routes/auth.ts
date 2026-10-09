@@ -7,7 +7,13 @@ import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
 import { requireAuth } from "../middleware/requireAuth";
-import { loginRateLimit, makeLoginRateLimit, registrationRateLimit } from "../lib/loginRateLimit";
+import {
+  configureProductionLoginRateLimitStore,
+  loginRateLimit,
+  makeLoginRateLimit,
+  registrationRateLimit,
+} from "../lib/loginRateLimit";
+import { createDatabaseLoginRateLimitStore } from "../lib/loginRateLimitStore";
 import { db } from "@workspace/db";
 import { usersTable, passwordResetTokensTable, clientsTable, consultantClientsTable } from "@workspace/db/schema";
 import { passkeysTable } from "@workspace/db/schema";
@@ -30,10 +36,19 @@ import {
   registrationOptionsForUser,
 } from "../lib/passkeys";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { getCsrfToken } from "../middleware/csrf";
 
 const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const router = Router();
+
+if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1") {
+  configureProductionLoginRateLimitStore(createDatabaseLoginRateLimitStore());
+}
+
+router.get("/auth/csrf-token", (req, res) => {
+  res.json({ token: getCsrfToken(req) });
+});
 
 // ── 2FA recovery codes ──────────────────────────────────────────────────────
 // Ten one-time recovery codes (format XXXX-XXXX-XXXX, no ambiguous chars) are
@@ -543,7 +558,19 @@ router.get("/auth/me", async (req, res) => {
     res.json({ requires2faSetup: true, user: safeUser });
     return;
   }
-  res.json({ user: safeUser, client, billingLocked, services, passkeyCount: passkeys.length });
+  const recoveryCount = await db.execute(sql`
+    SELECT count(*)::int AS remaining
+    FROM totp_recovery_codes
+    WHERE user_id = ${user.id} AND used_at IS NULL
+  `);
+  const recoveryCodesRemaining = Number(recoveryCount.rows[0]?.remaining);
+  if (!Number.isInteger(recoveryCodesRemaining) || recoveryCodesRemaining < 0) {
+    throw new Error("Could not determine remaining recovery codes");
+  }
+  res.json({
+    user: { ...safeUser, recoveryCodesRemaining },
+    client, billingLocked, services, passkeyCount: passkeys.length,
+  });
 });
 
 const ForgotPasswordBody = z.object({
@@ -908,6 +935,7 @@ const MobileTotpVerificationBody = z.object({
 const MOBILE_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const MOBILE_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MOBILE_SESSION_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MOBILE_LOGIN_CHALLENGE_INVALID_CODE = "MOBILE_LOGIN_CHALLENGE_INVALID";
 
 function hashMobileLoginChallenge(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -1102,7 +1130,10 @@ router.post("/auth/mobile-login/verify-totp", loginRateLimit, async (req, res) =
   });
 
   if (verification.status === "invalid-challenge") {
-    res.status(401).json({ error: "This verification request is invalid or has expired. Please sign in again." });
+    res.status(401).json({
+      error: "This verification request is invalid or has expired. Please sign in again.",
+      code: MOBILE_LOGIN_CHALLENGE_INVALID_CODE,
+    });
     return;
   }
   if (verification.status === "invalid-code") {

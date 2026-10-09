@@ -1,8 +1,39 @@
 import type { Request, Response, NextFunction } from "express";
+import { digestBearerToken } from "./bearerTokens";
 
 type Entry = { count: number; resetAt: number };
 
 const failures = new Map<string, Entry>();
+let productionSharedStore: SharedRateLimitStore | undefined;
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1";
+}
+
+/** Configure the database-backed store before the API begins serving requests. */
+export function configureProductionLoginRateLimitStore(store: SharedRateLimitStore) {
+  productionSharedStore = store;
+}
+
+const productionStoreProxy: SharedRateLimitStore = {
+  async consume(key, windowMs, max) {
+    if (!productionSharedStore) {
+      throw new Error("Shared authentication rate-limit store is not configured");
+    }
+    return productionSharedStore.consume(key, windowMs, max);
+  },
+};
+
+export interface SharedRateLimitStore {
+  /**
+   * Atomically consume an attempt and return the count and remaining window.
+   * Implementations must share counters across API processes.
+   */
+  consume(key: string, windowMs: number, max: number): Promise<{
+    count: number;
+    retryAfterSeconds: number;
+  }>;
+}
 
 // Periodically drop expired entries so the map can't grow unbounded even if
 // keys are never revisited. .unref() so it never keeps the process alive.
@@ -56,15 +87,54 @@ export function makeLoginRateLimit(opts?: {
   namespace?: string;
   failureStatuses?: number[];
   key?: (req: Request) => string;
+  store?: SharedRateLimitStore;
+  requireStore?: boolean;
+  storeOnlyInProduction?: boolean;
 }) {
   const windowMs = opts?.windowMs ?? 15 * 60 * 1000;
   const max = opts?.max ?? 10;
   const namespace = opts?.namespace ?? "login";
   const failureStatuses = opts?.failureStatuses ? new Set(opts.failureStatuses) : null;
 
-  return function loginRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (failureStatuses && (opts?.store || opts?.requireStore)) {
+    throw new Error("Shared rate-limit stores cannot be used with response-based failure counters");
+  }
+
+  return async function loginRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
     const now = Date.now();
     const key = `${namespace}:${opts?.key ? opts.key(req) : `ip:${clientIp(req)}`}`;
+    const useStore = Boolean(opts?.store)
+      && (!opts?.storeOnlyInProduction || isProductionRuntime());
+    const requireStore = Boolean(opts?.requireStore
+      && (!opts?.storeOnlyInProduction || isProductionRuntime()));
+
+    if (useStore || requireStore) {
+      try {
+        const store = opts?.store;
+        if (!store) throw new Error("Shared authentication rate-limit store is not configured");
+        const result = await store.consume(key, windowMs, max);
+        if (!Number.isSafeInteger(result.count) || result.count < 1
+          || !Number.isSafeInteger(result.retryAfterSeconds) || result.retryAfterSeconds < 0) {
+          throw new Error("Shared authentication rate-limit store returned an invalid result");
+        }
+        if (result.count > max) {
+          const retryAfter = Math.max(1, result.retryAfterSeconds);
+          res.setHeader("Retry-After", String(retryAfter));
+          res.status(429).json({
+            error: "Too many attempts. Please try again later.",
+            retryAfterSeconds: retryAfter,
+          });
+          return;
+        }
+        next();
+      } catch (error) {
+        req.log?.error({ err: error }, "Shared authentication rate-limit store unavailable");
+        res.status(503).json({
+          error: "Authentication is temporarily unavailable. Please try again shortly.",
+        });
+      }
+      return;
+    }
 
     const retryAfter = blockedSeconds(key, max, now);
     if (retryAfter > 0) {
@@ -88,18 +158,44 @@ export function makeLoginRateLimit(opts?: {
   };
 }
 
-/** Ten credential attempts per source IP in each 15-minute window. */
+/** Ten credential attempts per source IP in each shared 15-minute window in production. */
 export const loginRateLimit = makeLoginRateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   namespace: "login",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
 });
 
-/** Five registration attempts per source IP in each one-hour window. */
+/** Five registration attempts per source IP in each shared one-hour window in production. */
 export const registrationRateLimit = makeLoginRateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   namespace: "register",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/** Public token links are intentionally usable without login, but are still
+ * bounded per source IP to slow token enumeration and abusive scraping. */
+export const publicLinkRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  namespace: "public-link",
+});
+
+/** Bound repeated use of any one public-link credential, across source IPs. */
+export const publicLinkTokenRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  namespace: "public-link-token",
+  key: (req) => {
+    const firstPathSegment = req.path.split("/").filter(Boolean)[0];
+    if (firstPathSegment) return `token:${digestBearerToken(firstPathSegment)}`;
+    return `ip:${clientIp(req)}`;
+  },
 });
 
 /** Test-only helper: reset all counters. */

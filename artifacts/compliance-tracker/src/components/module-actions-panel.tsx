@@ -1,4 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { KitchenActionAudit } from "./kitchen-action-audit";
 import { CheckCircle2, ChevronDown, CircleDot, Loader2, Plus, Wrench } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
@@ -12,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
+import { TrackEvidencePanel } from "@/components/track-evidence-panel";
 import { cn } from "@/lib/utils";
 
 type Severity = "monitor" | "action_required" | "urgent";
@@ -79,6 +82,7 @@ function errorMessage(data: unknown, fallback: string) {
 
 export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const { user, activeClientId } = useAuth();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [actions, setActions] = useState<TrackAction[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -91,9 +95,11 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   const [resolution, setResolution] = useState<Record<string, ResolutionValues>>({});
   const [pendingSignature, setPendingSignature] = useState<{ action: TrackAction; values: ResolutionValues } | null>(null);
 
-  const canMutate = user?.role !== "client_viewer" && !!user;
-  const loadActions = useCallback(async () => {
-    setLoading(true);
+  const kitchenManager = user?.role === "client_admin" || user?.role === "consultant";
+  const canMutate = user?.role !== "client_viewer" && !!user && (moduleKey !== "kitchen" || kitchenManager);
+  const loadActions = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    void queryClient.invalidateQueries({ queryKey: ["kitchen-action-audit"] });
     try {
       const [actionsResponse, sitesResponse] = await Promise.all([
         apiFetch(`/track-actions?module=${encodeURIComponent(moduleKey)}`),
@@ -115,6 +121,13 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
   }, [activeClientId, moduleKey, toast]);
 
   useEffect(() => { void loadActions(); }, [loadActions]);
+  useEffect(() => {
+    if (moduleKey !== "kitchen") return;
+    const refresh = () => { void loadActions(true); };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("kitchen-actions-changed", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("kitchen-actions-changed", refresh); };
+  }, [moduleKey, loadActions]);
   useEffect(() => {
     let cancelled = false;
     const site = draft.siteId ? `&siteId=${encodeURIComponent(draft.siteId)}` : "";
@@ -262,16 +275,26 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
           {resolved.length > 0 && <Collapsible open={showResolved} onOpenChange={setShowResolved}><CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">Resolved actions ({resolved.length})<ChevronDown className={cn("h-4 w-4 transition-transform", showResolved && "rotate-180")} /></Button></CollapsibleTrigger><CollapsibleContent className="mt-3 space-y-2">{resolved.map(action => <div key={action.id}><ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={false} submitting={false} />{action.resolvedByName && <div className="-mt-3 border-x border-b bg-slate-50 px-4 pb-3 text-xs text-muted-foreground"><p>Signed off as complete by <strong className="text-foreground">{action.resolvedByName}</strong></p>{action.resolverSignature && <img src={action.resolverSignature} alt={`Signature of ${action.resolvedByName}`} className="mt-2 h-14 max-w-52 rounded-sm border bg-white object-contain" />}</div>}</div>)}</CollapsibleContent></Collapsible>}
         </CardContent>
       </Card>
+       <TrackEvidencePanel
+         moduleKey={moduleKey}
+         actions={actions.map(action => ({ id: action.id, title: action.title, status: action.status }))}
+         sites={sites}
+         canMutate={canMutate}
+       />
       <DrawnSignatureDialog open={!!pendingSignature} busy={submitting} onCancel={() => setPendingSignature(null)} onConfirm={async resolverSignature => {
         if (!pendingSignature) return;
         await updateAction(pendingSignature.action, { status: "resolved", ...pendingSignature.values, resolverSignature });
         setPendingSignature(null);
       }} />
+      {moduleKey === "kitchen" && kitchenManager && actions.filter(action => action.sourceKind?.startsWith("kitchen_temperature_")).map(action =>
+        <div key={`audit-${action.id}`} className="px-4"><p className="text-sm font-medium">{action.title}</p><KitchenActionAudit actionId={action.id} /></div>
+      )}
     </section>
   );
 }
 
 function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
+  if (action.sourceKind?.startsWith("kitchen_temperature_")) return null;
   if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
   if (!canMutate) return null;
   return <div className="-mt-3 flex flex-wrap items-center gap-2 rounded-b-sm border-x border-b bg-slate-50 px-4 pb-3 pt-2 text-xs"><span>{action.fixTrackDisposition === "not_needed" ? "Kept in this track. Add it to FixTrack now?" : "Does this action require FixTrack repair or contractor work?"}</span><Button type="button" size="sm" variant="outline" className="h-7" disabled={submitting} onClick={() => onDecision(true)}>Yes, add to FixTrack</Button>{action.fixTrackDisposition !== "not_needed" && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={submitting} onClick={() => onDecision(false)}>No</Button>}</div>;

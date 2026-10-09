@@ -5,7 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
-import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 
 // iOS 26+ liquid glass native tab bar
@@ -13,24 +13,24 @@ function NativeTabLayout() {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: 'house', selected: 'house.fill' }} />
-        <Label>Today</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />
+        <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="checks">
-        <Icon sf={{ default: 'checklist', selected: 'checklist' }} />
-        <Label>Checks</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'checklist', selected: 'checklist' }} />
+        <NativeTabs.Trigger.Label>Checks</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="issues">
-        <Icon sf={{ default: 'wrench', selected: 'wrench.fill' }} />
-        <Label>Issues</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'wrench', selected: 'wrench.fill' }} />
+        <NativeTabs.Trigger.Label>Issues</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="docs">
-        <Icon sf={{ default: 'folder', selected: 'folder.fill' }} />
-        <Label>Docs</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'folder', selected: 'folder.fill' }} />
+        <NativeTabs.Trigger.Label>Docs</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
-        <Icon sf={{ default: 'person', selected: 'person.fill' }} />
-        <Label>Profile</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'person', selected: 'person.fill' }} />
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );

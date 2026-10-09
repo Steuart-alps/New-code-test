@@ -2,10 +2,73 @@ import { Router, type IRouter } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { requireAuth, getClientId } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
+import { UpdateFeedbackReportBody, ListFeedbackReportsQueryParams } from "@workspace/api-zod";
 import { escapeHtml, sendSystemEmail } from "../lib/email";
 
 const router: IRouter = Router();
+
+const reportColumns = sql`
+  f.id, f.client_id AS "clientId", f.category, f.summary, f.details,
+  f.page_path AS "pagePath", f.email_status AS "emailStatus", f.created_at AS "createdAt",
+  f.status, f.internal_note AS "internalNote", f.updated_by AS "updatedBy",
+  f.updated_at AS "updatedAt",
+  (SELECT u.name FROM users u WHERE u.id = f.user_id) AS "submitterName"
+`;
+
+router.get("/feedback", requireAuth, requireClientAdmin, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "Select a client to review feedback." });
+    return;
+  }
+  // clientId has already been checked by the global tenant middleware.
+  const parsed = ListFeedbackReportsQueryParams.safeParse({
+    category: req.query.category, status: req.query.status,
+  });
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid feedback type or status filter." });
+    return;
+  }
+  const { category, status } = parsed.data;
+  const result = await db.execute(sql`
+    SELECT ${reportColumns} FROM feedback_reports f
+    WHERE f.client_id = ${clientId}
+      ${category ? sql`AND f.category = ${category}` : sql``}
+      ${status ? sql`AND f.status = ${status}` : sql``}
+    ORDER BY f.created_at DESC, f.id DESC
+  `);
+  res.json(result.rows);
+});
+
+router.patch("/feedback/:id", requireAuth, requireClientAdmin, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  const parsed = UpdateFeedbackReportBody.strict().safeParse(req.body);
+  if (!clientId) {
+    res.status(400).json({ error: "Select a client to review feedback." });
+    return;
+  }
+  if (!id.success || !parsed.success
+      || (parsed.data.status === undefined && parsed.data.internalNote === undefined)) {
+    res.status(400).json({ error: "Provide a valid feedback status or an internal note of at most 5000 characters." });
+    return;
+  }
+  const { status, internalNote } = parsed.data;
+  const result = await db.execute(sql`
+    UPDATE feedback_reports AS f SET
+      status = COALESCE(${status ?? null}::text, f.status),
+      internal_note = COALESCE(${internalNote ?? null}::text, f.internal_note),
+      updated_by = ${req.currentUser!.id}, updated_at = now()
+    WHERE f.id = ${id.data} AND f.client_id = ${clientId}
+    RETURNING ${reportColumns}
+  `);
+  if (result.rows.length === 0) {
+    res.status(404).json({ error: "Feedback report not found." });
+    return;
+  }
+  res.json(result.rows[0]);
+});
 
 const feedbackSchema = z.object({
   category: z.enum(["feedback", "bug", "feature"]),

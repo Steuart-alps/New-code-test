@@ -1,107 +1,97 @@
-import { Calendar, CheckCircle2, MapPin, User } from "lucide-react";
-import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { format } from "date-fns";
+import { Calendar, CheckCircle2, MapPin, User } from "lucide-react";
 
-// ── Priority board ────────────────────────────────────────────────────────────
-// Open FixTrack issues grouped by trade (issueType). Columns are ordered by
-// urgency so the most pressing trade is always first when scanning across;
-// cards inside a column are ordered by priority, then oldest reported.
-
-export interface BoardIssue {
+export interface FixTrackBoardIssue {
   id: number;
   title: string;
   issueType: string;
   priority: string;
   status: string;
   reportedDate: string;
+  location: string;
   targetDate?: string | null;
-  isOverdue: boolean;
   siteName?: string | null;
   contractorName?: string | null;
+  isOverdue: boolean;
 }
 
-type Meta = { label: string; color: string };
+export interface BoardBadgeMeta {
+  label: string;
+  color: string;
+}
 
-export const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-const rank = (priority: string) => PRIORITY_RANK[priority] ?? 99;
-const OPEN_STATUSES = new Set(["reported", "in_progress"]);
+export type BoardStatusMeta = BoardBadgeMeta;
 
-/** Local midnight of a date-only string ("YYYY-MM-DD…") or a Date. */
-export function startOfLocalDay(value: string | Date): Date {
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const priorityRank = (priority: string) => PRIORITY_RANK[priority] ?? 99;
+
+/**
+ * Open issues grouped into trade columns. Cards: priority, then oldest
+ * reported. Columns: their highest open priority, then the oldest job at
+ * that priority, then trade key, so the most urgent trade is always first
+ * and equally urgent groups keep a stable order whatever order the API
+ * returned.
+ */
+export function buildPriorityBoardColumns<Issue extends FixTrackBoardIssue>(issues: Issue[]) {
+  const openIssues = issues.filter(issue => issue.status === "reported" || issue.status === "in_progress");
+  const byCard = (a: Issue, b: Issue) =>
+    priorityRank(a.priority) - priorityRank(b.priority)
+    || new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
+
+  return [...new Set(openIssues.map(issue => issue.issueType))]
+    .map(key => ({ key, items: openIssues.filter(issue => issue.issueType === key).sort(byCard) }))
+    .filter(column => column.items.length > 0)
+    .sort((a, b) => byCard(a.items[0], b.items[0]) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+function startOfLocalDay(value: string | Date): Date {
   const date = typeof value === "string" ? new Date(`${value.slice(0, 10)}T00:00:00`) : new Date(value);
   date.setHours(0, 0, 0, 0);
   return date;
 }
 
-/**
- * Whole local calendar days from `from` to `to`. Rounded rather than floored:
- * local days are 23 or 25 hours long across a daylight-saving change, so a
- * floored millisecond difference would lose a day each spring.
- */
-export function localCalendarDaysBetween(from: string | Date, to: string | Date): number {
-  return Math.round((startOfLocalDay(to).getTime() - startOfLocalDay(from).getTime()) / 86_400_000);
+/** Signed whole local calendar days from `from` to `to` (DST-safe). */
+function localCalendarDaysBetween(from: string | Date, to: string | Date): number {
+  const dayMs = 86_400_000;
+  const localDayOrdinal = (value: string | Date) => {
+    const date = startOfLocalDay(value);
+    return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs);
+  };
+  return localDayOrdinal(to) - localDayOrdinal(from);
 }
 
-/** Days an issue has been open (reported age), never negative. */
-export function elapsedDays(from: string, to: Date = new Date()): number {
+/** Count whole local calendar days, never negative, for issue-age labels. */
+export function elapsedBoardDays(from: string, to = new Date()): number {
   return Math.max(0, localCalendarDaysBetween(from, to));
 }
 
 /**
  * Local calendar days past the target date, or null when there is nothing to
- * show: no target, or the issue is not overdue. The server decides overdue
- * (target before today); a target due today is never "past target".
+ * show: no target, or not overdue. The server decides overdue (target before
+ * today), so a target due today is never "past target".
  */
-export function daysPastTarget(issue: Pick<BoardIssue, "targetDate" | "isOverdue">, now: Date = new Date()): number | null {
+export function daysPastTarget(issue: Pick<FixTrackBoardIssue, "targetDate" | "isOverdue">, today = new Date()): number | null {
   if (!issue.targetDate || !issue.isOverdue) return null;
-  const days = localCalendarDaysBetween(issue.targetDate, now);
+  const days = localCalendarDaysBetween(issue.targetDate, today);
   return days > 0 ? days : null;
 }
 
-const byCardOrder = (a: BoardIssue, b: BoardIssue) =>
-  rank(a.priority) - rank(b.priority)
-  || startOfLocalDay(a.reportedDate).getTime() - startOfLocalDay(b.reportedDate).getTime();
-
-/**
- * Group open issues into trade columns. Columns are ordered by their highest
- * open priority, then by the oldest job at that priority, then by trade key
- * so equally urgent groups keep a stable order whatever order the API
- * returned. Card order within a column is unchanged.
- */
-export function buildBoardColumns<T extends BoardIssue>(issues: T[]): Array<{ key: string; items: T[] }> {
-  const open = issues.filter(i => OPEN_STATUSES.has(i.status));
-  const groups = new Map<string, T[]>();
-  for (const issue of open) {
-    const list = groups.get(issue.issueType);
-    if (list) list.push(issue);
-    else groups.set(issue.issueType, [issue]);
-  }
-  const columns = [...groups].map(([key, items]) => ({ key, items: [...items].sort(byCardOrder) }));
-  return columns.sort((a, b) => {
-    const [leadA] = a.items;
-    const [leadB] = b.items;
-    return rank(leadA.priority) - rank(leadB.priority)
-      || startOfLocalDay(leadA.reportedDate).getTime() - startOfLocalDay(leadB.reportedDate).getTime()
-      || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-  });
+interface FixTrackBoardProps<Issue extends FixTrackBoardIssue> {
+  issues: Issue[];
+  onEdit: (issue: Issue) => void;
+  issueTypeMeta: (key: string) => BoardBadgeMeta;
+  priorities: Record<string, BoardBadgeMeta>;
+  statuses: Record<string, BoardStatusMeta>;
+  /** An injectable local "today" for deterministic day-age checks. */
+  today?: Date;
 }
 
-const dayLabel = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
-
-export function FixTrackBoard<T extends BoardIssue>({
-  issues, onEdit, issueTypeMeta, priorities, statuses, now,
-}: {
-  issues: T[];
-  onEdit: (issue: T) => void;
-  issueTypeMeta: (key: string) => Meta;
-  priorities: Record<string, Meta>;
-  statuses: Record<string, Meta>;
-  /** Injectable clock for tests. */
-  now?: Date;
-}) {
-  const columns = buildBoardColumns(issues);
-  const today = now ?? new Date();
+export function FixTrackBoard<Issue extends FixTrackBoardIssue>({
+  issues, onEdit, issueTypeMeta, priorities, statuses, today = new Date(),
+}: FixTrackBoardProps<Issue>) {
+  const columns = buildPriorityBoardColumns(issues);
 
   if (columns.length === 0) {
     return (
@@ -117,7 +107,7 @@ export function FixTrackBoard<T extends BoardIssue>({
       {columns.map(({ key, items }) => {
         const meta = issueTypeMeta(key);
         return (
-          <div key={key} className="flex-shrink-0 w-72" data-testid="board-column" data-trade={key}>
+          <div key={key} data-testid={`fix-track-board-column-${key}`} className="flex-shrink-0 w-72">
             <div className="flex items-center justify-between mb-2 px-1">
               <span className={cn("inline-flex items-center text-xs px-2 py-0.5 rounded-md border font-medium", meta.color)}>
                 {meta.label}
@@ -127,15 +117,15 @@ export function FixTrackBoard<T extends BoardIssue>({
             <div className="space-y-2">
               {items.map(issue => {
                 const priorityMeta = priorities[issue.priority] ?? priorities.medium;
-                const statusMeta   = statuses[issue.status] ?? statuses.reported;
-                const daysOpen = elapsedDays(issue.reportedDate, today);
+                const statusMeta = statuses[issue.status] ?? statuses.reported;
+                const daysOpen = elapsedBoardDays(issue.reportedDate, today);
                 const pastTarget = daysPastTarget(issue, today);
                 return (
                   <button
                     key={issue.id}
+                    type="button"
+                    data-testid={`fix-track-board-card-${issue.id}`}
                     onClick={() => onEdit(issue)}
-                    data-testid="board-card"
-                    data-issue-id={issue.id}
                     className={cn(
                       "w-full text-left bg-card border rounded-lg p-3 transition-shadow hover:shadow-md",
                       issue.priority === "urgent" ? "border-l-4 border-l-rose-500" : "border-border",
@@ -143,7 +133,9 @@ export function FixTrackBoard<T extends BoardIssue>({
                   >
                     <div className="font-medium text-sm mb-1.5 line-clamp-2">{issue.title}</div>
                     <div className="flex flex-wrap gap-1 mb-1.5">
-                      <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
+                      <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", priorityMeta.color)}>
+                        {priorityMeta.label}
+                      </span>
                       <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
                     </div>
                     <div className="text-[11px] text-muted-foreground space-y-0.5">
@@ -155,28 +147,27 @@ export function FixTrackBoard<T extends BoardIssue>({
                         <User className="w-3 h-3 flex-shrink-0" />
                         <span>{issue.contractorName ?? "Unassigned"}</span>
                       </div>
-                      {issue.targetDate && (
+                      {issue.targetDate ? (
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 flex-shrink-0" />
                           <span>Target {format(startOfLocalDay(issue.targetDate), "dd/MM/yyyy")}</span>
                         </div>
-                      )}
-                      {!issue.targetDate && (
+                      ) : (
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3 flex-shrink-0" />
                           <span>No target date</span>
                         </div>
                       )}
                       {pastTarget !== null && (
-                        <div className="font-medium text-red-700" data-testid="days-past-target">
-                          {dayLabel(pastTarget)} past target
+                        <div data-testid={`fix-track-board-past-target-${issue.id}`} className="font-medium text-red-700">
+                          {pastTarget} {pastTarget === 1 ? "day" : "days"} past target
                         </div>
                       )}
                       <div className="flex items-center justify-between gap-2 pt-1">
-                        <span className="font-medium text-foreground" data-testid="days-open">{dayLabel(daysOpen)} open</span>
-                        {issue.isOverdue && (
-                          <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>
-                        )}
+                        <span className="font-medium text-foreground">
+                          {daysOpen} {daysOpen === 1 ? "day" : "days"} open
+                        </span>
+                        {issue.isOverdue && <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>}
                       </div>
                     </div>
                   </button>

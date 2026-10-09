@@ -151,7 +151,7 @@ async function main() {
 
   const fireBeta = await admin("POST", "/fire-safety", {
     checkType: "alarm",
-    checkDate: uniqueDate(2),
+    checkDate: uniqueDate(0),
     result: "pass",
     siteId: siteBetaId,
   });
@@ -162,6 +162,8 @@ async function main() {
     checkType: "calorifier_temp",
     checkDate: uniqueDate(1),
     result: "pass",
+    temperature: 60,
+    performedBy: "Dept Test Admin",
     siteId: siteAlphaId,
   });
   const legAlphaId = [200, 201].includes(legAlpha.status) ? legAlpha.data?.id : null;
@@ -169,12 +171,60 @@ async function main() {
 
   const legBeta = await admin("POST", "/legionella", {
     checkType: "calorifier_temp",
-    checkDate: uniqueDate(2),
+    checkDate: uniqueDate(0),
     result: "pass",
+    temperature: 60,
+    performedBy: "Dept Test Admin",
     siteId: siteBetaId,
   });
   const legBetaId = [200, 201].includes(legBeta.status) ? legBeta.data?.id : null;
   check("admin: create beta legionella check", legBetaId != null, `status=${legBeta.status}`);
+
+  // Distinct sentinel outlets and monthly readings make outlet-status leaks visible.
+  const outletAlpha = await admin("POST", "/legionella/outlets", {
+    name: `Alpha sentinel ${ts}`, type: "hot", siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha sentinel outlet", outletAlpha.status, [201]);
+  const outletAlphaId = outletAlpha.data?.id;
+  check("admin: alpha sentinel id", Number.isInteger(outletAlphaId), `id=${outletAlphaId}`);
+  const outletBeta = await admin("POST", "/legionella/outlets", {
+    name: `Beta sentinel ${ts}`, type: "hot", siteId: siteBetaId,
+  });
+  expectOk("admin: create beta sentinel outlet", outletBeta.status, [201]);
+  const outletBetaId = outletBeta.data?.id;
+  check("admin: beta sentinel id", Number.isInteger(outletBetaId), `id=${outletBetaId}`);
+  const alphaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 52, performedBy: "Dept Test Admin", siteId: siteAlphaId,
+    outletId: outletAlphaId, notes: `Alpha reading ${ts}`,
+  });
+  expectOk("admin: record alpha sentinel reading", alphaReading.status, [201]);
+  const betaReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 53, performedBy: "Dept Test Admin", siteId: siteBetaId,
+    outletId: outletBetaId, notes: `Beta reading ${ts}`,
+  });
+  expectOk("admin: record beta sentinel reading", betaReading.status, [201]);
+  // A historically mismatched outlet reference must not expose a Beta check
+  // through an otherwise accessible Alpha outlet.
+  const crossSiteReading = await admin("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: uniqueDate(0), result: "pass",
+    temperature: 54, performedBy: "Dept Test Admin", siteId: siteBetaId,
+    outletId: outletAlphaId, notes: `Beta linked to Alpha outlet ${ts}`,
+  });
+  expectOk("admin: record mismatched outlet reference", crossSiteReading.status, [201]);
+
+  // Put one module record in the most recently completed month. A trend must
+  // return its count without leaking the record to another department.
+  const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
+    .toISOString().slice(0, 10);
+  const priorMonthCheck = await admin("POST", "/fire-safety", {
+    checkType: "alarm",
+    checkDate: lastMonthDate,
+    result: "pass",
+    siteId: siteAlphaId,
+  });
+  expectOk("admin: create prior-month module record", priorMonthCheck.status, [200, 201]);
 
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────
   const staffEmail = `dept-staff-alpha-${ts}@test.local`;
@@ -191,6 +241,15 @@ async function main() {
   const staffUserId = createStaffRes.data?.id;
   check("admin: staff user has clientId", createStaffRes.data?.clientId === clientId, `staff clientId=${createStaffRes.data?.clientId}, expected ${clientId}`);
   check("admin: staff user id", Number.isInteger(staffUserId), `id=${staffUserId}`);
+  expectOk("admin: designate department manager", (await admin("PUT", `/users/${staffUserId}`, {
+    isDepartmentManager: true,
+  })).status);
+  expectOk("admin: route TubTrack to Alpha department", (await admin("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [staffUserId], departmentIds: [deptAlphaId] } }),
+  })).status);
+  check("admin: rejects unknown department recipient", (await admin("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [], departmentIds: [999999999] } }),
+  })).status === 400, "foreign/unknown department accepted");
 
   // ── 5. Staff logs in ─────────────────────────────────────────────────────────
   const staff = makeSession();
@@ -199,6 +258,195 @@ async function main() {
     password: staffPassword,
   });
   expectOk("staff: login", staffLogin.status, [200, 201]);
+  expectForbidden("staff cannot change track recipients", (await staff("PUT", "/settings", {
+    trackSummaryRouting: JSON.stringify({ hot_tub: { managerIds: [staffUserId], departmentIds: [] } }),
+  })).status);
+
+  // The checklist strip and AM/PM cards must report the same completion state
+  // for the same sites, including when department access narrows the site set.
+  const assertDashboardChecklists = (label, response, expectedSites, completedAm, completedPm) => {
+    const totals = response.data?.checklistTotals;
+    const am = response.data?.tracks?.find(track => track.trackId === "daily_am");
+    const pm = response.data?.tracks?.find(track => track.trackId === "daily_pm");
+    check(`${label}: totals and cards available`, response.status === 200 && totals?.available === true &&
+      am?.enabled === true && pm?.enabled === true, `status=${response.status}`);
+    check(`${label}: AM strip matches card`, totals?.expectedAmPairs === expectedSites &&
+      totals?.completedAmPairs === completedAm &&
+      (am?.status === "ok") === (completedAm === expectedSites) &&
+      (am?.health === "clear") === (completedAm === expectedSites),
+      `totals=${JSON.stringify(totals)} card=${JSON.stringify(am)}`);
+    check(`${label}: PM strip matches card`, totals?.expectedPmPairs === expectedSites &&
+      totals?.completedPmPairs === completedPm &&
+      (pm?.status === "ok") === (completedPm === expectedSites) &&
+      (pm?.health === "clear") === (completedPm === expectedSites),
+      `totals=${JSON.stringify(totals)} card=${JSON.stringify(pm)}`);
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const draft = await admin("POST", "/daily-track-am", {
+    siteId: siteAlphaId, checklistType: "premises_opening", checkDate: today, items: [],
+  });
+  expectOk("draft AM checklist remains unsubmitted", draft.status, [201]);
+  for (const [path, checklistType] of [
+    ["/daily-track-am", "kitchen_opening"],
+    ["/daily-track-pm", "kitchen_closing"],
+  ]) {
+    const prior = await admin("POST", path, {
+      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [],
+      submittedAt: new Date().toISOString(),
+    });
+    expectOk("prior-day checklist does not count today", prior.status, [201]);
+  }
+  assertDashboardChecklists("before submissions", await admin("GET", "/dashboard/summary"), 2, 0, 0);
+  const submitChecklist = (siteId, path, checklistType) => admin("POST", path, {
+    siteId, checklistType, checkDate: today, items: [], submittedAt: new Date().toISOString(),
+  });
+  const alphaAm = await submitChecklist(siteAlphaId, "/daily-track-am", "kitchen_opening");
+  const alphaPm = await submitChecklist(siteAlphaId, "/daily-track-pm", "kitchen_closing");
+  expectOk("alpha: submit today's AM checklist", alphaAm.status, [201]);
+  expectOk("alpha: submit today's PM checklist", alphaPm.status, [201]);
+  assertDashboardChecklists("admin all sites after alpha", await admin("GET", "/dashboard/summary"), 2, 1, 1);
+  assertDashboardChecklists("admin alpha site", await admin("GET", `/dashboard/summary?siteId=${siteAlphaId}`), 1, 1, 1);
+  assertDashboardChecklists("admin beta site", await admin("GET", `/dashboard/summary?siteId=${siteBetaId}`), 1, 0, 0);
+  assertDashboardChecklists("alpha department staff", await staff("GET", "/dashboard/summary"), 1, 1, 1);
+  expectForbidden("alpha staff cannot select beta dashboard site",
+    (await staff("GET", `/dashboard/summary?siteId=${siteBetaId}`)).status);
+  const betaAm = await submitChecklist(siteBetaId, "/daily-track-am", "premises_opening");
+  const betaPm = await submitChecklist(siteBetaId, "/daily-track-pm", "premises_closing");
+  expectOk("beta: submit today's AM checklist", betaAm.status, [201]);
+  expectOk("beta: submit today's PM checklist", betaPm.status, [201]);
+  assertDashboardChecklists("admin all sites complete", await admin("GET", "/dashboard/summary"), 2, 2, 2);
+
+  // PoolTrack and SwimTrack mobile submissions are tenant- and
+  // department-scoped just like the allowed-site list.
+  const poolAlpha = await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(1), siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha pool check", poolAlpha.status, [201]);
+  const poolBeta = await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(1), siteId: siteBetaId,
+  });
+  expectOk("admin: create beta pool check", poolBeta.status, [201]);
+  const swimAlpha = await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(1), siteId: siteAlphaId,
+  });
+  expectOk("admin: create alpha swim session", swimAlpha.status, [201]);
+  const swimBeta = await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(1), siteId: siteBetaId,
+  });
+  expectOk("admin: create beta swim session", swimBeta.status, [201]);
+
+  // Manager-style users remain able to use the historical optional / null
+  // site scope on both endpoints.
+  expectOk("admin: pool check without siteId", (await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(0),
+  })).status, [201]);
+  expectOk("admin: pool check with null siteId", (await admin("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: null,
+  })).status, [201]);
+  expectOk("admin: swim session without siteId", (await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0),
+  })).status, [201]);
+  expectOk("admin: swim session with null siteId", (await admin("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: null,
+  })).status, [201]);
+
+  const staffPoolChecks = await staff("GET", "/pool-track");
+  expectOk("staff: GET /pool-track is scoped", staffPoolChecks.status);
+  const staffPoolRows = Array.isArray(staffPoolChecks.data) ? staffPoolChecks.data : [];
+  check("staff: pool list excludes beta site", !staffPoolRows.some(row => row.site_id === siteBetaId), "beta check visible");
+  check("staff: pool list includes alpha site", staffPoolRows.some(row => row.site_id === siteAlphaId), "alpha check missing");
+  const staffPoolBeta = await staff("GET", `/pool-track?siteId=${siteBetaId}`);
+  expectOk("staff: GET /pool-track at inaccessible site returns empty", staffPoolBeta.status);
+  check("staff: pool beta filter is empty", Array.isArray(staffPoolBeta.data) && staffPoolBeta.data.length === 0, "inaccessible site returned records");
+  expectOk("staff: GET /pool-track at allowed site", (await staff("GET", `/pool-track?siteId=${siteAlphaId}`)).status);
+  expectOk("staff: POST /pool-track at allowed site", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: siteAlphaId,
+  })).status, [201]);
+  expectForbidden("staff: POST /pool-track at inaccessible site", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: siteBetaId,
+  })).status);
+  expectBlocked("staff: POST /pool-track without siteId", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0),
+  })).status);
+  expectBlocked("staff: POST /pool-track with null siteId", (await staff("POST", "/pool-track", {
+    checkDate: uniqueDate(0), siteId: null,
+  })).status);
+
+  const staffSwimSessions = await staff("GET", "/swim-track/sessions");
+  expectOk("staff: GET /swim-track/sessions is scoped", staffSwimSessions.status);
+  const staffSwimRows = Array.isArray(staffSwimSessions.data) ? staffSwimSessions.data : [];
+  check("staff: swim list excludes beta site", !staffSwimRows.some(row => row.site_id === siteBetaId), "beta session visible");
+  check("staff: swim list includes alpha site", staffSwimRows.some(row => row.site_id === siteAlphaId), "alpha session missing");
+  const staffSwimBeta = await staff("GET", `/swim-track/sessions?siteId=${siteBetaId}`);
+  expectOk("staff: GET /swim-track/sessions at inaccessible site returns empty", staffSwimBeta.status);
+  check("staff: swim beta filter is empty", Array.isArray(staffSwimBeta.data) && staffSwimBeta.data.length === 0, "inaccessible site returned sessions");
+  expectOk("staff: GET /swim-track/sessions at allowed site", (await staff("GET", `/swim-track/sessions?siteId=${siteAlphaId}`)).status);
+  expectOk("staff: POST /swim-track/sessions at allowed site", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: siteAlphaId,
+  })).status, [201]);
+  expectForbidden("staff: POST /swim-track/sessions at inaccessible site", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: siteBetaId,
+  })).status);
+  expectBlocked("staff: POST /swim-track/sessions without siteId", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0),
+  })).status);
+  expectBlocked("staff: POST /swim-track/sessions with null siteId", (await staff("POST", "/swim-track/sessions", {
+    sessionDate: uniqueDate(0), siteId: null,
+  })).status);
+
+  const staffFire = await staff("POST", "/fire-safety", {
+    checkType: "alarm",
+    checkDate: uniqueDate(0),
+    result: "pass",
+    siteId: siteAlphaId,
+  });
+  expectOk("staff: create attributed fire check", staffFire.status, [200, 201]);
+  const staffDaily = await staff("POST", `/daily-checklists/${siteAlphaId}/${uniqueDate(0)}/am`, {
+    answers: [{ question: "Opening check", checked: true }],
+  });
+  expectOk("staff: submit attributed daily checklist", staffDaily.status, [201]);
+  const staffLegacyDaily = await staff("POST", "/daily-track-am", {
+    siteId: siteAlphaId,
+    checklistType: "kitchen_opening",
+    checkDate: uniqueDate(1),
+    items: [],
+    submittedAt: new Date().toISOString(),
+  });
+  expectOk("staff: submit legacy AM checklist", staffLegacyDaily.status, [201]);
+
+  const departmentReport = await admin(
+    "GET", `/reports/compliance?from=${uniqueDate(2)}&to=${uniqueDate(0)}&departmentId=${deptAlphaId}`,
+  );
+  expectOk("admin: creator-scoped department report", departmentReport.status);
+  check(
+    "admin: report labels selected department",
+    departmentReport.data?.departmentName === "Dept Alpha"
+      && departmentReport.data?.dailyChecklists?.every(row => row.departmentName === "Dept Alpha"),
+    "department label missing from report",
+  );
+  check(
+    "admin: only staff-authored FireTrack records counted",
+    departmentReport.data?.moduleActivity?.find(row =>
+      row.module === "FireTrack" && row.siteId === siteAlphaId)?.count === 1,
+    "admin-authored fire check was included or staff check missing",
+  );
+  check(
+    "admin: current and legacy AM submissions counted",
+    departmentReport.data?.dailyChecklists?.find(row =>
+      row.siteId === siteAlphaId && row.type === "am")?.submitted === 2,
+    "current or legacy daily submission missing from department report",
+  );
+  const crossSiteDepartment = await admin(
+    "GET", `/reports/compliance?from=${uniqueDate(2)}&to=${uniqueDate(0)}&departmentId=${deptAlphaId}&siteId=${siteBetaId}`,
+  );
+  expectOk("admin: can filter department at a different site", crossSiteDepartment.status);
+  check(
+    "admin: different-site department filter excludes other authors",
+    crossSiteDepartment.data?.moduleActivity?.length === 0
+      && crossSiteDepartment.data?.sites?.length === 1,
+    "site-only department attribution leaked unrelated records",
+  );
 
   // ── 6. Staff site access ─────────────────────────────────────────────────────
 
@@ -239,6 +487,34 @@ async function main() {
     "staff: compliance report excludes beta site",
     !(staffCompliance.data?.sites ?? []).some((site) => site.id === siteBetaId),
     "beta site appeared in active-department report",
+  );
+  const trend = await staff("GET", "/reports/compliance-trend?months=3");
+  expectOk("staff: GET /reports/compliance-trend (active department)", trend.status);
+  check(
+    "staff: trend excludes beta site",
+    !(trend.data?.series ?? []).some((series) => series.siteId === siteBetaId),
+    "beta site appeared in active-department trend",
+  );
+  check(
+    "staff: trend has three complete months",
+    (trend.data?.months ?? []).length === 3
+      && trend.data.to === new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 0)).toISOString().slice(0, 10),
+    `months=${JSON.stringify(trend.data?.months)}, to=${trend.data?.to}`,
+  );
+  check(
+    "staff: trend counts prior-month module record",
+    (trend.data?.series ?? []).find((series) => series.siteId === siteAlphaId)
+      ?.data.some((point) => point.month === lastMonthDate.slice(0, 7) && point.moduleRecordCount >= 1),
+    "prior-month record missing from trend",
+  );
+  const priorMonthCount = trend.data?.series?.find((series) => series.siteId === siteAlphaId)
+    ?.data.find((point) => point.month === lastMonthDate.slice(0, 7))?.moduleRecordCount;
+  check(
+    "staff: monthly module total matches visible sites",
+    priorMonthCount >= 1
+      && trend.data?.monthlyTotals?.find((total) => total.month === lastMonthDate.slice(0, 7))
+        ?.moduleRecordCount === priorMonthCount,
+    `monthly total did not match scoped series`,
   );
   for (const [label, path] of [
     ["compliance department override", `/reports/compliance?from=${reportFrom}&to=${reportTo}&departmentId=${deptBetaId}`],
@@ -346,6 +622,48 @@ async function main() {
       (await staff("PUT", `/legionella/${legBetaId}`, { result: "fail" })).status,
     );
   }
+  const alphaStatus = await staff("GET", `/legionella/status?siteId=${siteAlphaId}`);
+  expectOk("staff: GET /legionella/status for alpha site", alphaStatus.status);
+  check("staff: alpha status includes alpha reading",
+    alphaStatus.data?.find(row => row.checkType === "calorifier_temp")?.lastDate === uniqueDate(1),
+    "alpha check date missing or replaced");
+  expectForbidden("staff: GET /legionella/status for beta site",
+    (await staff("GET", `/legionella/status?siteId=${siteBetaId}`)).status);
+  const unselectedStatus = await staff("GET", "/legionella/status");
+  expectOk("staff: GET /legionella/status without a site", unselectedStatus.status);
+  check("staff: status without a site has no beta readings",
+    Array.isArray(unselectedStatus.data) && unselectedStatus.data.every(row => row.lastDate == null),
+    "site-specific reading visible without selecting a site");
+
+  const adminOutlets = await admin("GET", "/legionella/outlets");
+  expectOk("admin: GET /legionella/outlets", adminOutlets.status);
+  check("admin: can see both department outlets",
+    Array.isArray(adminOutlets.data) && [outletAlphaId, outletBetaId].every(id =>
+      adminOutlets.data.some(row => row.id === id)), "department outlet missing for admin");
+  const staffOutlets = await staff("GET", "/legionella/outlets");
+  expectOk("staff: GET /legionella/outlets", staffOutlets.status);
+  check("staff: outlets include alpha but exclude beta",
+    Array.isArray(staffOutlets.data) &&
+      staffOutlets.data.some(row => row.id === outletAlphaId && row.site_id === siteAlphaId) &&
+      !staffOutlets.data.some(row => row.id === outletBetaId || row.site_id === siteBetaId),
+    "alpha outlet missing or beta outlet visible");
+
+  const adminOutletStatus = await admin("GET", "/legionella/outlet-status");
+  expectOk("admin: GET /legionella/outlet-status", adminOutletStatus.status);
+  check("admin: both outlets show their monthly checks",
+    Array.isArray(adminOutletStatus.data) && [outletAlphaId, outletBetaId].every(id =>
+      adminOutletStatus.data.some(row => row.id === id && row.testedThisMonth &&
+        row.thisMonthChecks?.length > 0)), "admin monthly check missing");
+  const staffOutletStatus = await staff("GET", "/legionella/outlet-status");
+  expectOk("staff: GET /legionella/outlet-status", staffOutletStatus.status);
+  check("staff: outlet status includes alpha reading but excludes beta outlet and reading",
+    Array.isArray(staffOutletStatus.data) &&
+      staffOutletStatus.data.some(row => row.id === outletAlphaId && row.siteId === siteAlphaId &&
+        row.thisMonthChecks?.some(reading => reading.id === alphaReading.data?.id)) &&
+      !staffOutletStatus.data.some(row => row.id === outletBetaId || row.siteId === siteBetaId ||
+        row.thisMonthChecks?.some(reading =>
+          reading.id === betaReading.data?.id || reading.id === crossSiteReading.data?.id)),
+    "alpha reading missing or beta outlet/reading visible");
 
   // ── 8c. Viewer (read-only) department scoping ─────────────────────────────────
   const viewerEmail = `dept-viewer-alpha-${ts}@test.local`;

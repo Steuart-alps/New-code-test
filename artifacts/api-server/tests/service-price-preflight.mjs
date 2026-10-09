@@ -41,6 +41,24 @@ try {
   );
 
   const complete = evaluateServicePricePreflight(required);
+  assert.deepEqual(complete.duplicates, []);
+  assert.deepEqual(complete.issues, []);
+  const duplicate = evaluateServicePricePreflight([...required, "pattrack"]);
+  assert.equal(duplicate.ready, false, "duplicate active prices must fail readiness");
+  assert.deepEqual(duplicate.duplicates, ["pattrack"]);
+  assert.ok(!duplicate.configured.includes("pattrack"), "an ambiguous price is not selectable");
+  assert.deepEqual(duplicate.issues, [{ key: "pattrack", label: "PATtrack", reason: "duplicate" }]);
+  const mixed = evaluateServicePricePreflight([...required.filter((key) => key !== "doctrack"), "fixtrack"]);
+  assert.deepEqual(mixed.missing, ["doctrack"]);
+  assert.deepEqual(mixed.duplicates, ["fixtrack"]);
+  assert.deepEqual(mixed.issues.map(({ label, reason }) => [label, reason]), [
+    ["FixTrack", "duplicate"], ["DocTrack", "missing"],
+  ]);
+  assert.equal(evaluateServicePricePreflight([...required, "unrelated", "unrelated"]).ready, true);
+  assert.deepEqual(evaluateServicePricePreflight([]).missing, required);
+  assert.equal(getServicePriceReadinessBlocker({
+    catalogueReadFailed: false, repairFailed: false, finalPreflight: duplicate,
+  }), "Required Stripe service prices are duplicated");
   assert.equal(complete.ready, true);
   assert.deepEqual(complete.missing, []);
   assert.deepEqual(complete.configured, required);
@@ -116,6 +134,21 @@ try {
     /missingServicePrices: pricePreflight\.missing/,
     "activation failure must identify every catalogue gap for remediation",
   );
+  assert.match(billingRoute, /duplicateServicePrices: pricePreflight\.duplicates/);
+  assert.match(billingRoute, /action === "add" &&[\s\S]*pricePreflight\.duplicates\.includes\(service\)/,
+    "ambiguity must block additions, not removals");
+  const servicesSource = await (await import("node:fs/promises")).readFile(path.join(apiDir, "src/lib/services.ts"), "utf8");
+  const liveQuery = servicesSource.slice(servicesSource.indexOf("async function listLiveMonthlyPriceServiceKeys"), servicesSource.indexOf("export type Entitlements"));
+  assert.doesNotMatch(liveQuery, /SELECT DISTINCT/, "live prices must retain duplicates");
+  assert.match(liveQuery, /p\.active = true[\s\S]*pr\.active = true/);
+  assert.match(liveQuery, /interval'\) = 'month'/);
+  assert.match(liveQuery, /interval_count', '1'\) = '1'/);
+  assert.doesNotMatch(liveQuery, /\b(?:INSERT|UPDATE|DELETE)\b/,
+    "catalogue checks must only read the database");
+  const cli = await (await import("node:fs/promises")).readFile(path.join(apiDir, "scripts/check-service-prices.mjs"), "utf8");
+  assert.match(cli, /default_transaction_read_only=on/);
+  assert.match(cli, /process\.exitCode = 1/);
+  assert.doesNotMatch(cli, /ensureServicePrices|initStripe|subscriptions\.|invoices\./);
 
   console.log("Stripe service-price preflight tests passed.");
 } finally {

@@ -7,6 +7,11 @@
  */
 
 export interface CreateFoodSafetyRecordRequest {
+  /**
+     * Stable device submission identifier retained across retries.
+     * @pattern ^[A-Za-z0-9_-]{12,100}$
+     */
+  mobileEntryId?: string;
   recordDate: string;
   deliveries?: unknown[];
   coldFood?: unknown[];
