@@ -6,7 +6,8 @@ import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/d
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
-import { escapeHtml, sendSystemEmail, getPublicAppUrl, sendTwoFactorResetEmail } from "../lib/email";
+import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
+import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
 
 const router = Router();
 
@@ -289,19 +290,21 @@ router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req,
     return;
   }
 
-  const resetAt = new Date();
-  const [resetUser] = await db.update(usersTable)
-    .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: resetAt })
-    .where(eq(usersTable.id, id))
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name });
-  if (!resetUser) {
+  // The reset and its security alert commit together, so the alert survives a
+  // provider outage or restart. Email failure never undoes or repeats the
+  // reset: it is logged and the queued alert is retried by the recovery job.
+  const reset = await resetTwoFactorWithAlert(id);
+  if (!reset) {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  try {
-    await sendTwoFactorResetEmail({ to: resetUser.email, name: resetUser.name, resetAt });
-  } catch (err) {
-    req.log.error({ err, userId: resetUser.id, actorId: actor.id }, "Failed to send two-factor reset security notification");
+  if (reset.alertId !== null) {
+    try {
+      await deliverTwoFactorResetAlert(reset.alertId);
+    } catch (err) {
+      req.log.error({ err, userId: reset.user.id, actorId: actor.id, alertId: reset.alertId },
+        "Failed to send two-factor reset security notification; queued for retry");
+    }
   }
   res.json({ ok: true });
 });

@@ -113,6 +113,7 @@ const freshSchema = new Set([
   "test:login-rate-limit-postgres", "test:pat-photo-boundary",
   "test:staged-photo-cleanup", "test:service-price-preflight-db",
   "test:service-price-audit", "test:biketrack-config-cadence", "test:bike-overdue-reminders",
+  "test:two-factor-reset-alerts", // in-process jobs plus restart worker processes on the private cluster
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
