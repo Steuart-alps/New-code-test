@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
 import crypto from "node:crypto";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,7 +72,10 @@ async function main() {
     db, pool, clientsTable, usersTable, contractorsTable, fixTrackIssuesTable, sql,
   } = lib;
 
-  const tag = `contractorcompl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  // The run id is in the client slug and every user email, so cleanup can
+  // prove ownership and never touches another run's (or tenant's) rows.
+  const runId = resolveRunId();
+  const tag = `contractorcompl-${runId}`;
   let clientId = null;
 
   async function seedContractor(label, fields) {
@@ -708,16 +712,27 @@ async function main() {
       && milestones.some(m => m.startsWith("cert:") && m.endsWith(":30")),
     JSON.stringify(milestones));
   } finally {
+    // Remove only this run's tenant, including the dependent audit_log rows
+    // that would otherwise block DELETE FROM clients (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
     try {
-      if (clientId != null) {
-        await db.execute(sql`DELETE FROM contractor_compliance_reminder_log WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM contractors WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM users WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`);
-      }
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({
+        runId, clientIds: clientId == null ? [] : [clientId],
+      }));
+      const left = await cleanupConnection.query(
+        `SELECT (SELECT count(*) FROM clients WHERE slug = $1)::int AS clients,
+                (SELECT count(*) FROM users WHERE position($2 IN email) > 0)::int AS users`,
+        [tag, runId],
+      );
+      check("cleanup removes this run's client and users",
+        left.rows[0]?.clients === 0 && left.rows[0]?.users === 0, JSON.stringify(left.rows[0]));
     } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
       console.error("Cleanup failed:", err);
       failures.push(`cleanup — ${err?.message ?? err}`);
+    } finally {
+      cleanupConnection?.release();
     }
     await rm(outDir, { recursive: true, force: true }).catch(() => {});
     await pool.end().catch(() => {});
