@@ -3,6 +3,8 @@ name: Mobile app plan
 description: Durable architecture constraints for the ComplyTrack Expo mobile app
 ---
 
+> **Historical (Replit-only, 2026-10-09):** the next two sections describe the Replit-managed Expo session and Preview-on-your-phone flow, which no longer exist; `pnpm --filter @workspace/mobile run dev` now runs plain `expo start`. The Expo Go-only product decision itself still stands.
+
 ComplyTrack Mobile currently uses stock Expo Go with the Replit-managed Expo CLI session; do not reintroduce a development client without revisiting the product decision.
 
 **Why:** The current launch path is deliberately Expo Go-only, with SDK 57 dependency alignment and no EAS or custom development build. Native hardware work is future scope, not a reason to change the current preview flow.

@@ -7,10 +7,10 @@
 - [Session expiry handling](session-expiry-handling.md) — API-client 401s fire setUnauthorizedHandler (registered in auth-context) to clear auth and route to login; stale prod sessions caused "Site not found".
 - [Integration and job testing](job-testing-pattern.md) — bundle workspace TS helpers; own test APIs and capture mail explicitly; restore existing rows touched by jobs.
 - [Background-job test scoping](background-job-test-scoping.md) — tenant-sweeping jobs see unrelated DB fixtures, so assert recipient-scoped delivery instead of global candidate counts.
-- [Validation steps setup](validation-steps.md) — test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
+- [Validation steps setup](validation-steps.md) — Historical (Replit-only) registration; contention lessons still apply: test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
 - [API route middleware](api-route-middleware.md) — admin guards live in requireAuth; root-mounted auth middleware intercepts later public routes, so mount public routers first.
-- [Mobile app plan](mobile-app-plan.md) — Expo SDK 54 app built; screens, API calls, design tokens, known gaps (KitchenTrack, 2FA, push notifs) documented.
+- [Mobile app plan](mobile-app-plan.md) — (Replit Expo-session sections historical) Expo SDK 54 app built; screens, API calls, design tokens, known gaps (KitchenTrack, 2FA, push notifs) documented.
 - [Mobile auth architecture](mobile-auth-architecture.md) — bearer token auth via mobile_sessions table; loadUser checks both session cookie and Authorization: Bearer header.
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.
 - [Viewer role enforcement](viewer-role-enforcement.md) — client_viewer is only read-only if mutation routes mount denyViewers; requireAuth alone lets viewers write.
@@ -34,7 +34,7 @@
 - [Stripe start-up readiness](stripe-startup-readiness.md) — Stripe init is bounded/supervised; /readyz is starting only until the deadline, then ok/degraded; checkout and add-ons stay 503 until the catalogue is verified.
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
-- [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
+- [Post-merge pnpm contention](post-merge-pnpm-contention.md) — Historical (Replit-only): skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
 - [Export attachment trust](export-attachment-trust.md) — ZIP exports require a private tenant ACL; never claim an unmarked object while exporting a DB reference.
 - [Storage happy-path fixture](storage-happy-path-fixture.md) — required object-storage tests need a dedicated bucket plus Google signing credentials; never reuse the application bucket.
@@ -55,7 +55,7 @@
 - [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
-- [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from Replit storage cost plus a 20% ALPS margin.
+- [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from the provider rate (STORAGE_PROVIDER_USD_PER_GIB_MONTH, default set from Replit's rate) plus a 20% ALPS margin.
 - [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
 - [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
 - [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.
@@ -64,10 +64,10 @@
 - [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
-- [Shell runtime stalls](shell-runtime-loader-hangs.md) — distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
-- [Staged validation runner](validation-runner.md) — every validation workflow runs through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
+- [Shell runtime stalls](shell-runtime-loader-hangs.md) — Historical (Replit-only): distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
+- [Staged validation runner](validation-runner.md) — validation checks run through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
-- [Orphaned workflow children](workflow-orphaned-children.md) — surviving Vite children can force restarted workflows off the registered preview port.
+- [Orphaned workflow children](workflow-orphaned-children.md) — Historical (Replit-only): surviving Vite children can force restarted workflows off the registered preview port.
 - [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
 - [Mobile staged photo evidence](mobile-staged-photo-evidence.md) — mobile mirrors the web staged-receipt flow; storage PUT never carries the bearer; receipts scoped to user+client+type.
@@ -83,10 +83,14 @@
 - [Per-run test fixture cleanup](test-fixture-cleanup.md) — suites purge only their own run-owned tenants via tests/fixture-ownership.mjs; never hand-delete clients (audit ledgers block it).
 - [API test lock inventory](api-test-lock-inventory.md) — classify every new api-server test:* script in test-api-integration-lock.sh; fresh-schema runs are locked, never pure.
 - [Completed-work adoption analytics](module-work-analytics.md) — first saved record/completed check after activation comes from an allowlisted API-mutation observer; add new endpoints to its rules.
+- [First-party analytics](first-party-analytics.md) — events go to our own analytics_events table via an allowlist; no tenant hash, no denyViewers on ingest; token-only summary route and analytics:report CLI.
 - [Feedback review revisions](feedback-review-revisions.md) — feedback PATCH needs expectedRevision (409 when stale); append-only trigger-guarded review history written in the same transaction.
 - [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.
 - [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
 - [Two-factor reset alert outbox](two-factor-reset-alerts.md) — admin 2FA reset alerts are queued in the reset transaction and retried; queue holds no secrets or rendered mail; provider key covers rendered content.
 - [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
+- [Replit removed; Render only](replit-removed-render-only.md) — 2026-10-09: all Replit fallbacks/files/packages removed; env vars only; what replaced each fallback; stripe-replit-sync kept.
 - [PDF export failure recovery](pdf-export-failure-recovery.md) — jsPDF output() alerts and returns undefined on error; failed lazy imports need a page reload; show recovery actions, not raw errors.
 - [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
+- [Training matrix identity](training-matrix-identity.md) — certificates link to roster by staff_roster_id; legacy name-only rows match only one unambiguous in-scope roster member, else reported as unmatched.
+- [Browser CSV formula safety](csv-formula-safety.md) — browser-built CSVs use compliance-tracker src/lib/csv.ts csvCell; it also neutralises leading tab/CR, which the api-server csvCell copies do not yet.

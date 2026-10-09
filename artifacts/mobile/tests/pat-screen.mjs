@@ -81,7 +81,7 @@ try {
   browser = await chromium.launch({
     headless: true, args: ['--no-sandbox'],
     executablePath: process.env.CHROMIUM_PATH
-      ?? ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/repl/tools/bin/chromium'].find((path) => existsSync(path)),
+      ?? ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome'].find((path) => existsSync(path)),
   });
   const page = await browser.newPage();
   page.setDefaultTimeout(15000);

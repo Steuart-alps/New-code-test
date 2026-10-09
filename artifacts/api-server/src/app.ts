@@ -18,6 +18,7 @@ import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
+import { internalAnalyticsRouter } from "./routes/analytics";
 
 const app: Express = express();
 let applicationReady = false;
@@ -31,7 +32,7 @@ export function markApplicationReady(): void {
   applicationReady = true;
 }
 
-// Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
+// Trust the hosting proxy (Render's load balancer) so express-session sees HTTPS and sets secure cookies
 app.set("trust proxy", 1);
 
 app.use(
@@ -59,26 +60,11 @@ app.use(
   }),
 );
 
-const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
-  .split(",")
-  .map(d => d.trim())
-  .filter(Boolean)
-  .map(d => `https://${d}`);
-const replitDevOrigins = process.env.REPLIT_DEV_DOMAIN
-  ? [`https://${process.env.REPLIT_DEV_DOMAIN.trim()}`]
-  : [];
-const replitExpoOrigins = process.env.REPLIT_EXPO_DEV_DOMAIN
-  ? [`https://${process.env.REPLIT_EXPO_DEV_DOMAIN.trim()}`]
-  : [];
-
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
   // Render sets this to the service's own onrender.com address.
   ...(process.env.RENDER_EXTERNAL_URL ? [process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, "")] : []),
-  ...replitDeploymentOrigins,
-  ...replitDevOrigins,
-  ...replitExpoOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
 ].flatMap((origin) => {
@@ -109,8 +95,9 @@ app.use(
 );
 
 // HTTP security headers — applied to all responses.
-// crossOriginEmbedderPolicy is disabled because Replit's proxy/iframe chain
-// sets its own COEP headers; enabling ours would conflict and break previews.
+// crossOriginEmbedderPolicy stays disabled as before:
+// enabling it would require every cross-origin resource the app loads to opt
+// in via CORP/CORS.
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
@@ -151,6 +138,10 @@ if (fs.existsSync(webIndexHtml)) {
     res.sendFile(webIndexHtml);
   });
 }
+
+// Token-only, read-only analytics aggregates. Mounted before cookies,
+// sessions and user loading so a session cookie can never authorise it.
+app.use(internalAnalyticsRouter);
 
 app.use(cookieParser());
 
@@ -218,7 +209,7 @@ app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers / Replit can reach it directly.
+// from the /api prefix so load balancers can reach it directly.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 app.get("/readyz", (_req, res) => {
   const report = computeReadiness(applicationReady, getBillingReadiness());
@@ -248,6 +239,13 @@ app.use("/api", (err: unknown, _req: Request, res: Response, _next: NextFunction
     const path = issue?.path?.join(".") || "input";
     logger.warn({ err }, "Validation error");
     return res.status(400).json({ error: `Validation error on '${path}': ${issue?.message ?? "invalid value"}` });
+  }
+
+  // Malformed JSON: body-parser's message quotes the request body, so neither
+  // return nor log it (it may hold personal data).
+  if ((err as { type?: string })?.type === "entity.parse.failed") {
+    logger.warn("Rejected a request body that is not valid JSON");
+    return res.status(400).json({ error: "Request body is not valid JSON" });
   }
 
   const e = err as { status?: number; statusCode?: number; message?: string };

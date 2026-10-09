@@ -1,7 +1,9 @@
 ---
 name: Shell runtime loader hangs
-description: A process-local workaround when even Node version checks stall in the shell.
+description: Historical (Replit-only) — A process-local workaround when even Node version checks stall in the shell.
 ---
+
+> **Historical (Replit-only, 2026-10-09):** ComplyTrack no longer runs on Replit (see `replit-removed-render-only.md`). The `LD_AUDIT`/`REPLIT_LD_LIBRARY_PATH` loader injection was specific to the Replit workspace. Kept for context only.
 
 When Node or pnpm produces no output and even `node --version` hangs, check the wrapped Node launcher before blaming dependency installation or lock contention. In this environment, clearing `LD_AUDIT` and `REPLIT_LD_LIBRARY_PATH` for the child command restored normal execution.
 

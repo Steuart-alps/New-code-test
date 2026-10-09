@@ -1,6 +1,6 @@
 // Bounded Stripe start-up: /readyz states and billing activation gating for
 // unconfigured, slow, hung, failing and recovering Stripe dependencies.
-// Uses fakes and short timers only — never contacts Stripe or a connector.
+// Uses fakes and short timers only — never contacts Stripe.
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -26,7 +26,7 @@ function captureLogger() {
   return { lines, logger: { info: at("info"), warn: at("warn"), error: at("error") } };
 }
 
-// Scrub any inherited Stripe/connector configuration before loading the code.
+// Scrub any inherited Stripe configuration (and legacy connector variables) before loading the code.
 for (const key of ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "REPLIT_CONNECTORS_HOSTNAME", "REPL_IDENTITY", "WEB_REPL_RENEWAL"]) {
   delete process.env[key];
 }
@@ -57,12 +57,12 @@ try {
     assert.deepEqual(readyz(), { httpStatus: 200, body: { status: "ok" } });
   });
 
-  await test("credential source is detected without reading or requesting credentials", async () => {
+  await test("credential source is STRIPE_SECRET_KEY only; legacy host connector variables are ignored", async () => {
     assert.equal(m.getStripeCredentialSource(), null);
+    // Variables a removed hosting connector used to read must not count as configuration.
     process.env.REPL_IDENTITY = "fake-identity";
-    assert.equal(m.getStripeCredentialSource(), null, "a token without a connector host is not a usable configuration");
     process.env.REPLIT_CONNECTORS_HOSTNAME = "connector.invalid";
-    assert.equal(m.getStripeCredentialSource(), "replit-connector");
+    assert.equal(m.getStripeCredentialSource(), null);
     process.env.STRIPE_SECRET_KEY = "sk_test_synthetic_not_real";
     assert.equal(m.getStripeCredentialSource(), "env");
     delete process.env.STRIPE_SECRET_KEY;
@@ -70,34 +70,23 @@ try {
     delete process.env.REPLIT_CONNECTORS_HOSTNAME;
   });
 
-  await test("connector credential request is bounded and its error names no token", async () => {
+  await test("missing STRIPE_SECRET_KEY fails fast without any network request", async () => {
     process.env.REPLIT_CONNECTORS_HOSTNAME = "connector.invalid";
     process.env.REPL_IDENTITY = "fake-identity-token-value";
-    process.env.STRIPE_CONNECTOR_TIMEOUT_MS = "50";
     const realFetch = globalThis.fetch;
-    let sawSignal = false;
-    globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
-      sawSignal = Boolean(init?.signal);
-      init?.signal?.addEventListener("abort", () => reject(init.signal.reason));
-    });
-    // AbortSignal.timeout() timers are unref'd; a real fetch's socket keeps the
-    // process alive, so the stub needs an equivalent handle.
-    const keepAlive = setInterval(() => {}, 1_000);
+    let fetchCalls = 0;
+    globalThis.fetch = async () => { fetchCalls += 1; throw new Error("unexpected network request"); };
     try {
-      const started = Date.now();
       await assert.rejects(m.getStripeSecretKey(), (err) => {
-        assert.match(err.message, /timed out after 50ms/);
+        assert.match(err.message, /STRIPE_SECRET_KEY is not set/);
         assert.doesNotMatch(err.message, /fake-identity-token-value/);
         return true;
       });
-      assert.ok(Date.now() - started < 1_000, "the hung connector request must be abandoned at its deadline");
-      assert.ok(sawSignal, "the connector request must carry an abort signal");
+      assert.equal(fetchCalls, 0, "credentials must never be requested from a connector");
     } finally {
-      clearInterval(keepAlive);
       globalThis.fetch = realFetch;
       delete process.env.REPLIT_CONNECTORS_HOSTNAME;
       delete process.env.REPL_IDENTITY;
-      delete process.env.STRIPE_CONNECTOR_TIMEOUT_MS;
     }
   });
 
@@ -186,7 +175,7 @@ try {
     m.resetBillingReadinessForTests();
     let attempts = 0;
     const handle = m.startStripeInitialization({
-      credentialSource: () => "replit-connector",
+      credentialSource: () => "env",
       runAttempt: async (onStage) => { attempts += 1; onStage("managed webhook"); return new Promise(() => {}); },
       required: false, timeoutMs: 30, retryDelaysMs: [5], logger: captureLogger().logger,
     });

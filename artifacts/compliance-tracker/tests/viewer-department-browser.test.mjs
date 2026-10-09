@@ -32,7 +32,7 @@ const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const vite = spawn("pnpm", ["exec", "vite", "--config", "vite.config.ts", "--host", "127.0.0.1"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/\/$/, ""),
-  env: { ...process.env, PORT: String(port), BASE_PATH: "/", NODE_ENV: "test", REPL_ID: undefined },
+  env: { ...process.env, PORT: String(port), BASE_PATH: "/", NODE_ENV: "test" },
   stdio: ["ignore", "ignore", "pipe"],
 });
 let viteError = "";
@@ -54,7 +54,7 @@ try {
   await waitForVite();
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH,
   });
   const context = await browser.newContext();
   const page = await context.newPage();

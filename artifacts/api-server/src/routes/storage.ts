@@ -21,7 +21,7 @@ const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
-const DEFAULT_REPLIT_STORAGE_USD_PER_GIB_MONTH = 0.015;
+const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
 const DEFAULT_ALPS_STORAGE_MARKUP_PERCENT = 20;
 const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
   core: 1,
@@ -69,8 +69,8 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
 });
 
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
-  const rawRate = process.env.STORAGE_REPLIT_USD_PER_GIB_MONTH?.trim();
-  const providerRate = rawRate ? Number(rawRate) : DEFAULT_REPLIT_STORAGE_USD_PER_GIB_MONTH;
+  const rawRate = process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH?.trim();
+  const providerRate = rawRate ? Number(rawRate) : DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH;
   const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT;
   const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
   if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;

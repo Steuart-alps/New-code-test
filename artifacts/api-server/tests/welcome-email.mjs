@@ -45,8 +45,9 @@ function capturedEmails() {
 function publicAppUrl() {
   const explicit = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "");
   if (explicit) return explicit;
-  const domain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
-  return domain ? `https://${domain}` : "http://localhost:5173";
+  // Mirrors getPublicAppUrl() in src/lib/email.ts.
+  const render = process.env.RENDER_EXTERNAL_URL?.replace(/\/+$/, "");
+  return render || "http://localhost:5173";
 }
 
 async function main() {
