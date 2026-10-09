@@ -27,6 +27,8 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { RequiredPhotoEvidence } from '@/components/RequiredPhotoEvidence';
+import { useStagedPhotoEvidence } from '@/hooks/useStagedPhotoEvidence';
 
 const MODULE_COLOR = '#6f8750';
 const MODULE_LIGHT = '#e6efdc';
@@ -101,6 +103,7 @@ interface GreenCheckPayload {
   notes: string;
   defectNoted: boolean;
   result: 'pass' | 'fail';
+  photoUploadIds?: string[];
 }
 
 const MACHINE_LABELS: Record<MachineType, string> = {
@@ -351,6 +354,9 @@ export default function GreenTrackScreen() {
   const [fuelLevel, setFuelLevel] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  // Staged evidence belongs to this new check for the selected machine only;
+  // changing or clearing the machine discards it.
+  const photoEvidence = useStagedPhotoEvidence('green_pre_use_check', serviceEnabled && selectedMachineId !== null);
 
   useEffect(() => {
     if (user?.name) setOperator(user.name);
@@ -396,11 +402,14 @@ export default function GreenTrackScreen() {
       setNotes('');
       setCheckDate(today());
       setOperator(user?.name ?? '');
+      photoEvidence.consume();
       Alert.alert('Check signed off', 'The pre-use check has been recorded against the machine.');
     },
     onError: (error: Error) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Could not save check', error.message || 'Please try again.');
+      // The draft (machine, answers, notes) is kept; still-valid photos are kept
+      // unless the server reports their receipts as unusable.
+      Alert.alert('Could not save check', photoEvidence.handleCreateError(error, error.message || 'Please try again.'));
     },
   });
 
@@ -454,6 +463,15 @@ export default function GreenTrackScreen() {
       Alert.alert('Operator required', 'Your signed-in name is needed to complete this check.');
       return;
     }
+    if (!photoEvidence.ready) {
+      Alert.alert(
+        'Photos required',
+        photoEvidence.uploading
+          ? 'Wait for the photo to finish verifying.'
+          : `Attach at least ${photoEvidence.minimum} verified ${photoEvidence.minimum === 1 ? 'photo' : 'photos'} before signing off.`,
+      );
+      return;
+    }
     const checklistItems = items.map((item) => ({
       key: item.key,
       label: item.label,
@@ -461,7 +479,7 @@ export default function GreenTrackScreen() {
       status: item.status as Exclude<ItemStatus, null>,
       ...(item.status === 'fail' && item.note?.trim() ? { note: item.note.trim() } : {}),
     }));
-    submitMutation.mutate({
+    const payload = photoEvidence.preparePayload({
       machineId: selectedMachine.id,
       checkDate,
       operator: operator.trim(),
@@ -470,8 +488,9 @@ export default function GreenTrackScreen() {
       fuelLevel,
       notes: notes.trim(),
       defectNoted: failedCount > 0,
-      result: failedCount > 0 ? 'fail' : 'pass',
+      result: failedCount > 0 ? 'fail' as const : 'pass' as const,
     });
+    if (payload) submitMutation.mutate(payload);
   }
 
   async function onRefresh() {
@@ -751,11 +770,18 @@ export default function GreenTrackScreen() {
               Your authenticated identity and the submitted time are the sign-off. No separate signature is needed.
             </Text>
 
+            <RequiredPhotoEvidence
+              evidence={photoEvidence}
+              disabled={submitMutation.isPending}
+              accent={MODULE_COLOR}
+              testIDPrefix="green-photo"
+            />
+
             <TouchableOpacity
               testID="green-complete-signoff"
               onPress={submit}
-              disabled={submitMutation.isPending || !allChecked}
-              style={[styles.submitButton, { backgroundColor: colors.navy }, (submitMutation.isPending || !allChecked) && styles.disabled]}
+              disabled={submitMutation.isPending || !allChecked || !photoEvidence.ready}
+              style={[styles.submitButton, { backgroundColor: colors.navy }, (submitMutation.isPending || !allChecked || !photoEvidence.ready) && styles.disabled]}
             >
               {submitMutation.isPending ? (
                 <ActivityIndicator color="#ffffff" />
@@ -767,6 +793,11 @@ export default function GreenTrackScreen() {
               )}
             </TouchableOpacity>
             {!allChecked && <Text style={[styles.submitHint, { color: colors.mutedForeground }]}>Answer every check to enable sign-off.</Text>}
+            {allChecked && !photoEvidence.ready && !photoEvidence.loading && (
+              <Text style={[styles.submitHint, { color: colors.mutedForeground }]}>
+                {photoEvidence.uploading ? 'Verifying photo…' : 'Attach the required photos to enable sign-off.'}
+              </Text>
+            )}
           </View>
         </>
       )}

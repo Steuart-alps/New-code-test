@@ -40,6 +40,10 @@ export interface FeedbackReport {
   /** @nullable */
   updatedBy: number | null;
   /** @nullable */
+  updatedByName: string | null;
+  /** @minimum 0 */
+  revision: number;
+  /** @nullable */
   submitterName: string | null;
 }
 
@@ -53,9 +57,52 @@ export const FeedbackReportUpdateStatus = {
 } as const;
 
 export interface FeedbackReportUpdate {
+  /**
+     * The report revision the draft was based on; a stale value returns 409.
+     * @minimum 0
+     */
+  expectedRevision: number;
   status?: FeedbackReportUpdateStatus;
   /** @maxLength 5000 */
   internalNote?: string;
+}
+
+export interface FeedbackReportConflict {
+  error: string;
+  report: FeedbackReport;
+}
+
+export type FeedbackReviewEventPreviousStatus = typeof FeedbackReviewEventPreviousStatus[keyof typeof FeedbackReviewEventPreviousStatus];
+
+
+export const FeedbackReviewEventPreviousStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export type FeedbackReviewEventStatus = typeof FeedbackReviewEventStatus[keyof typeof FeedbackReviewEventStatus];
+
+
+export const FeedbackReviewEventStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export interface FeedbackReviewEvent {
+  id: number;
+  reportId: number;
+  revision: number;
+  /** @nullable */
+  actorId: number | null;
+  /** @nullable */
+  actorName: string | null;
+  previousStatus: FeedbackReviewEventPreviousStatus;
+  status: FeedbackReviewEventStatus;
+  previousInternalNote: string;
+  internalNote: string;
+  createdAt: string;
 }
 
 export interface HealthStatus {
@@ -1798,6 +1845,10 @@ export const ListFeedbackReportsStatus = {
 } as const;
 
 export type UpdateFeedbackReportParams = {
+clientId?: number;
+};
+
+export type ListFeedbackReportHistoryParams = {
 clientId?: number;
 };
 

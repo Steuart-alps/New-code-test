@@ -3,7 +3,8 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
+import { patTestHistoryAccess } from "../lib/patLegacyHistoryScope";
 import { requireAnyService, requireService } from "../lib/services";
 import {
   AllowedUploadType,
@@ -21,6 +22,7 @@ import {
   lockPhotoRequirement,
   STAGED_PHOTO_ENTITY_TYPES,
 } from "../lib/stagedPhotoReceipts";
+import { cancelStagedPhotoReceipt, cleanupStagedPhotoUploads } from "../lib/stagedPhotoCleanup";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -103,8 +105,14 @@ async function requireOwnedPhotoEntity(
   entityType: string,
   entityId: number,
   clientId: number,
+  departmentId: number | null,
 ): Promise<boolean> {
   if (!isSupportedPhotoEntityType(entityType)) return false;
+  // Retained PAT tests are scoped by the department/site recorded with the
+  // test, like the PAT routes themselves, not just by tenant.
+  if (entityType === "pat_test") {
+    return await patTestHistoryAccess(db, clientId, entityId, departmentId) === "allowed";
+  }
   // table names come only from the constant above, never the request.
   const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
   const result = await db.execute(sql`
@@ -118,13 +126,15 @@ async function rejectUnownedPhotoEntity(
   entityType: string,
   entityId: number,
   clientId: number,
+  departmentId: number | null,
 ): Promise<boolean> {
   if (!isSupportedPhotoEntityType(entityType)) {
     res.status(400).json({ error: "Unsupported photo entity type" });
     return true;
   }
-  if (!await requireOwnedPhotoEntity(entityType, entityId, clientId)) {
-    // Do not disclose whether this is a missing ID or another tenant's ID.
+  if (!await requireOwnedPhotoEntity(entityType, entityId, clientId, departmentId)) {
+    // Do not disclose whether this is a missing ID, another tenant's ID or a
+    // record outside the caller's department.
     res.status(404).json({ error: "Record not found" });
     return true;
   }
@@ -225,6 +235,27 @@ router.post(
   },
 );
 
+// Cancel the caller's own unused receipt (dialog closed or photo removed) and
+// remove its object now when possible. Anything left is retried by the
+// scheduled staged-photo cleanup. The id selects only a server-written row
+// owned by this tenant and actor; no client path is ever trusted here.
+router.delete("/staged/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = String(req.params.id ?? "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    return res.status(400).json({ error: "Invalid staged photo id" });
+  }
+  const cancelled = await cancelStagedPhotoReceipt(db as any, id, clientId, req.currentUser!.id);
+  if (!cancelled) return res.status(404).json({ error: "Staged photo not found" });
+  try {
+    await cleanupStagedPhotoUploads(storage, { receiptId: id, clientId });
+  } catch (err) {
+    req.log?.warn({ err }, "Immediate staged photo cleanup deferred");
+  }
+  return res.json({ ok: true });
+});
+
 router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
@@ -238,7 +269,7 @@ router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
     }),
   }).parse(req.body);
 
-  if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId)) return;
+  if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId, getActiveDepartmentId(req))) return;
 
   try {
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, body.contentType);
@@ -261,7 +292,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     objectPath: z.string().min(1).max(500),
     caption: z.string().max(500).optional(),
   }).parse(req.body);
-  if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId)) return;
+  if (await rejectUnownedPhotoEntity(res, body.entityType, body.entityId, clientId, getActiveDepartmentId(req))) return;
   let objectPath: string;
   try {
     const normalizedPath = storage.normalizeObjectEntityPath(body.objectPath);
@@ -316,7 +347,7 @@ router.get("/", requireAuth, async (req, res) => {
     entityType: z.string().min(1),
     entityId: z.coerce.number().int().positive(),
   }).parse(req.query);
-  if (await rejectUnownedPhotoEntity(res, entityType, entityId, clientId)) return;
+  if (await rejectUnownedPhotoEntity(res, entityType, entityId, clientId, getActiveDepartmentId(req))) return;
 
   const result = await db.execute(sql`
     SELECT * FROM check_photos
@@ -338,14 +369,21 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
+  const departmentId = getActiveDepartmentId(req);
   const deletion = await db.transaction(async (tx) => {
     const photo = await tx.execute(sql`
-      SELECT object_path FROM check_photos
+      SELECT object_path, entity_type, entity_id FROM check_photos
       WHERE id = ${id} AND client_id = ${clientId}
       FOR UPDATE
     `);
-    const row = (photo as any).rows[0] as { object_path: string } | undefined;
+    const row = (photo as any).rows[0] as { object_path: string; entity_type: string; entity_id: number } | undefined;
     if (!row) return null;
+    // A retained PAT test's photos stay inside its recorded department. An
+    // orphaned row (no parent) remains deletable, as described below.
+    if (row.entity_type === "pat_test"
+      && await patTestHistoryAccess(tx as any, clientId, row.entity_id, departmentId) === "forbidden") {
+      return null;
+    }
 
     // Serialise lifecycle decisions for this tenant/path. Other attachment
     // deletion flows can use the same shared reference service and lock key.

@@ -15,8 +15,18 @@ try {
     bundle: true, platform: "node", format: "esm", outfile: bundle, logLevel: "silent",
   });
   const { trackServiceActionOutcome } = await import(pathToFileURL(bundle).href);
+  const outcomeBundle = path.join(temp, "outcome.mjs");
+  await build({
+    entryPoints: [path.join(root, "src/lib/service-action-outcome.ts")],
+    bundle: true, platform: "node", format: "esm", outfile: outcomeBundle, logLevel: "silent",
+  });
+  const { classifyServiceActionResponse } = await import(pathToFileURL(outcomeBundle).href);
   delete globalThis.window;
   assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: true }), true);
+  // The API returns the entitlement list (or "all"), not a boolean.
+  assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: ["core", "fixtrack"] }), true);
+  assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: "all" }), true);
+  assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: ["core"] }), false);
   globalThis.window = {};
   assert.equal(trackServiceActionOutcome("fixtrack", "remove", { ok: true }), true);
   const events = [];
@@ -37,8 +47,9 @@ try {
   const page = await readFile(path.join(root, "src/pages/settings.tsx"), "utf8");
   const handler = page.slice(page.indexOf("const handleServiceAction ="), page.indexOf("const servicesConfig ="));
   const source = `export function makeHandler(deps) {
-    const {config,confirm,setActionBusy,apiFetch,toast,trackServiceActionOutcome,
-      trackModuleActivation,clearModuleActivation,activeClientId,fetchConfig,refreshAuth}=deps;
+    const {config,confirm,setActionBusy,apiFetch,authenticatedApiFetch,toast,trackServiceActionOutcome,
+      trackModuleActivation,clearModuleActivation,activeClientId,fetchConfig,refreshAuth,
+      serviceActionsInFlight,setServiceNotices,setUnconfirmedServices,classifyServiceActionResponse}=deps;
     ${handler}
     return handleServiceAction;
   }`;
@@ -54,9 +65,17 @@ try {
       setActionBusy: value => calls.busy.push(value),
       apiFetch: async url => {
         calls.requests.push(url);
-        if (url === "/billing/services" && fail) throw new Error("billing failed");
-        return result;
+        return {};
       },
+      authenticatedApiFetch: async url => {
+        calls.requests.push(url);
+        if (fail) throw new Error("billing failed");
+        return { status: result.ok === false ? 400 : 200, json: async () => result };
+      },
+      serviceActionsInFlight: { current: new Set() },
+      setServiceNotices: () => {},
+      setUnconfirmedServices: () => {},
+      classifyServiceActionResponse,
       toast: notice => calls.notices.push(notice),
       trackServiceActionOutcome,
       trackModuleActivation: () => calls.activations++,
@@ -69,11 +88,14 @@ try {
   }
   events.length = 0;
   assert.equal((await run()).activations, 1);
+  assert.equal((await run({ result: { ok: true, entitled: ["core", "fixtrack"] } })).activations, 1,
+    "the real API entitlement list confirms the add");
   assert.equal((await run({ action: "remove", result: { ok: true, entitled: ["core"] } })).removals, 1);
-  assert.deepEqual(events.map(([, data]) => data.action), ["add", "remove"]);
+  assert.deepEqual(events.map(([, data]) => data.action), ["add", "add", "remove"]);
   for (const scenario of [
     { fail: true }, { approve: false }, { result: { ok: false } },
     { result: { ok: true, entitled: false } },
+    { result: { ok: true, entitled: ["core"] } },
     { result: { ok: true, entitled: true, paymentPending: true } },
   ]) {
     events.length = 0;

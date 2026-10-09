@@ -11,7 +11,8 @@ import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
-import { requireAuth, requireClientAdmin, getClientId, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
+import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
@@ -241,13 +242,21 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
     const objectPath = `/objects/${wildcardPath}`;
+    const clientId = getClientId(req);
+    // The tenant ACL below is per client. A retained PAT test photo is also
+    // limited to the department/site recorded with its test, so another
+    // department cannot fetch it by path. Checked before touching storage.
+    if (!clientId || objectPathTenantMismatch(objectPath, clientId)
+      || !await patPhotoObjectAccess(db, clientId, objectPath, getActiveDepartmentId(req))) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
 
     // Ownership is tagged per-tenant (owner = clientId as a string), not
     // per-user, since e.g. FixTrack photos should be visible to every user
     // of the client that uploaded them, not just the uploader. See
     // fix-track.ts's request-upload handler for where this gets set.
-    const clientId = getClientId(req);
     const canAccess = clientId
       ? await objectStorageService.canAccessObjectEntity({
           userId: String(clientId),

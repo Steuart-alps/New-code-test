@@ -95,6 +95,39 @@ paths:
           description: Not an administrator or not authorised for this client
         "404":
           description: Report not found in the selected client
+        "409":
+          description: >-
+            The report changed after the draft was loaded (expectedRevision is
+            stale). Nothing was saved; the latest saved report is returned for
+            comparison.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackReportConflict" }
+  /feedback/{id}/history:
+    get:
+      operationId: listFeedbackReportHistory
+      tags: [feedback]
+      summary: Review history for a report in the selected client, newest first (administrators only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: clientId
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Accepted status and note changes, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/FeedbackReviewEvent" }
+        "403":
+          description: Not an administrator or not authorised for this client
+        "404":
+          description: Report not found in the selected client
   /healthz:
     get:
       operationId: healthCheck
@@ -2269,7 +2302,7 @@ components:
   schemas:
     FeedbackReport:
       type: object
-      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, submitterName]
+      required: [id, clientId, category, summary, details, pagePath, emailStatus, createdAt, status, internalNote, updatedAt, updatedBy, updatedByName, revision, submitterName]
       properties:
         id: { type: integer }
         clientId: { type: integer }
@@ -2283,14 +2316,40 @@ components:
         internalNote: { type: string }
         updatedAt: { type: [string, "null"], format: date-time }
         updatedBy: { type: [integer, "null"] }
+        updatedByName: { type: [string, "null"] }
+        revision: { type: integer, minimum: 0 }
         submitterName: { type: [string, "null"] }
     FeedbackReportUpdate:
       type: object
       additionalProperties: false
-      minProperties: 1
+      required: [expectedRevision]
       properties:
+        expectedRevision:
+          type: integer
+          minimum: 0
+          description: The report revision the draft was based on; a stale value returns 409.
         status: { type: string, enum: [new, reviewing, resolved] }
         internalNote: { type: string, maxLength: 5000 }
+    FeedbackReportConflict:
+      type: object
+      required: [error, report]
+      properties:
+        error: { type: string }
+        report: { $ref: "#/components/schemas/FeedbackReport" }
+    FeedbackReviewEvent:
+      type: object
+      required: [id, reportId, revision, actorId, actorName, previousStatus, status, previousInternalNote, internalNote, createdAt]
+      properties:
+        id: { type: integer }
+        reportId: { type: integer }
+        revision: { type: integer }
+        actorId: { type: [integer, "null"] }
+        actorName: { type: [string, "null"] }
+        previousStatus: { type: string, enum: [new, reviewing, resolved] }
+        status: { type: string, enum: [new, reviewing, resolved] }
+        previousInternalNote: { type: string }
+        internalNote: { type: string }
+        createdAt: { type: string, format: date-time }
     HealthStatus:
       type: object
       properties:

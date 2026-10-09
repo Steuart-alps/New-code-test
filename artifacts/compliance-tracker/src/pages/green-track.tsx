@@ -865,6 +865,7 @@ function PreUseDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: check ? "Check updated" : "Pre-use check recorded" });
       onSaved(); onClose();
@@ -1011,6 +1012,7 @@ function ServiceDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: record ? "Service record updated" : "Service record logged" });
       onSaved(); onClose();
@@ -1162,6 +1164,7 @@ function DefectDialog({
           method: "POST",
           body: JSON.stringify({ ...body, photoUploadIds: photoEvidence.uploadIds }),
         });
+        photoEvidence.consume();
       }
       toast({ title: defect ? "Defect updated" : "Defect reported" });
       onSaved(); onClose();

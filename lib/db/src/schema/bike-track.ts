@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, date, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, boolean, timestamp, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -50,6 +51,34 @@ export const bikeHireRecordsTable = pgTable("bike_hire_records", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+/**
+ * Durable outbox for overdue-hire email digests. The rendered message and its
+ * provider idempotency key are persisted before dispatch, so a retry after an
+ * uncertain provider outcome (e.g. a response timeout) replays the identical
+ * request and the provider can deduplicate it. One open row per client.
+ */
+export const bikeOverdueNotificationLogTable = pgTable("bike_overdue_notification_log", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // pending | sending | sent | cancelled | expired
+  idempotencyKey: text("idempotency_key").notNull(),
+  claimToken: text("claim_token").notNull(),
+  hireIds: jsonb("hire_ids").notNull().default([]).$type<number[]>(),
+  recipientEmails: jsonb("recipient_emails").notNull().default([]).$type<string[]>(),
+  recipientUserIds: jsonb("recipient_user_ids").notNull().default([]).$type<number[]>(),
+  subject: text("subject").notNull(),
+  html: text("html").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  sentAt: timestamp("sent_at"),
+}, (table) => [
+  uniqueIndex("UQ_bike_overdue_notification_log_key").on(table.idempotencyKey),
+  uniqueIndex("UQ_bike_overdue_notification_log_open")
+    .on(table.clientId)
+    .where(sql`${table.status} IN ('pending', 'sending')`),
+]);
 
 export const bikeChecksTable = pgTable("bike_checks", {
   id: serial("id").primaryKey(),
