@@ -545,6 +545,67 @@ async function main() {
   check("reused mobile challenge returns the stable invalid-challenge code",
     replay.data?.code === "MOBILE_LOGIN_CHALLENGE_INVALID", JSON.stringify(replay.data));
 
+  // ── A stolen database snapshot cannot complete mobile sign-in ───────────────
+  // Only the SHA-256 digest of the pending token is stored; presenting that
+  // digest (as anyone reading the table could) must not be accepted.
+  const stolenToken = await startMobileChallenge(217);
+  const stored = await pool.query(
+    "SELECT token_hash FROM mobile_login_challenges WHERE token_hash = $1", [mobileChallengeHash(stolenToken)]);
+  check("stored challenge is the SHA-256 digest of the pending token", stored.rows.length === 1);
+  const rawStored = await pool.query(
+    "SELECT count(*)::int AS n FROM mobile_login_challenges WHERE token_hash = $1", [stolenToken]);
+  check("raw pending token is absent from the stored challenges", rawStored.rows[0].n === 0);
+  const beforeStolen = await mobileSessionCount();
+  const stolen = await verifyMobileChallenge(stored.rows[0].token_hash, generateToken(setup.data.secret), 217);
+  check("stored digest cannot be used as the pending token",
+    stolen.status === 401 && stolen.data?.token === undefined
+    && stolen.data?.code === "MOBILE_LOGIN_CHALLENGE_INVALID", JSON.stringify(stolen.data));
+  check("stolen digest attempt creates no session", await mobileSessionCount() === beforeStolen);
+
+  // ── A mistyped code keeps the sign-in recoverable ──────────────────────────
+  const wrongCode = String((Number(generateToken(setup.data.secret)) + 1) % 1_000_000).padStart(6, "0");
+  const mistyped = await verifyMobileChallenge(stolenToken, wrongCode, 217);
+  check("mistyped code is refused without a bearer",
+    mistyped.status === 401 && mistyped.data?.token === undefined, JSON.stringify(mistyped.data));
+  check("mistyped code is not reported as an invalid challenge",
+    mistyped.data?.code !== "MOBILE_LOGIN_CHALLENGE_INVALID", JSON.stringify(mistyped.data));
+  check("mistyped code creates no session", await mobileSessionCount() === beforeStolen);
+  const afterTypo = await pool.query(
+    "SELECT count(*)::int AS n FROM mobile_login_challenges WHERE token_hash = $1", [mobileChallengeHash(stolenToken)]);
+  check("mistyped code leaves the challenge in place", afterTypo.rows[0].n === 1);
+  const recovered = await verifyMobileChallenge(stolenToken, generateToken(setup.data.secret), 217);
+  check("the same challenge completes with the correct code after a typo",
+    recovered.status === 200 && typeof recovered.data?.token === "string", JSON.stringify(recovered.data));
+  check("successful exchange creates exactly one session", await mobileSessionCount() === beforeStolen + 1);
+
+  // ── A disabled account cannot finish a mobile 2FA challenge ─────────────────
+  const disabledChallenge = await startMobileChallenge(218);
+  const disabledRecovery = replenished.data.recoveryCodes[2];
+  const disabledRecoveryHash = createHash("sha256")
+    .update(disabledRecovery.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  const deactivated = await admin("PUT", `/users/${staffId}`, { active: false });
+  try {
+    check("admin deactivates the fixture user", deactivated.status === 200 && deactivated.data?.active === false,
+      JSON.stringify(deactivated.data));
+    const sessionsWhileDisabled = await mobileSessionCount();
+    const withTotp = await verifyMobileChallenge(disabledChallenge, generateToken(setup.data.secret), 218);
+    check("disabled account: valid TOTP is refused", withTotp.status === 401 && withTotp.data?.token === undefined,
+      JSON.stringify(withTotp.data));
+    const withRecovery = await verifyMobileChallenge(disabledChallenge, disabledRecovery, 218);
+    check("disabled account: valid recovery code is refused",
+      withRecovery.status === 401 && withRecovery.data?.token === undefined, JSON.stringify(withRecovery.data));
+    check("disabled account: no mobile session is created", await mobileSessionCount() === sessionsWhileDisabled);
+    const recoveryState = await pool.query(
+      "SELECT used_at FROM totp_recovery_codes WHERE user_id = $1 AND code_hash = $2", [staffId, disabledRecoveryHash]);
+    check("disabled account: the recovery code is not consumed",
+      recoveryState.rows.length === 1 && recoveryState.rows[0].used_at === null);
+  } finally {
+    // Restore the fixture even if an assertion above threw.
+    const restored = await admin("PUT", `/users/${staffId}`, { active: true });
+    check("fixture user active again", restored.status === 200 && restored.data?.active === true);
+    await pool.query("DELETE FROM mobile_login_challenges WHERE token_hash = $1", [mobileChallengeHash(disabledChallenge)]);
+  }
+
   const userList = await admin("GET", "/users");
   const staffRow = (Array.isArray(userList.data) ? userList.data : []).find((u) => u.id === staffId);
   check("users list shows totpEnabled", staffRow?.totpEnabled === true, JSON.stringify(staffRow));

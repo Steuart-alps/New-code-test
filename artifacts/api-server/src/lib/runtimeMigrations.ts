@@ -9,36 +9,316 @@ import {
   digestBearerToken,
   encryptTokenPayload,
   decryptTokenPayload,
+  isDamagedTokenPayload,
   tokenPayloadNeedsReencryption,
   validateTokenEncryptionConfig,
+  describeTokenKeyConfiguration,
 } from "./bearerTokens";
+
+// ── Queued contractor credentials: bounded startup passes ─────────────────────
+// Both passes below select only the rows that still need work, in id order,
+// and lock and commit one bounded batch at a time. Rows already secured on the
+// current key are neither decrypted nor locked, so restarts stay fast as the
+// queue history grows, and an interrupted pass resumes where it stopped (the
+// selection predicate is the progress record).
+
+export const QUEUE_MIGRATION_BATCH_SIZE = 200;
+
+export interface QueueMigrationOptions {
+  /** Restrict to one row (targeted maintenance and isolated tests). */
+  queueId?: number;
+  batchSize?: number;
+  /** Called after each batch commits, with the ids that batch locked. */
+  onBatchCommitted?: (batch: { index: number; ids: number[]; updated: number }) => void | Promise<void>;
+}
+
+/**
+ * Rows that still hold a raw quote token or bearer link (same routes as the
+ * scrub below). Inlined as a literal, not a parameter, so the planner can
+ * match it to the partial index of the same predicate and a restart reads
+ * only legacy rows instead of every draft's HTML.
+ */
+const LEGACY_QUEUE_PREDICATE = sql.raw(`(
+  quote_token IS NOT NULL
+  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+)`);
+/** "<format>.<key label>" of an envelope; legacy 3-part payloads yield "<iv>.<tag>". */
+const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) || '.' || split_part(encrypted_token_payload, '.', 2))`);
+
+/**
+ * Indexes that keep both passes proportional to the rows needing work. The
+ * envelope-key index is deliberately not partial: the planner only uses
+ * expression statistics from non-partial indexes, and without them it would
+ * estimate half the history as candidates and scan every row.
+ */
+export async function ensureQueueMigrationIndexes(): Promise<void> {
+  // The partial index must match LEGACY_QUEUE_PREDICATE exactly; v2 adds the
+  // compliance /schedule/ route. Drop the earlier definition so the planner
+  // and the scrub agree on which rows are candidates.
+  await db.execute(sql`DROP INDEX IF EXISTS "IDX_contractor_email_queue_legacy_credentials"`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials_v2"
+    ON contractor_email_queue (id) WHERE ${LEGACY_QUEUE_PREDICATE}`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_envelope_key"
+    ON contractor_email_queue (${ENVELOPE_KEY_SQL}, id)`);
+}
 
 /**
  * Re-encrypt queued credentials onto the configured current key. Supplying an
  * ID is useful for targeted maintenance and isolated integration tests.
  */
-export async function reencryptQueuedTokenPayloads(queueId?: number): Promise<number> {
+export async function reencryptQueuedTokenPayloads(
+  queueIdOrOptions?: number | QueueMigrationOptions,
+): Promise<number> {
+  const options: QueueMigrationOptions = typeof queueIdOrOptions === "number"
+    ? { queueId: queueIdOrOptions }
+    : queueIdOrOptions ?? {};
   validateTokenEncryptionConfig();
-  return db.transaction(async (tx) => {
-    const rows = await tx.execute(sql`SELECT id, encrypted_token_payload
+  const { currentVersion } = describeTokenKeyConfiguration();
+  const currentKey = `v2.${currentVersion}`;
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let lastId = 0;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const batch = await db.transaction(async (tx) => {
+      // Envelopes already on the current key are excluded before locking.
+      const rows = await tx.execute(sql`SELECT id, encrypted_token_payload
+        FROM contractor_email_queue
+        WHERE id > ${lastId}
+          AND encrypted_token_payload IS NOT NULL
+          AND (${ENVELOPE_KEY_SQL} < ${currentKey} OR ${ENVELOPE_KEY_SQL} > ${currentKey})
+          ${options.queueId == null ? sql`` : sql`AND id=${options.queueId}`}
+        ORDER BY id
+        LIMIT ${batchSize}
+        FOR UPDATE`);
+      const ids: number[] = [];
+      let changed = 0;
+      for (const row of rows.rows as any[]) {
+        ids.push(Number(row.id));
+        const encoded = String(row.encrypted_token_payload);
+        if (!tokenPayloadNeedsReencryption(encoded)) continue;
+        let replacement: string;
+        try {
+          replacement = encryptTokenPayload(decryptTokenPayload(encoded));
+        } catch (err) {
+          // A damaged draft stays as it is (preview and dispatch refuse it); a
+          // missing key is a configuration error and still stops startup.
+          if (!isDamagedTokenPayload(err)) throw err;
+          logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+          continue;
+        }
+        const result = await tx.execute(sql`UPDATE contractor_email_queue
+          SET encrypted_token_payload=${replacement}, updated_at=now()
+          WHERE id=${row.id}
+            AND encrypted_token_payload=${encoded}
+          RETURNING id`);
+        if ((result.rows as any[])[0]) changed++;
+      }
+      return { ids, changed };
+    });
+    if (batch.ids.length === 0) break;
+    lastId = batch.ids[batch.ids.length - 1];
+    updated += batch.changed;
+    await options.onBatchCommitted?.({ index, ids: batch.ids, updated: batch.changed });
+  }
+  return updated;
+}
+
+/**
+ * Move raw bearer links and legacy quote tokens out of queued drafts into the
+ * encrypted payload, leaving placeholders. Must finish before readiness so no
+ * plaintext credential is served or dispatched.
+ */
+export async function scrubLegacyQueuedCredentials(options: QueueMigrationOptions = {}): Promise<number> {
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let lastId = 0;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const batch = await db.transaction(async (tx) => {
+      // Only drafts that still hold a raw quote token or a raw bearer link are
+      // read and locked; secured history is filtered out by the predicate.
+      const legacy = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
+        subject, body_html, body_text, email_preview_json, encrypted_token_payload
+        FROM contractor_email_queue
+        WHERE id > ${lastId}
+          ${options.queueId == null ? sql`` : sql`AND id=${options.queueId}`}
+          AND ${LEGACY_QUEUE_PREDICATE}
+        ORDER BY id
+        LIMIT ${batchSize}
+        FOR UPDATE`);
+      const ids: number[] = [];
+      let changed = 0;
+      for (const row of (legacy.rows as any[])) {
+        ids.push(Number(row.id));
+        if (await scrubQueuedRow(tx, row)) changed++;
+      }
+      return { ids, changed };
+    });
+    if (batch.ids.length === 0) break;
+    lastId = batch.ids[batch.ids.length - 1];
+    updated += batch.changed;
+    await options.onBatchCommitted?.({ index, ids: batch.ids, updated: batch.changed });
+  }
+  return updated;
+}
+
+/**
+ * The scrub must also catch credentials an older edited draft carried as bare
+ * text, without their URL. Finding those needs the decrypted payload, so no
+ * SQL predicate can select them. This sweep reads drafts with credentials in
+ * bounded id batches *without locking*, decrypts in memory, and only then
+ * locks and rewrites the rows that actually contain a bare credential.
+ *
+ * A high-water mark (the last id examined) is recorded with each batch, so
+ * every draft is decrypted by this sweep at most once across restarts: the
+ * first boot works through the existing history (resuming after an
+ * interruption), and later boots only read drafts inserted since.
+ */
+const BARE_CREDENTIAL_SWEEP = "contractor_queue_bare_credentials_v1";
+
+export async function sweepPlainTextQueuedCredentials(options: QueueMigrationOptions = {}): Promise<number> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  await db.execute(sql`INSERT INTO runtime_migration_progress (name) VALUES (${BARE_CREDENTIAL_SWEEP})
+    ON CONFLICT (name) DO NOTHING`);
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const [progress] = (await db.execute(sql`SELECT last_id FROM runtime_migration_progress
+      WHERE name=${BARE_CREDENTIAL_SWEEP}`)).rows as any[];
+    const lastId = Number(progress.last_id);
+    const rows = (await db.execute(sql`SELECT id, subject, body_html, body_text, email_preview_json, encrypted_token_payload
       FROM contractor_email_queue
-      WHERE encrypted_token_payload IS NOT NULL
-        ${queueId == null ? sql`` : sql`AND id=${queueId}`}
-      FOR UPDATE`);
-    let updated = 0;
-    for (const row of rows.rows as any[]) {
-      const encoded = String(row.encrypted_token_payload);
-      if (!tokenPayloadNeedsReencryption(encoded)) continue;
-      const replacement = encryptTokenPayload(decryptTokenPayload(encoded));
-      const result = await tx.execute(sql`UPDATE contractor_email_queue
-        SET encrypted_token_payload=${replacement}, updated_at=now()
-        WHERE id=${row.id}
-          AND encrypted_token_payload=${encoded}
-        RETURNING id`);
-      if ((result.rows as any[])[0]) updated++;
+      WHERE id > ${lastId} AND encrypted_token_payload IS NOT NULL
+      ORDER BY id LIMIT ${batchSize}`)).rows as any[];
+    if (rows.length === 0) break;
+    const candidates = rows.filter((row) => {
+      try {
+        const payload = decryptTokenPayload(String(row.encrypted_token_payload));
+        const rendered = [row.subject, row.body_html, row.body_text ?? "", JSON.stringify(row.email_preview_json ?? {})].join("\n");
+        return Object.values(payload).some((token) => typeof token === "string" && token.length > 0 && rendered.includes(token));
+      } catch (err) {
+        if (!isDamagedTokenPayload(err)) throw err;
+        return false; // Damaged drafts are refused at preview and dispatch.
+      }
+    }).map((row) => Number(row.id));
+    const nextId = Number(rows[rows.length - 1].id);
+    const changed = await db.transaction(async (tx) => {
+      let written = 0;
+      if (candidates.length > 0) {
+        const locked = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
+          subject, body_html, body_text, email_preview_json, encrypted_token_payload
+          FROM contractor_email_queue WHERE id IN (${sql.join(candidates.map((id) => sql`${id}`), sql`, `)})
+          ORDER BY id FOR UPDATE`);
+        for (const row of locked.rows as any[]) if (await scrubQueuedRow(tx, row)) written++;
+      }
+      await tx.execute(sql`UPDATE runtime_migration_progress SET last_id=${nextId}, updated_at=now()
+        WHERE name=${BARE_CREDENTIAL_SWEEP}`);
+      return written;
+    });
+    updated += changed;
+    await options.onBatchCommitted?.({ index, ids: candidates, updated: changed });
+  }
+  return updated;
+}
+
+type MigrationTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Scrub one locked queue row. Returns false when there is nothing to move
+ *  (or the draft's credentials are damaged), true when it was rewritten. */
+async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
+  let payload: Record<string, string>;
+  try {
+    payload = row.encrypted_token_payload ? decryptTokenPayload(row.encrypted_token_payload) : {};
+  } catch (err) {
+    // Leave a damaged draft untouched rather than abort every later
+    // migration; preview and dispatch refuse it.
+    if (!isDamagedTokenPayload(err)) throw err;
+    logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+    return false;
+  }
+  let subject = String(row.subject ?? "");
+  let html = String(row.body_html ?? "");
+  let text = row.body_text == null ? null : String(row.body_text);
+  let previewText = JSON.stringify(row.email_preview_json ?? {});
+  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/([a-z0-9-]{32,})/ig;
+  const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
+  const candidates = [...all.matchAll(bearerPattern)];
+  // Older edited drafts may contain a known credential as plain text,
+  // without its URL. They still need scrubbing, even with an encrypted
+  // dispatch payload already present.
+  const containsPayloadToken = Object.values(payload).some(token =>
+    typeof token === "string" && token.length > 0 && all.includes(token));
+  if (candidates.length === 0 && row.quote_token == null && !containsPayloadToken) return false;
+  const discovered: Array<[string, string]> = [];
+  const rawQuote = row.quote_token ? String(row.quote_token) : null;
+  if (rawQuote) payload.quote = rawQuote;
+  for (const match of candidates) {
+    const route = match[1].toLowerCase();
+    const token = match[2];
+    if (route === "contractor-quote") {
+      payload.quote ??= token;
+      discovered.push([token, "{{QUOTE_TOKEN}}"]);
+    } else if (route === "contractor-portal") {
+      payload.portal ??= token;
+      discovered.push([token, "{{PORTAL_URL}}"]);
+    } else if (route === "schedule") {
+      // A compliance visit-scheduling link: carried in the `booked` slot,
+      // as current reminders do; the item keeps only its digest.
+      payload.booked ??= token;
+      discovered.push([token, "{{BOOKED_TOKEN}}"]);
     }
-    return updated;
-  });
+    else {
+      const issueId = Number(row.issue_id ?? row.entity_id);
+      if (!Number.isInteger(issueId)) {
+        throw new Error(`Cannot classify legacy action token without an issue id in contractor_email_queue row ${row.id}`);
+      }
+      const action = await tx.execute(sql`SELECT action FROM fix_track_action_tokens
+        WHERE token_hash=${digestBearerToken(token)}
+          AND issue_id=${issueId}
+          AND client_id=${row.client_id} LIMIT 1`);
+      const kind = String((action.rows as any[])[0]?.action ?? "");
+      if (kind === "booked" || kind === "completed") {
+        payload[kind] = token;
+        discovered.push([token, `{{${kind.toUpperCase()}_TOKEN}}`]);
+      }
+      else throw new Error(`Cannot safely classify legacy action token in contractor_email_queue row ${row.id}`);
+    }
+  }
+  const replacements: Array<[string, string]> = [...discovered];
+  if (payload.quote) replacements.push([payload.quote, "{{QUOTE_TOKEN}}"]);
+  if (payload.booked) replacements.push([payload.booked, "{{BOOKED_TOKEN}}"]);
+  if (payload.completed) replacements.push([payload.completed, "{{COMPLETED_TOKEN}}"]);
+  if (payload.portal) replacements.push([payload.portal, "{{PORTAL_URL}}"]);
+  // Full portal URLs must be replaced before their token suffixes or
+  // hydration would duplicate the URL prefix.
+  replacements.sort(([left], [right]) => right.length - left.length);
+  for (const [raw, placeholder] of replacements) {
+    subject = subject.split(raw).join(placeholder);
+    html = html.split(raw).join(placeholder);
+    if (text != null) text = text.split(raw).join(placeholder);
+    previewText = previewText.split(raw).join(placeholder);
+  }
+  const remaining = [subject, html, text ?? "", previewText].join("\n");
+  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i.test(remaining)) {
+    throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
+  }
+  const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
+  const result = await tx.execute(sql`UPDATE contractor_email_queue SET
+    quote_token_hash=COALESCE(quote_token_hash, ${payload.quote ? digestBearerToken(payload.quote) : null}),
+    quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
+    email_preview_json=${previewText}::jsonb,
+    encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
+    WHERE id=${row.id}
+      AND quote_token IS NOT DISTINCT FROM ${row.quote_token}
+      AND encrypted_token_payload IS NOT DISTINCT FROM ${row.encrypted_token_payload}
+    RETURNING id`);
+  return (result.rows as any[]).length > 0;
 }
 
 /**
@@ -974,91 +1254,9 @@ export async function runRuntimeMigrations() {
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
-    await db.transaction(async (tx) => {
-      const legacy = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
-        subject, body_html, body_text, email_preview_json, encrypted_token_payload
-        FROM contractor_email_queue FOR UPDATE`);
-      for (const row of (legacy.rows as any[])) {
-        const payload: Record<string, string> = row.encrypted_token_payload
-          ? decryptTokenPayload(row.encrypted_token_payload)
-          : {};
-        let subject = String(row.subject ?? "");
-        let html = String(row.body_html ?? "");
-        let text = row.body_text == null ? null : String(row.body_text);
-        let previewText = JSON.stringify(row.email_preview_json ?? {});
-        const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/([a-z0-9-]{32,})/ig;
-        const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
-        const candidates = [...all.matchAll(bearerPattern)];
-        // Older edited drafts may contain a known credential as plain text,
-        // without its URL. They still need scrubbing, even with an encrypted
-        // dispatch payload already present.
-        const containsPayloadToken = Object.values(payload).some(token =>
-          typeof token === "string" && token.length > 0 && all.includes(token));
-        if (candidates.length === 0 && row.quote_token == null && !containsPayloadToken) continue;
-        const discovered: Array<[string, string]> = [];
-        const rawQuote = row.quote_token ? String(row.quote_token) : null;
-        if (rawQuote) payload.quote = rawQuote;
-        for (const match of candidates) {
-          const route = match[1].toLowerCase();
-          const token = match[2];
-          if (route === "contractor-quote") {
-            payload.quote ??= token;
-            discovered.push([token, "{{QUOTE_TOKEN}}"]);
-          } else if (route === "contractor-portal") {
-            payload.portal ??= token;
-            discovered.push([token, "{{PORTAL_URL}}"]);
-          } else if (route === "schedule") {
-            // A compliance visit-scheduling link: carried in the `booked` slot,
-            // as current reminders do; the item keeps only its digest.
-            payload.booked ??= token;
-            discovered.push([token, "{{BOOKED_TOKEN}}"]);
-          }
-          else {
-            const issueId = Number(row.issue_id ?? row.entity_id);
-            if (!Number.isInteger(issueId)) {
-              throw new Error(`Cannot classify legacy action token without an issue id in contractor_email_queue row ${row.id}`);
-            }
-            const action = await tx.execute(sql`SELECT action FROM fix_track_action_tokens
-              WHERE token_hash=${digestBearerToken(token)}
-                AND issue_id=${issueId}
-                AND client_id=${row.client_id} LIMIT 1`);
-            const kind = String((action.rows as any[])[0]?.action ?? "");
-            if (kind === "booked" || kind === "completed") {
-              payload[kind] = token;
-              discovered.push([token, `{{${kind.toUpperCase()}_TOKEN}}`]);
-            }
-            else throw new Error(`Cannot safely classify legacy action token in contractor_email_queue row ${row.id}`);
-          }
-        }
-        const replacements: Array<[string, string]> = [...discovered];
-        if (payload.quote) replacements.push([payload.quote, "{{QUOTE_TOKEN}}"]);
-        if (payload.booked) replacements.push([payload.booked, "{{BOOKED_TOKEN}}"]);
-        if (payload.completed) replacements.push([payload.completed, "{{COMPLETED_TOKEN}}"]);
-        if (payload.portal) replacements.push([payload.portal, "{{PORTAL_URL}}"]);
-        // Full portal URLs must be replaced before their token suffixes or
-        // hydration would duplicate the URL prefix.
-        replacements.sort(([left], [right]) => right.length - left.length);
-        for (const [raw, placeholder] of replacements) {
-          subject = subject.split(raw).join(placeholder);
-          html = html.split(raw).join(placeholder);
-          if (text != null) text = text.split(raw).join(placeholder);
-          previewText = previewText.split(raw).join(placeholder);
-        }
-        const remaining = [subject, html, text ?? "", previewText].join("\n");
-        if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i.test(remaining)) {
-          throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
-        }
-        const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
-        await tx.execute(sql`UPDATE contractor_email_queue SET
-          quote_token_hash=COALESCE(quote_token_hash, ${payload.quote ? digestBearerToken(payload.quote) : null}),
-          quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
-          email_preview_json=${previewText}::jsonb,
-          encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
-          WHERE id=${row.id}
-            AND quote_token IS NOT DISTINCT FROM ${row.quote_token}
-            AND encrypted_token_payload IS NOT DISTINCT FROM ${row.encrypted_token_payload}`);
-      }
-    });
+    await ensureQueueMigrationIndexes();
+    await sweepPlainTextQueuedCredentials();
+    await scrubLegacyQueuedCredentials();
     await reencryptQueuedTokenPayloads();
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
