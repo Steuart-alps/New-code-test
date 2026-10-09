@@ -20,6 +20,7 @@
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
 - [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP before app access; passkeys are optional web sign-in; roster-only people are not auth accounts.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
+- [Push-only Drizzle tables](push-only-tables.md) — every pgTable needs runtime CREATE TABLE; Oct 2026 audit found 5 (certificates, password_reset_tokens, two SafeTrack, unused green_machine_reconciliations).
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
 - [Food-safety site scoping](foodsafety-site-scoping.md) — site.<id>.* app_settings overrides + nullable site_id diary with partial unique indexes; site saves must diff, not dump.
 - [Kitchen mobile submissions](kitchen-mobile-submissions.md) — use device-local calendar dates plus offset timestamps and stable entry IDs; server appends atomically and deduplicates retries.

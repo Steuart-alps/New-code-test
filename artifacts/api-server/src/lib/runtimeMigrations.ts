@@ -882,6 +882,10 @@ export async function runRuntimeMigrations() {
       REFERENCES "departments"("id") ON DELETE SET NULL
     `);
 
+    // Inductions and competency sign-offs were only ever created by drizzle
+    // push; see migrateSafeTrackPushOnlyTables below.
+    await migrateSafeTrackPushOnlyTables();
+
     // ---- FixTrack issues table ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "fix_track_issues" (
@@ -2053,6 +2057,61 @@ async function migrateTrainTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_train_track_client" ON "train_track_records" ("client_id")`);
+}
+
+// ---- SafeTrack inductions and competency sign-offs ----
+// lib/db safeInductionsTable / safeCompetencySignoffsTable. Both tables existed
+// only via drizzle push, yet the SafeTrack routes, the daily-entry cutoff,
+// photo ownership checks and offboarding all read them, so a runtime-migrated
+// database must create them. Ownership is the tenant's client_id (cascade on
+// client deletion); site and creator links are optional and cleared when the
+// site or user is removed. Existing tables are left as they are: only missing
+// nullable or defaulted columns are added, so a drifted legacy table can still
+// serve these routes.
+async function migrateSafeTrackPushOnlyTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_inductions" (
+      "id"           serial PRIMARY KEY,
+      "client_id"    integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"      integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"   text NOT NULL,
+      "start_date"   date NOT NULL,
+      "completed_at" date,
+      "checklist"    text,
+      "notes"        text,
+      "created_by"   integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"   timestamp NOT NULL DEFAULT now(),
+      "updated_at"   timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "completed_at" date`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "checklist" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_competency_signoffs" (
+      "id"            serial PRIMARY KEY,
+      "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"       integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"    text NOT NULL,
+      "task_name"     text NOT NULL,
+      "signed_off_by" text NOT NULL,
+      "signed_off_at" date NOT NULL,
+      "notes"         text,
+      "created_by"    integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"    timestamp NOT NULL DEFAULT now(),
+      "updated_at"    timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
 }
 
 // ---- SafeTrack handbook ----
