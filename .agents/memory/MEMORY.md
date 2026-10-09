@@ -31,6 +31,7 @@
 - [Water outlet read boundaries](water-outlet-read-boundaries.md) — scope both outlet rows and joined readings by site department; legacy cross-site outlet links may exist.
 - [AnyTrack roadmap](anytrack-roadmap.md) — keep user-configurable tracks as a future direction; prioritise completing and improving the main tracks first.
 - [API test readiness](api-test-readiness.md) — integration tests must wait for `/readyz`; `/healthz` becomes available before runtime migrations and Stripe initialization finish.
+- [Stripe start-up readiness](stripe-startup-readiness.md) — Stripe init is bounded/supervised; /readyz is starting only until the deadline, then ok/degraded; checkout and add-ons stay 503 until the catalogue is verified.
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
 - [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
