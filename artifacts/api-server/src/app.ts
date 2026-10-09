@@ -17,18 +17,18 @@ import { Sentry } from "./lib/sentry";
 import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
+import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
 
 const app: Express = express();
 let applicationReady = false;
-let readinessBlocker: string | null = null;
 
 /**
- * Keep the process alive for diagnostics while accurately withholding readiness
- * when a launch-critical dependency could not be verified.
+ * Mark the core application (runtime migrations) ready. Billing readiness is
+ * reported separately by lib/stripeStartup.ts, which keeps the process alive
+ * for diagnostics while withholding readiness when Stripe cannot be verified.
  */
-export function markApplicationReady(blocker: string | null = null): void {
-  readinessBlocker = blocker;
-  applicationReady = blocker === null;
+export function markApplicationReady(): void {
+  applicationReady = true;
 }
 
 // Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
@@ -221,13 +221,8 @@ app.use("/api", enforceTrialLock);
 // from the /api prefix so load balancers / Replit can reach it directly.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 app.get("/readyz", (_req, res) => {
-  if (!applicationReady) {
-    return res.status(503).json({
-      status: readinessBlocker ? "degraded" : "starting",
-      ...(readinessBlocker ? { blocker: readinessBlocker } : {}),
-    });
-  }
-  res.json({ status: "ok" });
+  const report = computeReadiness(applicationReady, getBillingReadiness());
+  res.status(report.httpStatus).json(report.body);
 });
 
 app.use("/api", router);
