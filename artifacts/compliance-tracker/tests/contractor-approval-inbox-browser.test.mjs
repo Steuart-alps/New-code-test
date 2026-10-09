@@ -10,7 +10,6 @@
 // (CHROMIUM_PATH or PLAYWRIGHT_BROWSERS_PATH selects the Chromium binary.)
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -50,7 +49,7 @@ const contexts = [];
 before(async () => {
   const port = await freePort();
   appOrigin = `http://127.0.0.1:${port}`;
-  // vite.config.ts reads these; REPL_ID is absent so no Replit dev plugins load.
+  // vite.config.ts requires PORT and BASE_PATH.
   process.env.PORT = String(port);
   process.env.BASE_PATH = "/";
   // The runner loader and a private cache dir keep the dev server from
@@ -64,9 +63,7 @@ before(async () => {
     server: { host: "127.0.0.1", port, strictPort: true, hmr: false },
   });
   await vite.listen();
-  const executablePath = process.env.CHROMIUM_PATH
-    || (process.env.PLAYWRIGHT_BROWSERS_PATH ? undefined
-      : existsSync("/repl/tools/bin/chromium") ? "/repl/tools/bin/chromium" : undefined);
+  const executablePath = process.env.CHROMIUM_PATH || undefined;
   browser = await chromium.launch({ headless: true, executablePath });
 });
 

@@ -1,7 +1,9 @@
 ---
 name: Post-merge pnpm contention
-description: Why post-merge dependency reconciliation checks pnpm's installed lock marker before installing.
+description: Historical (Replit-only) — Why post-merge dependency reconciliation checks pnpm's installed lock marker before installing.
 ---
+
+> **Historical (Replit-only, 2026-10-09):** ComplyTrack no longer runs on Replit (see `replit-removed-render-only.md`). `scripts/post-merge.sh` and the `.replit` post-merge hook were removed. Kept for context only.
 
 When post-merge setup runs while several pnpm-based workflows are active, a redundant workspace install can stall before emitting output. Treat an exact match between the repository lockfile and pnpm's installed lock marker as proof that dependency installation can be skipped.
 

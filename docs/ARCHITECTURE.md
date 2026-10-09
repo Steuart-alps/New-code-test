@@ -39,6 +39,13 @@ consultants managing portfolios of clients.
 - **Email**: Nodemailer (SMTP configurable via Settings page)
 - **File Storage**: Google Cloud Storage via the standard GCS SDK (ADC or secret-managed service-account credentials)
 
+## Hosting
+
+Render is the only deployment (`render.yaml`: one web service plus PostgreSQL,
+both in Frankfurt). The API server also serves the web build. Configuration is
+environment variables only (`.env.example`); see `CLAUDE.md` for the deploy
+sequence and the variables each integration needs.
+
 ## User Roles & Access
 
 | Role           | Scope                                          |
@@ -148,5 +155,5 @@ To reset demo data: `node artifacts/api-server/scripts/seed-demo.mjs` (idempoten
 - `pnpm --filter @workspace/api-server run dev` — start API server
 - `pnpm --filter @workspace/compliance-tracker run dev` — start frontend
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API client
-- `pnpm --filter @workspace/db run push` — push DB schema changes
+- `pnpm --filter @workspace/db run push` — create the base schema in an empty database only (later changes go in the API's runtime migrations)
 - `npx tsx scripts/seed-consultant.ts` — (re)seed consultant account

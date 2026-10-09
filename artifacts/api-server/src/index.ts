@@ -68,10 +68,9 @@ async function initStripe(onStage: (stage: string) => void): Promise<StripeAttem
   logger.info("Stripe schema ready");
 
   const stripeSync = await getStripeSync(onStage);
-  // Keep the existing Replit webhook address when deployed there: a new URL
-  // registers a second Stripe webhook rather than replacing the first.
-  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
-  const webhookBaseUrl = replitDomain ? `https://${replitDomain}` : getPublicAppUrl();
+  // The managed webhook is keyed by URL: changing PUBLIC_APP_URL registers a
+  // second Stripe webhook rather than replacing the first.
+  const webhookBaseUrl = getPublicAppUrl();
   onStage("managed webhook");
   await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
   logger.info("Stripe webhook configured");
@@ -544,7 +543,7 @@ process.on("uncaughtException", async (err: Error) => {
     }
   }
   // Give the event loop a tick so pino can flush, then exit so the process
-  // manager (or Replit) can restart the server cleanly.
+  // manager (Render) can restart the server cleanly.
   setTimeout(() => process.exit(1), 500);
 });
 
