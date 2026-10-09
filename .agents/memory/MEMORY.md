@@ -72,3 +72,4 @@
 - [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction; hold times and per-item rules replace section values.
 - [Shared auth rate limits](shared-auth-rate-limits.md) — production login/register/reset limits share PostgreSQL counters; reset reserves then releases non-failures.
 - [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.
+- [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
