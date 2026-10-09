@@ -25,3 +25,11 @@ Inspection-register access is a read-only handover, not approval of corrective w
 **Why:** Manager handover needs department-scoped access; reusing the approval restriction would unnecessarily prevent department managers from handing over their existing records.
 
 **How to apply:** Keep download authorization separate from remediation approval. Always apply tenant and site/department checks to the download; do not broaden action approval roles to match it.
+Hold times and item rules: `food_temperature_rules` also carries `cookingHoldSeconds`,
+`sousVideHoldMinutes` (null = no hold control; rules saved before these existed parse as
+null) and `items.cooking` / `items.sousVide` per-item rules. An item rule replaces the
+section's minimum °C *and* hold for that item, including "no control" when null; items
+match on the trimmed, case-folded name. With a hold control, a changed core temperature
+without a hold time is rejected, and a short hold is a failure needing a corrective action
+like any other (same track action and manager sign-off). `kitchenHoldRequirement` is the
+one source for both the assessment and the web/mobile hints.

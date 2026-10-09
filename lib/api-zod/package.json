@@ -7,6 +7,9 @@
     ".": "./src/index.ts",
     "./kitchen-temperature": "./src/kitchen-temperature.ts"
   },
+  "scripts": {
+    "test:kitchen-temperature": "node tests/kitchen-temperature.mjs"
+  },
   "dependencies": {
     "zod": "catalog:"
   }
