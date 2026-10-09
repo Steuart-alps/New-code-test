@@ -5,6 +5,7 @@ import { ensureRuntimeBaseline } from "./runtimeBaseline";
 import { migrateAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
+import { migratePatFailureHistory } from "./patFailureHistoryMigration";
 import {
   digestBearerToken,
   encryptTokenPayload,
@@ -3827,6 +3828,7 @@ async function migratePATtrack() {
   await db.execute(sql`ALTER TABLE "pat_failures" ADD COLUMN IF NOT EXISTS "location_text" text`);
   await db.execute(sql`ALTER TABLE "pat_failures" ADD COLUMN IF NOT EXISTS "room_name_snapshot" text`);
   await migratePatRoomHistory();
+  await migratePatFailureHistory();
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_rooms_client_site" ON "pat_rooms" ("client_id", "site_id")`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_certificates_client_site_date" ON "pat_certificates" ("client_id", "site_id", "visit_date" DESC)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_pat_certificate_rooms_room" ON "pat_certificate_rooms" ("room_id")`);
