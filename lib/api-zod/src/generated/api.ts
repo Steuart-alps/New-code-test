@@ -17,6 +17,10 @@ export const ListFeedbackReportsQueryParams = zod.object({
   "status": zod.enum(['new', 'reviewing', 'resolved']).optional()
 })
 
+export const listFeedbackReportsResponseRevisionMin = 0;
+
+
+
 export const ListFeedbackReportsResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
@@ -30,6 +34,8 @@ export const ListFeedbackReportsResponseItem = zod.object({
   "internalNote": zod.string(),
   "updatedAt": zod.date().nullable(),
   "updatedBy": zod.number().nullable(),
+  "updatedByName": zod.string().nullable(),
+  "revision": zod.number().min(listFeedbackReportsResponseRevisionMin),
   "submitterName": zod.string().nullable()
 })
 export const ListFeedbackReportsResponse = zod.array(ListFeedbackReportsResponseItem)
@@ -46,14 +52,21 @@ export const UpdateFeedbackReportQueryParams = zod.object({
   "clientId": zod.coerce.number().optional()
 })
 
+export const updateFeedbackReportBodyExpectedRevisionMin = 0;
+
 export const updateFeedbackReportBodyInternalNoteMax = 5000;
 
 
 
 export const UpdateFeedbackReportBody = zod.object({
+  "expectedRevision": zod.number().min(updateFeedbackReportBodyExpectedRevisionMin).describe('The report revision the draft was based on; a stale value returns 409.'),
   "status": zod.enum(['new', 'reviewing', 'resolved']).optional(),
   "internalNote": zod.string().max(updateFeedbackReportBodyInternalNoteMax).optional()
 })
+
+export const updateFeedbackReportResponseRevisionMin = 0;
+
+
 
 export const UpdateFeedbackReportResponse = zod.object({
   "id": zod.number(),
@@ -68,8 +81,36 @@ export const UpdateFeedbackReportResponse = zod.object({
   "internalNote": zod.string(),
   "updatedAt": zod.date().nullable(),
   "updatedBy": zod.number().nullable(),
+  "updatedByName": zod.string().nullable(),
+  "revision": zod.number().min(updateFeedbackReportResponseRevisionMin),
   "submitterName": zod.string().nullable()
 })
+
+
+/**
+ * @summary Review history for a report in the selected client, newest first (administrators only)
+ */
+export const ListFeedbackReportHistoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListFeedbackReportHistoryQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const ListFeedbackReportHistoryResponseItem = zod.object({
+  "id": zod.number(),
+  "reportId": zod.number(),
+  "revision": zod.number(),
+  "actorId": zod.number().nullable(),
+  "actorName": zod.string().nullable(),
+  "previousStatus": zod.enum(['new', 'reviewing', 'resolved']),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "previousInternalNote": zod.string(),
+  "internalNote": zod.string(),
+  "createdAt": zod.date()
+})
+export const ListFeedbackReportHistoryResponse = zod.array(ListFeedbackReportHistoryResponseItem)
 
 
 /**
