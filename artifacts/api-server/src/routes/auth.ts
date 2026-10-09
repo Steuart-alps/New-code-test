@@ -69,9 +69,32 @@ function generateRecoveryCodes(): string[] {
   return Array.from({ length: 10 }, generateRecoveryCode);
 }
 
+// Advisory-lock namespace (first key of the two-int4 form) for per-user
+// recovery-code replacement. Distinct from the other two-key namespaces in
+// src/ (106, DISCOUNT_LOCK_NS, BILLING_SYNC_LOCK_NS); the single-bigint
+// advisory locks used elsewhere live in a separate key space.
+const RECOVERY_CODE_REPLACE_LOCK_NS = 0x52434f44; // "RCOD"
+
+// Replaces every recovery code for one user. Callers: POST /auth/2fa/enable
+// (enrolment) and POST /auth/2fa/recovery-codes/regenerate (password-confirmed).
+//
+// Replacements for the same user are serialized with a transaction-scoped
+// advisory lock taken before the DELETE and held until COMMIT. Without it, two
+// overlapping READ COMMITTED transactions (separate tabs or API sessions) both
+// delete the old rows, neither sees the other's uncommitted inserts, and the
+// user ends up with 20 unused codes from two sets. With the lock, the second
+// replacement starts its DELETE only after the first commits, so it removes the
+// first set and exactly one ten-code set survives.
+//
+// An advisory lock is used rather than `SELECT ... FROM users ... FOR UPDATE`
+// so the replacement does not block unrelated writes to the user row (login
+// bookkeeping, admin edits, deactivation) and conflicts only with other
+// recovery-code replacements for that same user. Consumption stays a single
+// atomic conditional UPDATE and does not need this lock.
 async function replaceRecoveryCodes(userId: number): Promise<string[]> {
   const codes = generateRecoveryCodes();
   await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${RECOVERY_CODE_REPLACE_LOCK_NS}::int4, ${userId}::int4)`);
     await tx.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${userId}`);
     for (const code of codes) {
       await tx.execute(sql`
