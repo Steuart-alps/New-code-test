@@ -72,6 +72,7 @@
     "test:billing-addon-activation": "node tests/billing-addon-activation.mjs",
     "test:billing-addon-catalog": "node tests/billing-addon-catalog.mjs",
     "test:service-price-preflight": "node tests/service-price-preflight.mjs",
+    "test:service-price-preflight-db": "bash tests/run-fresh-schema.sh tests/service-price-preflight-db.mjs",
     "test:service-price-audit": "bash tests/run-fresh-schema.sh tests/service-price-audit.mjs",
     "test:stripe-startup-readiness": "node tests/stripe-startup-readiness.mjs",
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
