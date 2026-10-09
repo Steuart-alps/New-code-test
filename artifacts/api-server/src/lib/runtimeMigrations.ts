@@ -1454,6 +1454,23 @@ export async function runRuntimeMigrations() {
       }
     }
 
+    // ---- Stripe service-price audit alert state ----
+    // Operator-alert bookkeeping only (no customer or Stripe credential data):
+    // remembers the unresolved catalogue incident so the periodic read-only
+    // audit alerts once per incident and reports recovery.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "service_price_audit_state" (
+        "audit_key" text PRIMARY KEY,
+        "incident_fingerprint" text,
+        "incident_issues" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "incident_opened_at" timestamptz,
+        "notified_fingerprint" text,
+        "notified_at" timestamptz,
+        "last_checked_at" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

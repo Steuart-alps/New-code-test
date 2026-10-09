@@ -25,6 +25,7 @@ import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
+import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 
 const rawPort = process.env["PORT"];
 
@@ -315,6 +316,13 @@ function startScheduler() {
   // five minutes. Each account chooses daily or weekly cadence and local time.
   registerSafeTrackAckReminderSchedule(cron.schedule);
   logger.info("SafeTrack acknowledgement reminder scheduler started (every five minutes)");
+
+  // Read-only audit of the synced Stripe price catalogue, so a price or
+  // product archived after startup is reported before a client's add-on
+  // activation fails. Alerts once per incident and reports recovery; it never
+  // changes prices, products, subscriptions or charges.
+  cron.schedule(SERVICE_PRICE_AUDIT_CRON, runScheduledServicePriceAudit);
+  logger.info("Stripe service-price audit scheduler started (hourly at :25)");
 }
 
 async function runTrialReminders() {
@@ -471,6 +479,8 @@ app.listen(port, async (err?: any) => {
   // Catch up trial reminders on startup too, so a server that was down at
   // 08:15 doesn't miss the 3-day warning window (deduped per client).
   setTimeout(runTrialReminders, 20_000);
+  // First catalogue audit after the startup preflight; deduped across restarts.
+  setTimeout(runScheduledServicePriceAudit, 30_000);
   setTimeout(() => {
     void runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }).catch((err) => {
       logger.error({ err }, "FixTrack startup alert recovery failed");
