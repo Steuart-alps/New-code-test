@@ -298,6 +298,18 @@ function startScheduler() {
   });
   logger.info("Bike overdue repeat-notification scheduler started (daily at 08:20)");
 
+  // Replay unconfirmed overdue-bike digests with their persisted provider
+  // idempotency key while the provider still deduplicates it. Recovery never
+  // creates a new digest; new alerts still come only from the daily scan.
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      const result = await runBikeOverdueJob({}, { recoverOnly: true });
+      if (result.clientsEmailed > 0 || result.errors > 0) logger.info({ result }, "Bike overdue recovery complete");
+    } catch (err) {
+      logger.error({ err }, "Bike overdue recovery failed");
+    }
+  });
+
   // Detect newly cancelled subscriptions and start the 12-month retention clock
   // (daily at 07:00; sends one offboarding email per client).
   cron.schedule("0 7 * * *", async () => {

@@ -2276,6 +2276,35 @@ async function migrateBikeTrack() {
     CREATE INDEX IF NOT EXISTS "IDX_bike_hire_overdue_alerts"
     ON "bike_hire_records" ("client_id", "status", "return_date_expected", "overdue_notified_at")
   `);
+  // Durable outbox for overdue-hire digests: the rendered message and provider
+  // idempotency key survive an uncertain send so retries replay it unchanged.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "bike_overdue_notification_log" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "status" text NOT NULL DEFAULT 'pending',
+      "idempotency_key" text NOT NULL,
+      "claim_token" text NOT NULL,
+      "hire_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "recipient_emails" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "recipient_user_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+      "subject" text NOT NULL,
+      "html" text NOT NULL,
+      "attempts" integer NOT NULL DEFAULT 0,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now(),
+      "sent_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_bike_overdue_notification_log_key"
+    ON "bike_overdue_notification_log" ("idempotency_key")
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_bike_overdue_notification_log_open"
+    ON "bike_overdue_notification_log" ("client_id")
+    WHERE "status" IN ('pending', 'sending')
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "bike_checks" (
