@@ -22,6 +22,12 @@ const productionStoreProxy: SharedRateLimitStore = {
     }
     return productionSharedStore.consume(key, windowMs, max);
   },
+  async release(key, windowId) {
+    if (!productionSharedStore?.release) {
+      throw new Error("Shared authentication rate-limit store cannot release attempts");
+    }
+    return productionSharedStore.release(key, windowId);
+  },
 };
 
 export interface SharedRateLimitStore {
@@ -32,7 +38,14 @@ export interface SharedRateLimitStore {
   consume(key: string, windowMs: number, max: number): Promise<{
     count: number;
     retryAfterSeconds: number;
+    /** Identifies the window the attempt was counted in (needed by release). */
+    windowId?: string;
   }>;
+  /**
+   * Give back one attempt consumed in `windowId`, for limiters that only count
+   * failed responses. A no-op when that window has already expired or reset.
+   */
+  release?(key: string, windowId: string): Promise<void>;
 }
 
 // Periodically drop expired entries so the map can't grow unbounded even if
@@ -96,8 +109,8 @@ export function makeLoginRateLimit(opts?: {
   const namespace = opts?.namespace ?? "login";
   const failureStatuses = opts?.failureStatuses ? new Set(opts.failureStatuses) : null;
 
-  if (failureStatuses && (opts?.store || opts?.requireStore)) {
-    throw new Error("Shared rate-limit stores cannot be used with response-based failure counters");
+  if (failureStatuses && opts?.store && typeof opts.store.release !== "function") {
+    throw new Error("Response-based failure counters need a shared store that can release attempts");
   }
 
   return async function loginRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -114,7 +127,8 @@ export function makeLoginRateLimit(opts?: {
         if (!store) throw new Error("Shared authentication rate-limit store is not configured");
         const result = await store.consume(key, windowMs, max);
         if (!Number.isSafeInteger(result.count) || result.count < 1
-          || !Number.isSafeInteger(result.retryAfterSeconds) || result.retryAfterSeconds < 0) {
+          || !Number.isSafeInteger(result.retryAfterSeconds) || result.retryAfterSeconds < 0
+          || (failureStatuses && (typeof result.windowId !== "string" || !result.windowId))) {
           throw new Error("Shared authentication rate-limit store returned an invalid result");
         }
         if (result.count > max) {
@@ -125,6 +139,20 @@ export function makeLoginRateLimit(opts?: {
             retryAfterSeconds: retryAfter,
           });
           return;
+        }
+        if (failureStatuses) {
+          // Every attempt is reserved before the handler runs, so concurrent
+          // guesses across instances can never exceed the cap. Responses that
+          // are not failures (e.g. a successful reset) hand their attempt back.
+          // If the release fails, or the response never finishes, the attempt
+          // stays counted: the limiter errs towards blocking, never allowing.
+          const windowId = result.windowId!;
+          res.on("finish", () => {
+            if (failureStatuses.has(res.statusCode)) return;
+            Promise.resolve().then(() => store.release!(key, windowId)).catch((error) => {
+              req.log?.warn({ err: error }, "Could not release a shared authentication rate-limit attempt");
+            });
+          });
         }
         next();
       } catch (error) {
@@ -173,6 +201,21 @@ export const registrationRateLimit = makeLoginRateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   namespace: "register",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/**
+ * Ten failed reset-link attempts (invalid/expired token or bad request) per
+ * source IP in each 15-minute window. Production shares the counter across API
+ * instances; successful resets do not count. Development stays in-memory.
+ */
+export const resetPasswordRateLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  namespace: "reset-password",
+  failureStatuses: [400, 401],
   store: productionStoreProxy,
   storeOnlyInProduction: true,
   requireStore: true,

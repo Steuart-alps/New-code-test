@@ -19,6 +19,11 @@ import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Co
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
+import {
+  classifyServiceActionResponse,
+  type ServiceActionOutcome,
+  type ServiceActionResponseBody,
+} from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 interface DomainRecord {
   record?: string;
@@ -1310,6 +1315,8 @@ interface BillingConfig {
     subscribed: boolean;
     perSiteRate: number;
     capPence: number;
+    /** Add-ons whose recurring GBP price can't be purchased right now. */
+    addonAvailability?: { checked: boolean; unavailable: string[] };
     catalog: { key: string; label: string; amountPence: number }[];
   };
 }
@@ -1323,6 +1330,11 @@ function BillingCard() {
   const [busy, setBusy] = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const serviceActionsInFlight = useRef(new Set<string>());
+  const [serviceNotices, setServiceNotices] = useState<Record<string, { tone: "warning" | "error"; message: string }>>({});
+  // Adds whose payment or entitlement the server did not confirm this session;
+  // these rows never show Active until a later action is confirmed.
+  const [unconfirmedServices, setUnconfirmedServices] = useState<Set<string>>(() => new Set());
 
   const fetchConfig = () => {
     apiFetch<BillingConfig>("/billing/config")
@@ -1363,8 +1375,13 @@ function BillingCard() {
   };
 
   const handleServiceAction = async (serviceKey: string, action: "add" | "remove") => {
+    // A synchronous guard: a second click can arrive before React re-renders
+    // the disabled button, and must not send a duplicate billing mutation.
+    if (serviceActionsInFlight.current.has(serviceKey)) return;
     const isAdd = action === "add";
-    const amountPence = config?.services?.catalog.find((c) => c.key === serviceKey)?.amountPence || 1000;
+    const catalogEntry = config?.services?.catalog.find((c) => c.key === serviceKey);
+    const serviceLabel = catalogEntry?.label ?? serviceKey;
+    const amountPence = catalogEntry?.amountPence || 1000;
     const amount = amountPence / 100;
     const sites = config?.billableQuantity || 1;
     const initialCost = amount * sites;
@@ -1375,41 +1392,75 @@ function BillingCard() {
       if (!confirm("Takes effect immediately. No refund for the current month.")) return;
     }
 
+    serviceActionsInFlight.current.add(serviceKey);
     setActionBusy(serviceKey);
+    setServiceNotices((current) => {
+      const { [serviceKey]: _cleared, ...rest } = current;
+      return rest;
+    });
     try {
-      const response = await authenticatedApiFetch("/billing/services", {
-        method: "POST",
-        body: JSON.stringify({ service: serviceKey, action }),
-      });
-      const res = await response.json().catch(() => null) as {
-        ok?: boolean;
-        entitled?: boolean | "all" | string[];
-        paymentPending?: boolean;
-        error?: string;
-      } | null;
-      if (!response.ok) throw new Error(res?.error ?? `Request failed (${response.status})`);
-      if (!res || typeof res.ok !== "boolean") throw new Error("Invalid service action response");
-      const confirmed = trackServiceActionOutcome(serviceKey, action, {
-        ok: res.ok,
-        entitled: res.entitled,
-        paymentPending: res.paymentPending,
-      });
-      if (res.paymentPending || (isAdd && !confirmed)) {
-        toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
-      } else {
+      let outcome: ServiceActionOutcome;
+      let body: ServiceActionResponseBody | null = null;
+      try {
+        // The body carries only the service and action: the server derives the
+        // Stripe idempotency key from subscription + service + billing period,
+        // so a retry after a failure reuses the same key and cannot double-charge.
+        const response = await authenticatedApiFetch("/billing/services", {
+          method: "POST",
+          body: JSON.stringify({ service: serviceKey, action }),
+        });
+        body = await response.json().catch(() => null) as ServiceActionResponseBody | null;
+        outcome = classifyServiceActionResponse(serviceKey, serviceLabel, action, response.status, body);
+      } catch {
+        outcome = {
+          kind: "failed",
+          message: `We couldn't reach the billing service, so we can't confirm whether ${serviceLabel} changed. Refresh to check before trying again.`,
+        };
+      }
+      if (outcome.kind === "confirmed") {
+        const tracked = trackServiceActionOutcome(serviceKey, action, {
+          ok: true,
+          entitled: body?.entitled,
+          paymentPending: body?.paymentPending === true,
+        });
+        setUnconfirmedServices((current) => {
+          if (!current.has(serviceKey)) return current;
+          const next = new Set(current);
+          next.delete(serviceKey);
+          return next;
+        });
         toast({ title: `Service ${isAdd ? "added" : "removed"} successfully` });
+        if (isAdd && tracked) {
+          trackModuleActivation(activeClientId, serviceKey);
+        } else if (!isAdd && tracked) {
+          clearModuleActivation(activeClientId, serviceKey);
+        }
+      } else {
+        const pending = outcome.kind === "payment_pending" || outcome.kind === "unconfirmed";
+        if (isAdd && pending) {
+          setUnconfirmedServices((current) => new Set(current).add(serviceKey));
+        }
+        const message = outcome.message;
+        setServiceNotices((current) => ({
+          ...current,
+          [serviceKey]: { tone: pending ? "warning" : "error", message },
+        }));
+        const title = outcome.kind === "payment_pending"
+          ? "Payment pending"
+          : outcome.kind === "unconfirmed"
+            ? "Not confirmed yet"
+            : outcome.kind === "price_unavailable"
+              ? "Temporarily unavailable"
+              : "Action failed";
+        toast({ title, description: message, variant: outcome.kind === "failed" ? "destructive" : "default" });
       }
-      if (isAdd && confirmed) {
-        trackModuleActivation(activeClientId, serviceKey);
-      } else if (!isAdd && confirmed) {
-        clearModuleActivation(activeClientId, serviceKey);
-      }
+    } finally {
+      // Always re-read server truth: the row's state comes from the live
+      // subscription, never from the outcome of this request alone.
       fetchConfig();
       await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});
-      await refreshAuth();
-    } catch (err: any) {
-      toast({ title: "Action failed", description: err.message || "Could not update service", variant: "destructive" });
-    } finally {
+      await Promise.resolve(refreshAuth()).catch(() => {});
+      serviceActionsInFlight.current.delete(serviceKey);
       setActionBusy(null);
     }
   };
@@ -1521,11 +1572,22 @@ function BillingCard() {
                   .filter(c => c.key !== "core" && c.key !== "bundle")
                   .map(service => {
                   // "Active" means it's on the paid subscription — not merely
-                  // entitled via a trial (trials unlock everything for free).
-                  const isActive = servicesConfig.addons.includes(service.key);
+                  // entitled via a trial (trials unlock everything for free) —
+                  // and that no add this session left its payment unconfirmed.
+                  const onSubscription = servicesConfig.addons.includes(service.key);
+                  const awaitingConfirmation = unconfirmedServices.has(service.key);
+                  const isActive = onSubscription && !awaitingConfirmation;
                   const onTrial = !hasSubscription && (servicesConfig.entitled === "all" || servicesConfig.entitled.includes(service.key));
+                  // Purchase availability reuses the server's price readiness
+                  // check. Older servers omit it, so absence means available.
+                  const availability = servicesConfig.addonAvailability;
+                  const availabilityUnknown = availability?.checked === false;
+                  const priceUnavailable = availabilityUnknown || (availability?.unavailable.includes(service.key) ?? false);
+                  const purchaseBlocked = !onSubscription && priceUnavailable;
+                  const notice = serviceNotices[service.key];
+                  const busyHere = actionBusy === service.key;
                   return (
-                    <div key={service.key} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6">
+                    <div key={service.key} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6" data-service-key={service.key}>
                       <div>
                         <div className="font-medium text-base">{service.label}</div>
                         <div className="text-sm text-muted-foreground mt-1">
@@ -1536,9 +1598,17 @@ function BillingCard() {
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Active
                             </span>
+                          ) : awaitingConfirmation ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
+                              <AlertTriangle className="w-3.5 h-3.5" /> Awaiting confirmation
+                            </span>
                           ) : onTrial ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold">
                               Included in your trial
+                            </span>
+                          ) : purchaseBlocked ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
+                              Temporarily unavailable
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">
@@ -1546,6 +1616,26 @@ function BillingCard() {
                             </span>
                           )}
                         </div>
+                        {purchaseBlocked && !onTrial && (
+                          <p className="mt-2 text-xs text-muted-foreground max-w-md" data-testid="addon-unavailable-reason">
+                            {availabilityUnknown
+                              ? "We couldn't check add-on availability just now, so adding is paused. Nothing has been charged — please refresh or try again shortly."
+                              : `${service.label} can't be added online right now because its price is temporarily unavailable. Nothing has been charged — please try again later or contact support.`}
+                          </p>
+                        )}
+                        {notice && (
+                          <p
+                            role={notice.tone === "error" ? "alert" : "status"}
+                            data-testid="addon-action-notice"
+                            className={cn(
+                              "mt-2 flex items-start gap-1.5 text-xs max-w-md",
+                              notice.tone === "error" ? "text-destructive" : "text-amber-800",
+                            )}
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>{notice.message}</span>
+                          </p>
+                        )}
                       </div>
                       {canAdmin && !hasSubscription ? (
                         <div className="text-xs text-muted-foreground max-w-[200px] text-right">
@@ -1553,21 +1643,25 @@ function BillingCard() {
                         </div>
                       ) : canAdmin && (
                         <div>
-                          {isActive ? (
-                            <Button 
-                              variant="outline" 
+                          {onSubscription ? (
+                            <Button
+                              variant="outline"
                               className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              disabled={actionBusy === service.key}
+                              disabled={busyHere}
                               onClick={() => handleServiceAction(service.key, "remove")}
                             >
-                              {actionBusy === service.key ? "Removing..." : "Remove"}
+                              {busyHere ? "Removing..." : "Remove"}
+                            </Button>
+                          ) : purchaseBlocked ? (
+                            <Button variant="outline" disabled aria-label={`${service.label} unavailable`}>
+                              Unavailable
                             </Button>
                           ) : (
-                            <Button 
-                              disabled={actionBusy === service.key}
+                            <Button
+                              disabled={busyHere}
                               onClick={() => handleServiceAction(service.key, "add")}
                             >
-                              {actionBusy === service.key ? "Adding..." : "Add"}
+                              {busyHere ? "Adding..." : "Add"}
                             </Button>
                           )}
                         </div>

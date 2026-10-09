@@ -41,6 +41,7 @@ async function main() {
   const tag = `bike-overdue-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   let clientId;
   let dailyClientId;
+  let idemClientId;
   const sent = [];
 
   try {
@@ -207,6 +208,9 @@ async function main() {
     check("returned and cancelled hires suppress repeats",
       returned.clientsEmailed === 0 && sent.length === 0, JSON.stringify(returned));
 
+    // Simulate a brand-new hire state: the earlier initial alert's outbox row
+    // would otherwise mark this exact reminder period as already handled today.
+    await db.execute(sql`DELETE FROM bike_overdue_notification_log WHERE client_id = ${clientId}`);
     await db.execute(sql`
       UPDATE bike_hire_records
       SET status = 'active', overdue_notified_at = NULL,
@@ -220,7 +224,156 @@ async function main() {
     check("email failure is recorded", failed.errors === 1, JSON.stringify(failed));
     sent.length = 0;
     const retry = await runBikeOverdueJob(deps);
-    check("failed send is released for retry", retry.clientsEmailed === 1 && sent.length === 1, JSON.stringify(retry));
+    check("failed send is retried", retry.clientsEmailed === 1 && sent.length === 1, JSON.stringify(retry));
+
+    // ---- Uncertain provider outcome: accepted, but the response times out ----
+    const [idemClient] = await db.insert(clientsTable).values({
+      name: `Bike overdue idempotency test ${tag}`,
+      slug: `${tag}-idem`,
+      active: true,
+    }).returning();
+    idemClientId = idemClient.id;
+    const [idemAdmin] = await db.insert(usersTable).values({
+      email: `${tag}-idem-admin@test.local`, passwordHash: "x", name: "Idem Admin",
+      role: "client_admin", clientId: idemClientId, active: true,
+    }).returning();
+    const idemBike = await db.execute(sql`
+      INSERT INTO bikes (client_id, ref, name, type, status)
+      VALUES (${idemClientId}, 'BIKE-59', 'Idempotency bike', 'hybrid', 'hired')
+      RETURNING id
+    `);
+    const idemHire = await db.execute(sql`
+      INSERT INTO bike_hire_records
+        (client_id, bike_id, guest_name, hire_date, return_date_expected, status)
+      VALUES (${idemClientId}, ${idemBike.rows[0].id}, 'Timeout Guest', CURRENT_DATE - 3, CURRENT_DATE - 1, 'active')
+      RETURNING id
+    `);
+    const idemHireId = idemHire.rows[0].id;
+    await db.insert(appSettingsTable).values({
+      clientId: idemClientId, key: "bike_overdue_repeat_interval_days", value: "1",
+    });
+
+    // Fake provider with Resend's documented key semantics: a repeated
+    // idempotency key with the same payload returns the original message
+    // without delivering again; a changed payload is rejected (409).
+    const provider = {
+      accepted: new Map(),
+      delivered: [],
+      calls: [],
+      timeoutsAfterAccept: 0,
+      async send(message) {
+        provider.calls.push(message);
+        if (message.to?.every((to) => !to.startsWith(`${tag}-idem-`))) {
+          // Other fixture tenants are irrelevant to this provider.
+          return;
+        }
+        const body = JSON.stringify({ to: message.to, subject: message.subject, html: message.html });
+        const key = message.idempotencyKey;
+        if (key && provider.accepted.has(key)) {
+          if (provider.accepted.get(key) !== body) throw new Error("409 invalid_idempotent_request");
+          return;
+        }
+        if (key) provider.accepted.set(key, body);
+        provider.delivered.push(message);
+        if (provider.timeoutsAfterAccept > 0) {
+          provider.timeoutsAfterAccept--;
+          throw new Error("Simulated provider response timeout after acceptance");
+        }
+      },
+    };
+    const idemDeps = { sendEmail: provider.send, sendPush: async () => 0 };
+    const idemCalls = () => provider.calls.filter((m) => m.to?.includes(idemAdmin.email));
+    const outbox = async () => (await db.execute(sql`
+      SELECT status, idempotency_key, attempts FROM bike_overdue_notification_log
+      WHERE client_id = ${idemClientId} ORDER BY id
+    `)).rows;
+    const hireState = async () => (await db.execute(sql`
+      SELECT overdue_notified_at, overdue_notification_claim_token FROM bike_hire_records WHERE id = ${idemHireId}
+    `)).rows[0];
+
+    provider.timeoutsAfterAccept = 1;
+    const uncertain = await runBikeOverdueJob(idemDeps);
+    const afterTimeout = await outbox();
+    check("uncertain timeout is reported as an error",
+      uncertain.errors === 1 && provider.delivered.length === 1, JSON.stringify({ uncertain, delivered: provider.delivered.length }));
+    check("uncertain send keeps a pending digest with a stable key",
+      afterTimeout.length === 1 && afterTimeout[0].status === "pending"
+        && afterTimeout[0].idempotency_key.startsWith(`bike-overdue-${idemClientId}-`),
+      JSON.stringify(afterTimeout));
+    check("uncertain send does not record a successful alert",
+      (await hireState()).overdue_notified_at === null, "hire marked notified after timeout");
+
+    const retried = await runBikeOverdueJob(idemDeps);
+    const retryCalls = idemCalls();
+    check("retry after uncertain timeout does not deliver a second message",
+      provider.delivered.length === 1 && retried.clientsEmailed === 1 && retried.errors === 0,
+      JSON.stringify({ retried, delivered: provider.delivered.length }));
+    check("retry replays the identical request under the same idempotency key",
+      retryCalls.length === 2
+        && retryCalls[0].idempotencyKey === retryCalls[1].idempotencyKey
+        && retryCalls[0].html === retryCalls[1].html
+        && retryCalls[0].subject === retryCalls[1].subject,
+      JSON.stringify(retryCalls.map((m) => m.idempotencyKey)));
+    const afterRetry = await outbox();
+    const retriedHire = await hireState();
+    check("confirmed retry finalises the digest and the hire",
+      afterRetry.length === 1 && afterRetry[0].status === "sent" && afterRetry[0].attempts === 2
+        && retriedHire.overdue_notified_at !== null && retriedHire.overdue_notification_claim_token === null,
+      JSON.stringify({ afterRetry, retriedHire }));
+    const noRepeat = await runBikeOverdueJob(idemDeps);
+    check("finalised digest is not sent again in the same period",
+      idemCalls().length === 2 && noRepeat.clientsEmailed === 0, JSON.stringify(noRepeat));
+
+    // The next cadence period is a different reminder and gets a new key. Its
+    // uncertain outcome is resolved by the recovery-only replay.
+    await db.execute(sql`
+      UPDATE bike_hire_records SET overdue_notified_at = now() - (25 * interval '1 hour') WHERE id = ${idemHireId}
+    `);
+    provider.timeoutsAfterAccept = 1;
+    await runBikeOverdueJob(idemDeps);
+    const recovered = await runBikeOverdueJob(idemDeps, { recoverOnly: true });
+    const periods = await outbox();
+    check("next cadence period uses a new idempotency key",
+      periods.length === 2 && periods[0].idempotency_key !== periods[1].idempotency_key,
+      JSON.stringify(periods));
+    check("recovery-only replay confirms the uncertain repeat without duplicating it",
+      provider.delivered.length === 2 && recovered.clientsEmailed === 1 && periods[1].status === "sent",
+      JSON.stringify({ recovered, delivered: provider.delivered.length, periods }));
+
+    // A replay must not resend an alert once every hire in it has been returned.
+    await db.execute(sql`
+      UPDATE bike_hire_records SET overdue_notified_at = now() - (25 * interval '1 hour') WHERE id = ${idemHireId}
+    `);
+    provider.timeoutsAfterAccept = 1;
+    await runBikeOverdueJob(idemDeps);
+    await db.execute(sql`UPDATE bike_hire_records SET status = 'returned' WHERE id = ${idemHireId}`);
+    const callsBefore = idemCalls().length;
+    const afterReturn = await runBikeOverdueJob(idemDeps, { recoverOnly: true });
+    const cancelled = await outbox();
+    check("returned hire cancels its unconfirmed digest without another send",
+      idemCalls().length === callsBefore && afterReturn.clientsEmailed === 0
+        && cancelled.length === 3 && cancelled[2].status === "cancelled"
+        && (await hireState()).overdue_notification_claim_token === null,
+      JSON.stringify({ afterReturn, cancelled }));
+
+    // An unconfirmed digest older than the provider's key window is expired
+    // rather than replayed, and stops blocking new alerts for the client.
+    await db.execute(sql`
+      UPDATE bike_hire_records SET status = 'active', overdue_notified_at = now() - (25 * interval '1 hour') WHERE id = ${idemHireId}
+    `);
+    provider.timeoutsAfterAccept = 1;
+    await runBikeOverdueJob(idemDeps);
+    await db.execute(sql`
+      UPDATE bike_overdue_notification_log SET created_at = now() - (24 * interval '1 hour')
+      WHERE client_id = ${idemClientId} AND status = 'pending'
+    `);
+    const callsBeforeExpiry = idemCalls().length;
+    await runBikeOverdueJob(idemDeps, { recoverOnly: true });
+    const expired = await outbox();
+    check("digest outside the provider idempotency window is expired, not replayed",
+      idemCalls().length === callsBeforeExpiry && expired.at(-1)?.status === "expired"
+        && (await hireState()).overdue_notification_claim_token === null,
+      JSON.stringify(expired));
   } finally {
     try {
       if (clientId) {
@@ -234,6 +387,13 @@ async function main() {
         await db.execute(sql`DELETE FROM bikes WHERE client_id = ${dailyClientId}`);
         await db.execute(sql`DELETE FROM users WHERE client_id = ${dailyClientId}`);
         await db.execute(sql`DELETE FROM clients WHERE id = ${dailyClientId}`);
+      }
+      if (idemClientId) {
+        await db.execute(sql`DELETE FROM bike_hire_records WHERE client_id = ${idemClientId}`);
+        await db.execute(sql`DELETE FROM bikes WHERE client_id = ${idemClientId}`);
+        await db.execute(sql`DELETE FROM users WHERE client_id = ${idemClientId}`);
+        await db.execute(sql`DELETE FROM app_settings WHERE client_id = ${idemClientId}`);
+        await db.execute(sql`DELETE FROM clients WHERE id = ${idemClientId}`);
       }
     } catch (err) {
       failures.push(`cleanup — ${err?.message ?? err}`);

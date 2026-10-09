@@ -119,6 +119,8 @@ const stagedObjects = new Map();
 const requestUploadBodies = [];
 const requestUploadObjects = [];
 const stagedReceiptBodies = [];
+const stagedReceiptIds = [];
+const cancelledReceipts = [];
 const photoMutationHeaders = [];
 const storagePutHeaders = [];
 const createRequests = [];
@@ -270,7 +272,14 @@ async function routeApi(route, url) {
     const id = `11111111-1111-4111-8111-${String(nextPhotoId++).padStart(12, "0")}`;
     const photo = { id, entityType: body.entityType, objectPath: body.objectPath };
     stagedObjects.set(body.objectPath, photo);
+    stagedReceiptIds.push(id);
     return jsonResponse(route, { id, objectPath: body.objectPath });
+  }
+  const stagedCancel = pathname.match(/^\/api\/photos\/staged\/([0-9a-f-]{36})$/i);
+  if (stagedCancel && method === "DELETE") {
+    if (await csrfFailure(route, pathname)) return;
+    cancelledReceipts.push(stagedCancel[1]);
+    return jsonResponse(route, { ok: true });
   }
   if (pathname === "/api/photos" && method === "GET") {
     const entityType = searchParams.get("entityType");
@@ -457,12 +466,15 @@ async function completeRequiredCreate({ entityType, path, saveLabel, marker, pre
   assert.ok(Object.values(created.body).some(value => value === marker),
     `${entityType} create payload should retain its valid form data`);
   await dialog.waitFor({ state: "hidden" });
+  assert.ok(created.body.photoUploadIds.every(id => !cancelledReceipts.includes(id)),
+    `${entityType} receipts claimed by a successful create must not be cancelled`);
 
   const savedRow = entityType === "green_defect"
     ? page.getByText(marker, { exact: true }).last().locator("xpath=..")
     : page.locator("tr").filter({ hasText: marker }).last();
   await savedRow.waitFor({ state: "visible" });
-  await savedRow.locator('img[alt="Check photo"]').first().waitFor({ state: "visible" });
+  // Thumbnails are images inside "View photo N of M" buttons (decorative alt).
+  await savedRow.getByRole("button", { name: /^View photo 1 of 2$/ }).locator("img").first().waitFor({ state: "visible" });
   const photoResponse = await photoListResponse;
   assert.equal(photoResponse.status(), 200, "the saved row should reload its staged photo association");
   assert.equal(new URL(photoResponse.url()).searchParams.get("entityId"), String(created.id),
@@ -572,7 +584,9 @@ try {
   // photo gate and sends a normal update without staged IDs.
   await page.locator("main").getByRole("button", { name: "Pre-use", exact: true }).click();
   const oldPreUseRow = page.locator("tr").filter({ hasText: "Historical pre-use record" });
-  await oldPreUseRow.getByRole("button").first().click();
+  // The photo cell now has its own keyboard-accessible buttons; edit is the
+  // first action in the row's final (actions) cell.
+  await oldPreUseRow.locator("td").last().getByRole("button").first().click();
   const editDialog = page.getByRole("dialog");
   await editDialog.waitFor({ state: "visible" });
   assert.equal(await editDialog.getByRole("group", { name: "Required photo evidence" }).count(), 0,
@@ -607,6 +621,29 @@ try {
     saveLabel: "Report defect",
     marker: "Created defect evidence record",
   });
+
+  // Abandoned evidence is cancelled on the server so its object is deleted:
+  // removing one staged photo, then closing the dialog with another staged.
+  await openGreenTab("Defects", "Report defect");
+  const abandonDialog = page.getByRole("dialog");
+  await uploadRequiredPhoto(abandonDialog, "green_defect", 1);
+  const removedId = stagedReceiptIds.at(-1);
+  const removeCancel = page.waitForResponse(response =>
+    response.request().method() === "DELETE" && new URL(response.url()).pathname === `/api/photos/staged/${removedId}`,
+  );
+  await abandonDialog.getByRole("button", { name: "Remove required-green_defect-1.png" }).click();
+  assert.equal((await removeCancel).status(), 200, "removing a staged photo cancels its receipt");
+  await abandonDialog.getByText("0/2 required photos attached", { exact: true }).waitFor({ state: "visible" });
+  await uploadRequiredPhoto(abandonDialog, "green_defect", 1);
+  const abandonedId = stagedReceiptIds.at(-1);
+  const closeCancel = page.waitForResponse(response =>
+    response.request().method() === "DELETE" && new URL(response.url()).pathname === `/api/photos/staged/${abandonedId}`,
+  );
+  await page.keyboard.press("Escape");
+  await abandonDialog.waitFor({ state: "hidden" });
+  assert.equal((await closeCancel).status(), 200, "closing the dialog cancels staged receipts");
+  assert.deepEqual(cancelledReceipts.filter(id => id === removedId || id === abandonedId).sort(), [removedId, abandonedId].sort());
+  assert.equal(new Set(cancelledReceipts).size, cancelledReceipts.length, "each abandoned receipt is cancelled once");
 
   await navigateHarness("swim");
   await page.getByRole("heading", { name: "SwimTrack", exact: true }).waitFor({ state: "visible" });

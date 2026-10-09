@@ -26,6 +26,7 @@ import {
   UserCheck, MapPin, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -101,13 +102,10 @@ const SEVERITY_CFG: Record<ActionSeverity, { label: string; badge: string }> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+/** JSON request through the shared client: adds the /api prefix, the CSRF
+ *  token on writes and the session cookie. */
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-    ...opts,
-  });
+  const res = await sharedApiFetch(path, opts);
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
   if (res.status === 204) return null;
   return res.json();

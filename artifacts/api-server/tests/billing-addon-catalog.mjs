@@ -89,6 +89,11 @@ const stubs = {
       dataDeletedAt: "clients.dataDeletedAt",
     };
     export const sitesTable = { __table: "sites", clientId: "sites.clientId" };
+    // Imported by lib/email.ts (billing routes import the mailer); never read here.
+    export const appSettingsTable = {
+      __table: "app_settings", clientId: "app_settings.clientId",
+      key: "app_settings.key", value: "app_settings.value",
+    };
   `,
   drizzle: `
     export const eq = (left, right) => ({ left, right });
@@ -507,6 +512,42 @@ try {
   assert.equal(missingPrice.status, 503, "a missing active catalogue price must block self-service activation");
   assert.ok(missingPrice.data.missingServicePrices.includes("pattrack"));
   assert.deepEqual(state.calls.subscriptionUpdate, [], "missing price preflight must happen before Stripe mutation");
+
+  // Removing an add-on whose catalogue price is missing (or archived) must
+  // still delete the client's existing item: no price lookup, no proration,
+  // no invoice and no other subscription change.
+  for (const [variant, setup] of [
+    ["missing", () => {}],
+    ["archived", () => { state.priceRows.pattrack = { ...missingRow, active: false }; }],
+  ]) {
+    setup();
+    state.subscription = makeSubscription();
+    state.subscription.items.data.push({
+      id: "si_pattrack_existing",
+      current_period_start: 1_700_000_000,
+      quantity: 3,
+      price: { id: "price_pattrack_retired", unit_amount: 1000, currency: "gbp", metadata: { service_key: "pattrack" } },
+    });
+    state.stripe = fakeStripe();
+    state.queries.length = 0;
+    const removed = await request("POST", "/services", { service: "pattrack", action: "remove" }, { clientContext: true });
+    assert.equal(removed.status, 200, `${variant} price: removal must succeed: ${JSON.stringify(removed.data)}`);
+    assert.deepEqual(state.calls.subscriptionItemDelete, [
+      { id: "si_pattrack_existing", params: { proration_behavior: "none" } },
+    ], `${variant} price: delete exactly the client's existing item without proration`);
+    assert.deepEqual(state.calls.subscriptionUpdate, []);
+    assert.equal(state.calls.invoiceCreate.length + state.calls.invoiceItemCreate.length + state.calls.invoicePay.length, 0,
+      `${variant} price: removal must never charge`);
+    assert.ok(!state.queries.some((query) => query.text.includes("pr.metadata->>'service_key' =")),
+      `${variant} price: removal must not resolve the catalogue price`);
+    assert.ok(!state.subscription.items.data.some((item) => item.price?.metadata?.service_key === "pattrack"));
+    delete state.priceRows.pattrack;
+  }
+  state.subscription = makeSubscription();
+  state.stripe = fakeStripe();
+  const notActive = await request("POST", "/services", { service: "pattrack", action: "remove" }, { clientContext: true });
+  assert.equal(notActive.status, 409, "removing a service the client does not have is still rejected");
+  assert.deepEqual(state.calls.subscriptionItemDelete, []);
   state.priceRows.pattrack = missingRow;
 
   state.priceRows.core = undefined;

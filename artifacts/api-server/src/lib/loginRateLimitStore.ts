@@ -53,19 +53,49 @@ export function createDatabaseLoginRateLimitStore(): SharedRateLimitStore {
             ELSE auth_rate_limit_counters.expires_at
           END,
           updated_at = clock_timestamp()
-        RETURNING attempts,
+        RETURNING attempts, expires_at::text AS window_id,
           GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - clock_timestamp()))))::integer
             AS retry_after_seconds
       `);
       const row = result.rows?.[0] as
-        | { attempts: number | string; retry_after_seconds: number | string }
+        | { attempts: number | string; retry_after_seconds: number | string; window_id: string }
         | undefined;
       if (!row) throw new Error("Shared authentication rate-limit counter was not returned");
 
       return {
         count: Number(row.attempts),
         retryAfterSeconds: Number(row.retry_after_seconds),
+        windowId: row.window_id,
       };
+    },
+
+    /**
+     * Return one attempt to the exact window it was taken from. A window that
+     * has expired or been reset since is left alone. The last attempt removes
+     * the row so the next failure opens a fresh window, as in development.
+     * If a concurrent consume races the final release, the release is lost and
+     * the counter stays one higher, which only ever makes the limit stricter.
+     */
+    async release(key, windowId) {
+      const sessionSecret = process.env.SESSION_SECRET;
+      if (!sessionSecret) {
+        throw new Error("SESSION_SECRET is required for shared authentication rate limits");
+      }
+      const keyHash = createHmac("sha256", sessionSecret).update(key).digest("hex");
+      await db.execute(sql`
+        WITH removed AS (
+          DELETE FROM auth_rate_limit_counters
+          WHERE key_hash = ${keyHash}
+            AND expires_at = ${windowId}::timestamptz
+            AND attempts <= 1
+          RETURNING key_hash
+        )
+        UPDATE auth_rate_limit_counters
+        SET attempts = attempts - 1, updated_at = clock_timestamp()
+        WHERE key_hash = ${keyHash}
+          AND expires_at = ${windowId}::timestamptz
+          AND attempts > 1
+      `);
     },
   };
 }
