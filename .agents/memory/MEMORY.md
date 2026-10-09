@@ -40,6 +40,7 @@
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
 - [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.
 - [Queued bearer credentials](queued-bearer-credentials.md) — persist placeholders plus encrypted payloads; never store working contractor links in rendered queue fields.
+- [Email HTML escaping](email-html-escaping.md) — escape all business text in email HTML via escapeHtml; plain text/subjects stay raw; cover new templates in test:email-escaping.
 - [Contractor token key rotation](contractor-token-key-rotation.md) — version every key; drain old writers, migrate with the previous key retained, then retire it in a later deployment.
 - [Roster reconciliation identity](roster-reconciliation-identity.md) — payroll IDs are authoritative; preserve roster IDs, adopt legacy rows only by one unambiguous match, and deactivate rather than delete.
 - [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.

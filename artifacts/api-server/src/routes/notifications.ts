@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
-import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
@@ -399,18 +399,13 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
     notes: item.notes,
   });
 
-  const dateStr = proposed.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Visit Confirmed</h2>
-      <p>Thank you ${contractor.name}.</p>
-      <p>Your visit for <strong>${item.title}</strong> is scheduled for <strong>${dateStr}</strong>.</p>
-      <p>Best regards,<br><strong>${companyName}</strong></p>
-    </div>`;
-  const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\n${companyName}`;
-
-  const confirmationSubject = `Visit Confirmed: ${item.title} — ${dateStr}`;
+  const { subject: confirmationSubject, html, text, dateStr } = buildVisitConfirmationEmail({
+    contractorName: contractor.name,
+    companyName,
+    itemTitle: item.title,
+    visitDate: proposed,
+  });
   await db.execute(sql`INSERT INTO contractor_email_queue
     (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,idempotency_key)
     VALUES (${item.clientId},'compliance',${item.id},${contractor.id},'reminder','assign',${contractor.email},
