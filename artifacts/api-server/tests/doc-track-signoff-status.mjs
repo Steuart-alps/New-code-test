@@ -53,7 +53,111 @@ function isoDate(offset = 0) {
   return date.toISOString().slice(0, 10);
 }
 
+// A separate sign-in session (own cookie) for multi-tenant checks.
+function session() {
+  let jar = "";
+  return async (method, path, body) => {
+    const response = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...(jar ? { cookie: jar } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const setCookie = response.headers.get("set-cookie");
+    if (setCookie) jar = setCookie.split(";")[0];
+    const contentType = response.headers.get("content-type") ?? "";
+    return {
+      status: response.status,
+      contentType,
+      data: contentType.includes("application/json") ? await response.json() : null,
+      bytes: contentType.includes("application/json") ? null : Buffer.from(await response.arrayBuffer()),
+    };
+  };
+}
+
+async function signUp(label) {
+  const as = session();
+  const email = `doc-register-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test.local`;
+  const registered = await as("POST", "/auth/register", { name: `Doc register ${label}`, email, password: "password-123" });
+  requireSuccess(`register ${label}`, registered, 200);
+  requireSuccess(`verify ${label}`,
+    await as("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`), 200);
+  requireSuccess(`log in ${label}`, await as("POST", "/auth/login", { email, password: "password-123" }), 200);
+  const me = await as("GET", "/auth/me");
+  const user = me.data?.user ?? me.data;
+  if (!Number.isInteger(user?.clientId)) throw new Error(`${label} has no client`);
+  return { as, clientId: user.clientId, userId: user.id, role: user.role };
+}
+
+// One client's register material: a required document and an outstanding
+// staff member, both named after the tenant so the PDF shows whose they are.
+async function seedRegister(tenant, label) {
+  const site = await tenant.as("POST", "/sites", { name: `${label} register site`, seedStarterChecks: false });
+  requireSuccess(`${label} site`, site, 201);
+  const staffName = `${label} Register Staff`;
+  requireSuccess(`${label} staff`, await tenant.as("POST", "/staff-roster", {
+    name: staffName, email: `doc-register-staff-${label.toLowerCase()}-${Date.now()}@test.local`, siteId: site.data?.id,
+  }), 201);
+  const title = `${label} register document`;
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement)
+     VALUES (${Number(tenant.clientId)},${Number(site.data?.id)},'${title}','policy','register.pdf','application/pdf','fixtures/register-${label.toLowerCase()}.pdf',true,false)`,
+  ]);
+  return { title, staffName };
+}
+
+// A consultant linked to one client but not another exports the combined
+// register while selecting each tenant. The endpoint derives the client from
+// getClientId (an explicit clientId is honoured only when linked) and every
+// query is client-scoped, so each PDF holds only the selected client's
+// documents and staff, and an unlinked client is refused.
+async function checkConsultantRegisterTenantBoundary() {
+  const alpha = await signUp("Alpha");
+  const bravo = await signUp("Bravo");
+  const consultant = await signUp("Charlie");
+  check("register test account is a consultant", consultant.role === "consultant");
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO consultant_clients (user_id, client_id) VALUES (${Number(consultant.userId)}, ${Number(alpha.clientId)})`,
+  ]);
+  const seeded = {
+    Alpha: await seedRegister(alpha, "Alpha"),
+    Bravo: await seedRegister(bravo, "Bravo"),
+    Charlie: await seedRegister(consultant, "Charlie"),
+  };
+  const exportFor = (clientId) => consultant.as("GET",
+    `/doc-track/acknowledgements/export${clientId === undefined ? "" : `?clientId=${Number(clientId)}`}`);
+  const onlyTenant = (name, response, expected) => {
+    const text = response.bytes?.toString() ?? "";
+    check(`${name}: PDF returned`, response.status === 200 && response.contentType === "application/pdf"
+      && response.bytes?.subarray(0, 8).toString() === "%PDF-1.4");
+    for (const [label, { title, staffName }] of Object.entries(seeded)) {
+      const present = text.includes(title) && text.includes(staffName);
+      const absent = !text.includes(title) && !text.includes(staffName) && !text.includes(`${label} register`);
+      check(label === expected
+        ? `${name}: includes the selected client's document and staff`
+        : `${name}: excludes ${label}'s documents and staff`,
+        label === expected ? present : absent);
+    }
+  };
+
+  onlyTenant("consultant exporting linked client Alpha", await exportFor(alpha.clientId), "Alpha");
+  onlyTenant("consultant exporting own business", await exportFor(consultant.clientId), "Charlie");
+  onlyTenant("consultant export without a selected client", await exportFor(), "Charlie");
+
+  const refused = await exportFor(bravo.clientId);
+  check("consultant export for unlinked client Bravo is refused",
+    [400, 403].includes(refused.status) && refused.contentType.includes("application/json"));
+  check("refused export returns no register content",
+    !JSON.stringify(refused.data ?? {}).includes("Bravo register") && refused.bytes === null);
+
+  // The owners still see only their own register, unaffected by the link.
+  onlyTenant("Bravo owner exporting their own register", await bravo.as("GET", "/doc-track/acknowledgements/export"), "Bravo");
+}
+
 async function main() {
+  await checkConsultantRegisterTenantBoundary();
   const email = `doc-status-${Date.now()}@test.local`;
   const registered = await request("POST", "/auth/register", {
     name: "Doc Status Test", email, password: "password-123",
@@ -258,7 +362,11 @@ async function main() {
     name: "annual-safety-policy.pdf",
     contentType: "application/pdf",
   });
-  if (skipWhenStorageUnavailable(uploadRequest, "DocTrack sign-off integration")) return;
+  if (skipWhenStorageUnavailable(uploadRequest, "DocTrack sign-off integration")) {
+    // Checks before the storage-dependent part still decide the result.
+    if (failures) process.exit(1);
+    return;
+  }
   requireSuccess("request document upload", uploadRequest, 200);
   check("document upload URL is returned", typeof uploadRequest.data?.uploadUrl === "string");
   check("document object path is returned", typeof uploadRequest.data?.objectPath === "string");
