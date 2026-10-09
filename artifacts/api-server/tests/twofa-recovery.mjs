@@ -114,6 +114,163 @@ async function mobileRequest(method, path, body, token, ipSuffix) {
   return { status: res.status, data };
 }
 
+// ── Overlapping recovery-code regeneration (self-contained) ─────────────────
+// Two signed-in sessions for one user regenerate at the same time. The barrier
+// is implementation-agnostic: the test row-locks the user's existing code rows,
+// fires both requests, and waits until both server backends are blocked
+// (directly or transitively) behind the test transaction. Without per-user
+// serialization both DELETEs queue on those rows and both inserts survive (20
+// unused rows); with it, exactly one ten-code set remains.
+async function overlappingRegenerationRegression({ admin, clientId }) {
+  const recoveryHash = (code) => createHash("sha256")
+    .update(code.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  const password = "password-regen-789";
+
+  async function enrolledUser(label) {
+    const email = `twofa-regen-${label}-${fixtureId}@test.local`;
+    const created = await admin("POST", "/users", {
+      email, password, name: `Regen ${label}`, role: "client_staff", clientId,
+    });
+    check(`regen race: create user ${label}`, [200, 201].includes(created.status), `got ${created.status}`);
+    const session = makeSession();
+    await session("POST", "/auth/login", { email, password });
+    const setup = await session("GET", "/auth/2fa/setup");
+    if (!setup.data?.secret) throw new Error(`Regen race user ${label} could not start 2FA setup`);
+    const enabled = await session("POST", "/auth/2fa/enable", { code: generateToken(setup.data.secret) });
+    check(`regen race: user ${label} enrols with 10 codes`,
+      enabled.status === 200 && enabled.data?.recoveryCodes?.length === 10, `got ${enabled.status}`);
+    return { id: created.data?.id, email, session, enrolmentCodes: enabled.data?.recoveryCodes ?? [] };
+  }
+  async function signedInSession(user) {
+    const session = makeSession();
+    const login = await session("POST", "/auth/login", { email: user.email, password });
+    if (login.data?.requires2fa !== true) throw new Error("Regen race login did not require 2FA");
+    const totp = await session("POST", "/auth/2fa/verify", { code: user.enrolmentCodes.pop() });
+    if (totp.status !== 200) throw new Error(`Regen race sign-in failed: ${totp.status}`);
+    return session;
+  }
+  async function unusedHashes(userId) {
+    const rows = await pool.query(
+      "SELECT code_hash FROM totp_recovery_codes WHERE user_id = $1 AND used_at IS NULL", [userId]);
+    return rows.rows.map(row => row.code_hash);
+  }
+  async function recoveryLogin(user, code) {
+    const session = makeSession();
+    await session("POST", "/auth/login", { email: user.email, password });
+    return session("POST", "/auth/2fa/verify", { code });
+  }
+
+  const userA = await enrolledUser("a");
+  const userB = await enrolledUser("b");
+  // Two independent signed-in sessions (separate tabs / API clients) for user A.
+  const tabs = [await signedInSession(userA), await signedInSession(userA)];
+  const sessionB = await signedInSession(userB);
+  const bBefore = new Set(await unusedHashes(userB.id));
+
+  const locker = await pool.connect();
+  let regenerations;
+  let independent;
+  let barrierError;
+  try {
+    await locker.query("BEGIN");
+    const held = await locker.query(
+      "SELECT id FROM totp_recovery_codes WHERE user_id = $1 FOR UPDATE", [userA.id]);
+    if (held.rows.length === 0) throw new Error("Regen race user A has no code rows to hold");
+    regenerations = Promise.allSettled(tabs.map(tab =>
+      tab("POST", "/auth/2fa/recovery-codes/regenerate", { password })));
+    let waiting = 0;
+    const deadline = Date.now() + 10000;
+    do {
+      const blocked = await pool.query(`
+        WITH RECURSIVE blocked AS (
+          SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+          UNION
+          SELECT activity.pid FROM pg_stat_activity activity
+          JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+        )
+        SELECT count(*)::int AS waiting FROM blocked
+      `, [locker.processID]);
+      waiting = blocked.rows[0].waiting;
+      if (waiting === 2) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    } while (Date.now() < deadline);
+    check("regen race: both regenerations are blocked at the replacement boundary",
+      waiting === 2, `waiting: ${waiting}`);
+    // User B regenerates while user A's replacements are still held.
+    independent = await sessionB("POST", "/auth/2fa/recovery-codes/regenerate", { password });
+    check("regen race: another user's regeneration is not blocked by user A",
+      independent.status === 200 && independent.data?.recoveryCodes?.length === 10, `got ${independent.status}`);
+  } catch (error) {
+    barrierError = error;
+  } finally {
+    let rollbackError;
+    try {
+      await locker.query("ROLLBACK");
+    } catch (error) {
+      rollbackError = error;
+      barrierError ??= error;
+    } finally {
+      locker.release(rollbackError);
+    }
+  }
+  const settled = regenerations ? await regenerations : [];
+  if (barrierError) throw barrierError;
+  const rejected = settled.filter(result => result.status === "rejected");
+  if (rejected.length > 0) throw new AggregateError(rejected.map(r => r.reason), "Regeneration transport failure");
+  const responses = settled.map(result => result.value);
+  check("regen race: both overlapping regenerations succeed",
+    responses.length === 2 && responses.every(r => r.status === 200 && r.data?.recoveryCodes?.length === 10),
+    JSON.stringify(responses.map(r => r.status)));
+
+  const sets = responses.map(r => r.data?.recoveryCodes ?? []);
+  const finalHashes = await unusedHashes(userA.id);
+  const totalRows = Number((await pool.query(
+    "SELECT count(*)::int AS n FROM totp_recovery_codes WHERE user_id = $1", [userA.id])).rows[0].n);
+  check("regen race: exactly 10 unused rows remain, not 20 mixed rows",
+    finalHashes.length === 10 && totalRows === 10, `unused ${finalHashes.length}, total ${totalRows}`);
+  const finalSet = new Set(finalHashes);
+  const matches = sets.map(set => set.length === 10 && set.every(code => finalSet.has(recoveryHash(code))));
+  check("regen race: surviving rows are exactly one response's code set",
+    matches.filter(Boolean).length === 1, JSON.stringify(matches));
+  const survivorIndex = matches.indexOf(true);
+  const survivor = sets[survivorIndex] ?? [];
+  const superseded = sets[1 - survivorIndex] ?? [];
+  check("regen race: no superseded code is stored",
+    superseded.length === 10 && superseded.every(code => !finalSet.has(recoveryHash(code))));
+  const meA = await tabs[0]("GET", "/auth/me");
+  check("regen race: /auth/me reports 10 remaining after overlap",
+    meA.status === 200 && meA.data?.user?.id === userA.id && meA.data.user.recoveryCodesRemaining === 10,
+    `remaining ${meA.data?.user?.recoveryCodesRemaining}`);
+
+  for (const code of superseded.slice(0, 3)) {
+    const attempt = await recoveryLogin(userA, code);
+    check("regen race: superseded code fails at recovery login", attempt.status === 401, `got ${attempt.status}`);
+  }
+  const firstUse = await recoveryLogin(userA, survivor[0]);
+  check("regen race: surviving code signs in once",
+    firstUse.status === 200 && firstUse.data?.user?.id === userA.id, `got ${firstUse.status}`);
+  const reuse = await recoveryLogin(userA, survivor[0]);
+  check("regen race: surviving code fails on reuse", reuse.status === 401, `got ${reuse.status}`);
+  const meAfter = await tabs[1]("GET", "/auth/me");
+  check("regen race: /auth/me reports 9 remaining after one use",
+    meAfter.status === 200 && meAfter.data?.user?.recoveryCodesRemaining === 9,
+    `remaining ${meAfter.data?.user?.recoveryCodesRemaining}`);
+
+  const bHashes = await unusedHashes(userB.id);
+  const bSet = new Set(bHashes);
+  const bCodes = independent?.data?.recoveryCodes ?? [];
+  check("regen race: other user holds exactly its own new set",
+    bHashes.length === 10 && bCodes.every(code => bSet.has(recoveryHash(code)))
+      && bHashes.every(hash => !bBefore.has(hash)));
+  check("regen race: neither user's codes leak into the other's rows",
+    [...sets[0], ...sets[1]].every(code => !bSet.has(recoveryHash(code)))
+      && bCodes.every(code => !finalSet.has(recoveryHash(code))));
+  const meB = await sessionB("GET", "/auth/me");
+  check("regen race: other user's /auth/me count is 10",
+    meB.status === 200 && meB.data?.user?.id === userB.id && meB.data.user.recoveryCodesRemaining === 10,
+    `remaining ${meB.data?.user?.recoveryCodesRemaining}`);
+}
+
 async function main() {
   const ts = fixtureId;
   async function tokenRows(userId) {
@@ -147,6 +304,7 @@ async function main() {
   const me = await admin("GET", "/auth/me");
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   check("admin has client context", clientId != null, JSON.stringify(me.data?.user));
+  await overlappingRegenerationRegression({ admin, clientId });
 
   // ── User with 2FA: staff member created by admin ────────────────────────────
   const staffEmail = `twofa-staff-${ts}@test.local`;
