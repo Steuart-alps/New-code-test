@@ -186,6 +186,93 @@ await assert.rejects(corrupt.enqueue(input('corrupt-reading-0001')), /could not 
 assert.equal(memory.get(kitchenOutboxKey(corruptedOwner)), originalCorrupt);
 corrupt.suspend();
 
+// Stricter controls on reconnect: a rejected entry can be turned back into a
+// draft. The server is asked first; the original payload stays unchanged on
+// the device, is never sent again, and no longer blocks a new entry.
+let stricter = true;
+let stricterSends = 0;
+const restoring = new KitchenOutbox({
+  storage,
+  async send() { stricterSends++; if (stricter) throw errorWithStatus(422); },
+  async onSent() {},
+});
+await restoring.activate(A, 'test-A');
+await restoring.replay();
+await restoring.enqueue(input('stricter-rules-0001', 61, null));
+await restoring.replay();
+const rejected = restoring.getSnapshot().entries.find(e => e.entryId === 'stricter-rules-0001');
+assert.equal(rejected.state, 'failed');
+const originalBody = JSON.parse(JSON.stringify(rejected.body));
+await assert.rejects(restoring.restoreToDraft('no-such-entry-0001', async () => false), /Only a failed device entry/);
+const asked = [];
+const draftCopy = await restoring.restoreToDraft(rejected.entryId, async entry => { asked.push(entry.entryId); return false; });
+assert.deepEqual(asked, ['stricter-rules-0001'], 'the server is asked before restoring');
+assert.deepEqual(draftCopy.body, originalBody, 'the restored copy is the original payload');
+const restoredRow = restoring.getSnapshot().entries.find(e => e.entryId === rejected.entryId);
+assert.equal(restoredRow.state, 'restored');
+assert.deepEqual(restoredRow.body, originalBody, 'the original payload stays unchanged on the device');
+stricter = false;
+await restoring.replay();
+assert.equal(stricterSends, 1, 'a restored entry is never sent');
+const corrected = await restoring.enqueue(input('stricter-rules-0002', 61, null));
+assert.equal(corrected.entryId, 'stricter-rules-0002', 'the draft saves under a new entry identifier');
+await restoring.replay();
+assert.equal(restoring.getSnapshot().entries.find(e => e.entryId === 'stricter-rules-0002').state, 'sent');
+await assert.rejects(restoring.restoreToDraft(rejected.entryId, async () => false), /Only a failed device entry/,
+  'a restored entry cannot be restored twice');
+restoring.suspend();
+
+// Restart recovery: the restored state and the untouched payload survive.
+const afterRestart = new KitchenOutbox({ storage, async send() { throw new Error('must not send'); }, async onSent() {} });
+await afterRestart.activate(A, 'test-A');
+await afterRestart.replay();
+const survived = afterRestart.getSnapshot().entries.find(e => e.entryId === 'stricter-rules-0001');
+assert.equal(survived.state, 'restored');
+assert.deepEqual(survived.body, originalBody);
+afterRestart.suspend();
+
+// An entry the server already applied is never restored or rewritten.
+stricter = true;
+const receipted = new KitchenOutbox({
+  storage,
+  async send() { if (stricter) throw errorWithStatus(422); },
+  async onSent() {},
+});
+await receipted.activate(A, 'test-A');
+await receipted.replay();
+await receipted.enqueue(input('already-applied-0001', 62, null));
+await receipted.replay();
+const appliedBody = JSON.parse(JSON.stringify(receipted.getSnapshot().entries.find(e => e.entryId === 'already-applied-0001').body));
+await assert.rejects(receipted.restoreToDraft('already-applied-0001', async () => true), /already recorded these readings/);
+const applied = receipted.getSnapshot().entries.find(e => e.entryId === 'already-applied-0001');
+assert.equal(applied.state, 'sent', 'a receipted entry is recorded as sent');
+assert.deepEqual(applied.body, appliedBody, 'its payload is unchanged');
+// The receipt check failing (offline) changes nothing.
+await receipted.enqueue(input('offline-check-0001', 63, null));
+await receipted.replay();
+await assert.rejects(receipted.restoreToDraft('offline-check-0001', async () => { throw new Error('Network request failed'); }), /Network/);
+assert.equal(receipted.getSnapshot().entries.find(e => e.entryId === 'offline-check-0001').state, 'failed');
+receipted.suspend();
+
+// Account change during the receipt check: nothing is restored for the old account.
+const restoreSwitch = new KitchenOutbox({ storage, async send() { throw errorWithStatus(422); }, async onSent() {} });
+await restoreSwitch.activate(A, 'test-A');
+await restoreSwitch.replay();
+await restoreSwitch.enqueue(input('account-switch-0001', 64, null));
+await restoreSwitch.replay();
+await assert.rejects(restoreSwitch.restoreToDraft('account-switch-0001', async () => {
+  await restoreSwitch.activate(B, 'test-B');
+  return false;
+}), /signed-in account changed/);
+restoreSwitch.suspend();
+await restoreSwitch.activate(A, 'test-A');
+assert.equal(restoreSwitch.getSnapshot().entries.find(e => e.entryId === 'account-switch-0001').state, 'failed');
+restoreSwitch.suspend();
+await restoreSwitch.activate(B, 'test-B');
+await assert.rejects(restoreSwitch.restoreToDraft('account-switch-0001', async () => false), /Only a failed device entry/,
+  "another account cannot restore this account's entry");
+restoreSwitch.suspend();
+
 const form = await readFile(new URL('../components/KitchenTemperatureForm.tsx', import.meta.url), 'utf8');
 const auth = await readFile(new URL('../lib/auth.tsx', import.meta.url), 'utf8');
 const runtime = await readFile(new URL('../lib/kitchenOutbox.ts', import.meta.url), 'utf8');
@@ -197,5 +284,6 @@ assert.match(auth, /kitchenOutbox\.activate\(\{ clientId: user\.clientId, userId
 assert.match(runtime, /Authorization: `Bearer \$\{token\}`/);
 assert.match(runtime, /AppState\.addEventListener/);
 assert.match(runtime, /setInterval/);
-for (const label of ['Queued', 'Sent', 'Failed']) assert.ok(ui.includes(label));
+for (const label of ['Queued', 'Sent', 'Failed', 'Restored for editing', 'Edit as new entry']) assert.ok(ui.includes(label));
+assert.match(runtime, /\/api\/food-safety\/mobile-entries\//, 'restoring asks the server for a receipt first');
 console.log('KitchenTrack durable storage, restart/reconnect, delivery states, and account-isolation regressions passed.');
