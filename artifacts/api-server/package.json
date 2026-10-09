@@ -81,6 +81,7 @@
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:contractor-token-security": "bash tests/run-fresh-schema.sh tests/contractor-token-security.mjs",
     "test:compliance-schedule-tokens": "bash tests/run-compliance-schedule-tokens.sh",
+    "test:compliance-reminder-cycles": "bash tests/run-compliance-reminder-cycles.sh",
     "test:calendar-invite-compatibility": "esbuild tests/calendar-invite-compatibility.ts --bundle --platform=node --format=cjs --outfile=/tmp/calendar-invite-compatibility.cjs && node /tmp/calendar-invite-compatibility.cjs",
     "test:twofa-recovery": "bash tests/run-twofa-recovery.sh",
     "test:staff-invitations": "bash tests/run-staff-invitations.sh",

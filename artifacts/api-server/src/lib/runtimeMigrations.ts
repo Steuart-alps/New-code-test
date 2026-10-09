@@ -929,7 +929,7 @@ export async function runRuntimeMigrations() {
         "mode" text NOT NULL CHECK ("mode" IN ('assign','quote')),
         "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation')),
         "status" text NOT NULL DEFAULT 'pending'
-          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed')),
+          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed','superseded')),
         "to_email" text NOT NULL CHECK (length(trim("to_email")) > 3),
         "subject" text NOT NULL CHECK (length("subject") > 0),
         "body_html" text NOT NULL CHECK (length("body_html") > 0),
@@ -1081,6 +1081,34 @@ export async function runRuntimeMigrations() {
             AND newer.id > q.id
         )
     `);
+    // Reminder-cycle lifecycle (see lib/reminderCycles.ts): a pending
+    // reminder whose compliance check changed becomes 'superseded'. The
+    // status constraint is only replaced when it lacks that state, so
+    // ordinary restarts do not re-validate the whole queue.
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD COLUMN IF NOT EXISTS "reminder_cycle" text,
+      ADD COLUMN IF NOT EXISTS "superseded_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "superseded_reason" text`);
+    await db.execute(sql`DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'contractor_email_queue'::regclass
+          AND conname = 'contractor_email_queue_status_check'
+          AND pg_get_constraintdef(oid) LIKE '%superseded%'
+      ) THEN
+        ALTER TABLE contractor_email_queue DROP CONSTRAINT IF EXISTS contractor_email_queue_status_check;
+        ALTER TABLE contractor_email_queue ADD CONSTRAINT contractor_email_queue_status_check
+          CHECK (status IN ('pending','approved','sending','sent','cancelled','failed','superseded')) NOT VALID;
+        ALTER TABLE contractor_email_queue VALIDATE CONSTRAINT contractor_email_queue_status_check;
+      END IF;
+    END $$`);
+    // Drafts queued by the previous release carry their cycle only in the
+    // idempotency key. Only active drafts matter to the lifecycle, and the
+    // active-draft index keeps this to those rows.
+    await db.execute(sql`UPDATE contractor_email_queue
+      SET reminder_cycle = substring(idempotency_key from '^reminder-[0-9]+-[0-9]+-([0-9]{4}-[0-9]{2}-[0-9]{2})$')
+      WHERE status IN ('pending','sending') AND entity_type='compliance' AND reminder_cycle IS NULL
+        AND idempotency_key ~ '^reminder-[0-9]+-[0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$'`);
     await db.execute(sql`DROP INDEX IF EXISTS "UQ_contractor_email_queue_active_draft"`);
     await db.execute(sql`
       CREATE UNIQUE INDEX IF NOT EXISTS "UQ_contractor_email_queue_active_draft"
