@@ -616,7 +616,7 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
  * parents). Each statement uses IF the table exists via .catch(() => {}) so a
  * missing table (schema drift) never aborts the whole deletion run.
  */
-async function deleteAllClientData(cid: number): Promise<void> {
+export async function deleteAllClientData(cid: number): Promise<void> {
   // audit_log, like audit_events, is retained inspection evidence, not an
   // operational compliance table. Source DELETEs append redacted historical
   // diffs in the same transaction. Do not disable triggers or purge this ledger
@@ -680,6 +680,11 @@ async function deleteAllClientData(cid: number): Promise<void> {
   await db.execute(sql`DELETE FROM safe_inductions         WHERE client_id = ${cid}`).catch(() => {});
   await db.execute(sql`DELETE FROM safe_competency_signoffs WHERE client_id = ${cid}`).catch(() => {});
   await db.execute(sql`DELETE FROM safe_handbook           WHERE client_id = ${cid}`).catch(() => {});
+
+  // ─ Feedback ───────────────────────────────────────────────────────────────
+  // Reports and their review history are erased with the client's other data.
+  // Review rows are append-only and are removed only by this report cascade.
+  await db.execute(sql`DELETE FROM feedback_reports WHERE client_id = ${cid}`).catch(() => {});
 
   // ─ TrainTrack ─────────────────────────────────────────────────────────────
   await db.execute(sql`DELETE FROM train_track_records WHERE client_id = ${cid}`).catch(() => {});
