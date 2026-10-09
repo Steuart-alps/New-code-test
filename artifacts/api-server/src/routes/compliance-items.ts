@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
+import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import { complianceItemsTable, sitesTable, categoriesTable, contractorsTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
 import {
@@ -43,8 +44,10 @@ function buildItemResponse(
   category: typeof categoriesTable.$inferSelect | null,
   contractor: typeof contractorsTable.$inferSelect | null
 ) {
+  // Scheduling-link credentials (raw legacy token or digest) never leave the server.
+  const { scheduleToken: _token, scheduleTokenHash: _digest, ...visible } = item;
   return {
-    ...item,
+    ...visible,
     siteName: site?.name ?? null,
     categoryName: category?.name ?? null,
     categoryColor: category?.color ?? null,
@@ -321,8 +324,18 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
   if (body.status === "completed") updateData.completedAt = new Date();
   else if (body.status) updateData.completedAt = null;
+  // A reminder delivered for the old due date does not cover the new one, so
+  // the scheduler may remind again for the new cycle.
+  const previousCycle = existing[0].dueDate ? reminderCycleOf(new Date(existing[0].dueDate)) : null;
+  const nextCycle = body.dueDate === undefined ? previousCycle : body.dueDate ? reminderCycleOf(new Date(body.dueDate)) : null;
+  if (nextCycle !== previousCycle) updateData.notificationSentAt = null;
 
-  await db.update(complianceItemsTable).set(updateData).where(eq(complianceItemsTable.id, id));
+  // The item row is updated (and locked) first, then obsolete pending
+  // reminder drafts are superseded in the same transaction.
+  await db.transaction(async (tx) => {
+    await tx.update(complianceItemsTable).set(updateData).where(eq(complianceItemsTable.id, id));
+    await supersedeStaleReminderCycles(tx, existing[0].clientId, id);
+  });
 
   const joined = await fetchJoinedItem(id);
   await appendAuditEvent(req, {
@@ -347,7 +360,10 @@ router.delete("/compliance-items/:id", requireAuth, requireClientAdmin, async (r
     return;
   }
 
-  await db.delete(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+  await db.transaction(async (tx) => {
+    await tx.delete(complianceItemsTable).where(eq(complianceItemsTable.id, id));
+    await supersedeStaleReminderCycles(tx, existing[0].clientId, id);
+  });
   await appendAuditEvent(req, {
     clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
     action: "deleted", before: existing[0],
@@ -385,10 +401,13 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     }
   }
 
-  await db
-    .update(complianceItemsTable)
-    .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
-    .where(eq(complianceItemsTable.id, id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(complianceItemsTable)
+      .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
+      .where(eq(complianceItemsTable.id, id));
+    await supersedeStaleReminderCycles(tx, existing[0].clientId, id);
+  });
 
   const joined = await fetchJoinedItem(id);
   await appendAuditEvent(req, {
