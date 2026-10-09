@@ -87,4 +87,5 @@
 - [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
 - [Two-factor reset alert outbox](two-factor-reset-alerts.md) — admin 2FA reset alerts are queued in the reset transaction and retried; queue holds no secrets or rendered mail; provider key covers rendered content.
 - [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
+- [PDF export failure recovery](pdf-export-failure-recovery.md) — jsPDF output() alerts and returns undefined on error; failed lazy imports need a page reload; show recovery actions, not raw errors.
 - [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
