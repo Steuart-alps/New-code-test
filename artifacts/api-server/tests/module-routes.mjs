@@ -8,14 +8,24 @@
 //   - KitchenTrack (food-safety): config read/write, daily record
 //     create/update/list/by-date, duplicate-date 409 guard.
 //
-// Usage: node tests/module-routes.mjs
-// Exits 0 when all checks pass, 1 otherwise.
+// Usage: API_BASE=... DATABASE_URL=... node tests/module-routes.mjs
+// (normally via `pnpm run test:modules:ci`, which boots a private API).
+// Exits 0 when all checks pass, 1 otherwise. Every client and user this run
+// registers is removed in a finally block, including on failure paths; see
+// tests/fixture-ownership.mjs.
 import { testDocTrainFlows } from "./doc-train-flows.mjs";
-import { randomUUID } from "node:crypto";
+import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
 
-const runId = randomUUID();
+const runId = resolveRunId();
+const fixtures = createFixtureOwnership({ runId, suite: "module-routes" });
 
-const BASE = process.env.API_BASE || "http://localhost:8080/api";
+// Never fall back to a live development API: cleanup must target the same
+// database as the API under test.
+const BASE = process.env.API_BASE;
+if (!BASE) {
+  console.error("API_BASE is required (use `pnpm run test:modules:ci` to boot a private API).");
+  process.exit(1);
+}
 
 let passed = 0;
 const failures = [];
@@ -780,10 +790,11 @@ async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function runSuite() {
   const req = makeSession();
 
-  // Register a fresh account
+  // Register a fresh account. Track it before anything can fail so the
+  // finally block in main() always knows what this run owns.
   const email = `modules-${runId}@test.local`;
   const regRes = await req("POST", "/auth/register", {
     name: "Module Test Account",
@@ -791,30 +802,32 @@ async function main() {
     password: "password-123",
   });
   if (![200, 201].includes(regRes.status)) {
-    console.error("FATAL: registration failed", regRes.status, regRes.data);
-    process.exit(1);
+    throw new Error(`FATAL: registration failed (${regRes.status})`);
   }
+  fixtures.trackRegisteredUser();
 
   // New self-registrations require email verification. In the test instance
   // the API returns the one-time token because there is no test mailbox.
   if (regRes.data?.verificationToken) {
     const verifyRes = await req("GET", `/auth/verify-email?token=${encodeURIComponent(regRes.data.verificationToken)}`);
     if (verifyRes.status !== 200) {
-      console.error("FATAL: email verification failed", verifyRes.status, verifyRes.data);
-      process.exit(1);
+      throw new Error(`FATAL: email verification failed (${verifyRes.status})`);
     }
     const loginRes = await req("POST", "/auth/login", { email, password: "password-123" });
     if (loginRes.status !== 200) {
-      console.error("FATAL: login after verification failed", loginRes.status, loginRes.data);
-      process.exit(1);
+      throw new Error(`FATAL: login after verification failed (${loginRes.status})`);
     }
   }
+  const me = await req("GET", "/auth/me");
+  const clientId = (me.data?.user ?? me.data)?.clientId;
+  if (!Number.isInteger(clientId)) throw new Error(`FATAL: no client for the registered account (${me.status})`);
+  fixtures.trackClient(clientId);
+  fixtures.probe("after-registration");
 
   // Create a site (needed for site-scoped filter tests)
   const siteRes = await req("POST", "/sites", { name: "Module Test HQ" });
   if (siteRes.status !== 201) {
-    console.error("FATAL: site creation failed", siteRes.status, siteRes.data);
-    process.exit(1);
+    throw new Error(`FATAL: site creation failed (${siteRes.status})`);
   }
   const siteId = siteRes.data?.id;
   check("setup: site created", typeof siteId === "number", `siteId=${siteId}`);
@@ -823,12 +836,12 @@ async function main() {
     seedStarterChecks: false,
   });
   if (secondSiteRes.status !== 201) {
-    console.error("FATAL: second site creation failed", secondSiteRes.status, secondSiteRes.data);
-    process.exit(1);
+    throw new Error(`FATAL: second site creation failed (${secondSiteRes.status})`);
   }
   const secondSiteId = secondSiteRes.data?.id;
 
   await testFireSafety(req, siteId);
+  fixtures.probe("after-fire-safety");
   await testLegionella(req, siteId);
   await testFoodSafety(req);
   await testSiteFiltering(req, siteId);
@@ -841,6 +854,23 @@ async function main() {
     siteId,
     isoDate,
   });
+}
+
+async function main() {
+  console.log(`module-routes fixture run id: ${runId}`);
+  try {
+    await runSuite();
+  } catch (err) {
+    failures.push(`suite aborted — ${err?.message ?? err}`);
+    console.error("Test run aborted:", err?.message ?? err);
+  } finally {
+    try {
+      await fixtures.cleanup();
+    } catch (err) {
+      failures.push(`fixture cleanup — ${err?.message ?? err}`);
+      console.error(`FAIL: fixture cleanup — ${err?.message ?? err}`);
+    }
+  }
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

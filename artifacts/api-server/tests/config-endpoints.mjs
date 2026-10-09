@@ -1,7 +1,9 @@
 // Regression tests for the per-client configuration endpoints.
 //
 // Covers, all against a self-booted server with freshly-registered probe
-// accounts (cleaned up implicitly by using unique emails/clients each run):
+// accounts. Every client (including the consultant-created client B) and user
+// this run creates is removed in a finally block, also on failure paths; see
+// tests/fixture-ownership.mjs.
 //
 //   1. /api/form-options
 //        - GET returns effective lists + defaults
@@ -33,13 +35,22 @@
 //        - DELETE removes only the caller's own token (cross-user delete leaves
 //          the other user's token intact)
 //
-// Usage: node tests/config-endpoints.mjs   (API must be running on API_BASE)
+// Usage: API_BASE=... DATABASE_URL=... node tests/config-endpoints.mjs
+// (normally via `pnpm run test:config:ci`, which boots a private API).
 // Exits 0 when every check passes, 1 otherwise.
 
 import { randomUUID } from "node:crypto";
+import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
 
-const runId = randomUUID();
-const BASE = process.env.API_BASE || "http://localhost:8080/api";
+const runId = resolveRunId();
+const fixtures = createFixtureOwnership({ runId, suite: "config-endpoints" });
+// Never fall back to a live development API: cleanup must target the same
+// database as the API under test.
+const BASE = process.env.API_BASE;
+if (!BASE) {
+  console.error("API_BASE is required (use `pnpm run test:config:ci` to boot a private API).");
+  process.exit(1);
+}
 
 let passed = 0;
 const failures = [];
@@ -104,30 +115,28 @@ async function registerAccount(label, ts) {
     password: "password-123",
   });
   if (![200, 201].includes(reg.status)) {
-    console.error(`FATAL: registration failed for ${label}`, reg.status, reg.data);
-    process.exit(1);
+    throw new Error(`FATAL: registration failed for ${label} (${reg.status})`);
   }
+  fixtures.trackRegisteredUser();
   // Self-registrations require email verification; the test instance returns
   // the one-time token in the response because there is no mailbox.
   if (reg.data?.verificationToken) {
     const verify = await session("GET", `/auth/verify-email?token=${encodeURIComponent(reg.data.verificationToken)}`);
     if (verify.status !== 200) {
-      console.error(`FATAL: email verification failed for ${label}`, verify.status, verify.data);
-      process.exit(1);
+      throw new Error(`FATAL: email verification failed for ${label} (${verify.status})`);
     }
     const login = await session("POST", "/auth/login", { email, password: "password-123" });
     if (login.status !== 200) {
-      console.error(`FATAL: login after verification failed for ${label}`, login.status, login.data);
-      process.exit(1);
+      throw new Error(`FATAL: login after verification failed for ${label} (${login.status})`);
     }
   }
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
   const clientId = user?.clientId;
   if (!Number.isInteger(clientId)) {
-    console.error(`FATAL: no clientId for ${label}`, me.status, me.data);
-    process.exit(1);
+    throw new Error(`FATAL: no clientId for ${label} (${me.status})`);
   }
+  fixtures.trackClient(clientId);
   return { session, clientId, email };
 }
 
@@ -298,6 +307,7 @@ async function testFormOptionsIsolation(admin, clientAId, ts) {
   });
   expectOk("isolation: consultant creates client B", bRes.status, [200, 201]);
   const clientBId = bRes.data?.id;
+  fixtures.trackClient(clientBId);
   check("isolation: client B id", Number.isInteger(clientBId), `id=${clientBId}`);
 
   // Set a custom list on client A only.
@@ -984,13 +994,8 @@ async function testSiteDiaries(admin, ts) {
     `got ${JSON.stringify(s1CfgCleared.data?._siteOverrides)}`,
   );
 
-  // Cleanup records + config so later runs stay clean.
-  for (const id of [s1Rec.data?.id, s2Rec.data?.id, orgRec.data?.id]) {
-    if (Number.isInteger(id)) {
-      // No dedicated DELETE endpoint for diary records; clearing config is enough
-      // for isolation since each run uses fresh dates/sites. Leave rows in place.
-    }
-  }
+  // There is no DELETE endpoint for diary records; the run's fixture cleanup
+  // removes them with the rest of this run's tenants.
   await admin("DELETE", `/food-safety/config?siteId=${s1}`);
   await admin("DELETE", `/food-safety/config?siteId=${s2}`);
   await admin("DELETE", "/food-safety/config");
@@ -1204,7 +1209,7 @@ async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
-async function main() {
+async function runSuite() {
   // Full UUID entropy, without separators, fits the 60-character option limit.
   const ts = runId.replaceAll("-", "");
 
@@ -1215,15 +1220,34 @@ async function main() {
   const staff = await createAndLogin(a.session, a.clientId, "client_staff", "config-staff", ts);
   // A second real user (client_admin) under client A for push-token ownership.
   const other = await createAndLogin(a.session, a.clientId, "client_admin", "config-other", ts);
+  fixtures.probe("after-registration");
 
   await testFormOptions(a.session, viewer, staff, ts);
   const { clientBId } = await testFormOptionsIsolation(a.session, a.clientId, ts);
   await testRecordValidation(a.session, ts);
+  fixtures.probe("after-record-validation");
   await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);
   await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
+}
+
+async function main() {
+  console.log(`config-endpoints fixture run id: ${runId}`);
+  try {
+    await runSuite();
+  } catch (err) {
+    failures.push(`suite aborted — ${err?.message ?? err}`);
+    console.error("Test run aborted:", err?.message ?? err);
+  } finally {
+    try {
+      await fixtures.cleanup();
+    } catch (err) {
+      failures.push(`fixture cleanup — ${err?.message ?? err}`);
+      console.error(`FAIL: fixture cleanup — ${err?.message ?? err}`);
+    }
+  }
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {
