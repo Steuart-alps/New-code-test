@@ -42,7 +42,7 @@ const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const router = Router();
 
-if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT === "1") {
+if (process.env.NODE_ENV === "production") {
   configureProductionLoginRateLimitStore(createDatabaseLoginRateLimitStore());
 }
 

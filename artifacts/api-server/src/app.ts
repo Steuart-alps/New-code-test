@@ -31,7 +31,7 @@ export function markApplicationReady(): void {
   applicationReady = true;
 }
 
-// Trust the Replit/proxy chain so express-session sees HTTPS and sets secure cookies
+// Trust the hosting proxy (Render's load balancer) so express-session sees HTTPS and sets secure cookies
 app.set("trust proxy", 1);
 
 app.use(
@@ -59,26 +59,11 @@ app.use(
   }),
 );
 
-const replitDeploymentOrigins = (process.env.REPLIT_DOMAINS ?? "")
-  .split(",")
-  .map(d => d.trim())
-  .filter(Boolean)
-  .map(d => `https://${d}`);
-const replitDevOrigins = process.env.REPLIT_DEV_DOMAIN
-  ? [`https://${process.env.REPLIT_DEV_DOMAIN.trim()}`]
-  : [];
-const replitExpoOrigins = process.env.REPLIT_EXPO_DEV_DOMAIN
-  ? [`https://${process.env.REPLIT_EXPO_DEV_DOMAIN.trim()}`]
-  : [];
-
 const allowedOrigins = [
   ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ...(process.env.PUBLIC_APP_URL ? [process.env.PUBLIC_APP_URL.replace(/\/+$/, "")] : []),
   // Render sets this to the service's own onrender.com address.
   ...(process.env.RENDER_EXTERNAL_URL ? [process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, "")] : []),
-  ...replitDeploymentOrigins,
-  ...replitDevOrigins,
-  ...replitExpoOrigins,
   "http://localhost:3000",
   "http://localhost:5173",
 ].flatMap((origin) => {
@@ -109,8 +94,9 @@ app.use(
 );
 
 // HTTP security headers — applied to all responses.
-// crossOriginEmbedderPolicy is disabled because Replit's proxy/iframe chain
-// sets its own COEP headers; enabling ours would conflict and break previews.
+// crossOriginEmbedderPolicy stays disabled as before:
+// enabling it would require every cross-origin resource the app loads to opt
+// in via CORP/CORS.
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
@@ -218,7 +204,7 @@ app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers / Replit can reach it directly.
+// from the /api prefix so load balancers can reach it directly.
 app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
 app.get("/readyz", (_req, res) => {
   const report = computeReadiness(applicationReady, getBillingReadiness());

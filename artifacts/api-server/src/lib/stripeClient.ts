@@ -1,85 +1,22 @@
 import Stripe from "stripe";
 
-let connectionSettings: any;
-
-/** Default bound on the Replit connector credential request. */
-const DEFAULT_CONNECTOR_TIMEOUT_MS = 10_000;
-
-function replitConnectorToken(): string | null {
-  return process.env.REPL_IDENTITY
-    ? "repl " + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-      ? "depl " + process.env.WEB_REPL_RENEWAL
-      : null;
-}
-
 /**
- * Where Stripe credentials would come from, without reading or requesting them.
- * Null means Stripe is not configured for this process.
+ * Where Stripe credentials come from, without reading them. Null means Stripe
+ * is not configured for this process (start-up then reports billing as
+ * unconfigured instead of attempting initialization).
  */
-export function getStripeCredentialSource(): "env" | "replit-connector" | null {
-  if (process.env.STRIPE_SECRET_KEY) return "env";
-  if (process.env.REPLIT_CONNECTORS_HOSTNAME && replitConnectorToken()) return "replit-connector";
-  return null;
+export function getStripeCredentialSource(): "env" | null {
+  return process.env.STRIPE_SECRET_KEY ? "env" : null;
 }
 
 async function getCredentials() {
-  // Standard configuration: keys from the environment, as on any host.
-  const envSecret = process.env.STRIPE_SECRET_KEY;
-  if (envSecret) {
-    return {
-      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
-      secretKey: envSecret,
-    };
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    throw new Error("STRIPE_SECRET_KEY is not set");
   }
-
-  // Fallback for Replit deployments: keys from Replit's Stripe connector.
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = replitConnectorToken();
-
-  if (!xReplitToken) {
-    throw new Error("STRIPE_SECRET_KEY is not set (and no Replit Stripe connector is available)");
-  }
-
-  const connectorName = "stripe";
-  const isProduction = process.env.REPLIT_DEPLOYMENT === "1";
-  const targetEnvironment = isProduction ? "production" : "development";
-
-  const url = new URL(`https://${hostname}/api/v2/connection`);
-  url.searchParams.set("include_secrets", "true");
-  url.searchParams.set("connector_names", connectorName);
-  url.searchParams.set("environment", targetEnvironment);
-
-  // Bound the connector request: an unanswered request previously left API
-  // start-up waiting indefinitely. The error names no token or secret.
-  const parsedTimeout = Number(process.env.STRIPE_CONNECTOR_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : DEFAULT_CONNECTOR_TIMEOUT_MS;
-  let response: Response;
-  try {
-    response = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json",
-        "X-Replit-Token": xReplitToken,
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (err) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      throw new Error(`Stripe connector credential request timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  }
-
-  const data = await response.json() as any;
-  connectionSettings = data.items?.[0];
-
-  if (!connectionSettings || (!connectionSettings.settings.publishable || !connectionSettings.settings.secret)) {
-    throw new Error(`Stripe ${targetEnvironment} connection not found`);
-  }
-
   return {
-    publishableKey: connectionSettings.settings.publishable,
-    secretKey: connectionSettings.settings.secret,
+    publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? "",
+    secretKey,
   };
 }
 

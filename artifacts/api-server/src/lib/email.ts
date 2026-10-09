@@ -327,8 +327,6 @@ export function buildCalendarInvite(opts: {
 export function getPublicAppUrl(): string {
   const explicit = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "");
   if (explicit) return explicit;
-  const domain = (process.env.REPLIT_DOMAINS ?? "").split(",")[0]?.trim();
-  if (domain) return `https://${domain}`;
   // Render sets this to the service's own onrender.com address.
   const render = process.env.RENDER_EXTERNAL_URL?.replace(/\/+$/, "");
   if (render) return render;

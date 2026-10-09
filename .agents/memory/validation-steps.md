@@ -1,7 +1,9 @@
 ---
 name: Validation steps setup
-description: How the automated test validation steps are wired and platform quirks hit while registering them.
+description: Historical (Replit-only) — How the automated test validation steps are wired and platform quirks hit while registering them.
 ---
+
+> **Historical (Replit-only, 2026-10-09):** ComplyTrack no longer runs on Replit (see `replit-removed-render-only.md`). Replit validation steps (`setValidationCommand`, workflows, artifact-injected PORT/BASE_PATH, preview restarts) no longer exist; the contention and codegen-race lessons still apply to `scripts/validate.mjs` runs. Kept for context only.
 
 # Validation steps
 
