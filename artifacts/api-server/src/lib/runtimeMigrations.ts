@@ -1049,6 +1049,35 @@ export async function runRuntimeMigrations() {
       ON "contractor_certificates" ("contractor_id")
     `);
 
+    // Legacy item/contractor certificate history (lib/db certificatesTable).
+    // It was only ever created by drizzle push, but the compliance register,
+    // dashboard stats, item certificates and tenant export all read it, so a
+    // runtime-migrated database must have it too. Ownership has no client_id:
+    // a row belongs to the tenant of its compliance item or contractor.
+    // Existing tables are left as they are; only missing nullable columns are
+    // added so a drifted legacy table can still serve these reads.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "certificates" (
+        "id"            serial PRIMARY KEY,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "item_id"       integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+        "name"          text NOT NULL,
+        "file_url"      text,
+        "issue_date"    timestamp,
+        "expiry_date"   timestamp,
+        "notes"         text,
+        "created_at"    timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "file_url" text`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "issue_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "expiry_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "notes" text`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_item" ON "certificates" ("item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_contractor" ON "certificates" ("contractor_id")`);
+
     // Deduplication log for contractor compliance-expiry reminders. One row per
     // (client, contractor, milestone), where milestone encodes the reminder
     // target it was sent for (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
