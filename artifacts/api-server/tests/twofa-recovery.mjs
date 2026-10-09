@@ -698,6 +698,15 @@ async function main() {
   check("concurrent mobile challenge consumes its recovery code once",
     racedRecovery.rows.length === 1 && racedRecovery.rows[0].used_at != null);
 
+  // Run both lock orderings: a consumer that is only safe when it goes second
+  // (e.g. an unconditional SELECT-then-UPDATE) fails one of these rounds.
+  for (const [firstChannel, codeIndex, ipBase] of [["web", 3, 219], ["mobile", 4, 221]]) {
+    await raceRecoveryCodeAcrossWebAndMobile({
+      email: staffEmail, password: "password-456", userId: staffId,
+      recoveryCode: replenished.data.recoveryCodes[codeIndex], firstChannel, ipBase,
+    });
+  }
+
   const mobileTokenChallenge = await startMobileChallenge(216);
   const mobileSession = await verifyMobileChallenge(
     mobileTokenChallenge, generateToken(setup.data.secret), 216);
@@ -953,6 +962,200 @@ async function checkCrossTenantResetIsRejected(adminA, ownStaffId) {
   check("cross-tenant: target sign-in still requires 2fa", challenge.data?.requires2fa === true);
   const totpOk = await targetAgain("POST", "/auth/2fa/verify", { code: generateToken(targetSetup.data.secret) });
   check("cross-tenant: target's original authenticator still works", totpOk.status === 200, `got ${totpOk.status}`);
+}
+
+// ── Web cookie and mobile bearer race for one unused recovery code ────────────
+// Two independent valid pending challenges (a browser session pending 2FA and a
+// mobile login challenge) present the same code at the same time. A test-owned
+// connection holds the code's row lock until both requests are blocked on it,
+// so the overlap is proven rather than left to scheduling luck.
+async function raceRecoveryCodeAcrossWebAndMobile({ email, password, userId, recoveryCode, firstChannel, ipBase }) {
+  const label = `mixed web/mobile recovery race (${firstChannel} queued first)`;
+  const codeHash = createHash("sha256")
+    .update(recoveryCode.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  const challengeHash = token => createHash("sha256").update(token).digest("hex");
+  const createdChallengeHashes = [];
+  const issuedBearerTokens = [];
+  // Test-local deadline for every mobile call; never inherit an open-ended wait.
+  async function mobileCall(method, path, body, { token, ipSuffix, signal } = {}) {
+    const deadline = AbortSignal.timeout(15000);
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": `198.51.100.${ipSuffix}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    });
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (typeof data?.token === "string") issuedBearerTokens.push(data.token);
+    return { status: res.status, data };
+  }
+  async function startChallenge(ipSuffix) {
+    const started = await mobileCall("POST", "/auth/mobile-login", { email, password }, { ipSuffix });
+    if (started.status !== 200 || typeof started.data?.pendingToken !== "string") {
+      throw new Error(`${label}: mobile login did not issue a pending challenge (status ${started.status})`);
+    }
+    createdChallengeHashes.push(challengeHash(started.data.pendingToken));
+    return started.data.pendingToken;
+  }
+  const codeRows = async () => (await pool.query(
+    "SELECT id, used_at::text AS used_at FROM totp_recovery_codes WHERE user_id = $1 AND code_hash = $2",
+    [userId, codeHash])).rows;
+  const bearerSessions = async () => Number((await pool.query(
+    "SELECT count(*)::int AS n FROM mobile_sessions WHERE user_id = $1", [userId])).rows[0].n);
+
+  try {
+    const web = makeSession();
+    const webLogin = await web("POST", "/auth/login", { email, password });
+    check(`${label}: web contender has a valid pending 2FA session`,
+      webLogin.status === 200 && webLogin.data?.requires2fa === true, `got ${webLogin.status}`);
+    const webBefore = await web("GET", "/auth/me");
+    check(`${label}: pending web session is not yet authenticated`, webBefore.status === 401);
+    const pendingToken = await startChallenge(ipBase);
+
+    const before = await codeRows();
+    check(`${label}: code exists once and starts unused`, before.length === 1 && before[0].used_at === null);
+    const sessionsBefore = await bearerSessions();
+
+    // Both entry points end in `UPDATE totp_recovery_codes ...` against this
+    // row; the web path queues on its tuple lock and the mobile path on its
+    // SELECT ... FOR UPDATE subquery, so holding FOR UPDATE here stalls both.
+    const locker = await pool.connect();
+    const abort = new AbortController();
+    let outcomes;
+    let barrierError;
+    let waiting = 0;
+    try {
+      await locker.query("BEGIN");
+      await locker.query(
+        "SELECT id FROM totp_recovery_codes WHERE user_id = $1 AND code_hash = $2 FOR UPDATE", [userId, codeHash]);
+      // Each request gets its settle handler the moment it starts, so a rejection
+      // is observed at once and cannot go unhandled while the barrier is held.
+      const settle = promise => promise.then(
+        value => ({ status: "fulfilled", value }), reason => ({ status: "rejected", reason }));
+      const start = {
+        web: () => settle(web("POST", "/auth/2fa/verify", { code: recoveryCode }, { signal: abort.signal })),
+        mobile: () => settle(mobileCall("POST", "/auth/mobile-login/verify-totp",
+          { pendingToken, code: recoveryCode }, { ipSuffix: ipBase, signal: abort.signal })),
+      };
+      const secondChannel = firstChannel === "web" ? "mobile" : "web";
+      const started = {};
+      let finishedEarly = false;
+      const waitForQueued = async expected => {
+        const deadline = Date.now() + 10000;
+        do {
+          const blocked = await pool.query(`
+            WITH RECURSIVE blocked AS (
+              SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+              UNION
+              SELECT activity.pid FROM pg_stat_activity activity
+              JOIN blocked ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+            )
+            SELECT count(*)::int AS waiting
+            FROM blocked JOIN pg_stat_activity activity USING (pid)
+            WHERE activity.query ILIKE '%UPDATE totp_recovery_codes%'
+          `, [locker.processID]);
+          waiting = blocked.rows[0].waiting;
+          // A request that finished (or failed) while the row is locked cannot
+          // reach the barrier, so stop waiting instead of running to the deadline.
+          if (waiting >= expected || finishedEarly) return;
+          await new Promise(resolve => setTimeout(resolve, 25));
+        } while (Date.now() < deadline);
+      };
+      // Queue the first channel on the row lock before the second starts:
+      // Postgres grants queued tuple locks in arrival order, so this fixes which
+      // consumer runs first and each round exercises one ordering deterministically.
+      started[firstChannel] = start[firstChannel]();
+      started[firstChannel].then(() => { finishedEarly = true; });
+      await waitForQueued(1);
+      if (waiting === 1 && !finishedEarly) {
+        started[secondChannel] = start[secondChannel]();
+        started[secondChannel].then(() => { finishedEarly = true; });
+        await waitForQueued(2);
+      }
+      outcomes = Promise.all([started.web, started.mobile].map(promise => promise ?? Promise.resolve(
+        { status: "rejected", reason: new Error(`${label}: request was never started`) })));
+      check(`${label}: web and mobile verifications overlap at recovery-code consumption`,
+        waiting === 2, `waiting: ${waiting}`);
+      if (waiting !== 2) abort.abort(new Error(`${label}: requests did not reach the barrier`));
+    } catch (error) {
+      barrierError = error;
+      abort.abort(error);
+    } finally {
+      let rollbackError;
+      try {
+        await locker.query("ROLLBACK");
+      } catch (error) {
+        rollbackError = error;
+        barrierError ??= error;
+      } finally {
+        locker.release(rollbackError);
+      }
+    }
+    const settled = outcomes ? await outcomes : [];
+    if (barrierError) throw barrierError;
+    const transportFailures = settled.filter(result => result.status === "rejected");
+    if (transportFailures.length > 0) {
+      throw new AggregateError(transportFailures.map(result => result.reason), `${label}: request transport failure`);
+    }
+    const [webResult, mobileResult] = settled.map(result => result.value);
+    const webWon = webResult.status === 200;
+    const mobileWon = mobileResult.status === 200 && typeof mobileResult.data?.token === "string";
+    check(`${label}: exactly one channel authenticates`, Number(webWon) + Number(mobileWon) === 1,
+      `web ${webResult.status}, mobile ${mobileResult.status}`);
+    check(`${label}: the channel that reached the lock first is the one that signs in`,
+      firstChannel === "web" ? webWon : mobileWon, `web ${webResult.status}, mobile ${mobileResult.status}`);
+    check(`${label}: the losing channel is rejected`,
+      webWon ? mobileResult.status === 401 && mobileResult.data?.token === undefined
+        : webResult.status === 401,
+      `web ${webResult.status}, mobile ${mobileResult.status}`);
+
+    const webMe = await web("GET", "/auth/me");
+    check(`${label}: web cookie is authenticated only if web won`,
+      webWon ? webMe.status === 200 && webMe.data?.user?.id === userId : webMe.status === 401,
+      `won ${webWon}, /auth/me ${webMe.status}`);
+    if (mobileWon) {
+      const bearerMe = await mobileCall("GET", "/auth/me", undefined, { token: mobileResult.data.token, ipSuffix: ipBase });
+      check(`${label}: winning bearer token authenticates`,
+        bearerMe.status === 200 && bearerMe.data?.user?.id === userId, `got ${bearerMe.status}`);
+    }
+    check(`${label}: exactly the winner's bearer sessions exist`,
+      await bearerSessions() === sessionsBefore + (mobileWon ? 1 : 0));
+    const challengeLeft = await pool.query(
+      "SELECT count(*)::int AS n FROM mobile_login_challenges WHERE token_hash = $1", [challengeHash(pendingToken)]);
+    check(`${label}: mobile challenge is consumed only if mobile won`,
+      challengeLeft.rows[0].n === (mobileWon ? 0 : 1));
+
+    const after = await codeRows();
+    check(`${label}: exactly one matching recovery-code row is marked used`,
+      after.length === 1 && after[0].id === before[0]?.id && typeof after[0].used_at === "string");
+
+    // Replay on fresh, valid challenges for both channels.
+    const webReplay = makeSession();
+    const replayLogin = await webReplay("POST", "/auth/login", { email, password });
+    check(`${label}: web replay starts from a valid pending session`, replayLogin.data?.requires2fa === true);
+    const webReplayResult = await webReplay("POST", "/auth/2fa/verify", { code: recoveryCode });
+    check(`${label}: replaying the code on web fails`, webReplayResult.status === 401, `got ${webReplayResult.status}`);
+    check(`${label}: web replay leaves the session unauthenticated`, (await webReplay("GET", "/auth/me")).status === 401);
+    const replayToken = await startChallenge(ipBase + 1);
+    const mobileReplay = await mobileCall("POST", "/auth/mobile-login/verify-totp",
+      { pendingToken: replayToken, code: recoveryCode }, { ipSuffix: ipBase + 1 });
+    check(`${label}: replaying the code on mobile fails without a bearer`,
+      mobileReplay.status === 401 && mobileReplay.data?.token === undefined, `got ${mobileReplay.status}`);
+    check(`${label}: replays issue no bearer session`,
+      await bearerSessions() === sessionsBefore + (mobileWon ? 1 : 0));
+    const afterReplay = await codeRows();
+    check(`${label}: replays do not change the used timestamp`,
+      afterReplay.length === 1 && afterReplay[0].used_at === after[0]?.used_at);
+  } finally {
+    // Remove exactly the challenges and bearer sessions this race created.
+    await pool.query("DELETE FROM mobile_login_challenges WHERE token_hash = ANY($1::text[])", [createdChallengeHashes]);
+    await pool.query("DELETE FROM mobile_sessions WHERE token = ANY($1::text[])", [issuedBearerTokens]);
+  }
 }
 
 try {
