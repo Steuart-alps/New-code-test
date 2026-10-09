@@ -43,8 +43,10 @@ function buildItemResponse(
   category: typeof categoriesTable.$inferSelect | null,
   contractor: typeof contractorsTable.$inferSelect | null
 ) {
+  // Scheduling-link credentials (raw legacy token or digest) never leave the server.
+  const { scheduleToken: _token, scheduleTokenHash: _digest, ...visible } = item;
   return {
-    ...item,
+    ...visible,
     siteName: site?.name ?? null,
     categoryName: category?.name ?? null,
     categoryColor: category?.color ?? null,

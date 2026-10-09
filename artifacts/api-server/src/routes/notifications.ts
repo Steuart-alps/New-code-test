@@ -7,7 +7,7 @@ import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
-import { encryptTokenPayload } from "../lib/bearerTokens";
+import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -121,7 +121,8 @@ async function sendReminderForItem(opts: {
 
     if (queued.rows.length === 0) return false;
     const updatedItems = await tx.update(complianceItemsTable)
-      .set({ scheduleToken, visitScheduledAt: null })
+      // Only the digest is stored; the raw token lives in the encrypted draft.
+      .set({ scheduleToken: null, scheduleTokenHash: digestBearerToken(scheduleToken), visitScheduledAt: null })
       .where(and(
         eq(complianceItemsTable.id, item.id),
         eq(complianceItemsTable.clientId, item.clientId),
@@ -339,17 +340,34 @@ router.post("/notifications/send-reminder/:itemId", requireAuth, requireClientAd
 });
 
 // ----- Public scheduling endpoints (no auth — token is the credential) -----
+// Only the SHA-256 digest of a scheduling token is stored, so the presented
+// token is hashed before lookup; a stolen digest is not itself a valid link.
 
-router.get("/notifications/public/schedule/:token", async (req, res) => {
-  const token = req.params.token;
+const SCHEDULE_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function scheduleTokenDigest(raw: unknown): string | null {
+  return typeof raw === "string" && SCHEDULE_TOKEN.test(raw) ? digestBearerToken(raw) : null;
+}
+
+async function findScheduleItem(digest: string) {
   const rows = await db
     .select({ item: complianceItemsTable, contractor: contractorsTable })
     .from(complianceItemsTable)
     .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.scheduleToken, token))
+    .where(eq(complianceItemsTable.scheduleTokenHash, digest))
     .limit(1);
+  return rows[0];
+}
 
-  const row = rows[0];
+/**
+ * Public, token-protected scheduling routes. Mounted in routes/index.ts ahead of
+ * any router that installs root-level requireAuth, with the public-link rate
+ * limits, like the contractor portal.
+ */
+export const notificationsPublicRouter: IRouter = Router();
+
+notificationsPublicRouter.get("/:token", async (req, res) => {
+  const digest = scheduleTokenDigest(req.params.token);
+  const row = digest ? await findScheduleItem(digest) : undefined;
   if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
 
   const settings = await getClientSettings(row.item.clientId);
@@ -363,8 +381,9 @@ router.get("/notifications/public/schedule/:token", async (req, res) => {
   });
 });
 
-router.post("/notifications/public/schedule/:token", async (req, res) => {
-  const token = req.params.token;
+notificationsPublicRouter.post("/:token", async (req, res) => {
+  const digest = scheduleTokenDigest(req.params.token);
+  if (!digest) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
   const { date } = req.body ?? {};
   if (!date || typeof date !== "string") return void res.status(400).json({ error: "Please choose a date." });
 
@@ -372,14 +391,7 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
   if (Number.isNaN(proposed.getTime())) return void res.status(400).json({ error: "That date isn't valid." });
   if (proposed.getTime() < Date.now() - 24 * 60 * 60 * 1000) return void res.status(400).json({ error: "Please choose a date in the future." });
 
-  const rows = await db
-    .select({ item: complianceItemsTable, contractor: contractorsTable })
-    .from(complianceItemsTable)
-    .leftJoin(contractorsTable, eq(complianceItemsTable.contractorId, contractorsTable.id))
-    .where(eq(complianceItemsTable.scheduleToken, token))
-    .limit(1);
-
-  const row = rows[0];
+  const row = await findScheduleItem(digest);
   if (!row) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
   const { item, contractor } = row;
   if (!contractor?.email) return void res.status(400).json({ error: "Contractor record is missing — please contact the business directly." });
@@ -411,19 +423,30 @@ router.post("/notifications/public/schedule/:token", async (req, res) => {
   const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\n${companyName}`;
 
   const confirmationSubject = `Visit Confirmed: ${item.title} — ${dateStr}`;
-  await db.execute(sql`INSERT INTO contractor_email_queue
+  // Consume the link and queue the confirmation atomically. The conditional
+  // update on the digest is the one-time claim: of concurrent submissions
+  // only one matches, and a rotated or used link matches none.
+  const claimed = await db.transaction(async (tx) => {
+    const consumed = await tx
+      .update(complianceItemsTable)
+      .set({ visitScheduledAt: proposed, scheduleTokenHash: null, scheduleToken: null })
+      .where(and(
+        eq(complianceItemsTable.id, item.id),
+        eq(complianceItemsTable.clientId, item.clientId),
+        eq(complianceItemsTable.scheduleTokenHash, digest),
+      ))
+      .returning({ id: complianceItemsTable.id });
+    if (consumed.length === 0) return false;
+    await tx.execute(sql`INSERT INTO contractor_email_queue
     (client_id,entity_type,entity_id,contractor_id,email_type,mode,to_email,subject,body_html,body_text,cc_json,ics_content,ics_filename,email_preview_json,idempotency_key)
     VALUES (${item.clientId},'compliance',${item.id},${contractor.id},'reminder','assign',${contractor.email},
       ${confirmationSubject},${html},${text},${JSON.stringify(maintenanceEmail ? [maintenanceEmail] : [])}::jsonb,
       ${ics},${`${safeTitle}.ics`},${JSON.stringify({ subject: confirmationSubject, html, text })}::jsonb,
       ${`schedule-confirmation-${item.clientId}-${item.id}-${proposed.toISOString().slice(0,10)}`})
     ON CONFLICT (idempotency_key) DO NOTHING`);
-
-  // Burn the token so the link can't be reused, and record the chosen date.
-  await db
-    .update(complianceItemsTable)
-    .set({ visitScheduledAt: proposed, scheduleToken: null })
-    .where(eq(complianceItemsTable.id, item.id));
+    return true;
+  });
+  if (!claimed) return void res.status(404).json({ error: "This scheduling link is no longer valid." });
 
   res.json({ success: true, message: `Visit scheduled for ${dateStr}.`, scheduledFor: proposed });
 });
