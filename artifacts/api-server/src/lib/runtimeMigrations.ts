@@ -9,6 +9,7 @@ import {
   digestBearerToken,
   encryptTokenPayload,
   decryptTokenPayload,
+  isDamagedTokenPayload,
   tokenPayloadNeedsReencryption,
   validateTokenEncryptionConfig,
 } from "./bearerTokens";
@@ -29,7 +30,16 @@ export async function reencryptQueuedTokenPayloads(queueId?: number): Promise<nu
     for (const row of rows.rows as any[]) {
       const encoded = String(row.encrypted_token_payload);
       if (!tokenPayloadNeedsReencryption(encoded)) continue;
-      const replacement = encryptTokenPayload(decryptTokenPayload(encoded));
+      let replacement: string;
+      try {
+        replacement = encryptTokenPayload(decryptTokenPayload(encoded));
+      } catch (err) {
+        // A damaged draft stays as it is (preview and dispatch refuse it); a
+        // missing key is a configuration error and still stops startup.
+        if (!isDamagedTokenPayload(err)) throw err;
+        logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+        continue;
+      }
       const result = await tx.execute(sql`UPDATE contractor_email_queue
         SET encrypted_token_payload=${replacement}, updated_at=now()
         WHERE id=${row.id}
@@ -978,9 +988,16 @@ export async function runRuntimeMigrations() {
         subject, body_html, body_text, email_preview_json, encrypted_token_payload
         FROM contractor_email_queue FOR UPDATE`);
       for (const row of (legacy.rows as any[])) {
-        const payload: Record<string, string> = row.encrypted_token_payload
-          ? decryptTokenPayload(row.encrypted_token_payload)
-          : {};
+        let payload: Record<string, string>;
+        try {
+          payload = row.encrypted_token_payload ? decryptTokenPayload(row.encrypted_token_payload) : {};
+        } catch (err) {
+          // Leave a damaged draft untouched rather than abort every later
+          // migration; preview and dispatch refuse it.
+          if (!isDamagedTokenPayload(err)) throw err;
+          logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+          continue;
+        }
         let subject = String(row.subject ?? "");
         let html = String(row.body_html ?? "");
         let text = row.body_text == null ? null : String(row.body_text);
