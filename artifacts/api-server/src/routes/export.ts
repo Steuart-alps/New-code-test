@@ -410,7 +410,8 @@ router.get(
       archive.append(rawToCsv(uploadedCerts.rows), { name: "contractors/uploaded-certificates.csv" });
 
       // ── Compliance items ───────────────────────────────────────────────────
-      const compItems = await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.clientId, cid));
+      const compItems = (await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.clientId, cid)))
+        .map(({ scheduleToken: _token, scheduleTokenHash: _digest, ...item }) => item);
       archive.append(rowsToCsv(compItems), { name: "compliance/items.csv" });
 
       // ── Food safety ────────────────────────────────────────────────────────
