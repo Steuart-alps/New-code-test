@@ -323,6 +323,35 @@ export function getPublicAppUrl(): string {
   return "http://localhost:5173";
 }
 
+/**
+ * Visit confirmation sent after a contractor picks a date from the public
+ * scheduling link. Contractor, item and company names are business text, so
+ * the HTML escapes them; the plain-text body and subject keep them verbatim.
+ */
+export function buildVisitConfirmationEmail(opts: {
+  contractorName: string;
+  companyName: string;
+  itemTitle: string;
+  visitDate: Date;
+}): { subject: string; html: string; text: string; dateStr: string } {
+  const dateStr = opts.visitDate.toLocaleDateString("en-GB", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #1e293b;">Visit Confirmed</h2>
+      <p>Thank you ${escapeHtml(opts.contractorName)}.</p>
+      <p>Your visit for <strong>${escapeHtml(opts.itemTitle)}</strong> is scheduled for <strong>${escapeHtml(dateStr)}</strong>.</p>
+      <p>Best regards,<br><strong>${escapeHtml(opts.companyName)}</strong></p>
+    </div>`;
+  const text = `Visit Confirmed\n\nThank you ${opts.contractorName}.\n\nYour visit for ${opts.itemTitle} is scheduled for ${dateStr}.\n\n${opts.companyName}`;
+  const subject = `Visit Confirmed: ${opts.itemTitle} — ${dateStr}`;
+  return { subject, html, text, dateStr };
+}
+
 export function buildReminderEmail(opts: {
   contractorName: string;
   companyName: string;

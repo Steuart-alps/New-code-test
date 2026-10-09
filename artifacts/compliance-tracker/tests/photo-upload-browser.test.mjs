@@ -239,6 +239,18 @@ async function routeApi(route, url) {
     });
   }
   if (pathname === "/api/food-safety/summary" && method === "GET") return jsonResponse(route, { days: [] });
+  // KitchenTrack mounts its module actions and inspection-evidence panels
+  // beside the diary. They are read-only here; this suite has no actions or
+  // evidence fixtures, and any other route still fails the unexpected-request check.
+  const kitchenPanelReads = new Set([
+    "/api/track-evidence",
+    "/api/track-evidence/requirements",
+    "/api/track-actions",
+    "/api/track-actions/templates/matching",
+  ]);
+  if (kitchenPanelReads.has(pathname) && method === "GET" && searchParams.get("module") === "kitchen") {
+    return jsonResponse(route, []);
+  }
 
   if (pathname === "/api/bike-track/bikes" && method === "GET") return jsonResponse(route, []);
   if (pathname === "/api/bike-track/hires" && method === "GET") {

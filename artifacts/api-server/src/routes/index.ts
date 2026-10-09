@@ -9,7 +9,7 @@ import complianceItemsRouter from "./compliance-items";
 import contractorsRouter from "./contractors";
 import certificatesRouter from "./certificates";
 import settingsRouter from "./settings";
-import notificationsRouter from "./notifications";
+import notificationsRouter, { notificationsPublicRouter } from "./notifications";
 import storageRouter from "./storage";
 import billingRouter from "./billing";
 import adminRouter from "./admin";
@@ -75,6 +75,8 @@ router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, 
 // Public FixTrack token links must also precede routers with root-level auth.
 router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
 router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
+// Contractor visit-scheduling links (token-protected).
+router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);

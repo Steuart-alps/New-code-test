@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 export const base = process.env.API_BASE;
 if (process.env.NODE_ENV !== "test" || process.env.FRESH_SCHEMA_TEST !== "1"
@@ -32,37 +32,85 @@ export const {
   encryptTokenPayload, tokenPayloadNeedsReencryption, reencryptQueuedTokenPayloads,
 } = runtime;
 
-export function requestSession() {
+// With `browserPolicy`, the session behaves like the same-origin web app under
+// the production CSRF policy: unsafe requests carry the API origin and the
+// session-bound X-CSRF-Token from /auth/csrf-token. Legacy suites keep the
+// original header-free contract.
+export function requestSession({ browserPolicy = false } = {}) {
   let cookie = "";
-  return async (method, path, body, format = "json") => {
+  let csrfToken = null;
+  const origin = new URL(base).origin;
+  const send = async (method, path, body, format, extraHeaders = {}) => {
     const response = await fetch(`${base}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
     const setCookie = response.headers.get("set-cookie");
-    if (setCookie) cookie = setCookie.split(";")[0];
+    if (setCookie && setCookie.split(";")[0] !== cookie) {
+      cookie = setCookie.split(";")[0];
+      csrfToken = null;
+    }
     return { status: response.status, data: format === "buffer" ? Buffer.from(await response.arrayBuffer()) : await response.json().catch(() => null) };
   };
+  const request = async (method, path, body, format = "json") => {
+    if (!browserPolicy || ["GET", "HEAD"].includes(method)) return send(method, path, body, format);
+    if (!csrfToken) {
+      const issued = await send("GET", "/auth/csrf-token", undefined, "json");
+      assert.equal(issued.status, 200, JSON.stringify(issued.data));
+      csrfToken = issued.data.token;
+    }
+    const result = await send(method, path, body, format, { origin, "x-csrf-token": csrfToken });
+    // Authentication steps may change the session; fetch a fresh token next time.
+    if (path.startsWith("/auth/")) csrfToken = null;
+    return result;
+  };
+  request.cookie = () => cookie;
+  return request;
+}
+
+export function currentTotp(secret) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const char of secret.toUpperCase().replace(/=+$/, "")) bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  const message = Buffer.alloc(8);
+  message.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = createHmac("sha1", Buffer.from(bytes)).update(message).digest();
+  const offset = digest[digest.length - 1] & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+// Complete mandatory authenticator enrolment through the normal endpoints for
+// a session whose login returned `requires2faSetup`.
+async function enrolTwoFactor(request, login) {
+  assert.equal(login.data?.requires2faSetup, true, `mandatory 2FA must be enforced: ${JSON.stringify(login.data)}`);
+  const setup = await request("GET", "/auth/2fa/setup");
+  assert.equal(setup.status, 200, JSON.stringify(setup.data));
+  const enabled = await request("POST", "/auth/2fa/enable", { code: currentTotp(setup.data.secret) });
+  assert.equal(enabled.status, 200, JSON.stringify(enabled.data));
 }
 
 const password = "private-approval-fixture-123";
-export async function createTenant(label) {
-  const request = requestSession();
+export async function createTenant(label, { browserPolicy = false } = {}) {
+  const request = requestSession({ browserPolicy });
   const email = `approval-${label}-${randomUUID()}@test.local`;
   const registered = await request("POST", "/auth/register", { name: `${label} manager`, email, password });
   assert.equal(registered.status, 200, JSON.stringify(registered.data));
   assert.equal(typeof registered.data.verificationToken, "string");
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status, 200);
-  assert.equal((await request("POST", "/auth/login", { email, password })).status, 200);
+  const login = await request("POST", "/auth/login", { email, password });
+  assert.equal(login.status, 200);
+  if (browserPolicy) await enrolTwoFactor(request, login);
   const me = await request("GET", "/auth/me");
   const user = me.data.user ?? me.data;
   assert.ok(Number.isInteger(user.clientId));
   return { request, clientId: user.clientId, userId: user.id };
 }
 
-export async function createUser(owner, body) {
+export async function createUser(owner, body, { browserPolicy = false } = {}) {
   const email = `approval-user-${randomUUID()}@test.local`;
   const created = await owner.request("POST", "/users", {
     name: "Approval fixture user", email, password, clientId: owner.clientId, ...body,
@@ -76,8 +124,10 @@ export async function createUser(owner, body) {
     const updated = await owner.request("PUT", `/users/${created.data.id}`, managerFlags);
     assert.equal(updated.status, 200, JSON.stringify(updated.data));
   }
-  const request = requestSession();
-  assert.equal((await request("POST", "/auth/login", { email, password })).status, 200);
+  const request = requestSession({ browserPolicy });
+  const login = await request("POST", "/auth/login", { email, password });
+  assert.equal(login.status, 200);
+  if (browserPolicy) await enrolTwoFactor(request, login);
   return { request, userId: created.data.id };
 }
 
