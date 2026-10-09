@@ -6,11 +6,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { build } from "esbuild";
+import { chromium as playwrightChromium } from "@playwright/test";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tempDir = await mkdtemp(path.join(tmpdir(), "contractor-approvals-browser-"));
 const helperBundle = path.join(tempDir, "contractor-approval-refresh-state.mjs");
-const chromiumPath = process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium";
+const chromiumPath = process.env.CHROMIUM_PATH ?? playwrightChromium.executablePath();
 
 async function waitForPort(server) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

@@ -3,9 +3,9 @@
 //
 // Canonical base URL resolution order:
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
-//   2. verified production custom domain from site-url.mjs
-//
-// Workspace REPLIT_DOMAINS values are not canonical production addresses.
+//   2. RENDER_EXTERNAL_URL        (Render's onrender.com address)
+//   3. verified production custom domain
+// See site-url.mjs.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Bounded-concurrency, memory-aware validation runner.
 //
-// Every Replit validation workflow in .replit runs `node scripts/validate.mjs <check>`.
-// When Replit (or the Project run button) launches all of them at once, each
+// Every validation check runs as `node scripts/validate.mjs <check>`. When
+// several runners start at once (separate terminals, agents or CI jobs), each
 // runner waits here, as one small Node process, for a shared slot instead of
 // starting pnpm, tsc, esbuild, Vite, Chromium and an API server immediately.
 // The commands themselves are unchanged: they are listed in CHECKS below.
@@ -11,8 +11,6 @@
 //   node scripts/validate.mjs --all                    run every check in stages
 //   node scripts/validate.mjs --stage integration      run one stage
 //   node scripts/validate.mjs --list                   list checks and stages
-//   node scripts/validate.mjs --check-config           verify .replit points every
-//                                                      validation at this runner
 // Options: --concurrency N, --fail-fast, --dry-run.
 //
 // Environment (all optional):
@@ -23,7 +21,7 @@
 //   VALIDATE_BROWSER_CONCURRENCY browser suites at once (default 1)
 //   VALIDATE_MEM_RESERVE_MB     memory to keep free on top of a check's estimate (default 768)
 //   VALIDATE_MEM_WAIT_SECONDS   longest wait for memory before starting anyway (default 900)
-//   VALIDATE_GUARD_PORT         port owned by the managed API preview (default 8080)
+//   VALIDATE_GUARD_PORT         port owned by the local API dev server (default 8080)
 //   VALIDATE_ON_DUPLICATE       wait (default) | replace: what to do when the same check
 //                               is already running in another live runner
 //   VALIDATE_STATE_DIR          slot/claim directory (default $TMPDIR/complytrack-validate)
@@ -55,7 +53,7 @@ const STAGES = ["static", "codegen", "integration"];
 const api = (script) => `pnpm --filter @workspace/api-server run ${script}`;
 const web = (script) => `pnpm --filter @workspace/compliance-tracker run ${script}`;
 
-// Commands are exactly those the .replit validation workflows ran before.
+// Each check's shell command.
 const DEFAULT_CHECKS = {
   "api-codegen-drift": { stage: "codegen", class: "heavy", generated: "exclusive", cmd: "pnpm run check:api-codegen" },
 
@@ -323,7 +321,7 @@ function slotHeld(slot) {
 
 // The API codegen drift check temporarily deletes the generated client. It takes
 // the generated-files lock exclusively; every other check holds it shared, so
-// separate runners (one per Replit validation workflow) never overlap the gap.
+// separate runners (e.g. one per check) never overlap the gap.
 // While the drift check waits, it leaves a marker so new checks queue behind it.
 const pendingFile = (dir) => path.join(dir, "generated-pending.json");
 
@@ -361,7 +359,7 @@ function prefixStream(stream, out, prefix) {
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const checks = loadChecks(env);
-  const opts = { all: false, stages: [], names: [], failFast: false, dryRun: false, list: false, checkConfig: false };
+  const opts = { all: false, stages: [], names: [], failFast: false, dryRun: false, list: false };
   let concurrency = intEnv(env, "VALIDATE_CONCURRENCY", os.totalmem() < 4 * 1024 ** 3 ? 1 : 2);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -372,7 +370,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     else if (arg === "--fail-fast") opts.failFast = true;
     else if (arg === "--dry-run") opts.dryRun = true;
     else if (arg === "--list") opts.list = true;
-    else if (arg === "--check-config") opts.checkConfig = true;
     else if (arg === "--help" || arg === "-h") { process.stdout.write(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 30).map((l) => l.replace(/^\/\/ ?/, "")).join("\n") + "\n"); return 0; }
     else if (arg.startsWith("-")) throw new Error(`Unknown option ${arg}`);
     else opts.names.push(arg);
@@ -385,7 +382,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     }
     return 0;
   }
-  if (opts.checkConfig) return checkReplitConfig(checks, env);
 
   for (const stage of opts.stages) if (!STAGES.includes(stage)) throw new Error(`Unknown stage "${stage}" (stages: ${STAGES.join(", ")})`);
   for (const name of opts.names) if (!checks[name]) throw new Error(`Unknown check "${name}". Run with --list to see them.`);
@@ -602,28 +598,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   console.log(`Lowest available memory during the run: ${minMemory} MB; ${previewNote}`);
   const notRun = selected.filter((n) => !results.has(n));
   return failed || notRun.length ? 1 : 0;
-}
-
-// ---------------------------------------------------------------- .replit check
-
-/** Every `isValidation` workflow must run `node scripts/validate.mjs <its name>`, and every check must have one. */
-export function checkReplitConfig(checks, env = process.env) {
-  const file = env.VALIDATE_REPLIT_PATH || path.join(ROOT, ".replit");
-  const blocks = fs.readFileSync(file, "utf8").split(/^\[\[workflows\.workflow\]\]\s*$/m).slice(1);
-  const problems = [];
-  const seen = new Set();
-  for (const block of blocks) {
-    const name = /^name\s*=\s*"([^"]+)"/m.exec(block)?.[1];
-    if (!/isValidation\s*=\s*true/.test(block)) continue;
-    const args = [...block.matchAll(/^task\s*=\s*"shell\.exec"\s*\nargs\s*=\s*"([^"]*)"/gm)].map((m) => m[1]);
-    seen.add(name);
-    if (!checks[name]) problems.push(`validation workflow "${name}" has no entry in scripts/validate.mjs`);
-    else if (args.length !== 1 || args[0] !== `node scripts/validate.mjs ${name}`) problems.push(`validation workflow "${name}" should run "node scripts/validate.mjs ${name}" (found ${JSON.stringify(args)})`);
-  }
-  for (const name of Object.keys(checks)) if (!seen.has(name)) problems.push(`check "${name}" is not registered as a validation workflow in .replit`);
-  for (const problem of problems) console.error(problem);
-  if (!problems.length) console.log(`.replit: ${seen.size} validation workflows all run through scripts/validate.mjs`);
-  return problems.length ? 1 : 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

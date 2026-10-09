@@ -1,3 +1,35 @@
+import type { jsPDF as JsPdf } from "jspdf";
+
+/** An export failure whose message tells the user how to recover. */
+export class HotTubLogPdfError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "HotTubLogPdfError";
+  }
+}
+
+// Browsers keep a failed dynamic import for the page's lifetime, so retrying
+// in place cannot succeed; only a reload fetches the module again.
+const MODULE_LOAD_FAILED = "The PDF tool could not be loaded. Reload the page, then try again.";
+const GENERATION_FAILED = "The PDF could not be created. Please try again.";
+
+/**
+ * jsPDF's output() catches its own errors, shows a native alert and returns
+ * undefined. Silence the alert for this synchronous call and report the
+ * failure in the page instead.
+ */
+function outputBlob(pdf: JsPdf): Blob {
+  const nativeAlert = window.alert;
+  window.alert = () => {};
+  try {
+    const blob: unknown = pdf.output("blob");
+    if (!(blob instanceof Blob) || blob.size === 0) throw new Error("jsPDF produced no PDF data");
+    return blob;
+  } finally {
+    window.alert = nativeAlert;
+  }
+}
+
 export interface HotTubLogPdfReport {
   generatedAt: Date;
   generatedBy: string;
@@ -8,10 +40,24 @@ export interface HotTubLogPdfReport {
 /** Generate text-based, paginated PDF bytes without a print window or dialog. */
 export async function createHotTubLogPdf(report: HotTubLogPdfReport): Promise<Blob> {
   // Keep PDF libraries out of the initial page bundle.
-  const [{ jsPDF }, { autoTable }] = await Promise.all([
-    import("jspdf"),
-    import("jspdf-autotable"),
-  ]);
+  let modules: [typeof import("jspdf"), typeof import("jspdf-autotable")];
+  try {
+    modules = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  } catch (cause) {
+    throw new HotTubLogPdfError(MODULE_LOAD_FAILED, { cause });
+  }
+  try {
+    return buildPdf(modules[0].jsPDF, modules[1].autoTable, report);
+  } catch (cause) {
+    throw new HotTubLogPdfError(GENERATION_FAILED, { cause });
+  }
+}
+
+function buildPdf(
+  jsPDF: typeof import("jspdf").jsPDF,
+  autoTable: typeof import("jspdf-autotable").autoTable,
+  report: HotTubLogPdfReport,
+): Blob {
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   const title = "Hot Tub & Spa Maintenance Log";
   const date = report.generatedAt.toLocaleDateString("en-GB", {
@@ -78,5 +124,5 @@ export async function createHotTubLogPdf(report: HotTubLogPdfReport): Promise<Bl
     pdf.text(`Page ${page} of ${pages}`, pdf.internal.pageSize.getWidth() - 10,
       pdf.internal.pageSize.getHeight() - 7, { align: "right" });
   }
-  return pdf.output("blob");
+  return outputBlob(pdf);
 }

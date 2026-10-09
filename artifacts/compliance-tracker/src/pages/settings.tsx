@@ -219,7 +219,7 @@ function StorageUsageCard() {
                 </p>
                 {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Based on Replit’s storage cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
+                    Based on our storage provider’s cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}

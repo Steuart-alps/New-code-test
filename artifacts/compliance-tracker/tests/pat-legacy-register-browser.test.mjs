@@ -20,7 +20,7 @@ const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const vite = spawn("pnpm", ["exec", "vite", "--config", "vite.config.ts", "--host", "127.0.0.1"], {
   cwd: root,
-  env: { ...process.env, PORT: String(port), BASE_PATH: "/", NODE_ENV: "test", REPL_ID: undefined },
+  env: { ...process.env, PORT: String(port), BASE_PATH: "/", NODE_ENV: "test" },
   stdio: ["ignore", "ignore", "pipe"],
 });
 let viteError = "";
@@ -36,7 +36,7 @@ async function waitForVite() {
   throw new Error(`Vite did not start: ${viteError}`);
 }
 const chromiumPath = () => process.env.CHROMIUM_PATH
-  ?? ["/opt/pw-browsers/chromium-1194/chrome-linux/chrome", "/repl/tools/bin/chromium"].find(path => existsSync(path));
+  ?? ["/opt/pw-browsers/chromium-1194/chrome-linux/chrome"].find(path => existsSync(path));
 
 const today = new Date().toISOString().slice(0, 10);
 const appliance = (id, name, overrides = {}) => ({

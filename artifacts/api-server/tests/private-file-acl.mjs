@@ -10,6 +10,7 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = await mkdtemp(path.join(dir, ".build-private-acl-"));
 const fixture = JSON.stringify(path.join(dir, "private-file-acl-fixture.mjs"));
 let server;
+let lib;
 try {
   const stubs = {
     gcs: `export { Storage, File } from ${fixture};`,
@@ -58,7 +59,7 @@ try {
       },
     }],
   });
-  const lib = await import(pathToFileURL(output).href);
+  lib = await import(pathToFileURL(output).href);
   // Change only provider configuration, never the ownership/access methods.
   lib.ObjectStorageService.prototype.getPrivateObjectDir = () => "/acl-test/private";
   const storage = new lib.ObjectStorageService();
@@ -104,6 +105,8 @@ try {
       register: "/doc-track/documents",
       urlField: "uploadUrl",
       body: { title: "Private policy", category: "policy", fileName: "policy.pdf", mimeType: "application/pdf" },
+      // Current contract: an ACL persistence failure is a 500 "could not secure".
+      aclFailure: { status: 500, error: "Could not secure uploaded document" },
     },
     {
       label: "Generic",
@@ -111,9 +114,61 @@ try {
       register: "/documents",
       urlField: "uploadURL",
       body: { name: "Private policy", mimeType: "application/pdf", fileSize: 30 },
+      // Current contract: an ACL persistence failure is a 400 "could not be verified".
+      aclFailure: { status: 400, error: "Uploaded file could not be verified" },
     },
   ]) {
     const uploadBody = { name: "policy.pdf", size: 30, contentType: "application/pdf" };
+
+    // Failure path: the provider rejects the ACL write once during registration.
+    // Only the fake SDK fails; routes, ownership checks and ACL code stay real.
+    {
+      const reserved = await request("owner", "POST", flow.upload, uploadBody);
+      assert.equal(reserved.status, 200, `${flow.label}: failure-path upload URL request succeeds`);
+      const failedPath = reserved.data.objectPath;
+      assert.match(failedPath, /^\/objects\/uploads\/tenant-7\//);
+      const failedBytes = Buffer.from(`%PDF-1.4\n${flow.label} ACL failure content\n`);
+      await lib.putSignedUpload(reserved.data[flow.urlField], failedBytes);
+      const failedFile = await storage.getObjectEntityFile(failedPath);
+      const writesBefore = lib.writes.length;
+
+      lib.failNextSetMetadata();
+      const failed = await request("owner", "POST", flow.register, { ...flow.body, objectPath: failedPath });
+      assert.deepEqual(lib.consumedSetMetadataFaults(), [failedFile.name],
+        `${flow.label}: registration must reach the provider ACL write that was made to fail`);
+      assert.equal(failed.status, flow.aclFailure.status,
+        `${flow.label}: ACL persistence failure returns an explicit non-success status`);
+      assert.ok(failed.status >= 400, `${flow.label}: ACL failure must not be 2xx`);
+      assert.deepEqual(failed.data, { error: flow.aclFailure.error },
+        `${flow.label}: failure body is an error only, with no document or id`);
+      assert.equal(lib.writes.length, writesBefore, `${flow.label}: no document row after ACL failure`);
+      assert.equal(await lib.getObjectAclPolicy(failedFile), null, `${flow.label}: no tenant ACL granted`);
+      const [failedMetadata] = await failedFile.getMetadata();
+      assert.equal(failedMetadata.metadata["custom:aclPolicy"], undefined,
+        `${flow.label}: no partial ACL metadata on the object`);
+      for (const user of ["owner", "teammate", "foreign"]) {
+        const read = await request(user, "GET", `/storage${failedPath}`);
+        assert.equal(read.status, 403, `${flow.label}: ${user} cannot read an object whose ACL write failed`);
+        assert.ok(!read.text.includes("ACL failure content"), `${flow.label}: no bytes leak to ${user}`);
+      }
+      assert.equal((await request(null, "GET", `/storage${failedPath}`)).status, 401);
+
+      // The fault was one-shot: with it cleared, the same upload registers and
+      // becomes readable, so the failure above was not a broken fixture.
+      assert.equal(lib.clearSetMetadataFault(), false, "the injected fault was consumed exactly once");
+      const retried = await request("owner", "POST", flow.register, { ...flow.body, objectPath: failedPath });
+      assert.equal(retried.status, 201, `${flow.label}: registration succeeds once the provider recovers`);
+      assert.ok(retried.data?.id, `${flow.label}: retried registration returns a document id`);
+      assert.equal(lib.writes.length, writesBefore + 1);
+      assert.deepEqual(await lib.getObjectAclPolicy(failedFile), { owner: "7", visibility: "private" });
+      for (const user of ["owner", "teammate"]) {
+        const read = await request(user, "GET", `/storage${failedPath}`);
+        assert.equal(read.status, 200, `${flow.label}: ${user} can read after a successful retry`);
+        assert.equal(read.text, failedBytes.toString());
+      }
+      assert.equal((await request("foreign", "GET", `/storage${failedPath}`)).status, 403);
+    }
+
     assert.equal((await request(null, "POST", flow.upload, uploadBody)).status, 401);
     assert.equal((await request("teammate", "POST", flow.upload, uploadBody)).status, 403,
       `${flow.label}: viewer cannot request uploads`);
@@ -157,6 +212,7 @@ try {
   }
   console.log("Private file ACL HTTP regression checks passed for DocTrack and generic uploads.");
 } finally {
+  lib?.clearSetMetadataFault();
   if (server) await new Promise(resolve => server.close(resolve));
   await rm(outDir, { recursive: true, force: true });
 }

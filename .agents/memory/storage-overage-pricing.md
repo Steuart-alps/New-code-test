@@ -3,7 +3,7 @@ name: Storage overage pricing
 description: The commercial rule for retained object storage estimates and future billing.
 ---
 
-Retained storage includes 1 GiB for the base subscription entitlement. Excess storage is priced from the current Replit App Storage rate plus a 20% ALPS margin, calculated in integer currency minor units and scaled by the exact excess GiB. Download traffic is metered and displayed separately but is not included in the storage overage charge. Customer-approved capacity purchases belong on the existing Stripe subscription, not a second subscription.
+Retained storage includes 1 GiB for the base subscription entitlement. Excess storage is priced from the storage provider's rate (`STORAGE_PROVIDER_USD_PER_GIB_MONTH`, default 0.015 USD/GiB-month — the Replit App Storage rate it was set from; renamed from `STORAGE_REPLIT_USD_PER_GIB_MONTH` on 2026-10-09 with the default unchanged) plus a 20% ALPS margin, calculated in integer currency minor units and scaled by the exact excess GiB. Download traffic is metered and displayed separately but is not included in the storage overage charge. Customer-approved capacity purchases belong on the existing Stripe subscription, not a second subscription.
 
 **Why:** The customer should bear the incremental storage cost without ALPS guessing at a fixed package price; the provider rate and margin are the source of truth.
 
