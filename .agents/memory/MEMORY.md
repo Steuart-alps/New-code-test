@@ -38,6 +38,7 @@
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
 - [Export attachment trust](export-attachment-trust.md) — ZIP exports require a private tenant ACL; never claim an unmarked object while exporting a DB reference.
 - [Storage happy-path fixture](storage-happy-path-fixture.md) — required object-storage tests need a dedicated bucket plus Google signing credentials; never reuse the application bucket.
+- [Photo storage round trip](photo-storage-roundtrip.md) — real browser photo round trip runs only on PHOTO_ROUNDTRIP_* test bucket vars, refuses app buckets, skips when unconfigured; `--in-process-fake` is test-logic proof only.
 - [Concurrent task reconciliation](concurrent-task-reconciliation.md) — task merges can drop untracked main-workspace helpers; recheck status and typecheck immediately after reconciliation.
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
 - [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.
