@@ -624,6 +624,30 @@ async function resolveDiarySiteId(
   return site.siteId;
 }
 
+// GET /api/food-safety/mobile-entries/:entryId?recordDate=YYYY-MM-DD[&siteId=N]
+// Whether the server has already applied a device entry for this user. The
+// mobile app asks before turning a rejected entry back into an editable
+// draft, so an accepted reading is never re-entered or rewritten. Scoped to
+// the caller's client, the diary's site (department rules included) and
+// date, and to receipts the caller made: other users' entries are not visible.
+router.get("/mobile-entries/:entryId", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const entryId = mobileEntryIdSchema.safeParse(req.params.entryId);
+  if (!entryId.success || !entryId.data) return res.status(400).json({ error: "Invalid entry" });
+  const recordDate = String(req.query?.recordDate ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(recordDate)) return res.status(400).json({ error: "Invalid date" });
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const [record] = await db
+    .select({ id: foodSafetyRecordsTable.id, receipts: foodSafetyRecordsTable.mobileSubmissionReceipts })
+    .from(foodSafetyRecordsTable)
+    .where(and(eq(foodSafetyRecordsTable.clientId, clientId), eq(foodSafetyRecordsTable.recordDate, recordDate), siteScopeCond(siteId)))
+    .limit(1);
+  const receipt = record && findMobileReceipt(record.receipts ?? [], entryId.data, req.currentUser!.id);
+  res.json({ entryId: entryId.data, receipted: !!receipt, recordId: receipt ? record.id : null });
+});
+
 // GET /api/food-safety/by-date/:date[?siteId=N]
 router.get("/by-date/:date", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
