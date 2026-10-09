@@ -69,3 +69,4 @@
 - [Local calendar-day math](local-calendar-day-math.md) — date-only ages must use local calendar dates, not elapsed milliseconds, to stay correct across DST.
 - [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction; hold times and per-item rules replace section values.
 - [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.
+- [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.

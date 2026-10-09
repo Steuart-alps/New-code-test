@@ -21,6 +21,7 @@ import {
   SERVICE_CAP_PENCE,
   getEntitledServices,
   getServicePricePreflight,
+  addonPurchaseAvailability,
   invalidateEntitlements,
   type ServiceKey,
 } from "../lib/services";
@@ -132,6 +133,15 @@ router.get("/config", requireAuth, async (req, res) => {
     }
     const monthlyTotal = perSiteRate * billableQuantity;
 
+    // Same read-only price check that add-on activation enforces, so Settings
+    // can explain an unavailable add-on instead of offering an Add that fails.
+    let addonAvailability = addonPurchaseAvailability(null);
+    try {
+      addonAvailability = addonPurchaseAvailability(await getServicePricePreflight());
+    } catch (err) {
+      req.log?.warn?.({ err }, "Could not read add-on price availability");
+    }
+
     // Offboarding fields — expose so the frontend can warn about pending deletion.
     let cancelledAt: string | null = null;
     let dataDeletionScheduledAt: string | null = null;
@@ -173,6 +183,7 @@ router.get("/config", requireAuth, async (req, res) => {
         subscribed,
         perSiteRate,
         capPence: SERVICE_CAP_PENCE,
+        addonAvailability,
         catalog: [
           ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
           { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },

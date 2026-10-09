@@ -116,6 +116,30 @@ export function evaluateServicePricePreflight(
   return { required, configured, missing, duplicates, issues, ready: issues.length === 0 };
 }
 
+/**
+ * Client-facing purchase availability for add-ons, derived from the same
+ * read-only price preflight that activation enforces. Only add-on keys are
+ * reported, and only as "unavailable" — operator detail (missing vs
+ * duplicate) stays on the consultant-only preflight. A failed catalogue read
+ * is reported as `checked: false` so the UI can explain the gap instead of
+ * offering an Add action that activation would reject.
+ */
+export interface AddonPurchaseAvailability {
+  checked: boolean;
+  unavailable: string[];
+}
+
+export function addonPurchaseAvailability(
+  preflight: Pick<ServicePricePreflight, "missing" | "duplicates"> | null,
+): AddonPurchaseAvailability {
+  if (!preflight) return { checked: false, unavailable: [] };
+  const blocked = new Set([...preflight.missing, ...preflight.duplicates]);
+  return {
+    checked: true,
+    unavailable: ADDON_KEYS.filter((key) => blocked.has(key)),
+  };
+}
+
 async function listLiveMonthlyPriceServiceKeys(): Promise<string[]> {
   const rows = await db.execute(sql`
     SELECT pr.metadata->>'service_key' AS service_key
