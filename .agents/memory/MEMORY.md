@@ -86,3 +86,4 @@
 - [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.
 - [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
 - [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
+- [PDF export failure recovery](pdf-export-failure-recovery.md) — jsPDF output() alerts and returns undefined on error; failed lazy imports need a page reload; show recovery actions, not raw errors.

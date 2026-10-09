@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
@@ -28,7 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
-import { createHotTubLogPdf } from "@/lib/hot-tub-log-pdf";
+import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
@@ -229,6 +229,7 @@ export default function HotTubPage() {
   const [filterTo, setFilterTo] = useState(() => defaultDateRange().to);
   const [search, setSearch] = useState("");
   const [exportingPdf, setExportingPdf] = useState(false);
+  const dismissPdfError = useRef<(() => void) | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [showManageTubs, setShowManageTubs] = useState(false);
   const [editItem, setEditItem] = useState<HotTubCheck | null>(null);
@@ -318,6 +319,9 @@ export default function HotTubPage() {
     }
     if (search.trim()) filterParts.push(`Search: "${search.trim()}"`);
     const generatedAt = new Date();
+    // A new attempt supersedes the previous failure message.
+    dismissPdfError.current?.();
+    dismissPdfError.current = null;
     setExportingPdf(true);
     try {
       const blob = await createHotTubLogPdf({
@@ -335,13 +339,20 @@ export default function HotTubPage() {
           r.location ?? "", r.performedBy ?? "", r.notes ?? "",
         ]),
       });
-      downloadBlob(blob, `hot-tub-maintenance-log-${dateInputValue(generatedAt)}.pdf`);
+      try {
+        downloadBlob(blob, `hot-tub-maintenance-log-${dateInputValue(generatedAt)}.pdf`);
+      } catch (cause) {
+        throw new HotTubLogPdfError("The PDF could not be saved to this device. Please try again.", { cause });
+      }
     } catch (error) {
-      toast({
+      console.error("Hot tub PDF export failed", error);
+      dismissPdfError.current = toast({
         title: "PDF download failed",
-        description: error instanceof Error ? error.message : "Please try again.",
+        description: error instanceof HotTubLogPdfError
+          ? error.message
+          : "The PDF could not be created. Please try again.",
         variant: "destructive",
-      });
+      }).dismiss;
     } finally {
       setExportingPdf(false);
     }

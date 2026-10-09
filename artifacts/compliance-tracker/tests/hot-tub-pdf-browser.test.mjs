@@ -263,6 +263,32 @@ try {
       throw new Error("PDF export must not call window.print");
     };
   });
+  // One-shot fault hooks for the recovery checks. They stay inert until a test
+  // arms them, and survive reloads because they are init scripts.
+  await page.addInitScript(() => {
+    window.__pdfFaults = { generate: 0, objectUrl: 0 };
+    const NativeBlob = window.Blob;
+    // jsPDF's output("blob") builds the final PDF Blob; failing it makes the
+    // generator itself throw part-way through an export.
+    window.Blob = new Proxy(NativeBlob, {
+      construct(target, args, newTarget) {
+        if (args[1]?.type === "application/pdf" && window.__pdfFaults.generate > 0) {
+          window.__pdfFaults.generate -= 1;
+          throw new TypeError("Simulated jsPDF serialisation failure");
+        }
+        return Reflect.construct(target, args, newTarget);
+      },
+    });
+    // downloadBlob saves through an object URL; fail that step once.
+    const nativeCreateObjectURL = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = object => {
+      if (object?.type === "application/pdf" && window.__pdfFaults.objectUrl > 0) {
+        window.__pdfFaults.objectUrl -= 1;
+        throw new DOMException("Simulated object URL failure", "NotReadableError");
+      }
+      return nativeCreateObjectURL(object);
+    };
+  });
   temporaryDirectory = await mkdtemp(join(tmpdir(), "hot-tub-pdf-browser-"));
 
   await page.route("**/*", async route => {
@@ -476,6 +502,163 @@ try {
   );
   assert.equal(emptyPdf.pages.length, 1, "empty export should be a valid single-page PDF");
   assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), []);
+
+  // ── Failure recovery in the export controls ─────────────────────────────────
+  // Each fault fails exactly one attempt. The failed attempt must show an
+  // actionable error, release "Preparing PDF…", and produce no download, popup
+  // or print fallback. The retry runs under different filters and must export
+  // the rows those filters select, not the rows of the failed attempt.
+  const downloadEvents = [];
+  const popupEvents = [];
+  const dialogEvents = [];
+  page.on("download", download => downloadEvents.push(download));
+  page.on("dialog", dialog => {
+    dialogEvents.push(`${dialog.type()}: ${dialog.message()}`);
+    dialog.dismiss().catch(() => {});
+  });
+  page.on("popup", popup => popupEvents.push(popup));
+  context.on("page", newPage => popupEvents.push(newPage));
+
+  const siteNames = { 11: "Main site", 22: "Other site" };
+  const tubNames = { [activeTub.id]: activeTub.name, [otherActiveTub.id]: otherActiveTub.name };
+  const searchBox = page.getByPlaceholder("Search tubs, checks, staff…");
+  const downloadButton = page.getByRole("button", { name: "Download PDF", exact: true });
+  const failureToast = page.locator("li", { hasText: "PDF download failed" });
+
+  function expectedIdsFor(filters) {
+    // Search terms used here only occur in notes, so this mirrors the page.
+    return checks.filter(row =>
+      (filters.type === "all" || row.checkType === filters.type) &&
+      (filters.site === "all" || row.siteId === filters.site) &&
+      (filters.tub === "all" || row.hotTubId === filters.tub) &&
+      row.checkDate.slice(0, 10) >= filters.from &&
+      row.checkDate.slice(0, 10) <= filters.to &&
+      (!filters.search || row.notes.toLowerCase().includes(filters.search.toLowerCase())),
+    ).map(row => row.id);
+  }
+
+  async function applyFilters(filters) {
+    await page.locator("#hot-tub-filter-from").fill(filters.from);
+    await page.locator("#hot-tub-filter-to").fill(filters.to);
+    await filterComboboxes.nth(0).click();
+    await page.getByRole("option", { name: filters.site === "all" ? "All sites" : siteNames[filters.site], exact: true })
+      .click();
+    await filterComboboxes.nth(1).click();
+    await page.getByRole("option", {
+      name: filters.type === "all" ? "All check types" : "Water chemistry test (pH & sanitiser)",
+      exact: true,
+    }).click();
+    await page.getByRole("button", { name: "All tubs", exact: true }).click();
+    if (filters.tub !== "all") {
+      await page.getByRole("button", { name: tubNames[filters.tub], exact: true }).click();
+    }
+    await searchBox.fill(filters.search);
+    const count = expectedIdsFor(filters).length;
+    await page.getByText(`Showing ${count} of ${checks.length} records`, { exact: true })
+      .waitFor({ state: "visible" });
+  }
+
+  async function assertFailedAttempt(label, expectedMessage) {
+    const downloadsBefore = downloadEvents.length;
+    await downloadButton.click();
+    await failureToast.waitFor({ state: "visible", timeout: 20000 });
+    assert.deepEqual(dialogEvents, [], `${label}: a failed attempt must not show a native dialog`);
+    const message = (await failureToast.innerText()).replace(/\s+/g, " ");
+    assert.match(message, expectedMessage, `${label}: the visible error should say how to recover`);
+    // "Preparing PDF…" clears and the control is usable again.
+    await downloadButton.waitFor({ state: "visible", timeout: 5000 });
+    assert.equal(await downloadButton.isEnabled(), true, `${label}: Download PDF should be enabled again`);
+    assert.equal(await downloadButton.getAttribute("aria-busy"), "false", `${label}: button should not stay busy`);
+    assert.equal(await page.getByText("Preparing PDF…").count(), 0, `${label}: Preparing PDF should clear`);
+    // Give any late download or fallback a chance to surface before checking.
+    await page.waitForTimeout(750);
+    assert.equal(downloadEvents.length, downloadsBefore, `${label}: a failed attempt must not download anything`);
+    assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), [],
+      `${label}: a failed attempt must not fall back to print or a popup`);
+    assert.equal(popupEvents.length, 0, `${label}: a failed attempt must not open a popup`);
+    assert.equal(context.pages().length, 1, `${label}: a failed attempt must not open another page`);
+    return message;
+  }
+
+  async function assertRetryMatches(label, filters, staleFilters) {
+    const downloadsBefore = downloadEvents.length;
+    const expected = new Set(expectedIdsFor(filters));
+    const pdf = await downloadPdf(label);
+    assert.equal(downloadEvents.length, downloadsBefore + 1, `${label}: the retry should download exactly once`);
+    // Radix would auto-close it after 5s; the retry itself must clear it.
+    await failureToast.waitFor({ state: "hidden", timeout: 2000 }).catch(() => {
+      throw new assert.AssertionError({ message: `${label}: a stale failure must not stay on screen after success` });
+    });
+    assert.ok(pdf.text.includes(`Records: ${expected.size}`), `${label}: report count must match the new filters`);
+    for (const row of checks) {
+      const marker = row.notes.match(/CHECKROW\d+|EXCLUDED-[A-Z-]+/)[0];
+      assert.equal(pdf.text.includes(marker), expected.has(row.id),
+        `${label}: report membership of record ${row.id} (${marker}) must follow the new filters`);
+    }
+    const range = `Date range: ${formatDate(filters.from)} to ${formatDate(filters.to)}`;
+    const staleRange = `Date range: ${formatDate(staleFilters.from)} to ${formatDate(staleFilters.to)}`;
+    assert.ok(pdf.text.includes(range), `${label}: report should describe the new range (${range})`);
+    assert.ok(!pdf.text.includes(staleRange), `${label}: report must not describe the failed attempt's range`);
+    assert.equal(pdf.text.includes("Site: "), filters.site !== "all", `${label}: site description`);
+    if (filters.site !== "all") assert.ok(pdf.text.includes(`Site: ${siteNames[filters.site]}`));
+    assert.equal(pdf.text.includes("Check type: "), filters.type !== "all", `${label}: check type description`);
+    assert.equal(pdf.text.includes("Tub: "), filters.tub !== "all", `${label}: tub description`);
+    assert.equal(pdf.text.includes("Search: "), Boolean(filters.search), `${label}: search description`);
+    assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), []);
+    assert.equal(popupEvents.length, 0);
+    assert.deepEqual(dialogEvents, []);
+  }
+
+  // (a) PDF generation throws once.
+  const generationFailed = {
+    from: "2024-07-01", to: "2024-07-31", site: 11, type: "water_chemistry", tub: activeTub.id,
+    search: "needle-search-filter",
+  };
+  const generationRetry = { from: "2024-07-01", to: "2024-07-01", site: "all", type: "all", tub: "all", search: "" };
+  await applyFilters(generationFailed);
+  await page.evaluate(() => { window.__pdfFaults.generate = 1; });
+  await assertFailedAttempt("generation failure", /could not be created.*try again/i);
+  assert.equal(await page.evaluate(() => window.__pdfFaults.generate), 0, "generation fault should have fired");
+  await applyFilters(generationRetry);
+  await assertRetryMatches("generation-retry", generationRetry, generationFailed);
+
+  // (b) Saving the generated blob fails once.
+  const saveFailed = { from: "2024-07-01", to: "2024-07-31", site: 22, type: "all", tub: "all", search: "" };
+  const saveRetry = {
+    from: "2024-07-15", to: "2024-07-20", site: 11, type: "water_chemistry", tub: activeTub.id, search: "checkrow0",
+  };
+  await applyFilters(saveFailed);
+  await page.evaluate(() => { window.__pdfFaults.objectUrl = 1; });
+  await assertFailedAttempt("save failure", /could not be saved.*try again/i);
+  assert.equal(await page.evaluate(() => window.__pdfFaults.objectUrl), 0, "save fault should have fired");
+  await applyFilters(saveRetry);
+  await assertRetryMatches("save-retry", saveRetry, saveFailed);
+
+  // (c) The lazily loaded PDF module fails to download. It is already in this
+  // page's module map, so start from a fresh document before aborting it.
+  await page.reload();
+  let chunkAborts = 0;
+  await page.route(/\/node_modules\/\.vite\/deps\/jspdf\.js(\?|$)/, route => {
+    if (chunkAborts === 0) {
+      chunkAborts += 1;
+      return route.abort("internetdisconnected");
+    }
+    return route.fallback();
+  });
+  const chunkFailed = { from: "2024-07-01", to: "2024-07-01", site: "all", type: "all", tub: "all", search: "" };
+  const chunkRetry = { from: "2024-07-31", to: "2024-08-01", site: 11, type: "all", tub: "all", search: "" };
+  await applyFilters(chunkFailed);
+  await assertFailedAttempt("module fetch failure", /reload the page/i);
+  assert.equal(chunkAborts, 1, "the PDF module request should have been aborted once");
+  // Chromium caches a failed dynamic import for the document's lifetime, so a
+  // retry in place fails again with the same accurate instruction.
+  await failureToast.locator("[toast-close]").click();
+  await failureToast.waitFor({ state: "hidden", timeout: 5000 });
+  await applyFilters(chunkRetry);
+  await assertFailedAttempt("module fetch retry without reload", /reload the page/i);
+  await page.reload();
+  await applyFilters(chunkRetry);
+  await assertRetryMatches("module-retry-after-reload", chunkRetry, chunkFailed);
 
   console.log(`HotTub PDF ${browserName} browser regression passed (${expectedRows.length} filtered rows, ${populatedPdf.pages.length} PDF pages).`);
 } catch (error) {
