@@ -88,3 +88,4 @@
 - [Two-factor reset alert outbox](two-factor-reset-alerts.md) — admin 2FA reset alerts are queued in the reset transaction and retried; queue holds no secrets or rendered mail; provider key covers rendered content.
 - [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
 - [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
+- [Training matrix identity](training-matrix-identity.md) — certificates link to roster by staff_roster_id; legacy name-only rows match only one unambiguous in-scope roster member, else reported as unmatched.

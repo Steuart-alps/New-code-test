@@ -2591,6 +2591,12 @@ async function migrateStaffRosterAttribution() {
     await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`));
     await db.execute(sql.raw(`CREATE INDEX IF NOT EXISTS "IDX_${table}_staff_roster" ON "${table}" ("staff_roster_id")`));
   }
+  // TrainTrack records keep staff_name as an immutable snapshot; the optional
+  // roster link is the stable identity the training matrix matches on.
+  // Existing rows stay unlinked (NULL) and are matched by name only when
+  // unambiguous, client-side, at display time.
+  await db.execute(sql`ALTER TABLE "train_track_records" ADD COLUMN IF NOT EXISTS "staff_roster_id" integer REFERENCES "staff_roster"("id") ON DELETE SET NULL`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_train_track_records_staff_roster" ON "train_track_records" ("staff_roster_id")`);
 }
 async function migrateDocAcknowledgements() {
   await db.execute(sql`

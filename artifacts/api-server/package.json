@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:schema:fresh": "bash tests/run-fresh-schema.sh",
+    "test:train-track-roster-identity": "bash tests/run-fresh-schema.sh tests/train-track-roster-identity.mjs",
     "test:kitchen-mobile-replay": "bash tests/run-fresh-schema.sh tests/kitchen-mobile-replay.mjs",
     "test:kitchen-temperature-actions": "bash tests/run-fresh-schema.sh tests/kitchen-temperature-actions.mjs",
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
