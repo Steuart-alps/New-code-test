@@ -579,6 +579,72 @@ async function main() {
   expectStatus("foreign tenant cannot read corrections", await foreign("GET", correctionPath), [404]);
   expectStatus("foreign tenant cannot use foreign site filter", await foreign("GET", `/pat-track/failures?siteId=${alphaSite.data.id}`), [400]);
 
+  // Replacement log entries keep the room and site identity they were recorded
+  // against; renaming the room must not relocate an old replacement.
+  const replacementRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Replacement room A" });
+  const replacementRoomTwo = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Replacement room two" });
+  const alphaSiteTwo = await admin("POST", "/sites", { name: `PAT Alpha annex ${stamp}`, departmentId: alphaDept.data.id, seedStarterChecks: false });
+  const annexRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSiteTwo.data?.id, name: "Annex room" });
+  const replacement = await staff("POST", "/pat-track/replacements", {
+    roomId: replacementRoom.data.id, applianceName: "Old toaster", replacedOn: fixtureDate, replacementDetails: "New toaster",
+  });
+  for (const [name, response] of [["replacement room", replacementRoom], ["second replacement room", replacementRoomTwo],
+    ["alpha annex site", alphaSiteTwo], ["annex room", annexRoom], ["replacement", replacement]]) {
+    expectStatus(`create ${name}`, response, [200, 201]);
+  }
+  check("replacement records room and site identity", replacement.data?.room_name_snapshot === "Replacement room A"
+    && replacement.data?.site_id_snapshot === alphaSite.data.id && replacement.data?.site_name_snapshot === alphaSite.data.name
+    && replacement.data?.snapshot_source === "recorded", JSON.stringify(replacement.data));
+  expectStatus("rename room with replacement history", await admin("PUT", `/pat-track/rooms/${replacementRoom.data.id}`, {
+    siteId: alphaSite.data.id, name: "Replacement room B",
+  }), [200]);
+  const replacementById = async (session, id, query = "") => (await session("GET", `/pat-track/replacements${query}`)).data?.find(x => x.id === id);
+  const renamedReplacement = await replacementById(staff, replacement.data.id, `?siteId=${alphaSite.data.id}`);
+  check("replacement list keeps the recorded room name", renamedReplacement?.room_name === "Replacement room A"
+    && renamedReplacement?.current_room_name === "Replacement room B" && renamedReplacement?.site_id === alphaSite.data.id,
+    JSON.stringify(renamedReplacement));
+  const replacementBody = (roomId, extra = {}) => ({
+    roomId, applianceName: "Old toaster", replacedOn: fixtureDate, replacementDetails: "New toaster", ...extra,
+  });
+  const notesCorrection = await staff("PUT", `/pat-track/replacements/${replacement.data.id}`, replacementBody(replacementRoom.data.id, {
+    notes: "Corrected notes", room_name_snapshot: "Spoofed", roomNameSnapshot: "Spoofed",
+  }));
+  expectStatus("department staff correct replacement after rename", notesCorrection, [200]);
+  check("ordinary correction keeps recorded identity", notesCorrection.data?.room_name_snapshot === "Replacement room A"
+    && notesCorrection.data?.notes === "Corrected notes" && notesCorrection.data?.snapshot_source === "recorded");
+  const crossSiteCorrection = await admin("PUT", `/pat-track/replacements/${replacement.data.id}`, replacementBody(annexRoom.data.id));
+  expectStatus("replacement cannot be corrected to another site", crossSiteCorrection, [409]);
+  check("cross-site correction is identified", crossSiteCorrection.data?.code === "PAT_REPLACEMENT_SITE_LOCKED");
+  expectStatus("replacement cannot be corrected to another department's room", await staff("PUT",
+    `/pat-track/replacements/${replacement.data.id}`, replacementBody(betaRoom.data.id)), [403]);
+  const roomCorrection = await admin("PUT", `/pat-track/replacements/${replacement.data.id}`, replacementBody(replacementRoomTwo.data.id));
+  expectStatus("replacement can be corrected to another room at its site", roomCorrection, [200]);
+  check("room correction captures the corrected room's name", roomCorrection.data?.room_name_snapshot === "Replacement room two"
+    && roomCorrection.data?.snapshot_source === "corrected" && roomCorrection.data?.site_id_snapshot === alphaSite.data.id);
+  expectStatus("room correction back", await admin("PUT", `/pat-track/replacements/${replacement.data.id}`,
+    replacementBody(replacementRoom.data.id)), [200]);
+  check("correction back captures the room's current name, not a resurrected one",
+    (await replacementById(admin, replacement.data.id))?.room_name === "Replacement room B");
+  expectStatus("rename replacement room again", await admin("PUT", `/pat-track/rooms/${replacementRoom.data.id}`, {
+    siteId: alphaSite.data.id, name: "Replacement room C",
+  }), [200]);
+  expectStatus("replacement history still blocks room site move", await admin("PUT", `/pat-track/rooms/${replacementRoom.data.id}`, {
+    siteId: alphaSiteTwo.data.id, name: "Replacement room C",
+  }), [409]);
+  expectStatus("replacement history still blocks room delete", await admin("DELETE", `/pat-track/rooms/${replacementRoom.data.id}`), [409]);
+  expectStatus("replacement delete is retained evidence", await admin("DELETE", `/pat-track/replacements/${replacement.data.id}`), [405]);
+  check("other department cannot list replacement", !(await betaStaff("GET", "/pat-track/replacements")).data?.some(x => x.id === replacement.data.id));
+  expectStatus("other department cannot correct replacement", await betaStaff("PUT", `/pat-track/replacements/${replacement.data.id}`,
+    replacementBody(replacementRoom.data.id)), [403]);
+  expectStatus("viewer cannot correct replacement", await viewer("PUT", `/pat-track/replacements/${replacement.data.id}`,
+    replacementBody(replacementRoom.data.id)), [403]);
+  expectStatus("foreign tenant cannot correct replacement", await foreign("PUT", `/pat-track/replacements/${replacement.data.id}`,
+    replacementBody(replacementRoom.data.id)), [404]);
+  expectStatus("foreign tenant cannot filter by our site", await foreign("GET", `/pat-track/replacements?siteId=${alphaSite.data.id}`), [400]);
+  check("foreign tenant list excludes replacement", !(await foreign("GET", "/pat-track/replacements")).data?.some(x => x.id === replacement.data.id));
+  const annexOnly = await admin("GET", `/pat-track/replacements?siteId=${alphaSiteTwo.data.id}`);
+  check("site filter uses the recorded site", Array.isArray(annexOnly.data) && !annexOnly.data.some(x => x.id === replacement.data.id));
+
   // The cancellation/client export must preserve every certificate-led PAT
   // entity without depending on object storage availability.
   const exportResponse = await fetch(`${BASE}/export`, { headers: { cookie: admin.cookie() } });
@@ -610,6 +676,13 @@ async function main() {
     check("failure export retains recorded location and provenance", failureCsv.includes("snapshot_source")
       && failureCsv.includes("Failure room A") && failureCsv.includes("Plant cupboard"));
     check("failure export never substitutes the renamed room", !failureCsv.includes("Failure room B"));
+    const replacementCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/replacements.csv"], { encoding: "utf8" });
+    check("replacement export includes retained identity and provenance", replacementCsv.includes("room_name_snapshot")
+      && replacementCsv.includes("site_name_snapshot") && replacementCsv.includes("snapshot_source")
+      && replacementCsv.includes("Kettle"));
+    check("replacement export keeps the name recorded with each entry", replacementCsv.includes("Beta room")
+      && replacementCsv.includes("Replacement room B"));
+    check("replacement export never substitutes the current room name", !replacementCsv.includes("Replacement room C"));
     const correctionCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/failure-location-corrections.csv"], { encoding: "utf8" });
     check("failure correction export keeps reason and both locations", correctionCsv.includes("Original sheet says boiler room")
       && correctionCsv.includes("Plant cupboard") && correctionCsv.includes("Boiler room"));

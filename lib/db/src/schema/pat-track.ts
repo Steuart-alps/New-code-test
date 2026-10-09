@@ -136,6 +136,13 @@ export const patReplacementsTable = pgTable("pat_replacements", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   roomId: integer("room_id").notNull().references(() => patRoomsTable.id, { onDelete: "cascade" }),
+  // Room/site identity captured by a trigger when the replacement is recorded
+  // (or corrected to another room of the same site); not a live join.
+  roomNameSnapshot: text("room_name_snapshot"),
+  siteIdSnapshot: integer("site_id_snapshot"),
+  siteNameSnapshot: text("site_name_snapshot"),
+  // recorded | corrected | legacy_backfill | legacy_unavailable
+  snapshotSource: text("snapshot_source").notNull().default("recorded"),
   applianceName: text("appliance_name").notNull(),
   replacedOn: date("replaced_on").notNull(),
   replacementDetails: text("replacement_details"),
