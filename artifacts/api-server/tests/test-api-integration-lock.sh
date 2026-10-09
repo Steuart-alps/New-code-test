@@ -115,6 +115,7 @@ const freshSchema = new Set([
   "test:service-price-audit", "test:biketrack-config-cadence", "test:bike-overdue-reminders",
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
+  "test:client-data-deletion-feedback",
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
