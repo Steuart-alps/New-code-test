@@ -10,6 +10,12 @@ import { Badge } from "@/components/ui/badge";
 interface StagedPhoto {
   id: string;
   name: string;
+  /** Cancels the server receipt with the tenant context it was staged under. */
+  cancel: () => void;
+}
+
+function cancelStagedPhotos(photos: StagedPhoto[]) {
+  for (const photo of photos) photo.cancel();
 }
 
 export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
@@ -23,6 +29,10 @@ export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
   const [busyScope, setBusyScope] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<{ scope: string; message: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Photos staged but not yet used by a successful create. Abandoning them
+  // (closing the dialog, switching scope, removing one) cancels the receipt
+  // so the server deletes the unreferenced object instead of leaving it.
+  const pendingRef = useRef<StagedPhoto[]>([]);
   const photos = state.scope === scope ? state.photos : [];
   const uploading = busyScope === scope;
   const requirement = rules.requirements[entityType];
@@ -30,6 +40,8 @@ export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
   const minimum = requirement?.minPhotos ?? 1;
   const reset = useCallback(() => {
     abortRef.current?.abort();
+    cancelStagedPhotos(pendingRef.current);
+    pendingRef.current = [];
     setState({ scope, photos: [] });
     setBusyScope(null);
     setUploadError(null);
@@ -39,6 +51,11 @@ export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
     reset();
     return () => { abortRef.current?.abort(); };
   }, [reset]);
+
+  useEffect(() => () => {
+    cancelStagedPhotos(pendingRef.current);
+    pendingRef.current = [];
+  }, []);
 
   const addFile = async (file: File) => {
     if (!enabled || uploading || photos.length >= 10 || abortRef.current) return;
@@ -80,11 +97,23 @@ export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
       if (!staged.id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(staged.id)) {
         throw new Error("Invalid photo verification response.");
       }
+      const stagedId = staged.id;
+      const photo: StagedPhoto = {
+        id: stagedId,
+        name: file.name,
+        cancel: () => {
+          void request(`/photos/staged/${encodeURIComponent(stagedId)}`, { method: "DELETE" }).catch(() => {});
+        },
+      };
       if (currentScope.current === scope && !controller.signal.aborted) {
+        pendingRef.current = [...pendingRef.current, photo];
         setState(previous => ({
           scope,
-          photos: [...(previous.scope === scope ? previous.photos : []), { id: staged.id!, name: file.name }],
+          photos: [...(previous.scope === scope ? previous.photos : []), photo],
         }));
+      } else {
+        // Verified after the dialog was abandoned: cancel rather than orphan it.
+        photo.cancel();
       }
     } catch (error) {
       if (currentScope.current === scope && !controller.signal.aborted) {
@@ -112,10 +141,19 @@ export function useNewRecordPhotoEvidence(entityType: string, enabled = true) {
       && (!required || photos.length >= minimum)),
     uploadError: uploadError?.scope === scope ? uploadError.message : null,
     addFile,
-    removePhoto: (id: string) => setState(previous => ({
-      scope,
-      photos: previous.scope === scope ? previous.photos.filter(photo => photo.id !== id) : [],
-    })),
+    removePhoto: (id: string) => {
+      cancelStagedPhotos(pendingRef.current.filter(photo => photo.id === id));
+      pendingRef.current = pendingRef.current.filter(photo => photo.id !== id);
+      setState(previous => ({
+        scope,
+        photos: previous.scope === scope ? previous.photos.filter(photo => photo.id !== id) : [],
+      }));
+    },
+    /** Call after a successful create: the receipts were claimed, so do not cancel them. */
+    consume: () => {
+      pendingRef.current = [];
+      setState({ scope, photos: [] });
+    },
     reset,
   };
 }

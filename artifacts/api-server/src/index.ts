@@ -1,11 +1,18 @@
 import app, { markApplicationReady } from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./lib/stripeClient";
+import { getStripeCredentialSource, getStripeSync } from "./lib/stripeClient";
 import cron from "node-cron";
 import { runReminderJob } from "./routes/notifications";
 import { runRuntimeMigrations } from "./lib/runtimeMigrations";
 import { reconcileAllSubscriptionQuantities, type QuantityCorrection } from "./lib/billing";
+import {
+  getBillingReadiness,
+  isStripeCatalogueVerified,
+  positiveMsFromEnv,
+  startStripeInitialization,
+  type StripeAttemptResult,
+} from "./lib/stripeStartup";
 import {
   ensureServicePrices,
   getServicePricePreflight,
@@ -25,6 +32,9 @@ import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
+import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
+import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
+import { ObjectStorageService } from "./lib/objectStorage";
 
 const rawPort = process.env["PORT"];
 
@@ -40,92 +50,133 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-async function initStripe(): Promise<string | null> {
+/**
+ * One Stripe initialization attempt. Supervised by startStripeInitialization,
+ * which bounds it with a deadline and retries failures; `onStage` names each
+ * step so a stall can be attributed (see lib/stripeStartup.ts). Errors
+ * propagate to the supervisor, which reports them as a readiness blocker.
+ */
+async function initStripe(onStage: (stage: string) => void): Promise<StripeAttemptResult> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     logger.warn("DATABASE_URL not set — Stripe sync skipped");
-    return "Stripe service-price catalogue could not be read";
+    return { blocker: "Stripe service-price catalogue could not be read", catalogueVerified: false };
   }
+  onStage("sync schema migrations");
+  await runMigrations({ databaseUrl });
+  logger.info("Stripe schema ready");
+
+  const stripeSync = await getStripeSync(onStage);
+  // Keep the existing Replit webhook address when deployed there: a new URL
+  // registers a second Stripe webhook rather than replacing the first.
+  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  const webhookBaseUrl = replitDomain ? `https://${replitDomain}` : getPublicAppUrl();
+  onStage("managed webhook");
+  await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
+  logger.info("Stripe webhook configured");
+
+  onStage("backfill sync");
+  await stripeSync.syncBackfill();
+  logger.info("Stripe data synced");
+  onStage("service-price catalogue");
+
+  // Read-only launch preflight: report every gap from the synced catalogue
+  // before attempting the idempotent repair below. This cannot grant access
+  // or alter any subscription.
+  let catalogueReadFailed = false;
   try {
-    logger.info("Initializing Stripe schema...");
-    await runMigrations({ databaseUrl });
-    logger.info("Stripe schema ready");
-
-    const stripeSync = await getStripeSync();
-    // Keep the existing Replit webhook address when deployed there: a new URL
-    // registers a second Stripe webhook rather than replacing the first.
-    const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
-    const webhookBaseUrl = replitDomain ? `https://${replitDomain}` : getPublicAppUrl();
-    await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-    logger.info("Stripe webhook configured");
-
-    await stripeSync.syncBackfill();
-    logger.info("Stripe data synced");
-
-    // Read-only launch preflight: report every gap from the synced catalogue
-    // before attempting the idempotent repair below. This cannot grant access
-    // or alter any subscription.
-    let catalogueReadFailed = false;
-    try {
-      const preflight = await getServicePricePreflight();
-      if (preflight.ready) {
-        logger.info({ configured: preflight.configured }, "Stripe service-price preflight passed");
-      } else {
-        logger.error(
-          { missing: preflight.missing, duplicates: preflight.duplicates, issues: preflight.issues, configured: preflight.configured },
-          "Stripe service-price preflight failed — affected modules cannot be activated",
-        );
-      }
-    } catch (err) {
-      catalogueReadFailed = true;
-      logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+    const preflight = await getServicePricePreflight();
+    if (preflight.ready) {
+      logger.info({ configured: preflight.configured }, "Stripe service-price preflight passed");
+    } else {
+      logger.error(
+        { missing: preflight.missing, duplicates: preflight.duplicates, issues: preflight.issues, configured: preflight.configured },
+        "Stripe service-price preflight failed — affected modules cannot be activated",
+      );
     }
+  } catch (err) {
+    catalogueReadFailed = true;
+    logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+  }
 
-    // Ensure every module in the service catalogue has a Stripe product + price.
-    // Idempotent — only creates what's missing, after the sync has made existing
-    // prices visible to the catalogue read.
-    let repairFailed = false;
-    try {
-      const prices = await ensureServicePrices();
-      if (prices.created.length > 0) {
-        logger.info({ created: prices.created }, "Created missing Stripe service prices");
-      } else {
-        logger.info("All Stripe service prices already exist");
-      }
-    } catch (err) {
-      repairFailed = true;
-      logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+  // Ensure every module in the service catalogue has a Stripe product + price.
+  // Idempotent — only creates what's missing, after the sync has made existing
+  // prices visible to the catalogue read.
+  let repairFailed = false;
+  try {
+    const prices = await ensureServicePrices();
+    if (prices.created.length > 0) {
+      logger.info({ created: prices.created }, "Created missing Stripe service prices");
+    } else {
+      logger.info("All Stripe service prices already exist");
     }
+  } catch (err) {
+    repairFailed = true;
+    logger.error({ err }, "ensureServicePrices failed — run POST /api/admin/ensure-service-prices manually");
+  }
 
-    // Confirm the repair result before the application becomes ready. This is
-    // read-only and cannot grant a client an entitlement.
-    let finalPreflight: ServicePricePreflight | null = null;
-    try {
-      finalPreflight = await getServicePricePreflight();
-      if (finalPreflight.ready) {
-        logger.info({ configured: finalPreflight.configured }, "Stripe service-price preflight passed");
-      } else {
-        logger.error(
-          { missing: finalPreflight.missing, duplicates: finalPreflight.duplicates, issues: finalPreflight.issues, configured: finalPreflight.configured },
-          "Stripe service-price preflight failed — affected modules cannot be activated",
-        );
-      }
-    } catch (err) {
-      catalogueReadFailed = true;
-      logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+  // Confirm the repair result before the application becomes ready. This is
+  // read-only and cannot grant a client an entitlement.
+  let finalPreflight: ServicePricePreflight | null = null;
+  try {
+    finalPreflight = await getServicePricePreflight();
+    if (finalPreflight.ready) {
+      logger.info({ configured: finalPreflight.configured }, "Stripe service-price preflight passed");
+    } else {
+      logger.error(
+        { missing: finalPreflight.missing, duplicates: finalPreflight.duplicates, issues: finalPreflight.issues, configured: finalPreflight.configured },
+        "Stripe service-price preflight failed — affected modules cannot be activated",
+      );
     }
-    return getServicePriceReadinessBlocker({
+  } catch (err) {
+    catalogueReadFailed = true;
+    logger.error({ err }, "Stripe service-price preflight could not read synced catalogue");
+  }
+  return {
+    blocker: getServicePriceReadinessBlocker({
       catalogueReadFailed,
       repairFailed,
       finalPreflight,
+    }),
+    // Only a completed read and repair is a verdict an administrator must
+    // act on; read/repair failures may be transient and are retried.
+    catalogueVerified: !catalogueReadFailed && !repairFailed && finalPreflight !== null,
+  };
+}
+
+let stagedPhotoCleanupRunning = false;
+async function runStagedPhotoCleanup() {
+  if (stagedPhotoCleanupRunning) return;
+  const storage = new ObjectStorageService();
+  try {
+    storage.getPrivateObjectDir();
+  } catch {
+    // Without configured private storage nothing can be deleted; leave the
+    // receipts for a correctly configured instance rather than backing off.
+    return;
+  }
+  stagedPhotoCleanupRunning = true;
+  try {
+    // Bounded per run; a backlog drains over successive runs.
+    const result = await cleanupStagedPhotoUploads(storage, {
+      limit: 200,
+      onError: (err) => logger.warn({ err }, "Staged photo cleanup item failed; will retry with backoff"),
     });
+    if (result.examined > 0) logger.info({ result }, "Staged photo cleanup complete");
   } catch (err) {
-    logger.error({ err }, "Failed to initialize Stripe — continuing without it");
-    return "Stripe service-price catalogue initialization failed";
+    logger.error({ err }, "Staged photo cleanup failed");
+  } finally {
+    stagedPhotoCleanupRunning = false;
   }
 }
 
 function startScheduler() {
+  // Remove cancelled or expired unclaimed staged photos (and their objects)
+  // at boot and every 10 minutes. Restart-safe: unfinished items are retried.
+  void runStagedPhotoCleanup();
+  cron.schedule("*/10 * * * *", runStagedPhotoCleanup);
+  logger.info("Staged photo cleanup scheduler started (every 10 minutes)");
+
   cron.schedule("35 8 * * *", async () => {
     logger.info("Running operational action reminder job...");
     try {
@@ -247,6 +298,18 @@ function startScheduler() {
   });
   logger.info("Bike overdue repeat-notification scheduler started (daily at 08:20)");
 
+  // Replay unconfirmed overdue-bike digests with their persisted provider
+  // idempotency key while the provider still deduplicates it. Recovery never
+  // creates a new digest; new alerts still come only from the daily scan.
+  cron.schedule("*/5 * * * *", async () => {
+    try {
+      const result = await runBikeOverdueJob({}, { recoverOnly: true });
+      if (result.clientsEmailed > 0 || result.errors > 0) logger.info({ result }, "Bike overdue recovery complete");
+    } catch (err) {
+      logger.error({ err }, "Bike overdue recovery failed");
+    }
+  });
+
   // Detect newly cancelled subscriptions and start the 12-month retention clock
   // (daily at 07:00; sends one offboarding email per client).
   cron.schedule("0 7 * * *", async () => {
@@ -315,6 +378,13 @@ function startScheduler() {
   // five minutes. Each account chooses daily or weekly cadence and local time.
   registerSafeTrackAckReminderSchedule(cron.schedule);
   logger.info("SafeTrack acknowledgement reminder scheduler started (every five minutes)");
+
+  // Read-only audit of the synced Stripe price catalogue, so a price or
+  // product archived after startup is reported before a client's add-on
+  // activation fails. Alerts once per incident and reports recovery; it never
+  // changes prices, products, subscriptions or charges.
+  cron.schedule(SERVICE_PRICE_AUDIT_CRON, () => runScheduledServicePriceAudit());
+  logger.info("Stripe service-price audit scheduler started (hourly at :25)");
 }
 
 async function runTrialReminders() {
@@ -328,6 +398,11 @@ async function runTrialReminders() {
 }
 
 async function runBillingReconciliation() {
+  // Never correct subscriptions against a catalogue this process has not read.
+  if (!isStripeCatalogueVerified()) {
+    logger.warn({ billingState: getBillingReadiness().phase }, "Billing reconciliation skipped — Stripe catalogue not verified");
+    return;
+  }
   logger.info("Running billing reconciliation...");
   try {
     const result = await reconcileAllSubscriptionQuantities();
@@ -462,15 +537,31 @@ app.listen(port, async (err?: any) => {
     logger.warn("ADMIN_EMAIL not configured — internal billing and data-deletion notices cannot be delivered");
   }
   await runRuntimeMigrations();
-  const readinessBlocker = await initStripe();
-  markApplicationReady(readinessBlocker);
+  // Stripe start-up is bounded: /readyz reports "starting" until the first
+  // attempt settles or STRIPE_INIT_TIMEOUT_MS passes, then "ok" or "degraded"
+  // with a blocker. Failures retry in the background; billing activation stays
+  // blocked until the catalogue is verified (see lib/stripeStartup.ts).
+  const stripeStartup = startStripeInitialization({
+    credentialSource: getStripeCredentialSource,
+    runAttempt: initStripe,
+    required: process.env.NODE_ENV === "production",
+    timeoutMs: positiveMsFromEnv(process.env.STRIPE_INIT_TIMEOUT_MS, 120_000),
+    retryDelaysMs: [30_000, 60_000, 120_000, 300_000, 900_000],
+    logger,
+    // Reconcile once shortly after the catalogue is verified so drift never
+    // waits a full day (best-effort; exits quietly per client when Stripe fails).
+    onCatalogueVerified: () => { setTimeout(runBillingReconciliation, 15_000); },
+  });
+  markApplicationReady();
+  // Keep the previous ordering (jobs start after Stripe start-up) without
+  // letting a stalled Stripe dependency postpone them indefinitely.
+  await stripeStartup.firstSettledOrDeadline;
   startScheduler();
-  // Also reconcile once shortly after startup so drift never waits a full day
-  // (best-effort; exits quietly per client when Stripe isn't reachable).
-  setTimeout(runBillingReconciliation, 15_000);
   // Catch up trial reminders on startup too, so a server that was down at
   // 08:15 doesn't miss the 3-day warning window (deduped per client).
   setTimeout(runTrialReminders, 20_000);
+  // First catalogue audit after the startup preflight; deduped across restarts.
+  setTimeout(() => runScheduledServicePriceAudit(), 30_000);
   setTimeout(() => {
     void runFixTrackOverdueAlertJob(undefined, { recoverOnly: true }).catch((err) => {
       logger.error({ err }, "FixTrack startup alert recovery failed");

@@ -3,7 +3,7 @@ name: API test readiness
 description: How integration runners avoid racing API startup migrations.
 ---
 
-Use `/healthz` only for process/liveness checks. Integration runners that register users or access migrated tables must wait for `/readyz`.
+Use `/healthz` only for process/liveness checks. Integration runners that register users or access migrated tables must wait for `/readyz`. Outside production, an API without Stripe credentials reports 200 with `billing.state: "unconfigured"` (see stripe-startup-readiness.md).
 
 **Why:** The HTTP listener and `/healthz` become available before runtime migrations and startup initialization finish. Larger migration batches made tests intermittently begin registration too early and fail with misleading authentication errors.
 

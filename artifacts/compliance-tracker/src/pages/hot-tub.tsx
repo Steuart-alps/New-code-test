@@ -26,6 +26,7 @@ import {
   Filter, Settings2, ToggleLeft, ToggleRight, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { createHotTubLogPdf } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
@@ -125,13 +126,10 @@ const DAILY_SESSION_TYPES: CheckType[] = ["water_chemistry", "temperature"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+/** JSON request through the shared client: adds the /api prefix, the CSRF
+ *  token on writes and the session cookie. */
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${baseUrl}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-    ...opts,
-  });
+  const res = await sharedApiFetch(path, opts);
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
   if (res.status === 204) return null;
   return res.json();

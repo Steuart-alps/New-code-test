@@ -11,5 +11,6 @@ export {
   setClientIdGetter,
   setUnauthorizedHandler,
   setPaymentRequiredHandler,
+  setMutationObserver,
 } from "./custom-fetch";
-export type { AuthTokenGetter } from "./custom-fetch";
+export type { AuthTokenGetter, ApiMutationObserver } from "./custom-fetch";
