@@ -156,8 +156,119 @@ async function checkConsultantRegisterTenantBoundary() {
   onlyTenant("Bravo owner exporting their own register", await bravo.as("GET", "/doc-track/acknowledgements/export"), "Bravo");
 }
 
+// The text drawn on each page of a generated register, in page order. The
+// generator writes one uncompressed content stream per page, and each string
+// is a `BT /F<n> <size> Tf <x> <y> Td (<text>) Tj ET` command.
+function registerPages(bytes) {
+  const pdf = bytes.toString("latin1");
+  const pageCount = Number(/\/Type \/Pages \/Kids \[[^\]]*\] \/Count (\d+)/.exec(pdf)?.[1]);
+  const pages = [...pdf.matchAll(/stream\n([\s\S]*?)\nendstream/g)].map(([, content]) =>
+    [...content.matchAll(/BT \/F\d (\d+) Tf (\d+) (\d+) Td \(((?:\\.|[^\\)])*)\) Tj ET/g)]
+      .map(([, size, x, y, value]) => ({
+        size: Number(size), x: Number(x), y: Number(y), text: value.replace(/\\(.)/g, "$1"),
+      })));
+  return { pageCount, pages };
+}
+
+// More than one page of eligible staff (27 rows fit on a page) for the first
+// required document, followed by a second required document. Every eligible
+// staff member must appear exactly once in each section, within the printable
+// area; the second document must open its own page; and every page must repeat
+// its own document's title, category and acknowledgement date range.
+async function checkLargeRegisterPagination() {
+  const tenant = await signUp("Delta");
+  const site = await tenant.as("POST", "/sites", { name: "Delta pagination site", seedStarterChecks: false });
+  requireSuccess("pagination site", site, 201);
+  const otherSite = await tenant.as("POST", "/sites", { name: "Delta other site", seedStarterChecks: false });
+  requireSuccess("pagination other site", otherSite, 201);
+
+  const staffCount = 30;
+  const staff = [];
+  for (let n = 1; n <= staffCount; n++) {
+    const name = `Delta Staff ${String(n).padStart(2, "0")}`;
+    const created = await tenant.as("POST", "/staff-roster", {
+      name, email: `doc-pagination-${n}-${Date.now()}@test.local`, siteId: site.data?.id,
+    });
+    requireSuccess(`pagination staff ${n}`, created, 201);
+    staff.push({ id: Number(created.data?.id), name });
+  }
+  // Active, but assigned elsewhere: not eligible for either document.
+  requireSuccess("pagination ineligible staff", await tenant.as("POST", "/staff-roster", {
+    name: "Delta Elsewhere Staff", email: `doc-pagination-elsewhere-${Date.now()}@test.local`, siteId: otherSite.data?.id,
+  }), 201);
+
+  const documents = await execFile("psql", [
+    process.env.DATABASE_URL, "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_track_documents
+      (client_id,site_id,title,category,file_name,mime_type,object_path,requires_acknowledgement,annual_acknowledgement)
+     VALUES
+      (${Number(tenant.clientId)},${Number(site.data?.id)},'Delta A large register','risk_assessment','a.pdf','application/pdf','fixtures/pagination-a.pdf',true,false),
+      (${Number(tenant.clientId)},${Number(site.data?.id)},'Delta B second register','policy','b.pdf','application/pdf','fixtures/pagination-b.pdf',true,false)
+     RETURNING id`,
+  ]);
+  const [firstDocumentId] = documents.stdout.trim().split("\n").map(Number);
+  const signed = [[staff[4], "2026-01-05 12:00"], [staff[16], "2026-02-10 12:00"], [staff[28], "2026-03-15 12:00"]];
+  await execFile("psql", [
+    process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
+    `INSERT INTO doc_acknowledgements (document_id,client_id,staff_roster_id,staff_name,signature,acknowledged_at) VALUES
+     ${signed.map(([member, at]) => `(${firstDocumentId},${Number(tenant.clientId)},${member.id},'${member.name}','${member.name}','${at}')`).join(",")}`,
+  ]);
+
+  const exported = await tenant.as("GET", "/doc-track/acknowledgements/export");
+  check("large register: PDF returned", exported.status === 200 && exported.contentType === "application/pdf");
+  if (exported.status !== 200 || !exported.bytes) return;
+  const { pageCount, pages } = registerPages(exported.bytes);
+
+  const signedNames = new Set(signed.map(([member]) => member.name));
+  const expectedOrder = [
+    ...staff.filter((member) => signedNames.has(member.name)),
+    ...staff.filter((member) => !signedNames.has(member.name)),
+  ].map((member) => member.name);
+  const sections = [
+    { title: "Delta A large register", category: "risk assessment", dateRange: "05 Jan 2026 to 15 Mar 2026", pages: [1, 2], rows: expectedOrder },
+    { title: "Delta B second register", category: "policy", dateRange: "No acknowledgements recorded", pages: [3, 4], rows: staff.map((member) => member.name) },
+  ];
+  check(`large register has 4 pages (got ${pageCount}, ${pages.length} streams)`, pageCount === 4 && pages.length === 4);
+
+  for (const [index, section] of sections.entries()) {
+    const label = `section ${index + 1}`;
+    const rows = [];
+    for (const pageNumber of section.pages) {
+      const page = pages[pageNumber - 1] ?? [];
+      const has = (value) => page.some((item) => item.text === value);
+      check(`${label} page ${pageNumber} repeats its title`,
+        has(`Section ${index + 1} of 2: ${section.title}`));
+      check(`${label} page ${pageNumber} repeats its category`, has(`Category: ${section.category}`));
+      check(`${label} page ${pageNumber} repeats its date range`,
+        has(`Acknowledgement date range: ${section.dateRange}`));
+      check(`${label} page ${pageNumber} is numbered`, has(`Page ${pageNumber} of 4`));
+      const other = sections[1 - index];
+      check(`${label} page ${pageNumber} carries no heading from the other document`,
+        !page.some((item) => item.text.includes(other.title)));
+      // Staff names are the 8pt cells in the first column, below the header row.
+      const pageRows = page.filter((item) => item.x === 52 && item.size === 8 && item.y < 682);
+      check(`${label} page ${pageNumber} keeps every row inside the printable area`,
+        pageRows.every((item) => item.y > 48));
+      check(`${label} page ${pageNumber} holds at most 27 rows`, pageRows.length <= 27);
+      rows.push(...pageRows.map((item) => item.text));
+    }
+    check(`${label} first page is full before the register continues`,
+      (pages[section.pages[0] - 1] ?? []).filter((item) => item.x === 52 && item.size === 8 && item.y < 682).length === 27);
+    check(`${label} lists every eligible staff member exactly once, in register order`,
+      JSON.stringify(rows) === JSON.stringify(section.rows));
+  }
+  check("staff assigned to another site are not in the register",
+    !pages.flat().some((item) => item.text.includes("Delta Elsewhere Staff")));
+  // Page 2 has room for more rows, but the second document starts on its own page.
+  check("second document does not start on the first document's last page",
+    !(pages[1] ?? []).some((item) => item.text.includes("Delta B")));
+  const signedRows = (pages[0] ?? []).filter((item) => item.text === "Acknowledged");
+  check("acknowledged staff are listed first with their status", signedRows.length === 3);
+}
+
 async function main() {
   await checkConsultantRegisterTenantBoundary();
+  await checkLargeRegisterPagination();
   const email = `doc-status-${Date.now()}@test.local`;
   const registered = await request("POST", "/auth/register", {
     name: "Doc Status Test", email, password: "password-123",
