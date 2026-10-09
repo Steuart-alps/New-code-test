@@ -40,10 +40,10 @@ export interface QueueMigrationOptions {
  */
 const LEGACY_QUEUE_PREDICATE = sql.raw(`(
   quote_token IS NOT NULL
-  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
+  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
 )`);
 /** "<format>.<key label>" of an envelope; legacy 3-part payloads yield "<iv>.<tag>". */
 const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) || '.' || split_part(encrypted_token_payload, '.', 2))`);
@@ -55,7 +55,11 @@ const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) |
  * estimate half the history as candidates and scan every row.
  */
 export async function ensureQueueMigrationIndexes(): Promise<void> {
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials"
+  // The partial index must match LEGACY_QUEUE_PREDICATE exactly; v2 adds the
+  // compliance /schedule/ route. Drop the earlier definition so the planner
+  // and the scrub agree on which rows are candidates.
+  await db.execute(sql`DROP INDEX IF EXISTS "IDX_contractor_email_queue_legacy_credentials"`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials_v2"
     ON contractor_email_queue (id) WHERE ${LEGACY_QUEUE_PREDICATE}`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_envelope_key"
     ON contractor_email_queue (${ENVELOPE_KEY_SQL}, id)`);
@@ -242,7 +246,7 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
   let html = String(row.body_html ?? "");
   let text = row.body_text == null ? null : String(row.body_text);
   let previewText = JSON.stringify(row.email_preview_json ?? {});
-  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal)\/([a-z0-9-]{32,})/ig;
+  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/([a-z0-9-]{32,})/ig;
   const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
   const candidates = [...all.matchAll(bearerPattern)];
   // Older edited drafts may contain a known credential as plain text,
@@ -263,6 +267,11 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
     } else if (route === "contractor-portal") {
       payload.portal ??= token;
       discovered.push([token, "{{PORTAL_URL}}"]);
+    } else if (route === "schedule") {
+      // A compliance visit-scheduling link: carried in the `booked` slot,
+      // as current reminders do; the item keeps only its digest.
+      payload.booked ??= token;
+      discovered.push([token, "{{BOOKED_TOKEN}}"]);
     }
     else {
       const issueId = Number(row.issue_id ?? row.entity_id);
@@ -296,7 +305,7 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
     previewText = previewText.split(raw).join(placeholder);
   }
   const remaining = [subject, html, text ?? "", previewText].join("\n");
-  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i.test(remaining)) {
+  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i.test(remaining)) {
     throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
   }
   const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
@@ -1241,6 +1250,7 @@ export async function runRuntimeMigrations() {
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
       CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
+    await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
@@ -4247,4 +4257,25 @@ async function migrateDoctrackSafetrackMerge() {
       `);
     }
   }
+}
+
+/**
+ * Compliance visit-scheduling links: store only the SHA-256 digest of each
+ * token (digestBearerToken's format). Replay-safe: legacy raw tokens are
+ * hashed and cleared in one statement, so links already delivered keep
+ * working and a re-run finds nothing to do. Runs before the queue scrub,
+ * which moves matching raw links out of queued drafts.
+ */
+export async function migrateComplianceScheduleTokens(): Promise<number> {
+  await db.execute(sql`ALTER TABLE "compliance_items"
+    ADD COLUMN IF NOT EXISTS "schedule_token" text,
+    ADD COLUMN IF NOT EXISTS "schedule_token_hash" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_compliance_items_schedule_token_hash"
+    ON "compliance_items" ("schedule_token_hash") WHERE "schedule_token_hash" IS NOT NULL`);
+  const migrated = await db.execute(sql`UPDATE "compliance_items"
+    SET "schedule_token_hash" = encode(sha256(convert_to("schedule_token", 'UTF8')), 'hex'),
+        "schedule_token" = NULL
+    WHERE "schedule_token" IS NOT NULL
+    RETURNING id`);
+  return migrated.rows.length;
 }

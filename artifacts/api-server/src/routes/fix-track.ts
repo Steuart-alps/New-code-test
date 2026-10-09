@@ -76,7 +76,7 @@ function sendFailureResponse(res: any, err: unknown) {
   }
   return res.status(502).json({ error: "Contractor email could not be sent" });
 }
-const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
+const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i;
 const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
 const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
 const FIXTRACK_UPLOAD_EXTENSIONS: Record<string, string> = {

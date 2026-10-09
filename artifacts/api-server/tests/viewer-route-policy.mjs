@@ -23,7 +23,8 @@ function routeException(file, method, path) {
   if (name === "fix-track-public.ts" || name === "contractor-portal.ts" || name === "sign-off.ts") {
     return "public token portal";
   }
-  if (name === "notifications.ts" && method === "POST" && path === "/notifications/public/schedule/:token") {
+  // notificationsPublicRouter, mounted at /notifications/public/schedule.
+  if (name === "notifications.ts" && method === "POST" && path === "/:token") {
     return "public scheduling token";
   }
   if (name === "feedback.ts" && method === "POST" && path === "/feedback") {
@@ -56,7 +57,7 @@ for (const file of routeFiles) {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      ["router", "sub"].includes(node.expression.expression.getText(sourceFile)) &&
+      ["router", "sub", "notificationsPublicRouter"].includes(node.expression.expression.getText(sourceFile)) &&
       ["post", "put", "patch", "delete"].includes(node.expression.name.text)
     ) {
       const [pathArg, ...rest] = node.arguments;
