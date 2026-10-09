@@ -16,6 +16,12 @@
 //        - after PUT custom list, the custom type is accepted
 //        - PUT (edit) with an unchanged legacy value still succeeds after the
 //          option is removed from the list
+//   2b. FixTrack contractors + PremisesTrack inspections
+//        - account-specific active custom trades and inspection types are
+//          accepted for new records
+//        - disabled or another client's values are rejected for new records
+//        - unrelated edits preserve an unchanged disabled value
+//        - consultant ?clientId context keeps both modules tenant-scoped
 //   3. /api/food-safety/config
 //        - PUT/DELETE require admin (viewer/staff → 403)
 //        - invalid section-toggle values (not "true"/"false") → 400
@@ -30,6 +36,9 @@
 // Usage: node tests/config-endpoints.mjs   (API must be running on API_BASE)
 // Exits 0 when every check passes, 1 otherwise.
 
+import { randomUUID } from "node:crypto";
+
+const runId = randomUUID();
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
 let passed = 0;
@@ -88,7 +97,7 @@ function isoDate(daysOffset = 0) {
 // auto-provisioned client). Returns { session, clientId, email }.
 async function registerAccount(label, ts) {
   const session = makeSession();
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const reg = await session("POST", "/auth/register", {
     name: `${label} account`,
     email,
@@ -124,7 +133,7 @@ async function registerAccount(label, ts) {
 
 // Create a sub-user under the given admin session, then log them in.
 async function createAndLogin(admin, clientId, role, label, ts) {
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `${label}-${runId}-${randomUUID()}@test.local`;
   const password = "password-456";
   const created = await admin("POST", "/users", {
     name: label,
@@ -232,6 +241,35 @@ async function testFormOptions(admin, viewer, staff, ts) {
     `customised=${afterPut.data?.customised?.incident_types}`,
   );
 
+  // Removing an active custom value keeps it available for restoration, just
+  // like a disabled built-in default.
+  const disabledCustom = await admin("PUT", "/form-options/incident_types", {
+    items: [custom[0]],
+  });
+  expectOk("form-options: disable one custom option", disabledCustom.status);
+  const afterDisable = await admin("GET", "/form-options");
+  const disabledIncidentOptions = afterDisable.data?.disabled?.incident_types ?? [];
+  check(
+    "form-options: disabled custom option remains visible",
+    disabledIncidentOptions.includes(custom[1]),
+    `disabled=${JSON.stringify(disabledIncidentOptions)}`,
+  );
+  check(
+    "form-options: disabled built-in option remains visible",
+    disabledIncidentOptions.includes(afterDisable.data?.defaults?.incident_types?.[0]),
+    `disabled=${JSON.stringify(disabledIncidentOptions)}`,
+  );
+
+  const reenabled = await admin("PUT", "/form-options/incident_types", { items: custom });
+  expectOk("form-options: re-enable disabled custom option", reenabled.status);
+  const afterReenable = await admin("GET", "/form-options");
+  check(
+    "form-options: re-enabled custom option is active again",
+    afterReenable.data?.options?.incident_types?.includes(custom[1])
+      && !afterReenable.data?.disabled?.incident_types?.includes(custom[1]),
+    `active=${JSON.stringify(afterReenable.data?.options?.incident_types)}, disabled=${JSON.stringify(afterReenable.data?.disabled?.incident_types)}`,
+  );
+
   // DELETE resets to default.
   const del = await admin("DELETE", "/form-options/incident_types");
   expectOk("form-options: DELETE resets", del.status);
@@ -256,7 +294,7 @@ async function testFormOptionsIsolation(admin, clientAId, ts) {
   // them via consultant_clients so they can act on it with ?clientId.
   const bRes = await admin("POST", "/clients", {
     name: `Isolation Client B ${ts}`,
-    slug: `isolation-b-${ts}-${Math.floor(Math.random() * 1e6)}`,
+    slug: `isolation-b-${runId}`,
   });
   expectOk("isolation: consultant creates client B", bRes.status, [200, 201]);
   const clientBId = bRes.data?.id;
@@ -324,6 +362,7 @@ async function testRecordValidation(admin, ts) {
     description: "Test incident",
     involvedName: "Jane Doe",
     reportedBy: "Test Reporter",
+    riddorRationale: "Assessed against RIDDOR criteria; no reportable injury or occurrence.",
     ...overrides,
   });
 
@@ -375,10 +414,244 @@ async function testRecordValidation(admin, ts) {
   const editInvalid = await admin("PUT", `/incidents/${legacyId}`, { incidentType: "another_bad_type" });
   expectStatus("record: PUT to new invalid type → 400", editInvalid.status, 400);
 
+  // TrainTrack preserves the historical "Other" wildcard only while that
+  // option is active for the client. The UI submits the nonblank description,
+  // rather than persisting the literal picker label.
+  const customTrainingType = `Bespoke equipment induction ${ts}`;
+  expectOk(
+    "record: enable TrainTrack Other wildcard",
+    (await admin("PUT", "/form-options/traintrack_types", { items: ["Other"] })).status,
+  );
+  const customTraining = await admin("POST", "/train-track/records", {
+    recordType: "internal",
+    staffName: "Jane Doe",
+    trainingType: customTrainingType,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  expectOk("record: TrainTrack custom type accepted while Other active", customTraining.status, [201]);
+  const customTrainingId = customTraining.data?.id;
+
+  expectOk(
+    "record: disable TrainTrack Other wildcard",
+    (await admin("PUT", "/form-options/traintrack_types", { items: ["Fire Safety Awareness"] })).status,
+  );
+  const rejectedTraining = await admin("POST", "/train-track/records", {
+    recordType: "internal",
+    staffName: "John Doe",
+    trainingType: `Unlisted training ${ts}`,
+    trainer: "Test Trainer",
+    completedDate: isoDate(-1),
+  });
+  expectStatus("record: TrainTrack custom type rejected while Other disabled", rejectedTraining.status, 400);
+
+  if (Number.isInteger(customTrainingId)) {
+    const unchangedTraining = await admin("PATCH", `/train-track/records/${customTrainingId}`, {
+      trainingType: customTrainingType,
+      notes: "Legacy custom type remains editable",
+    });
+    expectOk("record: unchanged custom TrainTrack type remains editable", unchangedTraining.status, [200]);
+    await admin("DELETE", `/train-track/records/${customTrainingId}`);
+  }
+  await admin("DELETE", "/form-options/traintrack_types");
+
   // Cleanup: reset the list and remove created incidents.
   await admin("DELETE", "/form-options/incident_types");
   await admin("DELETE", `/incidents/${legacyId}`);
   if (Number.isInteger(customRecord.data?.id)) await admin("DELETE", `/incidents/${customRecord.data.id}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2b. FixTrack contractors + PremisesTrack inspection validation
+// ─────────────────────────────────────────────────────────────────────────────
+async function testCustomTradeAndInspectionValidation(admin, clientAId, clientBId, ts) {
+  console.log("\n── FixTrack trades + PremisesTrack inspection types ──");
+
+  const tradeA = `A trade ${ts}`;
+  const tradeAReplacement = `A replacement trade ${ts}`;
+  const tradeB = `B trade ${ts}`;
+  const tradeBReplacement = `B replacement trade ${ts}`;
+  const inspectionA = `A inspection ${ts}`;
+  const inspectionAReplacement = `A replacement inspection ${ts}`;
+  const inspectionB = `B inspection ${ts}`;
+  const inspectionBReplacement = `B replacement inspection ${ts}`;
+
+  const setOptions = async (clientId, key, items) => {
+    const suffix = clientId === clientAId ? "" : `?clientId=${clientId}`;
+    return admin("PUT", `/form-options/${key}${suffix}`, { items });
+  };
+
+  const getOptions = async (clientId) => {
+    const suffix = clientId === clientAId ? "" : `?clientId=${clientId}`;
+    return admin("GET", `/form-options${suffix}`);
+  };
+
+  const contractorBody = (label, trades) => ({
+    name: `${label} contractor`,
+    email: `${label.toLowerCase().replaceAll(" ", "-")}-${ts}@test.local`,
+    trades,
+  });
+
+  const inspectionBody = (inspectionType, findings) => ({
+    inspectionDate: isoDate(-2),
+    inspectionType,
+    area: "Test kitchen",
+    findings,
+    inspectedBy: "Config endpoint tester",
+  });
+
+  const createdContractorIds = [];
+  const createdInspectionIds = [];
+
+  try {
+    // The consultant's two selectable clients receive different active values.
+    expectOk(
+      "custom records: save client A FixTrack trade",
+      (await setOptions(clientAId, "fixtrack_trades", [tradeA])).status,
+    );
+    expectOk(
+      "custom records: save client B FixTrack trade via ?clientId",
+      (await setOptions(clientBId, "fixtrack_trades", [tradeB])).status,
+    );
+    expectOk(
+      "custom records: save client A PremisesTrack inspection type",
+      (await setOptions(clientAId, "premises_inspection_types", [inspectionA])).status,
+    );
+    expectOk(
+      "custom records: save client B PremisesTrack inspection type via ?clientId",
+      (await setOptions(clientBId, "premises_inspection_types", [inspectionB])).status,
+    );
+
+    const aOptions = await getOptions(clientAId);
+    const bOptions = await getOptions(clientBId);
+    check(
+      "custom records: client A exposes only its active custom values",
+      JSON.stringify(aOptions.data?.options?.fixtrack_trades) === JSON.stringify([tradeA])
+        && JSON.stringify(aOptions.data?.options?.premises_inspection_types) === JSON.stringify([inspectionA]),
+      `got ${JSON.stringify(aOptions.data?.options)}`,
+    );
+    check(
+      "custom records: client B exposes only its active custom values",
+      JSON.stringify(bOptions.data?.options?.fixtrack_trades) === JSON.stringify([tradeB])
+        && JSON.stringify(bOptions.data?.options?.premises_inspection_types) === JSON.stringify([inspectionB]),
+      `got ${JSON.stringify(bOptions.data?.options)}`,
+    );
+
+    // New records accept each client's active custom value, but not the other
+    // client's value, even when the same consultant selects that client.
+    const aContractor = await admin("POST", "/contractors", contractorBody("A active", [tradeA]));
+    expectOk("custom records: client A accepts active custom trade", aContractor.status, [201]);
+    if (Number.isInteger(aContractor.data?.id)) createdContractorIds.push(["", aContractor.data.id]);
+
+    const aForeignContractor = await admin("POST", "/contractors", contractorBody("A foreign", [tradeB]));
+    expectStatus("custom records: client A rejects client B trade", aForeignContractor.status, 400);
+
+    const bContractor = await admin(
+      "POST",
+      `/contractors?clientId=${clientBId}`,
+      contractorBody("B active", [tradeB]),
+    );
+    expectOk("custom records: client B accepts active custom trade", bContractor.status, [201]);
+    if (Number.isInteger(bContractor.data?.id)) createdContractorIds.push([`?clientId=${clientBId}`, bContractor.data.id]);
+
+    const bForeignContractor = await admin(
+      "POST",
+      `/contractors?clientId=${clientBId}`,
+      contractorBody("B foreign", [tradeA]),
+    );
+    expectStatus("custom records: client B rejects client A trade", bForeignContractor.status, 400);
+
+    const aInspection = await admin("POST", "/premises-track", inspectionBody(inspectionA, "A active type"));
+    expectOk("custom records: client A accepts active inspection type", aInspection.status, [201]);
+    if (Number.isInteger(aInspection.data?.id)) createdInspectionIds.push(["", aInspection.data.id]);
+
+    const aForeignInspection = await admin(
+      "POST",
+      "/premises-track",
+      inspectionBody(inspectionB, "A foreign type"),
+    );
+    expectStatus("custom records: client A rejects client B inspection type", aForeignInspection.status, 400);
+
+    const bInspection = await admin(
+      "POST",
+      `/premises-track?clientId=${clientBId}`,
+      inspectionBody(inspectionB, "B active type"),
+    );
+    expectOk("custom records: client B accepts active inspection type", bInspection.status, [201]);
+    if (Number.isInteger(bInspection.data?.id)) createdInspectionIds.push([`?clientId=${clientBId}`, bInspection.data.id]);
+
+    const bForeignInspection = await admin(
+      "POST",
+      `/premises-track?clientId=${clientBId}`,
+      inspectionBody(inspectionA, "B foreign type"),
+    );
+    expectStatus("custom records: client B rejects client A inspection type", bForeignInspection.status, 400);
+
+    // Remove the values from the active lists. New records reject them, but an
+    // unrelated edit may retain the unchanged value already stored on a record.
+    expectOk(
+      "custom records: disable client A trade",
+      (await setOptions(clientAId, "fixtrack_trades", [tradeAReplacement])).status,
+    );
+    const disabledContractor = await admin("POST", "/contractors", contractorBody("A disabled", [tradeA]));
+    expectStatus("custom records: new contractor rejects disabled trade", disabledContractor.status, 400);
+
+    if (Number.isInteger(aContractor.data?.id)) {
+      const editedContractor = await admin("PUT", `/contractors/${aContractor.data.id}`, {
+        name: "A active contractor renamed",
+        email: aContractor.data.email,
+      });
+      expectOk("custom records: contractor edit preserves disabled trade", editedContractor.status, [200]);
+      check(
+        "custom records: contractor keeps unchanged disabled trade",
+        JSON.stringify(editedContractor.data?.trades) === JSON.stringify([tradeA]),
+        `got ${JSON.stringify(editedContractor.data?.trades)}`,
+      );
+    }
+
+    expectOk(
+      "custom records: disable client A inspection type",
+      (await setOptions(clientAId, "premises_inspection_types", [inspectionAReplacement])).status,
+    );
+    const disabledInspection = await admin(
+      "POST",
+      "/premises-track",
+      inspectionBody(inspectionA, "A disabled type"),
+    );
+    expectStatus("custom records: new inspection rejects disabled type", disabledInspection.status, 400);
+
+    if (Number.isInteger(aInspection.data?.id)) {
+      const editedInspection = await admin("PUT", `/premises-track/${aInspection.data.id}`, {
+        ...inspectionBody(inspectionA, "A unrelated edit"),
+      });
+      expectOk("custom records: inspection edit preserves disabled type", editedInspection.status, [200]);
+      const afterEdit = await admin("GET", `/premises-track?type=${encodeURIComponent(inspectionA)}`);
+      const stored = Array.isArray(afterEdit.data)
+        ? afterEdit.data.find((row) => row.id === aInspection.data.id)
+        : null;
+      check(
+        "custom records: inspection keeps unchanged disabled type",
+        stored?.inspectionType === inspectionA && stored?.findings === "A unrelated edit",
+        `got ${JSON.stringify(stored)}`,
+      );
+    }
+  } finally {
+    for (const [suffix, id] of createdContractorIds) {
+      await admin("DELETE", `/contractors/${id}${suffix}`).catch(() => {});
+    }
+    for (const [suffix, id] of createdInspectionIds) {
+      await admin("DELETE", `/premises-track/${id}${suffix}`).catch(() => {});
+    }
+    await setOptions(clientAId, "fixtrack_trades", [
+      "electrical", "plumbing", "gas_kitchen", "gas_fireplace", "gas_heating",
+      "structural", "equipment", "hvac", "it_comms", "safety_hazard", "cleaning", "general",
+    ]);
+    await setOptions(clientAId, "premises_inspection_types", [
+      "routine", "hazard", "fault", "housekeeping", "signage",
+    ]);
+    await admin("DELETE", `/form-options/fixtrack_trades?clientId=${clientBId}`).catch(() => {});
+    await admin("DELETE", `/form-options/premises_inspection_types?clientId=${clientBId}`).catch(() => {});
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,6 +682,59 @@ async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
     "food-config: PUT invalid toggle value → 400",
     (await admin("PUT", "/food-safety/config", { food_show_cooling: "maybe" })).status,
     400,
+  );
+  expectStatus(
+    "food-config: PUT duplicate probe names → 400",
+    (await admin("PUT", "/food-safety/config", { food_probe_names: JSON.stringify(["Blue probe", " blue PROBE "]) })).status,
+    400,
+  );
+  expectOk(
+    "food-config: PUT custom probe names",
+    (await admin("PUT", "/food-safety/config", { food_probe_names: JSON.stringify([" Blue probe ", "Red probe"]) })).status,
+  );
+  const probeConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: custom probe names are trimmed and stored",
+    JSON.stringify(JSON.parse(probeConfig.data?.food_probe_names ?? "[]")) === JSON.stringify(["Blue probe", "Red probe"]),
+    `got ${probeConfig.data?.food_probe_names}`,
+  );
+
+  expectStatus(
+    "food-config: invalid jurisdiction → 400",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "northern_ireland" })).status,
+    400,
+  );
+  expectOk(
+    "food-config: Scotland jurisdiction",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "scotland" })).status,
+  );
+  const scotlandConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: Scotland reheating target is 82°C",
+    scotlandConfig.data?.food_jurisdiction === "scotland"
+      && scotlandConfig.data?.food_reheating_limit === "Above 82°C",
+    `jurisdiction=${scotlandConfig.data?.food_jurisdiction}, limit=${scotlandConfig.data?.food_reheating_limit}`,
+  );
+  expectOk(
+    "food-config: England/Wales jurisdiction",
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "england_wales" })).status,
+  );
+  const englandWalesConfig = await admin("GET", "/food-safety/config");
+  check(
+    "food-config: England/Wales reheating target is 75°C",
+    englandWalesConfig.data?.food_jurisdiction === "england_wales"
+      && englandWalesConfig.data?.food_reheating_limit === "Above 75°C",
+    `jurisdiction=${englandWalesConfig.data?.food_jurisdiction}, limit=${englandWalesConfig.data?.food_reheating_limit}`,
+  );
+  const jurisdictionRecord = await admin("POST", "/food-safety", {
+    recordDate: isoDate(-5),
+    reheating: [{ item: "Soup", coreTemp: "75" }],
+  });
+  expectOk("food-config: new diary uses jurisdiction reheating target", jurisdictionRecord.status, [201]);
+  check(
+    "food-config: England/Wales diary record stores 75°C target",
+    jurisdictionRecord.data?.reheatingLimit === "Above 75°C",
+    `got ${jurisdictionRecord.data?.reheatingLimit}`,
   );
 
   // siteId belonging to another client → 400.
@@ -580,7 +906,41 @@ async function testSiteDiaries(admin, ts) {
   expectOk("site-diary: whole-org record same date allowed", orgRec.status, [201]);
   check("site-diary: whole-org record has null siteId", orgRec.data?.siteId == null, `got ${orgRec.data?.siteId}`);
 
-  // ── (e) Same site + same date → upsert semantics (409 conflict, no dup) ──
+  // ── (e) Monthly and missing-date views distinguish drafts, submissions and gaps ──
+  const calendarDraftDate = "2098-02-10";
+  const calendarSubmittedDate = "2098-02-11";
+  const calendarMissingDate = "2098-02-12";
+  const calendarDraft = await admin("POST", `/food-safety?siteId=${s1}`, { recordDate: calendarDraftDate });
+  expectOk("site-diary: create calendar draft", calendarDraft.status, [201]);
+  const calendarSubmitted = await admin("POST", `/food-safety?siteId=${s1}`, {
+    recordDate: calendarSubmittedDate,
+    submittedAt: "2098-02-11T12:00:00.000Z",
+  });
+  expectOk("site-diary: create submitted calendar record", calendarSubmitted.status, [201]);
+
+  const summary = await admin("GET", `/food-safety/summary?year=2098&month=2&siteId=${s1}`);
+  expectOk("site-diary: GET monthly summary", summary.status);
+  check("site-diary: February summary has 28 days", summary.data?.days?.length === 28, `got ${summary.data?.days?.length}`);
+  const draftSummary = summary.data?.days?.find((entry) => entry.date === calendarDraftDate);
+  const submittedSummary = summary.data?.days?.find((entry) => entry.date === calendarSubmittedDate);
+  const missingSummary = summary.data?.days?.find((entry) => entry.date === calendarMissingDate);
+  check("site-diary: summary marks draft as present but not submitted", draftSummary?.hasRecord === true && draftSummary?.submitted === false);
+  check("site-diary: summary marks submitted record complete", submittedSummary?.hasRecord === true && submittedSummary?.submitted === true);
+  check("site-diary: summary marks absent date missing", missingSummary?.hasRecord === false && missingSummary?.submitted === false);
+
+  const missingDates = await admin(
+    "GET",
+    `/food-safety/missing-dates?from=${calendarDraftDate}&to=${calendarMissingDate}&siteId=${s1}`,
+  );
+  expectOk("site-diary: GET missing dates", missingDates.status);
+  check(
+    "site-diary: missing dates excludes drafts and submissions",
+    JSON.stringify(missingDates.data?.missingDates) === JSON.stringify([calendarMissingDate])
+      && JSON.stringify(missingDates.data?.draftDates) === JSON.stringify([calendarDraftDate]),
+    `got ${JSON.stringify(missingDates.data)}`,
+  );
+
+  // ── (f) Same site + same date → upsert semantics (409 conflict, no dup) ──
   const s1Dup = await admin("POST", `/food-safety?siteId=${s1}`, { recordDate: day });
   expectStatus("site-diary: duplicate site1 record same date → 409", s1Dup.status, 409);
   check(
@@ -607,7 +967,7 @@ async function testSiteDiaries(admin, ts) {
     `ids=${JSON.stringify((listS1.data ?? []).map((r) => r.id))}`,
   );
 
-  // ── (f) Clearing a site override reverts that key to the client value ──
+  // ── (g) Clearing a site override reverts that key to the client value ──
   expectOk(
     "site-diary: clear site1 cooking override (null)",
     (await admin("PUT", `/food-safety/config?siteId=${s1}`, { food_cooking_limit: null })).status,
@@ -695,10 +1055,158 @@ async function testPushToken(admin, other, ts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 5. /api/storage/usage and storage warning settings
+// ─────────────────────────────────────────────────────────────────────────────
+async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
+  console.log("\n── storage usage ──");
+
+  const initialSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  expectOk("account timezone: settings are readable", initialSettings.status);
+  check(
+    "account timezone: existing accounts use the UK fallback",
+    initialSettings.data?.accountTimezone === null,
+    `got ${initialSettings.data?.accountTimezone}`,
+  );
+  expectOk(
+    "account timezone: save a valid IANA zone",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "America/New_York",
+    })).status,
+  );
+  const configuredSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  check(
+    "account timezone: saved value is returned",
+    configuredSettings.data?.accountTimezone === "America/New_York",
+    `got ${configuredSettings.data?.accountTimezone}`,
+  );
+  expectStatus(
+    "account timezone: fixed offset is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "+05:00",
+    })).status,
+    400,
+  );
+  expectStatus(
+    "account timezone: unknown IANA name is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: "Not/AZone",
+    })).status,
+    400,
+  );
+  expectOk(
+    "account timezone: null resets to the UK fallback",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      accountTimezone: null,
+    })).status,
+  );
+  expectOk(
+    "SafeTrack reminders: save weekly cadence and preferred time",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderFrequency: "weekly",
+      safeTrackReminderTime: "17:35",
+    })).status,
+  );
+  const safeTrackSettings = await admin("GET", `/settings?clientId=${clientAId}`);
+  check(
+    "SafeTrack reminders: saved cadence and time are returned",
+    safeTrackSettings.data?.safeTrackReminderFrequency === "weekly" &&
+      safeTrackSettings.data?.safeTrackReminderTime === "17:35",
+    `got ${JSON.stringify({
+      frequency: safeTrackSettings.data?.safeTrackReminderFrequency,
+      time: safeTrackSettings.data?.safeTrackReminderTime,
+    })}`,
+  );
+  expectStatus(
+    "SafeTrack reminders: invalid cadence is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderFrequency: "monthly",
+    })).status,
+    400,
+  );
+  expectStatus(
+    "SafeTrack reminders: invalid time is rejected",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      safeTrackReminderTime: "5pm",
+    })).status,
+    400,
+  );
+
+  const anon = makeSession();
+  expectStatus(
+    "storage usage: anonymous request → 401",
+    (await anon("GET", "/storage/usage", undefined, { noCookie: true })).status,
+    401,
+  );
+  expectStatus("storage usage: viewer → 403", (await viewer("GET", "/storage/usage")).status, 403);
+  expectStatus("storage usage: staff → 403", (await staff("GET", "/storage/usage")).status, 403);
+
+  const thresholdA = 2 * 1024 * 1024;
+  const thresholdB = 3 * 1024 * 1024;
+  expectOk(
+    "storage usage: save client A warning threshold",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: String(thresholdA),
+    })).status,
+  );
+  expectOk(
+    "storage usage: save selected client B warning threshold",
+    (await admin("PUT", `/settings?clientId=${clientBId}`, {
+      storageWarningThresholdBytes: String(thresholdB),
+    })).status,
+  );
+
+  const usageA = await admin("GET", `/storage/usage?clientId=${clientAId}`);
+  const usageB = await admin("GET", `/storage/usage?clientId=${clientBId}`);
+  expectOk("storage usage: client A response", usageA.status);
+  expectOk("storage usage: selected client B response", usageB.status);
+  check(
+    "storage usage: client A keeps its threshold",
+    usageA.data?.warningThresholdBytes === thresholdA,
+    `got ${usageA.data?.warningThresholdBytes}`,
+  );
+  check(
+    "storage usage: selected client B keeps its threshold",
+    usageB.data?.warningThresholdBytes === thresholdB,
+    `got ${usageB.data?.warningThresholdBytes}`,
+  );
+  check(
+    "storage usage: selected accounts use distinct tenant contexts",
+    usageA.data?.usedBytes === clientAId && usageB.data?.usedBytes === clientBId,
+    `A=${usageA.data?.usedBytes}, B=${usageB.data?.usedBytes}`,
+  );
+  for (const [name, response] of [["A", usageA], ["B", usageB]]) {
+    check(`storage usage: client ${name} bytes are non-negative`, Number.isSafeInteger(response.data?.usedBytes) && response.data.usedBytes >= 0);
+    check(`storage usage: client ${name} object count is non-negative`, Number.isSafeInteger(response.data?.objectCount) && response.data.objectCount >= 0);
+     check(`storage usage: client ${name} download traffic is measured`, Number.isSafeInteger(response.data?.monthlyDownloadBytes) && response.data.monthlyDownloadBytes >= 0 && response.data?.monthlyDownloadTrackingAvailable === true);
+  }
+
+  expectStatus(
+    "storage usage: threshold below 1 MB → 400",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: String(1024 * 1024 - 1),
+    })).status,
+    400,
+  );
+  expectOk(
+    "storage usage: null threshold resets to default",
+    (await admin("PUT", `/settings?clientId=${clientAId}`, {
+      storageWarningThresholdBytes: null,
+    })).status,
+  );
+  const reset = await admin("GET", `/storage/usage?clientId=${clientAId}`);
+  check(
+    "storage usage: reset uses 5 GB default",
+    reset.data?.warningThresholdBytes === 5 * 1024 * 1024 * 1024,
+    `got ${reset.data?.warningThresholdBytes}`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 async function main() {
-  const ts = Date.now();
+  // Full UUID entropy, without separators, fits the 60-character option limit.
+  const ts = runId.replaceAll("-", "");
 
   // Probe account A: self-service consultant + its own client.
   const a = await registerAccount("config-admin", ts);
@@ -711,9 +1219,11 @@ async function main() {
   await testFormOptions(a.session, viewer, staff, ts);
   const { clientBId } = await testFormOptionsIsolation(a.session, a.clientId, ts);
   await testRecordValidation(a.session, ts);
+  await testCustomTradeAndInspectionValidation(a.session, a.clientId, clientBId, ts);
   await testFoodSafetyConfig(a.session, viewer, staff, clientBId, ts);
   await testSiteDiaries(a.session, ts);
   await testPushToken(a.session, other, ts);
+  await testStorageUsage(a.session, viewer, staff, a.clientId, clientBId);
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable } from "@workspace/db/schema";
+import { auditEventsTable, departmentsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, trackActionTemplatesTable, trackActionsTable, trackEvidenceTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
+import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
 
 const router = Router();
-const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident"] as const;
+const MODULES = ["daily_am", "daily_pm", "kitchen", "fire", "legionella", "pool", "pat", "pest", "fix", "premises", "doc", "safe", "train", "hot_tub", "tree", "bike", "green", "swim", "incident", "room"] as const;
 const severity = z.enum(["monitor", "action_required", "urgent"]);
 const nullableText = z.string().trim().max(10_000).nullable().optional();
 const drawnSignature = z.string().max(250_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/);
@@ -234,6 +235,9 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
     if (!action) return { status: 404 as const, error: "Action not found" };
     if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
     if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
+    if (action.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_") && parsed.data.create) {
+      return { status: 409 as const, error: "Temperature corrective actions must stay in KitchenTrack for manager verification; raise a separate maintenance issue if necessary" };
+    }
     if (!await canAccessSite(action.siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden site" };
     if (!parsed.data.create) {
       const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
@@ -271,11 +275,55 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     if (current.sourceKind && "siteId" in parsed.data && parsed.data.siteId !== current.siteId) {
       return { status: 409 as const, error: "The source record controls this action's site" };
     }
+    const kitchenFailure = current.module === "kitchen" && current.sourceKind?.startsWith("kitchen_temperature_");
+    if (kitchenFailure) {
+      if (!["client_admin", "consultant"].includes(req.currentUser!.role)) return { status: 403 as const, error: "A manager must assign, resolve and verify failed-temperature actions" };
+      if ("instruction" in parsed.data || "title" in parsed.data || "severity" in parsed.data) return { status: 409 as const, error: "The failed temperature and original control rule are immutable" };
+    }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
     if (nextStatus === "resolved" && current.fixTrackIssueId) return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
+    }
+    if (nextStatus === "resolved") {
+      if (kitchenFailure) {
+        const proof = await tx.select({ id: trackEvidenceTable.id }).from(trackEvidenceTable).where(and(
+          eq(trackEvidenceTable.clientId, clientId), eq(trackEvidenceTable.actionId, current.id),
+          eq(trackEvidenceTable.module, "kitchen"), eq(trackEvidenceTable.requirementKey, "temperature_control_restored"),
+          eq(trackEvidenceTable.evidenceType, "verification"), ne(trackEvidenceTable.reviewStatus, "rejected"),
+        )).for("share");
+        if (!proof.length) return { status: 400 as const, error: "Record corrective-action verification evidence before manager sign-off" };
+      }
+      const missingEvidence = await missingEvidenceForAction(clientId, current);
+      if (missingEvidence.length) {
+        return {
+          status: 400 as const,
+          error: "Required inspection evidence is missing or not independently verified",
+          missingEvidence: missingEvidence.map(item => ({
+            requirementKey: item.requirementKey,
+            title: item.title,
+            evidenceType: item.evidenceType,
+            reviewRequired: item.reviewRequired,
+          })),
+        };
+      }
+      if (current.severity === "urgent") {
+        const [reviewedEvidence] = await tx.select({ id: trackEvidenceTable.id })
+          .from(trackEvidenceTable)
+          .where(and(
+            eq(trackEvidenceTable.clientId, clientId),
+            eq(trackEvidenceTable.actionId, current.id),
+            eq(trackEvidenceTable.reviewStatus, "verified"),
+          ))
+          .limit(1);
+        if (!reviewedEvidence) {
+          return {
+            status: 400 as const,
+            error: "Urgent actions require at least one independently reviewed evidence record before resolution",
+          };
+        }
+      }
     }
     const updates: Record<string, unknown> = { ...parsed.data, updatedAt: new Date() };
     if (nextStatus === "resolved") {
@@ -287,9 +335,14 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
+    if (kitchenFailure) await tx.insert(auditEventsTable).values({
+      clientId, actorId: req.currentUser!.id, entityType: "track_action", entityId: id,
+      action: nextStatus === "resolved" ? "manager_verified_and_resolved" : "updated",
+      before: current, after: row, metadata: { module: "kitchen" },
+    });
     return { status: 200 as const, row };
   });
-  if ("error" in result) return res.status(result.status).json({ error: result.error });
+  if ("error" in result) return res.status(result.status).json({ error: result.error, ...("missingEvidence" in result ? { missingEvidence: result.missingEvidence } : {}) });
   res.json(result.row);
 });
 export default router;

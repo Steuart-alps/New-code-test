@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
+import { appendFile } from "node:fs/promises";
 
 function getResend(apiKeyOverride?: string | null) {
   const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
@@ -122,6 +123,8 @@ function extractEmail(raw: string): string {
   return match ? match[1].trim() : raw.trim();
 }
 
+const testEmailRejectionOccurrences = new Map<string, number>();
+
 export async function sendSystemEmail(opts: {
   to: string;
   subject: string;
@@ -130,6 +133,38 @@ export async function sendSystemEmail(opts: {
   /** Stable provider key for workflows which must never duplicate a handoff. */
   idempotencyKey?: string;
 }) {
+  // Integration tests can inspect exactly what would have been handed to the
+  // provider without sending real mail. The same test-only transport can
+  // simulate slow or failed delivery. This is deliberately restricted to test
+  // mode and an explicitly configured capture file or behavior.
+  const capturePath = process.env.TEST_EMAIL_CAPTURE_PATH;
+  const testBehavior = process.env.TEST_EMAIL_BEHAVIOR;
+  if (process.env.NODE_ENV === "test" && (capturePath || testBehavior)) {
+    if (process.env.TEST_EMAIL_REJECT_SUBJECT === opts.subject) {
+      const occurrences = (testEmailRejectionOccurrences.get(opts.subject) ?? 0) + 1;
+      testEmailRejectionOccurrences.set(opts.subject, occurrences);
+      const rejectAtOccurrence = Number(process.env.TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE ?? 1);
+      if (occurrences === rejectAtOccurrence) {
+        throw new Error("Simulated email delivery failure for selected subject");
+      }
+    }
+    if (testBehavior === "delay") {
+      const delayMs = Number(process.env.TEST_EMAIL_DELAY_MS ?? 2500);
+      await new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : 2500));
+    }
+    if (testBehavior === "reject") {
+      throw new Error("Simulated email delivery failure");
+    }
+    if (!capturePath) return;
+    await appendFile(capturePath, `${JSON.stringify({
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.text,
+    })}\n`);
+    return;
+  }
+
   const resend = getResend();
   const rawFrom = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
   const email = extractEmail(rawFrom);
@@ -146,12 +181,68 @@ export async function sendSystemEmail(opts: {
   }
 }
 
+/** Notify the affected account only after an administrator's reset is committed. */
+export async function sendTwoFactorResetEmail(opts: {
+  to: string;
+  name: string;
+  resetAt: Date;
+}): Promise<void> {
+  const when = opts.resetAt.toISOString();
+  await sendSystemEmail({
+    to: opts.to,
+    subject: "Security alert: your two-factor authentication was reset",
+    text: [
+      `Hello ${opts.name},`,
+      "",
+      `An administrator reset your ComplyTrack two-factor authentication at ${when} (UTC).`,
+      "If you did not expect this reset, contact your administrator immediately.",
+      "Sign in and re-enrol your authenticator promptly. You must complete two-factor setup before accessing your account.",
+      "",
+      "ComplyTrack account security",
+    ].join("\n"),
+    html: `
+      <h2>ComplyTrack account security</h2>
+      <p>Hello ${escapeHtml(opts.name)},</p>
+      <p>An administrator reset your two-factor authentication at <strong>${when} (UTC)</strong>.</p>
+      <p>If you did not expect this reset, <strong>contact your administrator immediately</strong>.</p>
+      <p>Sign in and re-enrol your authenticator promptly. You must complete two-factor setup before accessing your account.</p>
+    `,
+  });
+}
+
 function toIcsDate(date: Date): string {
   return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
 
 function escapeIcs(str: string): string {
-  return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  return str.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+}
+
+function escapeIcsParameter(str: string): string {
+  return str.replace(/[\r\n]/g, "").replace(/\^/g, "^^").replace(/"/g, "^'");
+}
+
+function sanitizeIcsAddress(str: string): string {
+  return str.replace(/[\r\n]/g, "").trim();
+}
+
+function foldIcsLine(line: string): string {
+  if (Buffer.byteLength(line, "utf8") <= 75) return line;
+  const parts: string[] = [];
+  let current = "";
+  let limit = 75;
+  for (const char of line) {
+    if (current && Buffer.byteLength(current + char, "utf8") > limit) {
+      parts.push(current);
+      current = char;
+      // A continuation line begins with one folding-space octet.
+      limit = 74;
+    } else {
+      current += char;
+    }
+  }
+  if (current) parts.push(current);
+  return parts.map((part, index) => index === 0 ? part : ` ${part}`).join("\r\n");
 }
 
 export function buildCalendarInvite(opts: {
@@ -162,14 +253,26 @@ export function buildCalendarInvite(opts: {
   companyName: string;
   fromEmail: string;
   notes?: string | null;
+  descriptionLabel?: string;
   extraAttendees?: { name?: string; email: string }[];
+  /** Supply a stable UID when later invitations should update the same event. */
+  uid?: string;
+  /** Increment when updating an invitation with the same UID. */
+  sequence?: number;
+  /** Date-only work is represented as an all-day event, ending the next day. */
+  allDay?: boolean;
+  method?: "REQUEST" | "CANCEL";
+  eventStatus?: "CONFIRMED" | "CANCELLED";
+  /** Override generation time for deterministic compatibility fixtures. */
+  generatedAt?: Date;
 }): string {
-  const uid = randomUUID();
-  const now = new Date();
-  const endDate = new Date(opts.dueDate.getTime() + 60 * 60 * 1000);
+  const uid = opts.uid ?? randomUUID();
+  const now = opts.generatedAt ?? new Date();
+  const endDate = new Date(opts.dueDate.getTime() + (opts.allDay ? 24 : 1) * 60 * 60 * 1000);
+  const toIcsDay = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, "");
 
   const description = [
-    `Compliance check due: ${opts.itemTitle}`,
+    `${opts.descriptionLabel ?? "Compliance check due"}: ${opts.itemTitle}`,
     opts.notes ? opts.notes : "",
     ``,
     `Scheduled by ${opts.companyName}`,
@@ -178,24 +281,26 @@ export function buildCalendarInvite(opts: {
     .map((part) => escapeIcs(part.replace(/\r/g, "")))
     .join("\\n");
 
-  return [
+  const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     `PRODID:-//ComplyTrack//EN`,
-    "METHOD:REQUEST",
+    "CALSCALE:GREGORIAN",
+    `METHOD:${opts.method ?? "REQUEST"}`,
     "BEGIN:VEVENT",
     `UID:${uid}`,
+    `SEQUENCE:${Math.max(0, Math.trunc(opts.sequence ?? 0))}`,
     `DTSTAMP:${toIcsDate(now)}`,
-    `DTSTART:${toIcsDate(opts.dueDate)}`,
-    `DTEND:${toIcsDate(endDate)}`,
+    opts.allDay ? `DTSTART;VALUE=DATE:${toIcsDay(opts.dueDate)}` : `DTSTART:${toIcsDate(opts.dueDate)}`,
+    opts.allDay ? `DTEND;VALUE=DATE:${toIcsDay(endDate)}` : `DTEND:${toIcsDate(endDate)}`,
     `SUMMARY:${escapeIcs(opts.itemTitle)}`,
     `DESCRIPTION:${description}`,
-    `ORGANIZER;CN=${escapeIcs(opts.companyName)}:MAILTO:${opts.fromEmail}`,
-    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(opts.contractorName)}:MAILTO:${opts.contractorEmail}`,
+    `ORGANIZER;CN="${escapeIcsParameter(opts.companyName)}":MAILTO:${sanitizeIcsAddress(opts.fromEmail)}`,
+    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${escapeIcsParameter(opts.contractorName)}":MAILTO:${sanitizeIcsAddress(opts.contractorEmail)}`,
     ...(opts.extraAttendees ?? []).map(
-      (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN=${escapeIcs(a.name ?? a.email)}:MAILTO:${a.email}`,
+      (a) => `ATTENDEE;ROLE=OPT-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${escapeIcsParameter(a.name ?? a.email)}":MAILTO:${sanitizeIcsAddress(a.email)}`,
     ),
-    "STATUS:CONFIRMED",
+    `STATUS:${opts.eventStatus ?? "CONFIRMED"}`,
     "BEGIN:VALARM",
     "TRIGGER:-P1D",
     "ACTION:DISPLAY",
@@ -203,7 +308,8 @@ export function buildCalendarInvite(opts: {
     "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
-  ].join("\r\n");
+  ];
+  return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
 
 export function getPublicAppUrl(): string {

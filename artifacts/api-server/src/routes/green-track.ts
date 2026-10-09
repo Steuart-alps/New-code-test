@@ -4,6 +4,7 @@ import { sql, eq, and } from "drizzle-orm";
 import { getClientId, requireClientAdmin, requireAuth, denyViewers } from "../middleware/requireAuth";
 import { appSettingsTable } from "@workspace/db/schema";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { createWithStagedPhotoReceipts, StagedPhotoReceiptError } from "../lib/stagedPhotoReceipts";
 
 const router = Router();
 
@@ -11,17 +12,55 @@ const router = Router();
 export const MACHINE_TYPES = [
   "ride_on_cylinder",
   "ride_on_rotary",
+  "ride_on",
+  "pedestrian",
   "fairway_mower",
   "walk_behind",
   "tractor",
   "utility_vehicle",
   "sprayer_spreader",
   "aerator",
+  "atv_quad",
+  "blower",
+  "chainsaw",
+  "hedge_trimmer",
+  "topdresser",
   "scarifier",
   "roller",
   "edger_strimmer",
   "other",
 ] as const;
+
+const MACHINE_TYPE_ALIASES: Record<string, string> = {
+  "ride-on": "ride_on",
+  "ride on": "ride_on",
+  rideon: "ride_on",
+  ride_on_mower: "ride_on",
+  pedestrian: "pedestrian",
+  pedestrian_mower: "pedestrian",
+  "walk behind": "walk_behind",
+  "walk-behind": "walk_behind",
+  "walk behind mower": "walk_behind",
+  "ride-on cylinder": "ride_on_cylinder",
+  "ride-on rotary": "ride_on_rotary",
+  "fairway": "fairway_mower",
+  "utility": "utility_vehicle",
+  "sprayer": "sprayer_spreader",
+  "spreader": "sprayer_spreader",
+  "atv": "atv_quad",
+  "quad": "atv_quad",
+  "hedge trimmer": "hedge_trimmer",
+  "edger": "edger_strimmer",
+  "strimmer": "edger_strimmer",
+};
+
+function normalizeMachineType(value: unknown): string | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  const underscored = raw.replace(/&/g, "and").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const normalized = MACHINE_TYPE_ALIASES[raw] ?? MACHINE_TYPE_ALIASES[underscored] ?? underscored;
+  return (MACHINE_TYPES as readonly string[]).includes(normalized) ? normalized : null;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function rows<T = any>(result: any): T[] {
@@ -64,6 +103,121 @@ router.post("/machines", requireClientAdmin, async (req, res) => {
     res.status(201).json(rows(result)[0]);
   } catch (err) {
     res.status(500).json({ error: "Failed to create machine" });
+  }
+});
+
+router.post("/machines/import", requireClientAdmin, async (req, res) => {
+  try {
+    const clientId = getClientId(req);
+    const input = req.body?.rows;
+    if (!Array.isArray(input) || input.length === 0) {
+      return res.status(400).json({ error: "At least one equipment row is required" });
+    }
+    if (input.length > 500) {
+      return res.status(400).json({ error: "Import is limited to 500 equipment rows" });
+    }
+
+    const siteRows = rows<{ id: number }>(await db.execute(sql`
+      SELECT id FROM sites WHERE client_id = ${clientId}
+    `));
+    const siteIds = new Set(siteRows.map(site => Number(site.id)));
+    const errors: Array<{ row: number; error: string }> = [];
+    const normalizedRows: Array<{
+      name: string;
+      type: string;
+      make: string | null;
+      model: string | null;
+      serialNo: string | null;
+      year: number | null;
+      regNo: string | null;
+      siteId: number | null;
+      notes: string | null;
+      active: boolean;
+    }> = [];
+
+    input.forEach((rawRow: any, index: number) => {
+      const rowNumber = index + 2;
+      const name = String(rawRow?.name ?? "").trim();
+      const type = normalizeMachineType(rawRow?.type);
+      const yearValue = rawRow?.year === undefined || rawRow?.year === null || String(rawRow.year).trim() === ""
+        ? null
+        : Number(rawRow.year);
+      const siteId = rawRow?.siteId === undefined || rawRow?.siteId === null || String(rawRow.siteId).trim() === ""
+        ? null
+        : Number(rawRow.siteId);
+
+      if (!name) errors.push({ row: rowNumber, error: "Name is required" });
+      if (!type) errors.push({ row: rowNumber, error: "Type must be one of the approved GreenTrack types (ride-on and pedestrian are supported aliases)" });
+      if (yearValue !== null && (!Number.isInteger(yearValue) || yearValue < 1900 || yearValue > 2100)) {
+        errors.push({ row: rowNumber, error: "Year must be a whole number between 1900 and 2100" });
+      }
+      if (siteId !== null && (!Number.isInteger(siteId) || !siteIds.has(siteId))) {
+        errors.push({ row: rowNumber, error: "Site does not belong to this account" });
+      }
+      if (!name || !type || errors.some(error => error.row === rowNumber)) return;
+
+      normalizedRows.push({
+        name,
+        type,
+        make: String(rawRow?.make ?? "").trim() || null,
+        model: String(rawRow?.model ?? "").trim() || null,
+        serialNo: String(rawRow?.serialNo ?? "").trim() || null,
+        year: yearValue,
+        regNo: String(rawRow?.regNo ?? "").trim() || null,
+        siteId,
+        notes: String(rawRow?.notes ?? "").trim() || null,
+        active: rawRow?.active !== false,
+      });
+    });
+
+    if (errors.length) {
+      return res.status(400).json({ error: "Import contains invalid rows", errors });
+    }
+
+    const result = await db.transaction(async tx => {
+      const existing = rows<{ name: string; type: string; serial_no: string | null; reg_no: string | null }>(
+        await tx.execute(sql`
+          SELECT name, type, serial_no, reg_no
+          FROM green_machines
+          WHERE client_id = ${clientId}
+        `),
+      );
+      const existingKeys = new Set<string>();
+      for (const machine of existing) {
+        if (machine.serial_no) existingKeys.add(`serial:${machine.serial_no.trim().toLowerCase()}`);
+        if (machine.reg_no) existingKeys.add(`reg:${machine.reg_no.trim().toLowerCase()}`);
+        existingKeys.add(`name:${machine.name.trim().toLowerCase()}|${machine.type}`);
+      }
+
+      let imported = 0;
+      const skipped: Array<{ row: number; name: string; reason: string }> = [];
+      for (const [index, machine] of normalizedRows.entries()) {
+        const keys = [
+          machine.serialNo ? `serial:${machine.serialNo.toLowerCase()}` : null,
+          machine.regNo ? `reg:${machine.regNo.toLowerCase()}` : null,
+          `name:${machine.name.toLowerCase()}|${machine.type}`,
+        ].filter(Boolean) as string[];
+        if (keys.some(key => existingKeys.has(key))) {
+          skipped.push({ row: index + 2, name: machine.name, reason: "Already in fleet" });
+          continue;
+        }
+        await tx.execute(sql`
+          INSERT INTO green_machines
+            (client_id, site_id, name, type, make, model, serial_no, year, reg_no, active, notes)
+          VALUES
+            (${clientId}, ${machine.siteId}, ${machine.name}, ${machine.type}, ${machine.make},
+             ${machine.model}, ${machine.serialNo}, ${machine.year}, ${machine.regNo},
+             ${machine.active}, ${machine.notes})
+        `);
+        keys.forEach(key => existingKeys.add(key));
+        imported += 1;
+      }
+      return { imported, skipped };
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to import equipment roster" });
   }
 });
 
@@ -128,13 +282,33 @@ router.get("/pre-use-checks", async (req, res) => {
 router.post("/pre-use-checks", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
        machineId, checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, notes,
+        checklistItems, fuelLevel, defectNoted, notes, photoUploadIds,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!checkDate) return res.status(400).json({ error: "checkDate is required" });
+
+    let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null = null;
+    if (checklistItems !== undefined) {
+      if (!Array.isArray(checklistItems) || checklistItems.length === 0) {
+        return res.status(400).json({ error: "checklistItems must contain at least one item" });
+      }
+      parsedChecklist = checklistItems.map((item: any) => ({
+        key: String(item?.key ?? "").trim(),
+        label: String(item?.label ?? "").trim(),
+        section: String(item?.section ?? "General").trim(),
+        status: item?.status,
+        ...(item?.note?.trim() ? { note: String(item.note).trim() } : {}),
+      }));
+      if (parsedChecklist.some(item =>
+        !item.key || !item.label || !["ok", "fail", "na"].includes(item.status)
+      )) {
+        return res.status(400).json({ error: "Every checklist item needs a key, label and OK, FAIL or N/A status" });
+      }
+    }
 
     // Verify machine belongs to client
     const machineCheck = await db.execute(sql`
@@ -146,23 +320,37 @@ router.post("/pre-use-checks", denyViewers, async (req, res) => {
 
     // The checklist is the source of truth. Never persist caller-supplied
     // aliases such as "advisory" as a newly recorded observation.
-    const canonicalResult = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
-      .some((value) => value === false) ? "fail" : "pass";
-    const result = await db.execute(sql`
-      INSERT INTO green_pre_use_checks (
-         client_id, machine_id, check_date, operator, operator_roster_id,
-        fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
-        defect_noted, result, notes
-      ) VALUES (
-         ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-        ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
-        ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
-        ${defectNoted ?? false}, ${canonicalResult}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const canonicalResult = parsedChecklist
+      ? (parsedChecklist.some(item => item.status === "fail") ? "fail" : "pass")
+      : ([fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
+        .some((value) => value === false) ? "fail" : "pass");
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_pre_use_check",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_pre_use_checks (
+           client_id, machine_id, check_date, operator, operator_roster_id,
+          fluid_levels_ok, tyres_ok, blades_ok, guards_ok, controls_ok, lights_ok, cleanliness_ok,
+           defect_noted, result, notes, checklist_items, fuel_level, submitted_at
+        ) VALUES (
+           ${clientId}, ${machineId}, ${checkDate}, ${performer?.performedBy ?? operator?.trim() ?? null}, ${performer?.staffRosterId ?? null},
+          ${fluidLevelsOk ?? null}, ${tyresOk ?? null}, ${bladesOk ?? null},
+          ${guardsOk ?? null}, ${controlsOk ?? null}, ${lightsOk ?? null}, ${cleanlinessOk ?? null},
+           ${parsedChecklist?.some(item => item.status === "fail") ?? defectNoted ?? false},
+           ${canonicalResult}, ${notes?.trim() ?? null}, ${parsedChecklist ? JSON.stringify(parsedChecklist) : null},
+           ${fuelLevel?.trim() ?? null}, now()
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create pre-use check" });
   }
 });
@@ -173,17 +361,38 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
     const {
        checkDate, operator, operatorRosterId,
       fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk,
-      defectNoted, notes,
+       checklistItems, fuelLevel, defectNoted, notes,
     } = req.body;
     const existing = (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE id=${req.params.id} AND client_id=${clientId}`)).rows[0] as any;
     if (!existing) return res.status(404).json({ error: "Check not found" });
     const performer = await resolveStaffPerformerUpdate(clientId, operatorRosterId, operator, existing.operator_roster_id, existing.operator);
     if (operatorRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
+    let parsedChecklist: Array<{ key: string; label: string; section: string; status: "ok" | "fail" | "na"; note?: string }> | null | undefined;
+    if (checklistItems !== undefined) {
+      if (!Array.isArray(checklistItems) || checklistItems.length === 0) {
+        return res.status(400).json({ error: "checklistItems must contain at least one item" });
+      }
+      parsedChecklist = checklistItems.map((item: any) => ({
+        key: String(item?.key ?? "").trim(),
+        label: String(item?.label ?? "").trim(),
+        section: String(item?.section ?? "General").trim(),
+        status: item?.status,
+        ...(item?.note?.trim() ? { note: String(item.note).trim() } : {}),
+      }));
+      if (parsedChecklist.some(item =>
+        !item.key || !item.label || !["ok", "fail", "na"].includes(item.status)
+      )) {
+        return res.status(400).json({ error: "Every checklist item needs a key, label and OK, FAIL or N/A status" });
+      }
+    }
     const value = (input: any, stored: any) => input === undefined ? stored : input;
     const merged = [fluidLevelsOk, tyresOk, bladesOk, guardsOk, controlsOk, lightsOk, cleanlinessOk]
       .map((input, index) => value(input, [existing.fluid_levels_ok, existing.tyres_ok, existing.blades_ok, existing.guards_ok, existing.controls_ok, existing.lights_ok, existing.cleanliness_ok][index]));
-    const canonicalResult = merged
-      .some((value) => value === false) ? "fail" : "pass";
+    const storedChecklist = Array.isArray(existing.checklist_items) ? existing.checklist_items : null;
+    const effectiveChecklist = parsedChecklist === undefined ? storedChecklist : parsedChecklist;
+    const canonicalResult = effectiveChecklist
+      ? (effectiveChecklist.some((item: any) => item.status === "fail") ? "fail" : "pass")
+      : (merged.some((value) => value === false) ? "fail" : "pass");
     const result = await db.execute(sql`
       UPDATE green_pre_use_checks
        SET check_date = ${value(checkDate, existing.check_date)},
@@ -191,8 +400,13 @@ router.put("/pre-use-checks/:id", denyViewers, async (req, res) => {
            fluid_levels_ok = ${merged[0]}, tyres_ok = ${merged[1]},
           blades_ok = ${merged[2]}, guards_ok = ${merged[3]},
           controls_ok = ${merged[4]}, lights_ok = ${merged[5]},
-          cleanliness_ok = ${merged[6]}, defect_noted = ${value(defectNoted, existing.defect_noted)},
-          result = ${canonicalResult}, notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null}
+           cleanliness_ok = ${merged[6]},
+           defect_noted = ${effectiveChecklist ? effectiveChecklist.some((item: any) => item.status === "fail") : value(defectNoted, existing.defect_noted)},
+           result = ${canonicalResult},
+           notes = ${notes === undefined ? existing.notes : notes?.trim() ?? null},
+           checklist_items = ${parsedChecklist === undefined ? existing.checklist_items ?? null : JSON.stringify(parsedChecklist)},
+           fuel_level = ${fuelLevel === undefined ? existing.fuel_level ?? null : fuelLevel?.trim() ?? null},
+           submitted_at = COALESCE(submitted_at, now())
       WHERE id = ${req.params.id} AND client_id = ${clientId}
       RETURNING *
     `);
@@ -242,9 +456,10 @@ router.get("/service-records", async (req, res) => {
 router.post("/service-records", requireClientAdmin, async (req, res) => {
   try {
     const clientId = getClientId(req);
+    if (!clientId) return res.status(400).json({ error: "No client context" });
     const {
       machineId, serviceDate, serviceType, hoursAtService, nextServiceHours,
-      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes,
+      nextServiceDate, workPerformed, servicedBy, servicedByRosterId, costPence, notes, photoUploadIds,
     } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!serviceDate) return res.status(400).json({ error: "serviceDate is required" });
@@ -256,20 +471,30 @@ router.post("/service-records", requireClientAdmin, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, servicedByRosterId, servicedBy);
     if (servicedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-    const result = await db.execute(sql`
-      INSERT INTO green_service_records (
-        client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
-        next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
-      ) VALUES (
-        ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
-        ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
-        ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
-        ${costPence ?? null}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_service",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_service_records (
+          client_id, machine_id, service_date, service_type, hours_at_service, next_service_hours,
+          next_service_date, work_performed, serviced_by, serviced_by_roster_id, cost_pence, notes
+        ) VALUES (
+          ${clientId}, ${machineId}, ${serviceDate}, ${serviceType ?? "scheduled"},
+          ${hoursAtService ?? null}, ${nextServiceHours ?? null}, ${nextServiceDate ?? null},
+          ${workPerformed?.trim() ?? null}, ${performer?.performedBy ?? servicedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null},
+          ${costPence ?? null}, ${notes?.trim() ?? null}
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create service record" });
   }
 });
@@ -346,7 +571,8 @@ router.get("/defects", async (req, res) => {
 router.post("/defects", denyViewers, async (req, res) => {
   try {
     const clientId = getClientId(req);
-    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes } = req.body;
+    if (!clientId) return res.status(400).json({ error: "No client context" });
+    const { machineId, reportDate, reportedBy, reportedByRosterId, description, severity, outOfService, notes, photoUploadIds } = req.body;
     if (!machineId) return res.status(400).json({ error: "machineId is required" });
     if (!description?.trim()) return res.status(400).json({ error: "description is required" });
 
@@ -357,18 +583,28 @@ router.post("/defects", denyViewers, async (req, res) => {
     const performer = await resolveStaffRoster(clientId, reportedByRosterId, reportedBy);
     if (reportedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-    const result = await db.execute(sql`
-      INSERT INTO green_defects (
-        client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
-      ) VALUES (
-        ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
-        ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
-        ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
-      )
-      RETURNING *
-    `);
-    res.status(201).json(rows(result)[0]);
+    const created = await createWithStagedPhotoReceipts({
+      clientId,
+      entityType: "green_defect",
+      actorId: req.currentUser!.id,
+      photoUploadIds,
+      requestBody: req.body,
+    }, async (tx) => {
+      const result = await tx.execute(sql`
+        INSERT INTO green_defects (
+          client_id, machine_id, report_date, reported_by, reported_by_roster_id, description, severity, out_of_service, notes
+        ) VALUES (
+          ${clientId}, ${machineId}, ${reportDate ?? new Date().toISOString().split("T")[0]},
+          ${performer?.performedBy ?? reportedBy?.trim() ?? null}, ${performer?.staffRosterId ?? null}, ${description.trim()},
+          ${severity ?? "minor"}, ${outOfService ?? false}, ${notes?.trim() ?? null}
+        )
+        RETURNING *
+      `);
+      return rows(result)[0];
+    });
+    res.status(201).json(created);
   } catch (err) {
+    if (err instanceof StagedPhotoReceiptError) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: "Failed to create defect report" });
   }
 });

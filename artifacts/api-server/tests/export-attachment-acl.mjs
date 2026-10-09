@@ -29,6 +29,8 @@ try {
     getAttachmentOmissionReason,
     getAttachmentZipPath,
     isExportAttachmentAuthorized,
+    rawToCsv,
+    attachmentCap,
   } = await import(outfile);
   assert.equal(isExportAttachmentAuthorized({ owner: "42", visibility: "private" }, 42), true);
   assert.equal(isExportAttachmentAuthorized({ owner: "43", visibility: "private" }, 42), false, "other tenant owner is denied");
@@ -45,11 +47,27 @@ try {
     { module: "doc-track", record_id: "2", label: "Fire certificate", file_name: "certificate.pdf" },
     usedNames,
   );
-  assert.equal(first, "attachments/doc-track/Fire certificate.pdf", "available attachment gets an archive path");
-  assert.equal(second, "attachments/doc-track/Fire certificate (2).pdf", "same-name attachments do not overwrite each other");
+  assert.equal(first, "files/doc-track/Fire certificate.pdf", "available attachment gets an archive path");
+  assert.equal(second, "files/doc-track/Fire certificate (2).pdf", "same-name attachments do not overwrite each other");
   const cap = 500 * 1024 * 1024;
   assert.equal(fitsAttachmentExportCap("1048576", cap - 1048576, cap), true, "metadata byte size is included in cap calculation");
   assert.equal(fitsAttachmentExportCap("1048577", cap - 1048576, cap), false, "metadata size cannot exceed the attachment cap");
+  const objectPath = "/objects/uploads/tenant-42/certificate.pdf";
+  const csv = rawToCsv([{ object_path: objectPath, media_urls: [objectPath, "/objects/missing"], external_url: "https://example.test/doc" }],
+    new Map([[objectPath, first]]));
+  assert.ok(csv.includes(first), "included files use relative archive paths in CSV and nested media");
+  assert.ok(!csv.includes("/objects/"), "omitted private paths do not leak as unusable CSV links");
+  assert.ok(csv.includes("https://example.test/doc"), "external URLs remain unchanged");
+  const priorCap = process.env.EXPORT_ATTACHMENT_MAX_BYTES;
+  try {
+    process.env.EXPORT_ATTACHMENT_MAX_BYTES = "1024";
+    assert.equal(attachmentCap(), 1024, "attachment cap is configurable");
+    process.env.EXPORT_ATTACHMENT_MAX_BYTES = "-1";
+    assert.throws(() => attachmentCap(), /Invalid EXPORT_ATTACHMENT_MAX_BYTES/, "invalid cap is rejected");
+  } finally {
+    if (priorCap === undefined) delete process.env.EXPORT_ATTACHMENT_MAX_BYTES;
+    else process.env.EXPORT_ATTACHMENT_MAX_BYTES = priorCap;
+  }
   console.log("export attachment ACL adversarial checks passed");
 } finally {
   await rm(outDir, { recursive: true, force: true });

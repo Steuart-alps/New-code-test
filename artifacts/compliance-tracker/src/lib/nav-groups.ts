@@ -26,11 +26,21 @@ import {
   BarChart2,
   FileCheck2,
   BedDouble,
-  Tractor
+  Tractor,
+  Inbox
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
 export interface NavGroup { id: string; title: string; defaultOpen: boolean; items: NavItem[] }
+
+export function isNavItemActive(item: NavItem, location: string): boolean {
+  return location === item.href || location.startsWith(`${item.href}/`);
+}
+
+export function isNavItemAvailable(item: NavItem, hasService: (key: string) => boolean): boolean {
+  if (item.serviceKeys) return item.serviceKeys.some(hasService);
+  return !item.serviceKey || hasService(item.serviceKey);
+}
 
 export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean; canAdmin: boolean }): NavGroup[] {
   const groups: NavGroup[] = [
@@ -40,7 +50,6 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       defaultOpen: true,
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/reports",   label: "Reports",   icon: BarChart2 },
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
@@ -48,22 +57,36 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       ],
     },
     {
-      id: "modules",
-      title: "Compliance Modules",
-      defaultOpen: true,
+      id: "safety",
+      title: "Safety",
+      defaultOpen: false,
       items: [
         { href: "/fire-safety",    label: "FireTrack",       icon: Flame,           serviceKey: "firetrack" },
-        { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
+        { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
+        { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
+      ],
+    },
+    {
+      id: "food-water",
+      title: "Food & Water",
+      defaultOpen: false,
+      items: [
+        { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+        { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
+        { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
+      ],
+    },
+    {
+      id: "operations",
+      title: "Operations",
+      defaultOpen: false,
+      items: [
         { href: "/fix-track",      label: "FixTrack",        icon: Wrench,          serviceKey: "fixtrack" },
         { href: "/premises-track", label: "PremisesTrack",   icon: Building2,       serviceKey: "premisestrack" },
         { href: "/room-track",     label: "RoomTrack",       icon: BedDouble,       serviceKey: "roomtrack" },
-        { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
-        { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
-        { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
         { href: "/tree-track",     label: "TreeTrack",       icon: TreePine,        serviceKey: "treetrack" },
         { href: "/bike-track",     label: "BikeTrack",       icon: Bike,            serviceKey: "biketrack" },
-        { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
         { href: "/green-track",    label: "GreenTrack",      icon: Tractor,         serviceKey: "greentrack" },
         { href: "/pat-track",      label: "PATtrack",        icon: Zap,             serviceKey: "pattrack" },
         { href: "/pest-track",     label: "PestTrack",       icon: Bug,             serviceKey: "pesttrack" },
@@ -72,13 +95,21 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       ],
     },
     {
-      id: "people",
-      title: "People & Documents",
+      id: "people-training",
+      title: "People & Training",
       defaultOpen: false,
       items: [
         { href: "/doc-track",      label: "DocTrack",        icon: FolderOpen,      serviceKey: "doctrack" },
         { href: "/train-track",    label: "TrainTrack",      icon: BookOpen,        serviceKey: "traintrack" },
-      ]
+      ],
+    },
+    {
+      id: "reporting",
+      title: "Reporting",
+      defaultOpen: false,
+      items: [
+        { href: "/reports", label: "Reports", icon: BarChart2 },
+      ],
     },
     {
       id: "admin",
@@ -89,7 +120,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   ];
 
   if (canAdmin) {
-    const peopleGroup = groups.find(g => g.id === "people");
+    const peopleGroup = groups.find(g => g.id === "people-training");
     if (peopleGroup) {
       peopleGroup.items.push(
         { href: "/users", label: "Users", icon: Users },
@@ -107,7 +138,11 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   }
 
   if (canAdmin) {
-    groups.find(g => g.id === "admin")?.items.push({ href: "/settings", label: "Settings", icon: Settings });
+    groups.find(g => g.id === "admin")?.items.push(
+      { href: "/feedback", label: "Feedback inbox", icon: Inbox },
+      { href: "/privacy-governance", label: "Privacy Centre", icon: ShieldCheck },
+      { href: "/settings", label: "Settings", icon: Settings }
+    );
   }
 
   return groups.filter(g => g.items.length > 0);

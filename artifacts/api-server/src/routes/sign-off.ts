@@ -3,17 +3,28 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const router = Router();
 const storage = new ObjectStorageService();
 
 // ── Helper: resolve client from sign-off token ────────────────────────────────
-async function resolveClient(token: string): Promise<{ id: number; name: string } | null> {
+async function resolveClient(
+  token: string,
+  req: import("express").Request,
+): Promise<{ id: number; name: string } | null> {
   if (!token || token.length < 8) return null;
   const result = await db.execute(sql`
-    SELECT id, name FROM clients WHERE sign_off_token = ${token} LIMIT 1
+    SELECT id, name FROM clients
+    WHERE sign_off_token = ${token}
+      AND sign_off_token_expires_at > now()
+      AND sign_off_token_revoked_at IS NULL
+    LIMIT 1
   `);
   const row = (result.rows ?? [])[0] as any;
+  if (row) {
+    await recordPublicLinkAccess(req, { kind: "sign_off", clientId: row.id, token });
+  }
   return row ? { id: row.id, name: row.name } : null;
 }
 
@@ -97,18 +108,19 @@ async function resolvePublicDocument(
 // GET /api/sign-off/:token/info
 router.get("/:token/info", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
     res.json({ clientName: client.name });
   } catch (err: any) {
-    res.status(500).json({ error: "Server error", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off info lookup failed");
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // GET /api/sign-off/:token/departments
 router.get("/:token/departments", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
 
     const result = await db.execute(sql`
@@ -118,14 +130,15 @@ router.get("/:token/departments", async (req, res) => {
     `);
     res.json((result.rows ?? []).map((r: any) => r.department as string));
   } catch (err: any) {
-    res.status(500).json({ error: "Server error", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off department lookup failed");
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // GET /api/sign-off/:token/staff?department=X
 router.get("/:token/staff", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
 
     const { department } = req.query as { department?: string };
@@ -144,14 +157,15 @@ router.get("/:token/staff", async (req, res) => {
 
     res.json(result.rows ?? []);
   } catch (err: any) {
-    res.status(500).json({ error: "Server error", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off staff lookup failed");
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // GET /api/sign-off/:token/documents?department=X&staffId=Y
 router.get("/:token/documents", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
 
     const { staffId } = req.query as { staffId?: string };
@@ -237,14 +251,15 @@ router.get("/:token/documents", async (req, res) => {
 
     res.json(result.rows ?? []);
   } catch (err: any) {
-    res.status(500).json({ error: "Server error", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off document lookup failed");
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // GET /api/sign-off/:token/documents/:docId/download
 router.get("/:token/documents/:docId/download", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
 
     const docId = parseInt(req.params.docId);
@@ -258,10 +273,11 @@ router.get("/:token/documents/:docId/download", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Not found" });
     if (!row.object_path) return res.status(404).json({ error: "No file attached" });
 
-    const downloadUrl = await storage.getSignedDownloadURL(row.object_path);
+    const downloadUrl = await storage.getSignedDownloadURL(row.object_path, 900, undefined, client.id);
     res.json({ downloadUrl, fileName: row.file_name });
   } catch (err: any) {
-    res.status(500).json({ error: "Could not generate download URL", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off download URL generation failed");
+    res.status(500).json({ error: "Could not generate download URL" });
   }
 });
 
@@ -278,7 +294,7 @@ const ackSchema = z.object({
 
 router.post("/:token/acknowledge", async (req, res) => {
   try {
-    const client = await resolveClient(req.params.token);
+    const client = await resolveClient(req.params.token, req);
     if (!client) return res.status(404).json({ error: "Invalid sign-off link" });
 
     const parsed = ackSchema.safeParse(req.body);
@@ -373,7 +389,8 @@ router.post("/:token/acknowledge", async (req, res) => {
 
     res.status(201).json((ackResult.rows ?? [])[0]);
   } catch (err: any) {
-    res.status(500).json({ error: "Server error", detail: err?.message });
+    req.log?.error({ err }, "Public sign-off acknowledgement failed");
+    res.status(500).json({ error: "Server error" });
   }
 });
 

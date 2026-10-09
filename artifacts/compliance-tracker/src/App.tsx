@@ -14,8 +14,9 @@ import CategoryDetailPage from "@/pages/category-detail";
 import SitesPage from "@/pages/sites";
 import SiteDetailPage from "@/pages/site-detail";
 import SettingsPage from "@/pages/settings";
+import AccountSecurityPage from "@/pages/account-security";
 import UsersPage from "@/pages/users";
-import ClientsPage from "@/pages/clients";
+import ClientsPage, { LockedClientsPage } from "@/pages/clients";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -25,6 +26,7 @@ import MandatoryTwoFactorPage from "@/pages/mandatory-two-factor";
 import TrialEndedPage from "@/pages/trial-ended";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
+import PrivacyGovernancePage from "@/pages/privacy-governance";
 import VerifyEmailPage from "@/pages/verify-email";
 import SchedulePage from "@/pages/schedule";
 import ItemDetailPage from "@/pages/item-detail";
@@ -57,6 +59,7 @@ import PremisesTrackPage from "@/pages/premises-track";
 import RoomTrackPage from "@/pages/room-track";
 import ReportsPage from "@/pages/reports";
 import ComplianceHubPage from "@/pages/compliance-hub";
+import FeedbackInboxPage from "@/pages/feedback-inbox";
 import NotFound from "@/pages/not-found";
 import DailyOverviewPage from "@/pages/daily-overview";
 import DailyChecklistPage from "@/pages/daily-checklist";
@@ -127,7 +130,7 @@ function ProtectedRoutes() {
   if (location.startsWith("/verify-email")) return <VerifyEmailPage />;
   if (location.startsWith("/schedule/")) return <SchedulePage />;
   if (location.startsWith("/sign-off/")) return <SignOffPage />;
-  if (location.startsWith("/contractor-portal/")) return <ContractorPortalPage />;
+  if (location.startsWith("/contractor-portal/")) return <Route path="/contractor-portal/:token" component={ContractorPortalPage} />;
   if (location.startsWith("/contractor-quote/")) return <ContractorQuotePage />;
   if (location === "/kiosk") return <KioskPage />;
   if (location === "/staff/set-pin") return <StaffSetPinPage />;
@@ -153,6 +156,15 @@ function ProtectedRoutes() {
   // Trial expired without a subscription: the whole app is replaced by the
   // billing-required screen (which lets consultants pay and everyone log out).
   if (billingLocked) {
+    if (location === "/account-security") {
+      return <AccountSecurityPage />;
+    }
+    if (location === "/settings" && (user.role === "consultant" || user.role === "client_admin")) {
+      return <SettingsPage />;
+    }
+    if (location === "/clients" && user.role === "consultant") {
+      return <LockedClientsPage />;
+    }
     return <TrialEndedPage />;
   }
 
@@ -206,7 +218,10 @@ function ProtectedRoutes() {
       {canAdmin && <Route path="/categories" component={CategoriesPage} />}
       {canAdmin && <Route path="/users" component={UsersPage} />}
       {canAdmin && <Route path="/staff-roster" component={StaffRosterPage} />}
+      {canAdmin && <Route path="/feedback" component={FeedbackInboxPage} />}
       {canAdmin && <Route path="/settings" component={SettingsPage} />}
+      <Route path="/account-security" component={AccountSecurityPage} />
+      {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>

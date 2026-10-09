@@ -18,6 +18,87 @@ interface Client {
   active: boolean;
 }
 
+type PendingDeletion = {
+  id: number;
+  client_id: number;
+  client_name: string;
+  requested_at: string;
+  earliest_deletion_at: string;
+  notification_state: string;
+  status: "pending" | "approved";
+  review_note: string | null;
+};
+
+function PendingDeletionRequests() {
+  const [requests, setRequests] = useState<PendingDeletion[]>([]);
+  const [error, setError] = useState("");
+  const [reviewId, setReviewId] = useState<number | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const load = async () => {
+    const res = await apiFetch("/admin/data-deletion-requests");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Could not load deletion requests");
+    setRequests(data as PendingDeletion[]);
+  };
+  useEffect(() => {
+    load().catch(err => setError(err.message));
+  }, []);
+  const review = async (id: number, decision: "approved" | "refused") => {
+    setError("");
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/admin/data-deletion-requests/${id}/review`, {
+        method: "PATCH",
+        body: JSON.stringify({ decision, note: reviewNote }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not save review");
+      await load();
+      setReviewId(null);
+      setReviewNote("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save review");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <section className="rounded-xl border border-amber-200 bg-card p-5" aria-label="Pending data deletion requests">
+      <h2 className="font-semibold">Pending data deletion requests</h2>
+      <p className="mt-1 text-xs text-muted-foreground">Review legal retention requirements before approval. Approval schedules deletion no earlier than 30 days after the request; legal holds still block it.</p>
+      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+      {!error && requests.length === 0 && <p className="mt-3 text-sm text-muted-foreground">No pending requests.</p>}
+      {requests.map(request => (
+        <div key={request.id} className="mt-3 rounded-md border p-3 text-sm">
+          <strong>{request.client_name}</strong> (ID {request.client_id}) · Requested {new Date(request.requested_at).toLocaleDateString("en-GB", { timeZone: "Europe/London" })}
+          <div className="text-muted-foreground">Earliest deletion: {new Date(request.earliest_deletion_at).toLocaleDateString("en-GB", { timeZone: "Europe/London" })} · {request.status === "approved" ? "Approved — awaiting deletion" : "Awaiting review"} · Notification {request.notification_state === "sent" ? "sent" : "pending"}</div>
+          {request.review_note && <p className="mt-2 text-muted-foreground">Review note: {request.review_note}</p>}
+          {request.status === "pending" && (reviewId === request.id ? (
+            <div className="mt-3 space-y-2">
+              <label className="block text-sm font-medium" htmlFor={`deletion-review-${request.id}`}>Review note</label>
+              <textarea id={`deletion-review-${request.id}`} className="w-full rounded-md border bg-background p-2" rows={3} maxLength={2000} value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Document your legal retention review (at least 10 characters)" />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" disabled={saving || reviewNote.trim().length < 10} onClick={() => review(request.id, "approved")}>Approve after review</Button>
+                <Button type="button" size="sm" variant="outline" disabled={saving || reviewNote.trim().length < 10} onClick={() => review(request.id, "refused")}>Refuse request</Button>
+                <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => setReviewId(null)}>Cancel</Button>
+              </div>
+            </div>
+          ) : <Button className="mt-2" type="button" size="sm" variant="outline" onClick={() => { setReviewId(request.id); setReviewNote(""); }}>Review request</Button>)}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+export function LockedClientsPage() {
+  return (
+    <AppLayout title="Clients">
+      <div className="max-w-4xl"><PendingDeletionRequests /></div>
+    </AppLayout>
+  );
+}
+
 function ClientDialog({
   open,
   onClose,
@@ -321,6 +402,7 @@ export default function ClientsPage() {
   return (
     <AppLayout title="Clients">
       <div className="space-y-6">
+        <PendingDeletionRequests />
         <div className="flex items-center justify-between">
           <p className="text-muted-foreground text-sm">Manage client organisations</p>
           <Button onClick={() => { setEditingClient(null); setDialogOpen(true); }}>

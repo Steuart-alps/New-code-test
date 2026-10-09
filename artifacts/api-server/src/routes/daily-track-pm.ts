@@ -107,7 +107,7 @@ router.post("/signoffs", requireAuth, denyViewers, async (req, res) => {
     clientId, siteId: data.siteId ?? null, signoffDate: data.signoffDate,
     managerName: data.managerName, notes: data.notes ?? null,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser!.id,
   }).returning();
   res.status(201).json(row);
 });
@@ -209,7 +209,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     checkDate: data.checkDate, items: (data.items ?? []) as any,
     completedBy: performer?.performedBy ?? null, staffRosterId: performer?.staffRosterId ?? null, managerNote: data.managerNote ?? null,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
-    createdBy: (req.session as any).userId ?? null,
+    createdBy: req.currentUser!.id,
   } as any).returning();
   res.status(201).json(row);
 });

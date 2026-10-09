@@ -49,22 +49,32 @@ import formOptionsRouter from "./form-options";
 import mobileRouter from "./mobile";
 import exportRouter from "./export";
 import reportsRouter from "./reports";
+import privacyGovernanceRouter from "./privacy-governance";
 import dashboardSummaryRouter from "./dashboard-summary";
 import complianceHubRouter from "./compliance-hub";
 import trackActionsRouter from "./track-actions";
+import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
+import auditLogRouter from "./audit-log";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
 import { staffTrainingRouter } from "./staff-training";
 import dailyChecklistsRouter from "./daily-checklists";
 import feedbackRouter from "./feedback";
+import { publicLinkRateLimit, publicLinkTokenRateLimit } from "../lib/loginRateLimit";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use("/billing", billingRouter);
+// Public contractor self-service portal — token-protected, not login-protected.
+// Mount before root-level routers that install requireAuth for all later paths.
+router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
+// Public FixTrack token links must also precede routers with root-level auth.
+router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackPublicRouter);
+router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -76,6 +86,7 @@ router.use(complianceItemsRouter);
 router.use(contractorsRouter);
 router.use(certificatesRouter);
 router.use(settingsRouter);
+router.use(privacyGovernanceRouter);
 router.use(notificationsRouter);
 router.use(storageRouter);
 router.use("/food-safety", requireAuth, requireService("kitchentrack"), foodSafetyRouter);
@@ -85,16 +96,12 @@ router.use(staffTrainingRouter);
 router.use("/fire-safety", requireAuth, requireService("firetrack"), fireSafetyRouter);
 router.use("/legionella", requireAuth, requireService("legionellatrack"), legionellaRouter);
 router.use("/safe-track", requireAuth, requireService("safetrack"), safeTrackRouter);
-// Public contractor token links must be mounted before the protected
-// /fix-track router, otherwise its auth middleware intercepts them.
-router.use("/fix-track/action", fixTrackPublicRouter);
-router.use("/fix-track/quotes/public", fixTrackQuoteRouter);
 router.use("/fix-track", requireAuth, (req, res, next) => {
   if (req.path.startsWith("/contractor-email-queue")) return next();
   return requireService("fixtrack")(req, res, next);
 }, fixTrackRouter);
 router.use(staffRosterRouter);
-router.use("/sign-off", signOffRouter); // public — no auth
+router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter); // public — no auth
 // safetrack and doctrack are now the same module; either key grants access.
 router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
@@ -129,8 +136,7 @@ router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
 router.use(feedbackRouter);
 router.use("/audit-events", auditEventsRouter);
+router.use("/audit-log", auditLogRouter);
 router.use("/track-actions", trackActionsRouter);
-// Public contractor self-service portal — no auth, token-protected
-router.use("/contractor-portal", contractorPortalRouter);
-
+router.use("/track-evidence", trackEvidenceRouter);
 export default router;

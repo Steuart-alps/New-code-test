@@ -137,7 +137,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
   const [form, setForm] = useState(() => ({
     inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
     nextInspectionDate: inspection?.nextInspectionDate ?? "",
-    inspectionType: inspection?.inspectionType ?? "routine",
+    inspectionType: inspection?.inspectionType ?? inspectionTypes[0] ?? "",
     area:           inspection?.area ?? "",
     findings:       inspection?.findings ?? "",
     hazardDetails:  inspection?.hazardDetails ?? "",
@@ -154,7 +154,7 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
     setForm({
       inspectionDate: inspection?.inspectionDate ?? new Date().toISOString().slice(0, 10),
       nextInspectionDate: inspection?.nextInspectionDate ?? "",
-      inspectionType: inspection?.inspectionType ?? "routine",
+      inspectionType: inspection?.inspectionType ?? inspectionTypes[0] ?? "",
       area: inspection?.area ?? "",
       findings: inspection?.findings ?? "",
       hazardDetails: inspection?.hazardDetails ?? "",
@@ -165,13 +165,14 @@ function InspectionDialog({ open, inspection, onClose, onSaved, sites }: {
       staffRosterId: (inspection as any)?.staffRosterId ?? null,
       siteId: inspection?.siteId == null ? "all" : String(inspection.siteId),
     });
-  }, [open, inspection]);
+  }, [open, inspection, inspectionTypes]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
 
   const handleSave = async () => {
     if (!form.inspectionDate) { toast({ title: "Inspection date is required", variant: "destructive" }); return; }
+    if (!form.inspectionType) { toast({ title: "Inspection type is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const payload = {

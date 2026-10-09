@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.2.0
  */
 
+/**
+ * New records use pass or fail; historical action_required records remain readable.
+ */
 export type LegionellaCheckResult = typeof LegionellaCheckResult[keyof typeof LegionellaCheckResult];
 
 

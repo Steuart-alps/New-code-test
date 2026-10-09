@@ -3,8 +3,14 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
+import { getEffectiveOptionList } from "../lib/formOptions";
 
 const router = Router();
+
+function trainingTypeIsAllowed(value: string, activeOptions: string[]): boolean {
+  return activeOptions.includes(value)
+    || (activeOptions.includes("Other") && value.trim().length > 0);
+}
 
 async function canAccessSite(clientId: number, siteId: number | null | undefined, departmentId: number | null) {
   if (siteId == null) return true;
@@ -158,6 +164,12 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const d = parsed.data;
+  if ("trainingType" in d) {
+    const allowedTypes = await getEffectiveOptionList(clientId, "traintrack_types");
+    if (!trainingTypeIsAllowed(d.trainingType, allowedTypes)) {
+      return res.status(400).json({ error: "Invalid training type" });
+    }
+  }
   if (!await canAccessSite(clientId, d.siteId, getActiveDepartmentId(req))) {
     return res.status(403).json({ error: "Site not accessible" });
   }
@@ -196,7 +208,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = recordUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
   const existing = await db.execute(sql`
-    SELECT site_id FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
+    SELECT site_id, record_type, training_type FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
   `);
   const record = (existing.rows ?? [])[0] as any;
   if (!record || !await canAccessSite(clientId, record.site_id, getActiveDepartmentId(req))) {
@@ -204,6 +216,23 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (parsed.data.siteId !== undefined && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req))) {
     return res.status(403).json({ error: "Site not accessible" });
+  }
+  if (parsed.data.trainingType !== undefined) {
+    if (record.record_type === "signoff" && parsed.data.trainingType !== null) {
+      return res.status(400).json({ error: "Training type is not applicable to a sign-off" });
+    }
+    if (
+      record.record_type !== "signoff"
+      && parsed.data.trainingType !== record.training_type
+    ) {
+      if (parsed.data.trainingType === null) {
+        return res.status(400).json({ error: "Training type is required" });
+      }
+      const allowedTypes = await getEffectiveOptionList(clientId, "traintrack_types");
+      if (!trainingTypeIsAllowed(parsed.data.trainingType, allowedTypes)) {
+        return res.status(400).json({ error: "Invalid training type" });
+      }
+    }
   }
 
   const {

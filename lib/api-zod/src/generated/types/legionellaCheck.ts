@@ -14,6 +14,7 @@ export interface LegionellaCheck {
   siteId?: number | null;
   checkType: LegionellaCheckType;
   checkDate: string;
+  /** New records use pass or fail; historical action_required records remain readable. */
   result: LegionellaCheckResult;
   temperature?: string | null;
   location?: string | null;

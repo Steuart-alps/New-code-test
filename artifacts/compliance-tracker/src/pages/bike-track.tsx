@@ -52,6 +52,9 @@ interface BikeRow {
   createdAt: string;
 }
 
+const BIKE_OVERDUE_REPEAT_OPTIONS = ["0", "1", "3", "7", "14"] as const;
+type BikeOverdueRepeatChoice = (typeof BIKE_OVERDUE_REPEAT_OPTIONS)[number];
+
 interface HireRow {
   id: number;
   bikeId: number;
@@ -273,6 +276,7 @@ function BikeConfigDialog() {
   const [defaultDepositPounds, setDefaultDepositPounds] = useState("");
   const [hireDurationHours, setHireDurationHours] = useState("");
   const [requireHelmet, setRequireHelmet] = useState(false);
+  const [overdueRepeatDays, setOverdueRepeatDays] = useState<BikeOverdueRepeatChoice>("0");
 
   useEffect(() => {
     if (!config || !open) return;
@@ -280,6 +284,7 @@ function BikeConfigDialog() {
     setDefaultDepositPounds(pence ? (parseInt(pence, 10) / 100).toFixed(2) : "");
     setHireDurationHours(config.bike_hire_duration_hours ?? "");
     setRequireHelmet(config.bike_require_helmet === "true");
+    setOverdueRepeatDays(config.bike_overdue_repeat_interval_days ?? "0");
   }, [config, open]);
 
   const handleSave = () => {
@@ -291,12 +296,16 @@ function BikeConfigDialog() {
             : "",
           bike_hire_duration_hours: hireDurationHours,
           bike_require_helmet: requireHelmet ? "true" : "false",
+          bike_overdue_repeat_interval_days: overdueRepeatDays,
         },
       },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetBikeTrackConfigQueryKey() });
-          toast({ title: "Template saved", description: "New hires will use these defaults." });
+          toast({
+            title: "BikeTrack settings saved",
+            description: "Defaults apply to new hires; the reminder cadence applies to this client.",
+          });
           setOpen(false);
         },
         onError: (err: any) => toast({ title: "Failed to save", description: err.message, variant: "destructive" }),
@@ -314,8 +323,8 @@ function BikeConfigDialog() {
       </DialogTrigger>
       <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>BikeTrack Template</DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">Configure defaults for new bike hire records.</p>
+          <DialogTitle>BikeTrack settings</DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">Set BikeTrack defaults and overdue reminder behavior.</p>
         </DialogHeader>
         <div className="space-y-4 py-1">
           <div className="space-y-1.5">
@@ -336,6 +345,31 @@ function BikeConfigDialog() {
               <p className="text-xs text-muted-foreground">Add helmet check to pre-hire checklist</p>
             </div>
             <Switch checked={requireHelmet} onCheckedChange={setRequireHelmet} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bike-overdue-repeat">Overdue return reminders</Label>
+            <Select
+              value={overdueRepeatDays}
+              onValueChange={(value) => {
+                if ((BIKE_OVERDUE_REPEAT_OPTIONS as readonly string[]).includes(value)) {
+                  setOverdueRepeatDays(value as BikeOverdueRepeatChoice);
+                }
+              }}
+            >
+              <SelectTrigger id="bike-overdue-repeat" className="rounded-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">One-time alert only</SelectItem>
+                <SelectItem value="1">Repeat daily</SelectItem>
+                <SelectItem value="3">Repeat every 3 days</SelectItem>
+                <SelectItem value="7">Repeat weekly</SelectItem>
+                <SelectItem value="14">Repeat every 14 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Applies to this client’s overdue hires. Reminders stop when a hire is returned or cancelled.
+            </p>
           </div>
         </div>
         <DialogFooter>

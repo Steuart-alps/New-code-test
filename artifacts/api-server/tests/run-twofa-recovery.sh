@@ -8,26 +8,65 @@ _free_port() {
 }
 
 TEST_PORT="${TEST_PORT:-$(_free_port)}"
-export API_BASE="${API_BASE:-http://localhost:${TEST_PORT}/api}"
+LOCAL_API_BASE="http://127.0.0.1:${TEST_PORT}/api"
+READY_URL="http://127.0.0.1:${TEST_PORT}/readyz"
+if [ -n "${API_BASE:-}" ] &&
+  [ "$API_BASE" != "$LOCAL_API_BASE" ] &&
+  [ "$API_BASE" != "http://localhost:${TEST_PORT}/api" ]; then
+  echo "API_BASE overrides are not supported by this self-booting test; unset API_BASE to use its private local server." >&2
+  exit 2
+fi
+export API_BASE="$LOCAL_API_BASE"
+umask 077
+CAPTURE_DIR="$(mktemp -d)"
+CAPTURE_FILE="${CAPTURE_DIR}/emails.jsonl"
+SERVER_LOG="${CAPTURE_DIR}/server.log"
 SERVER_PID=""
 cleanup() {
+  result=$?
+  if [ "$result" -ne 0 ] && [ -f "$SERVER_LOG" ]; then
+    echo "Two-factor recovery test API log (last 100 lines):" >&2
+    tail -n 100 "$SERVER_LOG" >&2
+  fi
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  rm -rf "$CAPTURE_DIR"
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+touch "$CAPTURE_FILE"
+export TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE"
 
-if ! curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1; then
-  pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
-  SERVER_PID=$!
-  for _ in $(seq 1 45); do
-    curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null 2>&1 && break
-    kill -0 "$SERVER_PID" 2>/dev/null || exit 1
-    sleep 1
-  done
+if curl -sf -m 2 "$READY_URL" >/dev/null 2>&1; then
+  echo "A ready API already occupies TEST_PORT; refusing to reuse it. Choose a free TEST_PORT." >&2
+  exit 1
 fi
 
-curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null
-node tests/twofa-recovery.mjs
+pnpm run build
+NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success \
+  TEST_EMAIL_REJECT_SUBJECT="Security alert: your two-factor authentication was reset" \
+  TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE=2 PORT="$TEST_PORT" \
+  node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+for _ in $(seq 1 120); do
+  kill -0 "$SERVER_PID" 2>/dev/null || {
+    echo "Test API server exited before becoming ready." >&2
+    exit 1
+  }
+  curl -sf -m 2 "$READY_URL" >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -sf -m 2 "$READY_URL" >/dev/null || {
+  echo "Test API server did not become ready at $READY_URL within 120s." >&2
+  exit 1
+}
+node tests/twofa-recovery.mjs "$@"
+if ! grep -Fq "Failed to send two-factor reset security notification" "$SERVER_LOG"; then
+  echo "The test API did not log the simulated reset notification failure." >&2
+  exit 1
+fi
+echo "Verified reset notification delivery failure is logged without undoing the reset."

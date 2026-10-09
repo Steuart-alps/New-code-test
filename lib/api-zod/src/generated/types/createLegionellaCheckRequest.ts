@@ -8,7 +8,10 @@
 import type { CreateLegionellaCheckRequestResult } from './createLegionellaCheckRequestResult';
 import type { LegionellaCheckType } from './legionellaCheckType';
 
-export interface CreateLegionellaCheckRequest {
+/**
+ * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+ */
+export type CreateLegionellaCheckRequest = unknown & ({
   checkType: LegionellaCheckType;
   checkDate: string;
   result: CreateLegionellaCheckRequestResult;
@@ -17,4 +20,4 @@ export interface CreateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
-}
+});

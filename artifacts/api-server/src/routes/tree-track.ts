@@ -185,7 +185,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       followUpDate: data.followUpDate ?? null,
       siteId: data.siteId ?? null,
       notes: data.notes ?? null,
-      createdBy: (req.session as any).userId ?? null,
+      createdBy: req.currentUser!.id,
     })
     .returning();
 

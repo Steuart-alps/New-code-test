@@ -6,10 +6,50 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, getClientId, denyViewers, requireClientAdmin, getActiveDepartmentId } from "../middleware/requireAuth";
 import { createCleaningSchedulePdf, type CleaningScheduleCompletion } from "../lib/cleaningSchedulePdf";
 
 const router = Router();
+
+type SiteResolution =
+  | { ok: true; siteId: number | null }
+  | { ok: false };
+
+async function resolveAccessibleSite(
+  req: any,
+  res: any,
+  clientId: number,
+  rawSiteId: unknown,
+): Promise<SiteResolution> {
+  if (rawSiteId === undefined || rawSiteId === null || rawSiteId === "") {
+    return { ok: true, siteId: null };
+  }
+
+  const siteId = Number(Array.isArray(rawSiteId) ? rawSiteId[0] : rawSiteId);
+  if (!Number.isInteger(siteId) || siteId <= 0) {
+    res.status(400).json({ error: "Invalid site id" });
+    return { ok: false };
+  }
+
+  const departmentId = getActiveDepartmentId(req);
+  const result = await db.execute(sql`
+    SELECT id
+    FROM sites
+    WHERE id = ${siteId}
+      AND client_id = ${clientId}
+      AND (
+        ${departmentId}::integer IS NULL
+        OR department_id IS NULL
+        OR department_id = ${departmentId}
+      )
+    LIMIT 1
+  `);
+  if (!result.rows[0]) {
+    res.status(403).json({ error: "You do not have access to this site" });
+    return { ok: false };
+  }
+  return { ok: true, siteId };
+}
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -73,9 +113,15 @@ router.get("/tasks", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+  if (!scope.ok) return;
+  const siteFilter = scope.siteId === null
+    ? sql``
+    : sql`AND (site_id = ${scope.siteId} OR site_id IS NULL)`;
   const rows = await db.execute(sql`
     SELECT * FROM kitchen_cleaning_tasks
     WHERE client_id = ${clientId} AND active = true
+      ${siteFilter}
     ORDER BY frequency, sort_order, id
   `);
   res.json(rows.rows);
@@ -167,13 +213,19 @@ router.get("/logs/history", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
+  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+  if (!scope.ok) return;
+  const siteFilter = scope.siteId === null
+    ? sql``
+    : sql`AND (site_id = ${scope.siteId} OR site_id IS NULL)`;
   const rows = await db.execute(sql`
-    SELECT id, log_date, frequency, signed_by, submitted_at,
+    SELECT id, site_id, log_date, frequency, signed_by, submitted_at,
       (SELECT count(*) FROM jsonb_array_elements(completions) AS c
        WHERE (c->>'done')::boolean = true)::int AS completed_count,
       jsonb_array_length(completions) AS total_count
     FROM kitchen_cleaning_logs
     WHERE client_id = ${clientId}
+      ${siteFilter}
     ORDER BY log_date DESC, frequency
     LIMIT 60
   `);
@@ -187,9 +239,15 @@ router.get("/logs", requireAuth, async (req, res) => {
   const { date, frequency } = req.query;
   if (!date || !frequency) return res.status(400).json({ error: "date and frequency required" });
 
+  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+  if (!scope.ok) return;
+  const siteFilter = scope.siteId === null
+    ? sql``
+    : sql`AND site_id = ${scope.siteId}`;
   const row = await db.execute(sql`
     SELECT * FROM kitchen_cleaning_logs
     WHERE client_id = ${clientId} AND log_date = ${date as string} AND frequency = ${frequency as string}
+      ${siteFilter}
     LIMIT 1
   `);
   if (!row.rows[0]) return res.status(404).json({ error: "Not found" });
@@ -223,12 +281,18 @@ router.post("/logs", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { logDate, frequency, completions, signedBy, submittedAt, siteId } = parsed.data;
-  const userId = (req.session as any).userId ?? null;
+  const scope = await resolveAccessibleSite(req, res, clientId, siteId);
+  if (!scope.ok) return;
+  const siteMatch = scope.siteId === null
+    ? sql`site_id IS NULL`
+    : sql`site_id = ${scope.siteId}`;
+  const userId = req.currentUser!.id;
   const completionsJson = JSON.stringify(completions);
 
   const existing = await db.execute(sql`
     SELECT id FROM kitchen_cleaning_logs
     WHERE client_id = ${clientId} AND log_date = ${logDate} AND frequency = ${frequency}
+      AND ${siteMatch}
     LIMIT 1
   `);
 
@@ -239,7 +303,7 @@ router.post("/logs", requireAuth, denyViewers, async (req, res) => {
         completions  = ${completionsJson}::jsonb,
         signed_by    = ${signedBy ?? null},
         submitted_at = ${submittedAt ? new Date(submittedAt) : null},
-        site_id      = ${siteId ?? null},
+        site_id      = ${scope.siteId},
         updated_at   = now()
       WHERE id = ${id} AND client_id = ${clientId}
       RETURNING *
@@ -251,7 +315,7 @@ router.post("/logs", requireAuth, denyViewers, async (req, res) => {
     INSERT INTO kitchen_cleaning_logs
       (client_id, site_id, log_date, frequency, completions, signed_by, submitted_at, created_by)
     VALUES
-      (${clientId}, ${siteId ?? null}, ${logDate}, ${frequency},
+       (${clientId}, ${scope.siteId}, ${logDate}, ${frequency},
        ${completionsJson}::jsonb, ${signedBy ?? null},
        ${submittedAt ? new Date(submittedAt) : null}, ${userId})
     RETURNING *

@@ -12,5 +12,4 @@ export type CreateLegionellaCheckRequestResult = typeof CreateLegionellaCheckReq
 export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
-  action_required: 'action_required',
 } as const;

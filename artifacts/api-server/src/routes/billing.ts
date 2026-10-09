@@ -11,6 +11,7 @@ import {
   findLiveSubscription,
   collectAddonFirstMonthInvoice,
 } from "../lib/billing";
+import { activatePaidAddonService } from "../lib/addonActivation";
 import { invalidateTrialLock, isClientBillingLocked } from "../lib/trialLock";
 import {
   SERVICES,
@@ -37,9 +38,41 @@ import {
 import { logger } from "../lib/logger";
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
-import { requireAuth, getClientId, requireRole, requireClientAdmin } from "../middleware/requireAuth";
+import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
 
 const router = Router();
+
+// Keep this lightweight for the app-wide offboarding banner. Read the synced
+// Stripe state on each request so reversing a cancellation hides the warning.
+router.get("/cancellation-status", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  try {
+    const [client] = await db.select({ customerId: clientsTable.stripeCustomerId })
+      .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+    if (!client?.customerId) return res.json({ accessEndsAt: null });
+    const result = await db.execute(sql`
+      SELECT COALESCE(s.cancel_at, s.current_period_end) AS access_ends_at
+      FROM stripe.subscriptions s
+      WHERE s.customer = ${client.customerId}
+        AND s.cancel_at_period_end = true
+        AND s.status IN ('active', 'trialing', 'past_due')
+        AND COALESCE(s.cancel_at, s.current_period_end) > now()
+        AND NOT EXISTS (
+          SELECT 1 FROM stripe.subscriptions live
+          WHERE live.customer = s.customer
+            AND live.status IN ('active', 'trialing', 'past_due')
+            AND COALESCE(live.cancel_at_period_end, false) = false
+        )
+      ORDER BY s.current_period_end DESC NULLS LAST
+      LIMIT 1
+    `);
+    res.json({ accessEndsAt: (result.rows[0] as { access_ends_at: Date | string } | undefined)?.access_ends_at ?? null });
+  } catch (error) {
+    req.log.error({ err: error, clientId }, "Could not load cancellation status");
+    res.status(503).json({ error: "Cancellation status unavailable" });
+  }
+});
 
 // GET /api/billing/config — returns publishable key + current plan info
 router.get("/config", requireAuth, async (req, res) => {
@@ -214,6 +247,16 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client) return res.status(404).json({ error: "Client not found" });
 
+  // Reminder-email checkout may arrive without a plan payload. In that case,
+  // preserve the services selected during signup instead of silently falling
+  // back to the core-only plan.
+  const checkoutBundle = typeof bundle === "boolean"
+    ? bundle
+    : client.selectedServices?.includes(BUNDLE_KEY) === true;
+  const checkoutServices = Array.isArray(requestedServices)
+    ? requestedServices
+    : (client.selectedServices ?? []).filter((service) => service !== BUNDLE_KEY);
+
   // Discount codes are manager-issued per client; the entered code must match
   // the code issued to THIS client (server-derived context) exactly.
   const discountCode = normaliseAlpsDiscountCode(rawDiscountCode);
@@ -237,7 +280,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     // client's current number of sites (never below 1).
     const quantity = quantityForSiteCount(await countClientSites(clientId));
     const lineItems: { price: string; quantity: number }[] = [];
-    if (bundle) {
+    if (checkoutBundle) {
       const bundlePrice = await getServicePrice(BUNDLE_KEY);
       if (!bundlePrice) return res.status(400).json({ error: "Bundle price not configured" });
       lineItems.push({ price: bundlePrice.priceId, quantity });
@@ -245,7 +288,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       const corePrice = await getPerSitePrice();
       if (!corePrice) return res.status(400).json({ error: "No per-site price configured" });
       lineItems.push({ price: corePrice.priceId, quantity });
-      const requested = Array.from(new Set(requestedServices ?? []));
+      const requested = Array.from(new Set(checkoutServices));
       const unknown = requested.filter((s) => !(ADDON_KEYS as readonly string[]).includes(s));
       if (unknown.length > 0) {
         return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });
@@ -417,10 +460,12 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     // Keep the individual getServicePrice check below as a race-safe defence
     // if a price is deactivated after this read.
     const pricePreflight = await getServicePricePreflight();
-    if (pricePreflight.missing.includes(service)) {
+    if (action === "add" && (pricePreflight.missing.includes(service) || pricePreflight.duplicates.includes(service))) {
       return res.status(503).json({
-        error: "Service price not configured",
+        error: "Service price is missing or ambiguous",
         missingServicePrices: pricePreflight.missing,
+        duplicateServicePrices: pricePreflight.duplicates,
+        servicePriceIssues: pricePreflight.issues,
       });
     }
 
@@ -433,67 +478,59 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
       return res.status(400).json({ error: "This account has the Complete bundle — all services are already included" });
     }
 
-    const price = await getServicePrice(service);
-    if (!price) return res.status(400).json({ error: "Service price not configured" });
     const existingItem = sub.items.data.find((i) => i.price?.metadata?.service_key === service);
-    const quantity = quantityForSiteCount(await countClientSites(clientId));
 
     if (action === "add") {
-      if (existingItem) return res.status(409).json({ error: "Service already active" });
-
-      // Add the line for renewals (no proration), then charge the current
-      // month in full immediately — same no-proration policy as added sites.
-      // Idempotency keys are scoped to subscription + service + billing period
-      // so a double-click can't double-charge, while re-adding the service in
-      // a later period bills again as expected.
-      const periodStart = sub.items.data[0]?.current_period_start ?? sub.created;
-      await stripe.subscriptions.update(
-        sub.id,
-        {
-          items: [{ price: price.priceId, quantity }],
-          proration_behavior: "none",
+      const activation = await activatePaidAddonService({
+        allowedServiceKeys: ADDON_KEYS,
+        service,
+        serviceLabel: SERVICES[service as ServiceKey].label,
+        clientId,
+        customerId: client.stripeCustomerId,
+        subscription: sub,
+        stripe,
+        getServicePrice,
+        countClientSites,
+        findLiveSubscription,
+        collectFirstMonthInvoice: collectAddonFirstMonthInvoice,
+        invalidateEntitlements,
+        getEntitledServices,
+        onRollbackFailure: (rollbackError) => {
+          req.log?.error?.(
+            { rollbackError, clientId, service },
+            "Add-on rollback failed — manual attention needed",
+          );
         },
-        { idempotencyKey: `svc-add-${sub.id}-${service}-${periodStart}` },
-      );
-
-      const amount = price.unitAmount * quantity;
-      const label = SERVICES[service as ServiceKey].label;
-      const description = `${label} — 1 month access, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`;
-      try {
-        const payment = await collectAddonFirstMonthInvoice(stripe, {
-          customerId: client.stripeCustomerId,
-          amount,
-          currency: price.currency,
-          description,
-          metadata: { addon_service: service, client_id: String(clientId), period_start: String(periodStart) },
-          idempotencyPrefix: `svc-add-${sub.id}-${service}-${periodStart}`,
-        });
-        if (payment === "not_collected") {
-          throw new Error("Add-on invoice was not collected");
-        }
-        if (payment === "unknown") {
-          // Do not compensate by removing the item: Stripe may have accepted
-          // payment and only its response/retrieval may have failed.
-          invalidateEntitlements(clientId);
-          return res.status(502).json({
-            error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
-          });
-        }
-      } catch (err: any) {
-        // Roll back the item add: enabling a service without collecting its
-        // first month would violate the pay-up-front policy.
-        try {
-          const fresh = await findLiveSubscription(client.stripeCustomerId);
-          const added = fresh?.items.data.find((i) => i.price?.metadata?.service_key === service);
-          if (added) await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
-        } catch (rollbackErr) {
-          req.log?.error?.({ rollbackErr, clientId, service }, "Add-on rollback failed — manual attention needed");
-        }
-        invalidateEntitlements(clientId);
-        req.log?.error?.({ err, clientId, service }, "Add-on immediate charge failed; item rolled back");
-        return res.status(502).json({ error: "We couldn't complete the charge, so the service wasn't enabled. Please try again." });
+        onChargeFailure: (err) => {
+          req.log?.error?.(
+            { err, clientId, service },
+            "Add-on immediate charge failed; item rolled back",
+          );
+        },
+      });
+      if (activation.status === "unknown_service") {
+        return res.status(400).json({ error: "Unknown service" });
       }
+      if (activation.status === "price_missing") {
+        return res.status(400).json({ error: "Service price not configured" });
+      }
+      if (activation.status === "already_active") {
+        return res.status(409).json({ error: "Service already active" });
+      }
+      if (activation.status === "payment_unknown") {
+        return res.status(502).json({
+          error: "We couldn't confirm the payment outcome. Access has been kept while we confirm it; please contact support before retrying.",
+        });
+      }
+      if (activation.status === "charge_failed") {
+        return res.status(502).json({
+          error: "We couldn't complete the charge, so the service wasn't enabled. Please try again.",
+        });
+      }
+      return res.json({ ok: true, entitled: activation.entitled });
     } else {
+      const price = await getServicePrice(service);
+      if (!price) return res.status(400).json({ error: "Service price not configured" });
       if (!existingItem) return res.status(409).json({ error: "Service not active" });
       await stripe.subscriptionItems.del(existingItem.id, { proration_behavior: "none" });
     }
@@ -503,6 +540,122 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
     res.json({ ok: true, entitled });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/storage — add recurring storage capacity to the client's
+// existing subscription. The Stripe price is server-configured; the browser
+// may only request a validated quantity of GiB.
+router.post("/storage", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const parsed = z.object({
+    gib: z.number().int().min(1).max(100_000),
+    requestId: z.string().uuid(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "gib must be a whole number between 1 and 100000 and requestId must be a UUID" });
+
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "clientId required" });
+  const priceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
+  if (!priceId) return res.status(503).json({ error: "Storage add-on billing is not configured" });
+
+  const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+  if (!client?.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer for this client" });
+
+  try {
+    const stripe = await getUncachableStripeClient();
+    const subscription = await findLiveSubscription(client.stripeCustomerId);
+    if (!subscription) return res.status(400).json({ error: "No active subscription — subscribe first" });
+
+    const price = await stripe.prices.retrieve(priceId);
+    const unitAmount = Number(price.unit_amount);
+    const subscriptionCurrency = subscription.items.data.find((item) => item.price?.currency)?.price?.currency;
+    if (
+      !price.active
+      || price.type !== "recurring"
+      || price.recurring?.interval !== "month"
+      || !subscriptionCurrency
+      || price.currency !== subscriptionCurrency
+      || !Number.isSafeInteger(unitAmount)
+      || unitAmount < 1
+    ) {
+      return res.status(503).json({ error: "Storage add-on price must be an active monthly price in the subscription currency" });
+    }
+
+    const existingItem = subscription.items.data.find(
+      (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
+    );
+    const oldQuantity = existingItem?.quantity ?? 0;
+    const desiredQuantity = oldQuantity + parsed.data.gib;
+    const periodStart = subscription.items.data[0]?.current_period_start ?? subscription.created;
+    const idempotencyPrefix = `storage-add-${subscription.id}-${parsed.data.requestId}`;
+
+    await stripe.subscriptions.update(
+      subscription.id,
+      {
+        items: [existingItem
+          ? { id: existingItem.id, price: priceId, quantity: desiredQuantity }
+          : { price: priceId, quantity: desiredQuantity }],
+        proration_behavior: "none",
+      },
+      { idempotencyKey: `${idempotencyPrefix}-subscription` },
+    );
+
+    try {
+      const payment = await collectAddonFirstMonthInvoice(stripe, {
+        customerId: client.stripeCustomerId,
+        amount: unitAmount * parsed.data.gib,
+        currency: price.currency,
+        description: `Additional storage — ${parsed.data.gib} GiB per month`,
+        metadata: {
+          addon_service: "storage",
+          client_id: String(clientId),
+          gib_added: String(parsed.data.gib),
+          period_start: String(periodStart),
+        },
+        idempotencyPrefix,
+      });
+      if (payment === "unknown") {
+        invalidateEntitlements(clientId);
+        return res.status(502).json({
+          error: "We couldn't confirm the payment outcome. Storage access was kept while Stripe confirms it; please contact support before retrying.",
+        });
+      }
+      if (payment !== "paid") throw new Error("Storage add-on invoice was not collected");
+    } catch (error) {
+      try {
+        const fresh = await findLiveSubscription(client.stripeCustomerId);
+        const added = fresh?.items.data.find(
+          (item) => item.price?.id === priceId || item.price?.metadata?.service_key === "storage",
+        );
+        if (added) {
+          if (oldQuantity > 0 && existingItem?.price?.id) {
+            await stripe.subscriptionItems.update(added.id, {
+              price: existingItem.price.id,
+              quantity: oldQuantity,
+              proration_behavior: "none",
+            });
+          } else {
+            await stripe.subscriptionItems.del(added.id, { proration_behavior: "none" });
+          }
+        }
+      } catch (rollbackError) {
+        req.log.error({ err: rollbackError, clientId }, "Storage add-on rollback failed");
+      }
+      invalidateEntitlements(clientId);
+      req.log.error({ err: error, clientId }, "Storage add-on payment failed");
+      return res.status(502).json({ error: "We couldn't complete the storage charge, so the add-on was not enabled. Please try again." });
+    }
+
+    invalidateEntitlements(clientId);
+    res.status(201).json({
+      gibAdded: parsed.data.gib,
+      monthlyGib: desiredQuantity,
+      unitAmount,
+      currency: price.currency,
+    });
+  } catch (err: any) {
+    req.log.error({ err, clientId }, "Storage add-on failed");
+    res.status(500).json({ error: err?.message ?? "Could not add storage" });
   }
 });
 
@@ -644,7 +797,7 @@ router.post("/portal", requireAuth, requireRole("consultant", "client_admin"), a
 // the caller's client and re-check Stripe fresh. Called by the lock screen
 // after checkout so a new subscription restores access immediately instead of
 // waiting out the cache TTL.
-router.post("/refresh-access", requireAuth, async (req, res) => {
+router.post("/refresh-access", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.json({ billingLocked: false });
   try {

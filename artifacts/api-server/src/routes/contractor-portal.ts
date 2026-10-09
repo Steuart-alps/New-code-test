@@ -9,9 +9,12 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
+import { CONTRACTOR_DBS_TYPES, normalizeContractorDbsType } from "../lib/contractorDbsTypes";
+import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -39,7 +42,7 @@ const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a YYYY-MM-DD date"
     const parsed = new Date(Date.UTC(year, month - 1, day));
     return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
   }, "Invalid date");
-const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"] as const;
+const DBS_TYPES = CONTRACTOR_DBS_TYPES;
 const ALLOWED_CERTIFICATE_TYPES: ReadonlySet<AllowedUploadType> = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 async function audit(row: TokenRow, eventType: string, details: Record<string, unknown> = {}) {
@@ -66,7 +69,7 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function validateToken(token: string): Promise<TokenRow | null> {
+async function validateToken(token: string, req: import("express").Request): Promise<TokenRow | null> {
   const result = await db.execute(sql`
     SELECT
       cpt.client_id, cpt.contractor_id,
@@ -74,24 +77,37 @@ async function validateToken(token: string): Promise<TokenRow | null> {
       c.public_liability_expiry, c.dbs_type, c.dbs_expiry_date
     FROM contractor_portal_tokens cpt
     JOIN contractors c ON c.id = cpt.contractor_id
-     WHERE cpt.token_hash = ${digestBearerToken(token)}
-      AND cpt.expires_at > now()
+     WHERE (
+        (cpt.token_hash = ${digestBearerToken(token)} AND cpt.expires_at > now())
+        OR EXISTS (
+          SELECT 1 FROM contractor_portal_reminder_tokens reminder
+          WHERE reminder.portal_token_id = cpt.id
+            AND reminder.issuance_hash = cpt.token_hash
+            AND reminder.token_hash = ${digestBearerToken(token)}
+            AND reminder.expires_at > now()
+        )
+      )
       AND cpt.revoked_at IS NULL
       AND cpt.client_id = c.client_id
   `);
   const rows = (result.rows ?? []) as unknown as TokenRow[];
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  if (row) {
+    await recordPublicLinkAccess(req, { kind: "contractor_portal", clientId: row.client_id, token });
+  }
+  return row;
 }
 
 // ── GET /:token — contractor's current details + certificates ──────────────
 
 router.get("/:token", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid. Please ask your client to resend a reminder." });
 
     const certs = await db.execute(sql`
-      SELECT id, certificate_name, issuer, completed_date, expiry_date, object_path
+      SELECT id, certificate_name, issuer, completed_date, expiry_date,
+        portal_created AS "canDelete", (object_path IS NOT NULL) AS "hasFile"
       FROM contractor_certificates
       WHERE contractor_id = ${row.contractor_id}
         AND client_id = ${row.client_id}
@@ -124,14 +140,14 @@ const updateSchema = z.object({
   phone:           z.string().max(30).nullish(),
   address:         z.string().max(500).nullish(),
   insuranceExpiry: DATE.nullish(),
-  dbsType:         z.enum(DBS_TYPES).nullish(),
+  dbsType:         z.preprocess(normalizeContractorDbsType, z.enum(DBS_TYPES).nullish()),
   dbsExpiryDate:   DATE.nullish(),
   gasSafeNumber:   z.string().max(50).nullish(),
 });
 
 router.put("/:token", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const data = updateSchema.parse(req.body);
@@ -142,7 +158,7 @@ router.put("/:token", async (req, res) => {
         address             = ${data.address ?? null},
         public_liability_expiry = ${data.insuranceExpiry ? new Date(data.insuranceExpiry) : null},
         dbs_type            = ${data.dbsType ?? null},
-        dbs_expiry_date     = ${data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
+        dbs_expiry_date     = ${data.dbsType === "None" ? null : data.dbsExpiryDate ? new Date(data.dbsExpiryDate) : null},
         gas_safe_number     = ${data.gasSafeNumber ?? null},
         updated_at          = now()
       WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}
@@ -162,24 +178,24 @@ router.put("/:token", async (req, res) => {
 // ── POST /:token/upload-url — presigned URL for a certificate document ─────
 
 router.post("/:token/upload-url", async (req, res) => {
-  try {
-    const row = await validateToken(req.params.token);
-    if (!row) return res.status(404).json({ error: "Link expired or invalid" });
-    const body = z.object({
-      contentType: z.string().max(100),
-    }).parse(req.body);
-    if (!ALLOWED_CERTIFICATE_TYPES.has(body.contentType.toLowerCase() as AllowedUploadType)) {
-      return res.status(400).json({ error: "Certificate files must be PDF, JPEG, or PNG" });
-    }
+  const row = await validateToken(req.params.token, req);
+  if (!row) return res.status(404).json({ error: "Link expired or invalid" });
+  const parsed = z.object({
+    contentType: z.string().max(100),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Invalid upload details" });
+  if (!ALLOWED_CERTIFICATE_TYPES.has(parsed.data.contentType.toLowerCase() as AllowedUploadType)) {
+    return res.status(400).json({ error: "Certificate files must be PDF, JPEG, or PNG" });
+  }
 
-    const contentType = body.contentType.toLowerCase() as AllowedUploadType;
+  try {
+    const contentType = parsed.data.contentType.toLowerCase() as AllowedUploadType;
     const uploadUrl  = await objectStorageService.getObjectEntityUploadURL(row.client_id, contentType);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadUrl);
 
     return res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    req.log?.error({ err }, "contractor-portal upload-url error");
-    return res.status(500).json({ error: "Could not generate upload URL" });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "contractor certificate upload");
   }
 });
 
@@ -197,7 +213,7 @@ const certCreateSchema = z.object({
 
 router.post("/:token/certificates", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
     const data = certCreateSchema.parse(req.body);
@@ -226,7 +242,7 @@ router.post("/:token/certificates", async (req, res) => {
     const result = await db.execute(sql`
       INSERT INTO contractor_certificates
         (client_id, contractor_id, certificate_name, issuer,
-         completed_date, expiry_date, notes, object_path, created_at, updated_at)
+         completed_date, expiry_date, notes, object_path, portal_created, created_at, updated_at)
       VALUES
         (${row.client_id}, ${row.contractor_id}, ${data.certificateName},
          ${data.issuer ?? null},
@@ -234,10 +250,14 @@ router.post("/:token/certificates", async (req, res) => {
          ${data.expiryDate ? new Date(data.expiryDate) : null},
           ${null},
           ${finalizedObjectPath},
+          true,
          now(), now())
-      RETURNING *
+      RETURNING id, certificate_name, issuer, completed_date, expiry_date,
+        portal_created AS "canDelete", (object_path IS NOT NULL) AS "hasFile"
     `);
 
+    await db.execute(sql`UPDATE contractors SET updated_at = now()
+      WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}`);
     await audit(row, "certificate_created", { certificateName: data.certificateName, hasUpload: !!data.objectPath });
     await notifyManagers(row, "certificate records");
     return res.status(201).json((result.rows ?? [])[0] ?? {});
@@ -253,7 +273,7 @@ router.post("/:token/certificates", async (req, res) => {
 // the already tenant- and contractor-scoped certificate row first.
 router.get("/:token/certificates/:certId/download", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
     const certId = Number(req.params.certId);
     if (!Number.isInteger(certId) || certId <= 0) return res.status(400).json({ error: "Invalid certificate ID" });
@@ -264,7 +284,9 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     `);
     const objectPath = (certs.rows?.[0] as { object_path?: string } | undefined)?.object_path;
     if (!objectPath) return res.status(404).json({ error: "Certificate file not found" });
-    const downloadUrl = await objectStorageService.getSignedDownloadURL(objectPath, 900, ALLOWED_CERTIFICATE_TYPES);
+    const downloadUrl = await objectStorageService.getSignedDownloadURL(
+      objectPath, 900, ALLOWED_CERTIFICATE_TYPES, row.client_id,
+    );
     return res.json({ downloadUrl });
   } catch (err: any) {
     if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Certificate file not found" });
@@ -279,19 +301,22 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
 
 router.delete("/:token/certificates/:certId", async (req, res) => {
   try {
-    const row = await validateToken(req.params.token);
+    const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
 
-    const certId = parseInt(req.params.certId, 10);
-    if (isNaN(certId)) return res.status(400).json({ error: "Invalid certificate ID" });
+    const certId = Number(req.params.certId);
+    if (!Number.isSafeInteger(certId) || certId <= 0) return res.status(400).json({ error: "Invalid certificate ID" });
 
     const deleted = await db.execute(sql`
       DELETE FROM contractor_certificates
       WHERE id = ${certId}
         AND contractor_id = ${row.contractor_id}
         AND client_id = ${row.client_id}
+        AND portal_created = true
     `);
-    if ((deleted.rowCount ?? 0) === 0) return res.status(404).json({ error: "Certificate not found" });
+    if ((deleted.rowCount ?? 0) === 0) return res.status(404).json({ error: "Certificate not found or not portal-created" });
+    await db.execute(sql`UPDATE contractors SET updated_at = now()
+      WHERE id = ${row.contractor_id} AND client_id = ${row.client_id}`);
     await audit(row, "certificate_deleted", { certificateId: certId });
     await notifyManagers(row, "certificate records");
     return res.json({ success: true });

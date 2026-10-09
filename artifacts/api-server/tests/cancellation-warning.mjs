@@ -81,7 +81,7 @@ try {
   );
   assert.equal(partial.emailsSent, 1);
   assert.equal(messages.length, 2);
-  assert.match(messages[0].text, /https:\/\/app\.example\.test\/settings/);
+  assert.match(messages[0].text, /https:\/\/app\.example\.test\/settings#data-export/);
   assert.match(messages[0].text, /access will continue until/);
 
   // A handed-off lease is terminal if final sent_at persistence fails: a

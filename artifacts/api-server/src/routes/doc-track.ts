@@ -4,8 +4,13 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
-import { createAcknowledgementRegisterPdf } from "../lib/acknowledgementRegisterPdf";
+import {
+  createAcknowledgementRegisterPdf,
+  createCombinedAcknowledgementRegisterPdf,
+} from "../lib/acknowledgementRegisterPdf";
+import { newBearerToken } from "../lib/bearerTokens";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -92,7 +97,8 @@ router.get("/documents", requireAuth, async (req, res) => {
         ) AS pending_count,
         COUNT(*) FILTER (
           WHERE a.id IS NOT NULL
-            AND (a.train_track_record_id IS NULL OR tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
+            AND (a.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+            AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
         ) AS acknowledged_count,
         COUNT(*) FILTER (
           WHERE tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE
@@ -377,28 +383,75 @@ router.get("/documents/:id/acknowledgements/export", requireAuth, requireClientA
 });
 
 // ── Outstanding acknowledgements overview (managers) ────────────────────────
-// For every document that requires acknowledgement, list the roster staff who
-// have NOT yet acknowledged it.
-router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
+// Resolve a login to exactly one active roster record. Display names are not
+// identities: multiple staff can share a name (or even a reused email).
+async function findMyRoster(clientId: number, email: string | null | undefined) {
+  if (!email?.trim()) return [];
+  const rows = await db.execute(sql`
+    SELECT id, name, department, site_id FROM staff_roster
+    WHERE client_id = ${clientId} AND active = true
+      AND email IS NOT NULL AND lower(btrim(email)) = lower(${email.trim()})
+    LIMIT 2
+  `);
+  return (rows.rows ?? []) as Array<{ id: number; name: string; department: string | null; site_id: number | null }>;
+}
+
+router.get("/acknowledgements/my", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const matches = await findMyRoster(clientId, req.currentUser!.email);
+  if (matches.length > 1) return res.status(409).json({ error: "More than one active staff record uses your email. Ask an administrator to resolve this before signing." });
+  if (matches.length === 0) return res.json({ rosterLinked: false, pending: [], completed: [] });
+  const roster = matches[0];
+  const result = await db.execute(sql`
+    SELECT d.id, d.title, d.category, d.description, d.file_name, d.mime_type,
+           d.department, s.name AS site_name, a.acknowledged_at, a.signature,
+           CASE WHEN a.id IS NOT NULL
+             AND (a.train_track_record_id IS NULL OR tr.id IS NOT NULL)
+             AND (tr.expiry_date IS NULL OR tr.expiry_date >= CURRENT_DATE)
+             THEN true ELSE false END AS is_current
+    FROM doc_track_documents d
+    LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
+    LEFT JOIN doc_acknowledgements a ON a.document_id = d.id
+      AND a.client_id = d.client_id AND a.staff_roster_id = ${roster.id}
+    LEFT JOIN train_track_records tr ON tr.id = a.train_track_record_id
+      AND tr.client_id = d.client_id
+    WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      AND (d.department IS NULL OR d.department = ${roster.department})
+      AND (d.site_id IS NULL OR d.site_id = ${roster.site_id})
+      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+    ORDER BY d.created_at DESC
+  `);
+  const rows = (result.rows ?? []) as Array<Record<string, unknown> & { is_current: boolean }>;
+  const toDocument = ({ is_current: _current, ...document }: typeof rows[number]) => document;
+  res.json({
+    rosterLinked: true,
+    pending: rows.filter(row => !row.is_current).map(toDocument),
+    completed: rows.filter(row => row.is_current).map(toDocument),
+  });
+});
 
+// ── Outstanding acknowledgements overview (managers) ────────────────────────
+// For every document that requires acknowledgement, list the roster staff who
+// have NOT yet acknowledged it.
+async function getAcknowledgementOverview(clientId: number, departmentId: number | null) {
   const docsResult = await db.execute(sql`
     SELECT d.id, d.title, d.category, d.department, d.site_id, d.created_at
     FROM doc_track_documents d
-    LEFT JOIN sites s ON s.id = d.site_id
+    LEFT JOIN sites s ON s.id = d.site_id AND s.client_id = d.client_id
     WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
-      ${getActiveDepartmentId(req) !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${getActiveDepartmentId(req)})
-        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+      ${departmentId !== null ? sql`AND (d.site_id IS NULL OR s.department_id IS NULL OR s.department_id = ${departmentId})
+        AND (d.department IS NULL OR d.department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY d.title ASC
   `);
   const docs = (docsResult.rows ?? []) as any[];
-  if (docs.length === 0) return res.json({ documents: [] });
+  if (docs.length === 0) return [];
 
   const staffResult = await db.execute(sql`
     SELECT id, name, department, site_id FROM staff_roster
     WHERE client_id = ${clientId} AND active = true
-      ${getActiveDepartmentId(req) !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${getActiveDepartmentId(req)}))` : sql``}
+      ${departmentId !== null ? sql`AND (department IS NULL OR department = (SELECT name FROM departments WHERE id = ${departmentId}))` : sql``}
     ORDER BY name ASC
   `);
   const staff = (staffResult.rows ?? []) as any[];
@@ -415,21 +468,55 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
       ON tr.id = a.train_track_record_id
      AND tr.client_id = a.client_id
     WHERE a.client_id = ${clientId}
+      AND a.document_id IN (
+        SELECT d.id FROM doc_track_documents d
+        WHERE d.client_id = ${clientId} AND d.requires_acknowledgement = true
+      )
   `);
   const ackRows = (acksResult.rows ?? []) as any[];
-  const acked = new Set(
-    ackRows
-      .filter((r) => r.is_current)
-      .map((r) => `${r.document_id}:${r.staff_roster_id}`),
-  );
 
-  const documents = docs.map((d) => {
+  const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  return docs.map((d) => {
     // Documents scoped to a department only need acknowledgement from that department.
     const relevant = staff.filter((s) =>
       (!d.department || s.department === d.department)
       && (d.site_id == null || s.site_id === d.site_id),
     );
-    const outstanding = relevant.filter((s) => !acked.has(`${d.id}:${s.id}`));
+    const relevantIds = new Set(relevant.map((s) => Number(s.id)));
+    const currentAcks = ackRows.filter((r) =>
+      Number(r.document_id) === Number(d.id)
+      && r.is_current
+      && r.staff_roster_id !== null
+      && relevantIds.has(Number(r.staff_roster_id)),
+    );
+    const currentByRosterId = new Map(
+      currentAcks.map((r) => [Number(r.staff_roster_id), r]),
+    );
+    const outstanding = relevant.filter((s) => !currentByRosterId.has(Number(s.id)));
+    const acknowledgedDates = currentAcks
+      .filter((r) => r.acknowledged_at)
+      .map((r) => new Date(r.acknowledged_at))
+      .sort((a, b) => a.getTime() - b.getTime());
+    const dateRange = acknowledgedDates.length
+      ? `${formatDate(acknowledgedDates[0])} to ${formatDate(acknowledgedDates[acknowledgedDates.length - 1])}`
+      : "No acknowledgements recorded";
+    const acknowledgedRows = relevant
+      .filter((s) => currentByRosterId.has(Number(s.id)))
+      .map((s) => {
+        const ack = currentByRosterId.get(Number(s.id));
+        return {
+          staffName: String(ack.staff_name),
+          acknowledgedAt: ack.acknowledged_at ? formatDate(new Date(ack.acknowledged_at)) : "",
+          status: "Acknowledged" as const,
+        };
+      });
+    const outstandingRows = outstanding.map((s) => ({
+      staffName: String(s.name),
+      acknowledgedAt: "",
+      status: "Outstanding" as const,
+    }));
     return {
       id: d.id,
       title: d.title,
@@ -438,17 +525,48 @@ router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
       staffTotal: relevant.length,
       acknowledgedCount: relevant.length - outstanding.length,
       outstanding: outstanding.map((s) => ({ id: s.id, name: s.name, department: s.department })),
-      acknowledged: ackRows
-        .filter((r) =>
-          r.document_id === d.id
-          && r.is_current
-          && relevant.some((s) => s.id === r.staff_roster_id),
-        )
+      acknowledged: currentAcks
         .map((r) => ({ name: r.staff_name, acknowledgedAt: r.acknowledged_at, signed: !!r.signature })),
+      dateRange,
+      registerRows: [...acknowledgedRows, ...outstandingRows].map((row) => ({
+        ...row,
+        signature: "",
+      })),
     };
   });
+}
 
-  res.json({ documents });
+router.get("/acknowledgements/export", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  const formatDate = (date: Date) => date.toLocaleDateString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  const pdf = createCombinedAcknowledgementRegisterPdf({
+    generatedAt: formatDate(new Date()),
+    sections: documents.map((document) => ({
+      title: document.title,
+      category: String(document.category).replace(/_/g, " "),
+      dateRange: document.dateRange,
+      rows: document.registerRows,
+    })),
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="document-acknowledgement-register.pdf"');
+  res.setHeader("Content-Length", pdf.length);
+  res.send(pdf);
+});
+
+router.get("/acknowledgements/outstanding", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const documents = await getAcknowledgementOverview(clientId, getActiveDepartmentId(req));
+  res.json({
+    documents: documents.map(({ dateRange: _dateRange, registerRows: _registerRows, ...document }) => document),
+  });
 });
 
 // ── Record acknowledgements ───────────────────────────────────────────────────
@@ -536,7 +654,7 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   // only ever acknowledge as themselves, regardless of request body.
   let toCreate: ResolvedAck[] = [];
 
-  if (isManager) {
+  if (isManager && req.body?.self !== true) {
     const parsed = ackBulkCreate.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
@@ -553,14 +671,18 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
   } else {
     // Self-acknowledgement — derive identity from the authenticated user.
     const parsed = ackSelfCreate.safeParse(req.body ?? {});
-    const signature = parsed.success ? (parsed.data.signature ?? null) : null;
+    if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
+    const signature = parsed.data.signature?.trim() || null;
 
-    // staff_roster has no user_id column, so email is the authoritative link.
-    // Unlike the legacy fallback, an unmatched/ineligible user cannot create
-    // acknowledgement evidence with an unlinked display name.
-    const roster = await findEligibleRosterMember(clientId, doc, undefined, user.email);
+    // staff_roster has no user_id column: require one unambiguous active
+    // email match, then check the document's site/department eligibility.
+    const matches = await findMyRoster(clientId, user.email);
+    if (matches.length > 1) return res.status(409).json({ error: "More than one active staff record uses your email. Ask an administrator to resolve this before signing." });
+    const roster = matches.length === 1
+      ? await findEligibleRosterMember(clientId, doc, matches[0].id)
+      : null;
     if (!roster) return res.status(403).json({ error: "No eligible active staff roster entry for this document" });
-    toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature: signature ?? roster.name }];
+    toCreate = [{ staffRosterId: roster.id, staffName: roster.name, signature }];
   }
 
   const today = new Date().toISOString().split("T")[0];
@@ -651,17 +773,54 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
 
 // ── Get sign-off link token ───────────────────────────────────────────────────
 
-router.get("/sign-off-info", requireAuth, async (req, res) => {
+router.get("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
   const result = await db.execute(sql`
-    SELECT sign_off_token FROM clients WHERE id = ${clientId} LIMIT 1
+    SELECT sign_off_token, sign_off_token_expires_at, sign_off_token_revoked_at
+    FROM clients WHERE id = ${clientId} LIMIT 1
   `);
   const row = (result.rows ?? [])[0] as any;
-  if (!row?.sign_off_token) return res.status(404).json({ error: "No sign-off token found" });
+  if (!row?.sign_off_token || row.sign_off_token_revoked_at ||
+      !row.sign_off_token_expires_at || new Date(row.sign_off_token_expires_at) <= new Date()) {
+    return res.status(404).json({ error: "No active sign-off link. Create a new link to continue." });
+  }
 
-  res.json({ token: row.sign_off_token });
+  res.json({ token: row.sign_off_token, expiresAt: row.sign_off_token_expires_at });
+});
+
+router.post("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+
+  const token = newBearerToken();
+  const updated = await db.execute(sql`
+    UPDATE clients
+    SET sign_off_token = ${token},
+        sign_off_token_expires_at = now() + interval '90 days',
+        sign_off_token_revoked_at = NULL
+    WHERE id = ${clientId}
+    RETURNING sign_off_token_expires_at
+  `);
+  const expiresAt = (updated.rows ?? [])[0] as { sign_off_token_expires_at?: Date } | undefined;
+  if (!expiresAt) return res.status(404).json({ error: "Client not found" });
+  res.status(201).json({ token, expiresAt: expiresAt.sign_off_token_expires_at });
+});
+
+router.delete("/sign-off-info", requireAuth, requireClientAdmin, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const revoked = await db.execute(sql`
+    UPDATE clients
+    SET sign_off_token = NULL,
+        sign_off_token_expires_at = NULL,
+        sign_off_token_revoked_at = now()
+    WHERE id = ${clientId} AND sign_off_token IS NOT NULL
+    RETURNING id
+  `);
+  if (!(revoked.rows ?? []).length) return res.status(404).json({ error: "No active sign-off link" });
+  res.status(204).end();
 });
 
 // ── Request presigned upload URL ──────────────────────────────────────────────
@@ -679,8 +838,8 @@ router.post("/documents/request-upload", requireAuth, denyViewers, async (req, r
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    return respondObjectStorageUnavailable(req, res, err, "DocTrack document upload");
   }
 });
 

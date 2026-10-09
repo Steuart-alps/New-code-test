@@ -7,7 +7,15 @@ import { eq, and, or, isNull, inArray, desc, ne, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import {
+  ObjectStorageService,
+  ObjectContentError,
+  ObjectGenerationError,
+  ObjectNotFoundError,
+  ObjectOwnershipError,
+  isTenantReservedObjectPath,
+} from "../lib/objectStorage";
+import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload } from "../lib/bearerTokens";
@@ -25,9 +33,58 @@ function hydrateQueuedContent(q: any) {
     : Array.isArray(value) ? value.map(replace)
     : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, replace(v)]))
     : value;
-  return { html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
+  return { subject: replace(q.subject) as string, html: replace(q.body_html) as string, text: replace(q.body_text) as string | null, preview: replace(q.email_preview_json) };
 }
 const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
+const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
+const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
+const FIXTRACK_UPLOAD_EXTENSIONS: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "image/heic": ".heic",
+  "image/heif": ".heif",
+  "image/avif": ".avif",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
+  "video/x-m4v": ".m4v",
+  "video/3gpp": ".3gp",
+  "video/x-msvideo": ".avi",
+  "video/avi": ".avi",
+  "video/mpeg": ".mpeg",
+  "video/ogg": ".ogv",
+  "video/x-matroska": ".mkv",
+  "video/mp2t": ".ts",
+};
+
+function preserveCancellationDraft(
+  emailType: unknown,
+  subject: string,
+  bodyText: string | null | undefined,
+) {
+  if (emailType !== "cancellation") return { subject, bodyText };
+
+  const safeSubject = /^(?:cancelled|calendar cancellation)\s*:/i.test(subject.trim())
+    ? subject
+    : `${CALENDAR_CANCELLATION_SUBJECT_PREFIX} ${subject.trim()}`;
+  const text = bodyText?.trim() ?? "";
+  const safeBodyText = /the attached calendar cancellation removes the previously sent assignment\./i.test(text)
+    ? bodyText
+    : [text, CALENDAR_CANCELLATION_NOTICE].filter(Boolean).join("\n\n");
+
+  return { subject: safeSubject, bodyText: safeBodyText };
+}
+
+function preserveCancellationHtml(emailType: unknown, bodyHtml: string): string {
+  if (emailType !== "cancellation" || bodyHtml.toLowerCase().includes(CALENDAR_CANCELLATION_NOTICE.toLowerCase())) {
+    return bodyHtml;
+  }
+  return `${bodyHtml}<p>${escapeHtml(CALENDAR_CANCELLATION_NOTICE)}</p>`;
+}
+
 function placeholderizeQueuedValue(value: string, payload: Record<string, string>): string {
   let safe = value;
   for (const [kind, raw] of Object.entries(payload)) {
@@ -58,7 +115,15 @@ const alertSettingsSchema = z.object({ staleDays: z.number().int().min(1).max(36
 
 async function finalizeIssueMedia(paths: string[] | undefined, clientId: number): Promise<string | null> {
   try {
-    for (const objectPath of paths ?? []) await storage.finalizeTenantUpload(objectPath, clientId);
+    for (const objectPath of paths ?? []) {
+      const normalizedPath = storage.normalizeObjectEntityPath(objectPath);
+      if (isTenantReservedObjectPath(normalizedPath, clientId)) {
+        await storage.finalizeTenantUpload(normalizedPath, clientId);
+      } else {
+        const file = await storage.getObjectEntityFile(normalizedPath);
+        await storage.assertTenantObjectOwnership(file, clientId);
+      }
+    }
     return null;
   } catch (err) {
     if (err instanceof ObjectNotFoundError) return "Uploaded media object not found";
@@ -97,6 +162,65 @@ function dateOnly(value: unknown): string | null {
   if (value == null) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value).slice(0, 10);
+}
+
+function fixTrackCalendarInvite(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+  const targetDate = dateOnly(draft.target_date);
+  if (!targetDate) return null;
+  const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
+  if (Number.isNaN(dueDate.getTime())) return null;
+  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
+  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
+  return buildCalendarInvite({
+    itemTitle: draft.title,
+    dueDate,
+    contractorName: draft.contractor_name,
+    contractorEmail: draft.contractor_email,
+    companyName: draft.company_name,
+    fromEmail,
+    descriptionLabel: "Maintenance job",
+    notes: [
+      draft.site_name ? `Site: ${draft.site_name}` : null,
+      draft.location ? `Location: ${draft.location}` : null,
+      draft.description || null,
+    ].filter(Boolean).join("\n"),
+    uid: `fix-track-${clientId}-${issueId}@complytrack`,
+    sequence,
+    allDay: true,
+  });
+}
+
+function fixTrackCalendarCancellation(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+  const targetDate = dateOnly(draft.target_date);
+  if (!targetDate || !draft.previous_ics) return null;
+  const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
+  if (Number.isNaN(dueDate.getTime())) return null;
+  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
+  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
+  return buildCalendarInvite({
+    itemTitle: draft.title,
+    dueDate,
+    contractorName: draft.contractor_name,
+    contractorEmail: draft.contractor_email,
+    companyName: draft.company_name,
+    fromEmail,
+    descriptionLabel: "Cancelled maintenance job",
+    notes: "This FixTrack assignment has been cancelled.",
+    uid: `fix-track-${clientId}-${issueId}@complytrack`,
+    sequence,
+    allDay: true,
+    method: "CANCEL",
+    eventStatus: "CANCELLED",
+  });
+}
+function nextCalendarSequence(existingIcs: unknown): number {
+  const match = typeof existingIcs === "string" ? existingIcs.match(/^SEQUENCE:(\d+)$/m) : null;
+  return match ? Number(match[1]) + 1 : 0;
+}
+
+function calendarFilename(title: string): string {
+  const safe = title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
+  return `${safe || "fix-track-job"}.ics`;
 }
 
 async function latestQuoteForIssue(clientId: number, issueId: number) {
@@ -415,7 +539,7 @@ router.post("/issues", requireAuth, denyViewers, async (req, res) => {
   }
 
   const [row] = await db.insert(fixTrackIssuesTable)
-    .values({ ...data, contractorId, clientId, createdBy: (req.session as any).userId ?? null })
+    .values({ ...data, contractorId, clientId, createdBy: req.currentUser!.id })
     .returning();
   await db.insert(fixTrackIssueActivityTable).values({
     clientId,
@@ -519,6 +643,19 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
       updateData.emailSentBy = null;
       updateData.emailSentAt = null;
     }
+    if (approvalInvalidated) {
+      const [pendingDraft] = await tx.execute(sql`
+        SELECT q.email_type
+        FROM contractor_email_queue q
+        WHERE q.entity_id=${id} AND q.client_id=${clientId}
+          AND q.entity_type='fix_track' AND q.status IN ('pending','approved')
+        ORDER BY q.created_at DESC, q.id DESC
+        LIMIT 1
+      `).then(result => (result.rows as any[]));
+      if (pendingDraft?.email_type === "cancellation") {
+        return { kind: "cancellation_content_locked" as const };
+      }
+    }
     // Make approval invalidation race safely against dispatch: the update can
     // only win while the row is still approved; a claimed `sending` row is
     // never mutated underneath the provider call.
@@ -564,7 +701,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     if (approvalInvalidated) {
         const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
          c.email AS contractor_email,cl.name AS company_name,q.mode,q.quote_token,q.body_html,q.body_text,
-         q.email_preview_json,q.encrypted_token_payload
+          q.email_preview_json,q.encrypted_token_payload,q.ics_content,q.email_type,
+          (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email
         FROM fix_track_issues i
         LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
         JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
@@ -597,6 +735,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
           const replacement = await generateActionTokens(id, clientId, draft.contractor_id);
           tokenPayload = { booked: replacement.bookedToken, completed: replacement.completedToken };
         }
+        const icsContent = draft.mode === "quote"
+          ? null
+          : fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.ics_content));
         const rendered = draft.mode === "quote"
           ? await sendContractorQuoteEmail({
               contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
@@ -612,7 +753,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
               issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
               companyName: draft.company_name,
                bookedToken: tokenPayload.booked, completedToken: tokenPayload.completed,
-              baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
+               baseUrl: getPublicAppUrl(), clientId, siteDocuments,
+               icsAttachment: icsContent ?? undefined, previewOnly: true,
             });
         const text = rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         const persisted = placeholderizeQueuedDraft(rendered.subject, rendered.html, text, tokenPayload);
@@ -621,7 +763,8 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
           contractor_id=${draft.contractor_id},to_email=${draft.contractor_email},subject=${persisted.subject},
           body_html=${persisted.html},body_text=${persisted.text},
           email_preview_json=${JSON.stringify(persisted.preview)}::jsonb,
-          encrypted_token_payload=${encryptedPayload},quote_token=NULL,
+           encrypted_token_payload=${encryptedPayload},quote_token=NULL,
+           ics_content=${icsContent},ics_filename=${icsContent ? calendarFilename(draft.title) : null},
           approved_by=NULL,approved_at=NULL,updated_at=now()
           WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
             AND status IN ('pending','approved')`);
@@ -661,6 +804,9 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (transitionResult.kind === "linked_site_forbidden") {
     return res.status(403).json({ error: "The originating module action is outside your active department" });
+  }
+  if (transitionResult.kind === "cancellation_content_locked") {
+    return res.status(409).json({ error: "This issue cannot change while its calendar cancellation awaits manager approval" });
   }
   res.json(transitionResult.row);
 });
@@ -726,9 +872,34 @@ router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
   const conditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const deptId = getActiveDepartmentId(req);
   if (deptId !== null) conditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any);
-  const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
+  const [existing] = await db.select({
+    id: fixTrackIssuesTable.id,
+    emailRequestStatus: fixTrackIssuesTable.emailRequestStatus,
+    targetDate: fixTrackIssuesTable.targetDate,
+  }).from(fixTrackIssuesTable)
     .where(and(...conditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  const [latestEmail] = await db.execute(sql`
+    SELECT email_type, status
+    FROM contractor_email_queue
+    WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).then(result => (result.rows as any[]));
+  if (latestEmail?.email_type === "cancellation" && ["pending", "sending"].includes(latestEmail.status)) {
+    return res.status(409).json({
+      error: "This issue has a calendar cancellation awaiting manager approval or delivery.",
+      cancellationPending: true,
+    });
+  }
+  if (existing.emailRequestStatus === "sent" && existing.targetDate) {
+    if (latestEmail?.email_type !== "cancellation" || latestEmail.status !== "sent") {
+      return res.status(409).json({
+        error: "This assigned job has a calendar invitation. Request a cancellation before deleting it.",
+        cancellationRequired: true,
+      });
+    }
+  }
 
   await db.delete(fixTrackIssuesTable)
     .where(and(...conditions));
@@ -737,32 +908,148 @@ router.delete("/issues/:id", requireAuth, denyViewers, async (req, res) => {
 
 // ── Request media upload URL ──────────────────────────────────────────────────
 
-router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, res) => {
+router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, res): Promise<void> => {
   const clientId = getClientId(req);
-  if (!clientId) return res.status(400).json({ error: "No client context" });
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
 
-  const id = parseInt(req.params.id as string);
-  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
 
   const uploadConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const uploadDeptId = getActiveDepartmentId(req);
   if (uploadDeptId !== null) uploadConditions.push(or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, uploadDeptId))) as any);
   const [existing] = await db.select({ id: fixTrackIssuesTable.id }).from(fixTrackIssuesTable)
     .where(and(...uploadConditions)).limit(1);
-  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
 
-  z.object({
-    name:        z.string().min(1).max(200),
-    contentType: z.string().min(1).max(100),
-  }).parse(req.body);
+  const parsed = z.object({
+    name:        z.string().trim().min(1).max(200),
+    contentType: z.string().trim().min(1).max(100),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid upload details" });
+    return;
+  }
 
   try {
-    const uploadUrl  = await storage.getObjectEntityUploadURL(clientId);
+    const contentType = parsed.data.contentType.trim().toLowerCase();
+    const extension = FIXTRACK_UPLOAD_EXTENSIONS[contentType] ?? "";
+    const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType, extension);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate upload URL", detail: err?.message });
+  } catch (err) {
+    respondObjectStorageUnavailable(req, res, err, "FixTrack issue upload");
   }
+});
+
+// ── Append uploaded media to an issue ─────────────────────────────────────────
+
+router.post("/issues/:id/media", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = getClientId(req);
+  if (!clientId) {
+    res.status(400).json({ error: "No client context" });
+    return;
+  }
+
+  const id = Number.parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const parsed = z.object({ objectPath: z.string().min(1).max(1000) }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid media object" });
+    return;
+  }
+
+  const deptId = getActiveDepartmentId(req);
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+
+  const [existing] = await db.select({ id: fixTrackIssuesTable.id })
+    .from(fixTrackIssuesTable)
+    .where(and(...conditions))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  let finalizedPath: string;
+  try {
+    const finalized = await storage.finalizeVerifiedIssueMediaUpload(parsed.data.objectPath, clientId);
+    finalizedPath = finalized.objectPath;
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded media object not found" });
+      return;
+    }
+    if (err instanceof ObjectContentError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: err.message });
+      return;
+    }
+    if (err instanceof ObjectGenerationError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
+    respondObjectStorageUnavailable(req, res, err, "FixTrack issue media finalization");
+    return;
+  }
+
+  // Lock the issue row and append against the latest array so simultaneous
+  // uploads cannot replace each other's media.
+  let result: string[] | null;
+  try {
+    result = await db.transaction(async (tx) => {
+      const [current] = await tx.select({ mediaUrls: fixTrackIssuesTable.mediaUrls })
+        .from(fixTrackIssuesTable)
+        .where(and(...conditions))
+        .for("update")
+        .limit(1);
+      if (!current) return null;
+
+      const currentPaths = current.mediaUrls ?? [];
+      const mediaUrls = currentPaths.includes(finalizedPath)
+        ? currentPaths
+        : [...currentPaths, finalizedPath];
+      const [updated] = await tx.update(fixTrackIssuesTable)
+        .set({ mediaUrls, updatedAt: new Date() })
+        .where(and(...conditions))
+        .returning({ mediaUrls: fixTrackIssuesTable.mediaUrls });
+      return updated?.mediaUrls ?? null;
+    });
+  } catch (error) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    throw error;
+  }
+
+  if (!result) {
+    await storage.deleteTenantObject(finalizedPath, clientId).catch(() => {});
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.json({ mediaUrls: result });
 });
 
 // ── Contractor suggestions ────────────────────────────────────────────────────
@@ -823,8 +1110,9 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-  const parsed = z.object({ mode: z.enum(["assign", "quote"]) }).safeParse(req.body);
+  const parsed = z.object({ mode: z.enum(["assign", "quote"]), force: z.boolean().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  const force = parsed.data.force === true || req.query.force === "true";
 
   const requestConditions: any[] = [eq(fixTrackIssuesTable.id, id), eq(fixTrackIssuesTable.clientId, clientId)];
   const requestDeptId = getActiveDepartmentId(req);
@@ -840,16 +1128,26 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   }).from(fixTrackIssuesTable).where(and(...requestConditions)).limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!existing.contractorId) return res.status(400).json({ error: "No contractor assigned to this issue" });
-  if (existing.emailRequestStatus === "sent" || existing.emailRequestStatus === "sending") {
+  if (existing.emailRequestStatus === "sending") {
     return res.status(409).json({ error: "A contractor email has already been sent for this issue" });
+  }
+  if (existing.emailRequestStatus === "sent" && !force) {
+    return res.status(409).json({
+      error: "A contractor email has already been sent for this issue",
+      alreadySent: true,
+    });
   }
 
   // Persist the exact draft that will cross the email boundary. Approval is
   // for these stored bytes, not for a later re-render of a changed issue.
   const draftResult = await db.execute(sql`
-    SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id,
+     SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id, i.target_date,
            s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
-           cl.name AS company_name
+            cl.name AS company_name,
+            (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
+            (SELECT ics_content FROM contractor_email_queue
+              WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+              ORDER BY created_at DESC LIMIT 1) AS previous_ics
     FROM fix_track_issues i
     LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
     JOIN contractors c ON c.id = i.contractor_id AND c.client_id = i.client_id
@@ -884,6 +1182,8 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   ].filter(Boolean).join("\n");
   let encryptedTokenPayload: string | null = null;
   let tokenPayload: Record<string, string> = {};
+  let icsContent: string | null = null;
+  let icsFilename: string | null = null;
   let previewHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
     <p>Dear ${escapeHtml(draft.contractor_name)},</p>
     ${parsed.data.mode === "quote" ? "<h2>Quotation Requested</h2>" : ""}
@@ -900,12 +1200,15 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   </div>`;
   if (parsed.data.mode === "assign") {
     const tokens = await generateActionTokens(id, clientId, existing.contractorId);
+    icsContent = fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    icsFilename = icsContent ? calendarFilename(draft.title) : null;
     const rendered = await sendContractorAssignmentEmail({
       contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
       issueTitle: draft.title, issueType: draft.issue_type, issuePriority: draft.priority,
       issueLocation: draft.location, issueDescription: draft.description, siteName: draft.site_name,
       companyName: draft.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
-      baseUrl: getPublicAppUrl(), clientId, siteDocuments, previewOnly: true,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments,
+      icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
     });
     previewSubject = rendered.subject;
     previewHtml = rendered.html;
@@ -930,11 +1233,50 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   previewSubject = persistedDraft.subject;
   previewHtml = persistedDraft.html;
   previewText = persistedDraft.text ?? "";
-  await db.transaction(async (tx) => {
+  const requestQueued = await db.transaction(async (tx) => {
+    // Serialize replacement requests for this issue. In particular, two
+    // simultaneous forced resends must not invalidate the tokens belonging to
+    // whichever queue row ultimately survives.
+    const locked = await tx.execute(sql`SELECT id,email_request_status FROM fix_track_issues
+      WHERE id=${id} AND client_id=${clientId} FOR UPDATE`);
+    if ((locked.rows as any[])[0]?.email_request_status === "sending") {
+      if (parsed.data.mode === "assign") {
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now(), revoked_at=now()
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+            AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
+      }
+      return false;
+    }
     await tx.execute(sql`UPDATE contractor_email_queue SET status='cancelled',
       last_error='Replaced by a newer request', updated_at=now()
       WHERE client_id=${clientId} AND entity_type='fix_track' AND entity_id=${id}
         AND status IN ('pending','sending')`);
+    if (parsed.data.mode === "assign") {
+      if (force) {
+        // Tokens are minted before this transaction so rendering remains
+        // outside the row lock. Re-activate this request's own hashes in case a
+        // concurrent forced request acquired the lock and expired them first.
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=CASE
+            WHEN token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})
+              THEN now() + interval '30 days'
+            ELSE now()
+          END,
+          revoked_at=CASE
+            WHEN token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})
+              THEN NULL
+            ELSE COALESCE(revoked_at, now())
+          END
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+        `);
+      } else {
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now() + interval '30 days'
+          WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL
+            AND token_hash IN (${digestBearerToken(tokenPayload.booked)}, ${digestBearerToken(tokenPayload.completed)})`);
+      }
+    } else if (force) {
+        await tx.execute(sql`UPDATE fix_track_action_tokens SET expires_at=now(), revoked_at=now()
+        WHERE issue_id=${id} AND client_id=${clientId} AND used_at IS NULL`);
+    }
     await tx.update(fixTrackIssuesTable).set({
       emailRequestMode: parsed.data.mode, emailRequestStatus: "pending",
       emailRequestedBy: (req.session as any).userId ?? null, emailRequestedAt: new Date(),
@@ -947,11 +1289,11 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     await tx.execute(sql`
     INSERT INTO contractor_email_queue
       (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type, to_email,
-       subject, body_html, body_text, email_preview_json, quote_token, quote_token_hash, quote_token_expires_at, encrypted_token_payload,
+        subject, body_html, body_text, ics_content, ics_filename, email_preview_json, quote_token, quote_token_hash, quote_token_expires_at, encrypted_token_payload,
        requested_by, idempotency_key)
     SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, ${parsed.data.mode},
       ${parsed.data.mode === "quote" ? "quote_request" : "assignment"},
-      c.email, ${previewSubject}, ${previewHtml}, ${previewText},
+       c.email, ${previewSubject}, ${previewHtml}, ${previewText}, ${icsContent}, ${icsFilename},
        ${JSON.stringify({ subject: previewSubject, text: previewText, html: previewHtml })}::jsonb,
        ${null}, ${quoteToken ? digestBearerToken(quoteToken) : null}, ${quoteToken ? sql`now() + interval '30 days'` : null},
        ${encryptedTokenPayload},
@@ -962,8 +1304,133 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
     WHERE i.id = ${id} AND i.client_id = ${clientId}
     ON CONFLICT DO NOTHING
   `);
+    return true;
   });
+  if (!requestQueued) {
+    return res.status(409).json({ error: "This issue cannot be re-requested while its approved contractor email is sending" });
+  }
   res.json({ ok: true, message: "Approval requested" });
+});
+
+// Staff: request a calendar cancellation for an assignment that was already
+// delivered. The resulting draft goes through the same manager approval and
+// provider idempotency boundary as ordinary contractor mail.
+router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = parseInt(req.params.id as string);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+  const conditions: any[] = [
+    eq(fixTrackIssuesTable.id, id),
+    eq(fixTrackIssuesTable.clientId, clientId),
+  ];
+  const deptId = getActiveDepartmentId(req);
+  if (deptId !== null) {
+    conditions.push(
+      or(isNull(fixTrackIssuesTable.siteId), inArray(fixTrackIssuesTable.siteId, allowedSites(clientId, deptId))) as any,
+    );
+  }
+
+  const queued = await db.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT i.*, s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
+        cl.name AS company_name,
+        (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
+        (SELECT ics_content FROM contractor_email_queue
+          WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+            AND email_type='assignment' AND status='sent'
+          ORDER BY created_at DESC LIMIT 1) AS previous_ics,
+        (SELECT email_type FROM contractor_email_queue
+          WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+            AND status IN ('pending','sending','sent')
+          ORDER BY created_at DESC LIMIT 1) AS latest_email_type
+      FROM fix_track_issues i
+      LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
+      JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
+      JOIN clients cl ON cl.id=i.client_id
+      WHERE i.id=${id} AND i.client_id=${clientId}
+      FOR UPDATE OF i
+    `);
+    const draft = (locked.rows as any[])[0];
+    if (!draft) return { kind: "not_found" as const };
+    if (deptId !== null && draft.site_id != null && !(await canAccessSite(draft.site_id, clientId, deptId))) {
+      return { kind: "not_found" as const };
+    }
+    if (draft.email_request_status === "sending") return { kind: "sending" as const };
+    if (draft.email_request_status !== "sent" || !draft.target_date || !draft.previous_ics) {
+      return { kind: "not_cancellable" as const };
+    }
+    if (draft.latest_email_type === "cancellation") return { kind: "already_requested" as const };
+
+    const icsContent = fixTrackCalendarCancellation(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    if (!icsContent) return { kind: "not_cancellable" as const };
+    const subject = `Cancelled: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`;
+    const text = [
+      `Dear ${draft.contractor_name},`,
+      "",
+      `${draft.company_name} has cancelled the following assigned work.`,
+      "",
+      draft.title,
+      `Site: ${draft.site_name ?? "Not specified"}`,
+      `Location: ${draft.location}`,
+      "",
+      "The attached calendar cancellation removes the previously sent assignment.",
+    ].join("\n");
+    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
+      <p>Dear ${escapeHtml(draft.contractor_name)},</p>
+      <p><strong>${escapeHtml(draft.company_name)}</strong> has cancelled the following assigned work.</p>
+      <h2>${escapeHtml(draft.title)}</h2>
+      <p><strong>Site:</strong> ${escapeHtml(draft.site_name ?? "Not specified")}<br>
+      <strong>Location:</strong> ${escapeHtml(draft.location)}</p>
+      <p>The attached calendar cancellation removes the previously sent assignment.</p>
+    </div>`;
+    const persisted = placeholderizeQueuedDraft(subject, html, text, {});
+    const updated = await tx.update(fixTrackIssuesTable).set({
+      emailRequestMode: "assign",
+      emailRequestStatus: "pending",
+      emailRequestedBy: (req.session as any).userId ?? null,
+      emailRequestedAt: new Date(),
+      emailApprovedBy: null,
+      emailApprovedAt: null,
+      emailSentBy: null,
+      emailSentAt: null,
+      updatedAt: new Date(),
+    }).where(and(...conditions, eq(fixTrackIssuesTable.emailRequestStatus, "sent"))).returning();
+    if (!updated[0]) return { kind: "conflict" as const };
+
+    await tx.insert(fixTrackIssueActivityTable).values({
+      clientId,
+      issueId: id,
+      eventType: "email_requested",
+      note: "cancellation",
+      createdBy: (req.session as any).userId ?? null,
+    });
+    await tx.execute(sql`
+      INSERT INTO contractor_email_queue
+        (client_id, issue_id, entity_type, entity_id, department_id, contractor_id, mode, email_type,
+         to_email, subject, body_html, body_text, ics_content, ics_filename, email_preview_json,
+         requested_by, idempotency_key)
+      SELECT ${clientId}, i.id, 'fix_track', i.id, s.department_id, i.contractor_id, 'assign', 'cancellation',
+        c.email, ${persisted.subject}, ${persisted.html}, ${persisted.text}, ${icsContent},
+        ${calendarFilename(draft.title)}, ${JSON.stringify(persisted.preview)}::jsonb,
+        ${(req.session as any).userId ?? null},
+        ${`fix-track-cancellation-${clientId}-${id}-${nextCalendarSequence(draft.previous_ics)}`}
+      FROM fix_track_issues i
+      LEFT JOIN sites s ON s.id=i.site_id
+      JOIN contractors c ON c.id=i.contractor_id
+      WHERE i.id=${id} AND i.client_id=${clientId}
+      ON CONFLICT DO NOTHING
+    `);
+    return { kind: "queued" as const };
+  });
+
+  if (queued.kind === "not_found") return res.status(404).json({ error: "Not found" });
+  if (queued.kind === "sending") return res.status(409).json({ error: "A contractor email is currently sending" });
+  if (queued.kind === "already_requested") return res.status(409).json({ error: "A cancellation is already queued or sent" });
+  if (queued.kind === "conflict") return res.status(409).json({ error: "The assignment changed; refresh and try again" });
+  if (queued.kind === "not_cancellable") return res.status(409).json({ error: "Only a dated assignment that was already sent can be cancelled" });
+  res.status(202).json({ ok: true, message: "Calendar cancellation queued for manager approval" });
 });
 
 // Manager queue endpoints. All mutations include tenant and department scope
@@ -1001,19 +1468,25 @@ router.get("/contractor-email-queue/count", requireAuth, async (req, res) => {
   res.json({ count: Number((result.rows as any[])[0]?.count ?? 0) });
 });
 
-router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => {
+router.put("/contractor-email-queue/:queueId", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const scope = queueDepartmentScope(req);
   const qid = Number(req.params.queueId); const parsed = z.object({ subject: z.string().min(1).max(500), bodyHtml: z.string().min(1), bodyText: z.string().optional() }).safeParse(req.body);
   if (!Number.isInteger(qid) || !parsed.success) return res.status(400).json({ error: "Invalid queue draft" });
-  const existing = (await db.execute(sql`SELECT encrypted_token_payload FROM contractor_email_queue
+  const existing = (await db.execute(sql`SELECT encrypted_token_payload,email_type FROM contractor_email_queue
     WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} LIMIT 1`)).rows[0] as any;
   if (!existing) return res.status(404).json({ error: "Queue entry not found" });
   const payload = existing.encrypted_token_payload ? decryptTokenPayload(existing.encrypted_token_payload) : {};
+  const cancellationDraft = preserveCancellationDraft(existing.email_type, parsed.data.subject, parsed.data.bodyText ?? null);
   let persisted;
   try {
-    persisted = placeholderizeQueuedDraft(parsed.data.subject, parsed.data.bodyHtml, parsed.data.bodyText ?? null, payload);
+    persisted = placeholderizeQueuedDraft(
+      cancellationDraft.subject,
+      preserveCancellationHtml(existing.email_type, parsed.data.bodyHtml),
+      cancellationDraft.bodyText ?? null,
+      payload,
+    );
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : "Invalid queue draft" });
   }
@@ -1024,7 +1497,7 @@ router.put("/contractor-email-queue/:queueId", requireAuth, async (req, res) => 
   res.json((rows.rows as any[])[0]);
 });
 
-router.post("/contractor-email-queue/:queueId/cancel", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/cancel", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const scope = queueDepartmentScope(req);
@@ -1044,7 +1517,7 @@ router.post("/contractor-email-queue/:queueId/cancel", requireAuth, async (req, 
 });
 
 // Approval is atomic and idempotent: only one manager can claim a draft.
-router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1063,7 +1536,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, as
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
-    await sendEmail({ to: q.to_email, subject: q.subject, html: hydrated.html, text: hydrated.text ?? undefined,
+    await dispatchStoredContractorEmail({ to: q.to_email, subject: hydrated.subject, html: hydrated.html, text: hydrated.text ?? undefined,
       cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
       icsAttachment: q.ics_content ?? undefined, icsFilename: q.ics_filename ?? undefined,
       clientId, idempotencyKey: q.idempotency_key });
@@ -1076,7 +1549,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, as
       await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     }
-    res.json({ ok: true, queueId: qid, mode: q.mode, subject: q.subject, bodyHtml: hydrated.html });
+    res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`UPDATE contractor_email_queue SET status='pending', last_error=${err instanceof Error ? err.message.slice(0, 2000) : "Email failed"}, updated_at=now() WHERE id=${qid} AND status='sending'`);
@@ -1086,7 +1559,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, as
   }
 });
 
-router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1101,16 +1574,17 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   let safeSubject: string;
   let safeBodyText: string;
   try {
-    safeSubject = placeholderizeQueuedValue(p.data.subject, payload);
-    safeBodyText = placeholderizeQueuedValue(p.data.bodyText, payload);
+    const cancellationDraft = preserveCancellationDraft(existingDraft.email_type, p.data.subject, p.data.bodyText);
+    safeSubject = placeholderizeQueuedValue(cancellationDraft.subject, payload);
+    safeBodyText = placeholderizeQueuedValue(cancellationDraft.bodyText ?? "", payload);
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : "Invalid email draft" });
   }
   const escapedBody = escapeHtml(safeBodyText).replace(/\r?\n/g, "<br>");
-   const existingQuoteToken = existingDraft.quote_token ??
-     (existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload).quote : null);
+  const existingQuoteToken = existingDraft.quote_token ??
+    (existingDraft.encrypted_token_payload ? decryptTokenPayload(existingDraft.encrypted_token_payload).quote : null);
   const quoteLink = existingDraft.email_type === "quote_request" && existingQuoteToken
-     ? `<p><a href="${getPublicAppUrl()}/contractor-quote/{{QUOTE_TOKEN}}">Submit Quote</a></p>`
+    ? `<p><a href="${getPublicAppUrl()}/contractor-quote/{{QUOTE_TOKEN}}">Submit Quote</a></p>`
     : "";
   const safeHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b"><p>${escapedBody}</p>${quoteLink}</div>`;
   const persisted = placeholderizeQueuedDraft(safeSubject, safeHtml, safeBodyText, payload);
@@ -1127,9 +1601,9 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
-    await sendEmail({
+    await dispatchStoredContractorEmail({
       to: q.to_email,
-      subject: q.subject,
+      subject: hydrated.subject,
       html: hydrated.html,
       text: hydrated.text ?? undefined,
       cc: Array.isArray(q.cc_json) && q.cc_json.length ? q.cc_json : undefined,
@@ -1148,7 +1622,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
       await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     }
-    res.json({ ok: true, queueId: qid });
+    res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`UPDATE contractor_email_queue SET status='pending',
@@ -1160,7 +1634,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, async
   }
 });
 
-router.post("/contractor-email-queue/:queueId/decline", requireAuth, async (req, res) => {
+router.post("/contractor-email-queue/:queueId/decline", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   const scope = queueDepartmentScope(req);
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
@@ -1171,7 +1645,7 @@ router.post("/contractor-email-queue/:queueId/decline", requireAuth, async (req,
   res.json({ ok: true });
 });
 
-router.post("/quotes/:quoteId/decline", requireAuth, async (req, res) => {
+router.post("/quotes/:quoteId/decline", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
@@ -1188,7 +1662,7 @@ router.post("/quotes/:quoteId/decline", requireAuth, async (req, res) => {
   res.json({ ok: true, status: "declined" });
 });
 
-router.post("/quotes/:quoteId/accept", requireAuth, async (req, res) => {
+router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req); if (!clientId) return res.status(400).json({ error: "No client context" });
   if (!isManager(req)) return res.status(403).json({ error: "Manager approval required" });
   const id = Number(req.params.quoteId);
@@ -1364,6 +1838,14 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   if (!issue.contractor_email) return res.status(400).json({ error: "Contractor has no email address" });
 
   if (issue.email_request_status !== "approved" || !["assign", "quote"].includes(issue.email_request_mode)) {
+    if (issue.email_request_status === "sent" && req.query.force === "true") {
+      return res.status(409).json({
+        error: "A resend must be submitted as a new approval request",
+        alreadySent: true,
+        requiresApproval: true,
+        requestEndpoint: `/api/fix-track/issues/${id}/request-send?force=true`,
+      });
+    }
     return res.status(403).json({ error: "An approved contractor email request is required before sending" });
   }
   const mode = issue.email_request_mode as "assign" | "quote";
@@ -1384,8 +1866,10 @@ router.post("/issues/:id/send-to-contractor", requireAuth, denyViewers, async (r
   try {
     const hydrated = hydrateQueuedContent(queueRow);
     await dispatchStoredContractorEmail({
-      to: queueRow.to_email, subject: queueRow.subject, html: hydrated.html,
+      to: queueRow.to_email, subject: hydrated.subject, html: hydrated.html,
       text: hydrated.text ?? undefined, clientId, idempotencyKey: queueRow.idempotency_key,
+      icsAttachment: queueRow.ics_content ?? undefined,
+      icsFilename: queueRow.ics_filename ?? undefined,
     });
     await db.execute(sql`UPDATE contractor_email_queue SET status='sent',sent_at=now(),updated_at=now()
       WHERE id=${queueRow.id} AND client_id=${clientId} AND status='sending'`);

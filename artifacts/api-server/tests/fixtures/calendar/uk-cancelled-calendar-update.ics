@@ -1,0 +1,30 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ComplyTrack//EN
+CALSCALE:GREGORIAN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:fix-track-44-881@complytrack
+SEQUENCE:3
+DTSTAMP:20301001T080000Z
+DTSTART;VALUE=DATE:20301027
+DTEND;VALUE=DATE:20301028
+SUMMARY:Révision complète — chaudière № 12 🔧 with an intentionall
+ y long title for calendar clients
+DESCRIPTION:Cancelled maintenance job: Révision complète — chaudière 
+ № 12 🔧 with an intentionally long title for calendar clients\nThis Fi
+ xTrack assignment has been cancelled.\nScheduled by ÅLPS “Facilities”
+  ^ Europe
+ORGANIZER;CN="ÅLPS “Facilities” ^^ Europe":MAILTO:compliance@example.t
+ est
+ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="Zoë O’Connor":MA
+ ILTO:zoe@example.test
+STATUS:CANCELLED
+BEGIN:VALARM
+TRIGGER:-P1D
+ACTION:DISPLAY
+DESCRIPTION:Reminder: Révision complète — chaudière № 12 🔧 with a
+ n intentionally long title for calendar clients
+END:VALARM
+END:VEVENT
+END:VCALENDAR

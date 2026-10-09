@@ -8,3 +8,9 @@ Every dedicated contractor-token encryption key must have a unique, never-reused
 **Why:** Reusing or omitting a version can make ciphertext created by a different key appear current, delaying failure until an approved email is previewed or dispatched. Rolling deployments can also create old-version drafts after a migration has already run.
 
 **How to apply:** Stop or drain old writers. Configure the new dedicated key and a new version while retaining the old key in the previous-key ring. Start the new version, wait for migrations and readiness, and verify no stale envelope versions remain. Remove the retired key only in a later deployment, retaining rollback access until that deployment is healthy. Never run database-wide rotation tests with temporary keys; target isolated fixture rows.
+
+Do not rotate the session secret in place while it remains the current contractor encryption key. Move drafts onto a uniquely versioned dedicated key first, retaining the original session key as `session-v1` if the session secret must change during migration.
+
+**Why:** The session fallback has a fixed version, so two different session secrets cannot both be identified as the current `session-v1` key. A retained historical key must identify the original draft key, not the new login-session secret.
+
+**How to apply:** Keep real keys in Replit Secrets. Use dedicated current-key versions and explicitly retained historical keys for rotation; never infer historical key material from the live session secret after it changes.

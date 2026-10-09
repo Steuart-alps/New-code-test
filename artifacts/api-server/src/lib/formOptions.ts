@@ -1,8 +1,6 @@
 import { db } from "@workspace/db";
 import { appSettingsTable } from "@workspace/db/schema";
-import {
-  INCIDENT_TYPES, INCIDENT_SEVERITIES,
-} from "@workspace/db/schema";
+import { INCIDENT_TYPES } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 
 /**
@@ -87,7 +85,6 @@ export const DEFAULT_TRAINTRACK_TYPES = [
  */
 export const FORM_OPTION_DEFAULTS: Record<string, readonly string[]> = {
   incident_types:            INCIDENT_TYPES,
-  incident_severities:      INCIDENT_SEVERITIES,
   fixtrack_issue_types:      DEFAULT_FIXTRACK_ISSUE_TYPES,
   fixtrack_trades:           DEFAULT_FIXTRACK_TRADES,
   premises_inspection_types: DEFAULT_PREMISES_INSPECTION_TYPES,
@@ -136,6 +133,68 @@ export function validateOptionList(input: unknown): { ok: true; value: string[] 
   return { ok: true, value: cleaned };
 }
 
+export interface StoredOptionState {
+  active: string[];
+  disabled: string[];
+}
+
+function validateDisabledList(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(input)) return { ok: false, error: "disabled must be an array" };
+  if (input.length > MAX_OPTIONS) return { ok: false, error: `too many disabled items (max ${MAX_OPTIONS})` };
+  const cleaned: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (typeof raw !== "string") return { ok: false, error: "disabled items must be strings" };
+    const trimmed = raw.trim();
+    if (!trimmed) return { ok: false, error: "disabled items must not be blank" };
+    if (trimmed.length > MAX_OPTION_LENGTH) return { ok: false, error: `disabled item too long (max ${MAX_OPTION_LENGTH} chars)` };
+    const dupeKey = trimmed.toLowerCase();
+    if (seen.has(dupeKey)) return { ok: false, error: `duplicate disabled item: ${trimmed}` };
+    seen.add(dupeKey);
+    cleaned.push(trimmed);
+  }
+  return { ok: true, value: cleaned };
+}
+
+/** Parse both the current object format and the original active-array format. */
+export function parseStoredOptionState(
+  input: unknown,
+  defaults: readonly string[],
+): { ok: true; value: StoredOptionState } | { ok: false; error: string } {
+  if (Array.isArray(input)) {
+    const active = validateOptionList(input);
+    if (!active.ok) return active;
+    return {
+      ok: true,
+      value: {
+        active: active.value,
+        disabled: defaults.filter((item) =>
+          !active.value.some((candidate) => candidate.toLowerCase() === item.toLowerCase()),
+        ),
+      },
+    };
+  }
+
+  if (!input || typeof input !== "object") {
+    return { ok: false, error: "stored option state must be an array or object" };
+  }
+  const state = input as { active?: unknown; disabled?: unknown };
+  const active = validateOptionList(state.active);
+  if (!active.ok) return active;
+  const disabled = validateDisabledList(state.disabled ?? []);
+  if (!disabled.ok) return disabled;
+
+  const activeKeys = new Set(active.value.map((item) => item.toLowerCase()));
+  if (disabled.value.some((item) => activeKeys.has(item.toLowerCase()))) {
+    return { ok: false, error: "an option cannot be active and disabled" };
+  }
+  return { ok: true, value: { active: active.value, disabled: disabled.value } };
+}
+
+export function serialiseOptionState(state: StoredOptionState): string {
+  return JSON.stringify(state);
+}
+
 /**
  * Load the effective list for one option key for a client: the saved custom
  * list if present and valid, otherwise the hardcoded default.
@@ -148,9 +207,8 @@ export async function getEffectiveOptionList(clientId: number, key: FormOptionKe
   const raw = rows[0]?.value;
   if (raw) {
     try {
-      const parsed = JSON.parse(raw);
-      const check = validateOptionList(parsed);
-      if (check.ok) return check.value;
+      const check = parseStoredOptionState(JSON.parse(raw), FORM_OPTION_DEFAULTS[key]);
+      if (check.ok) return check.value.active;
     } catch { /* fall through to default */ }
   }
   return [...FORM_OPTION_DEFAULTS[key]];

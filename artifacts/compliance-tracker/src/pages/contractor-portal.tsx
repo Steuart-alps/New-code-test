@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { format, isPast, differenceInDays } from "date-fns";
-import { ShieldCheck, FileUp, Trash2, Plus, CheckCircle2, AlertTriangle, Clock, X, Loader2 } from "lucide-react";
+import { ShieldCheck, FileUp, Trash2, Plus, CheckCircle2, AlertTriangle, Clock, X, Loader2, Download } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -30,7 +30,7 @@ function ExpiryChip({ date }: { date: string | null }) {
   return <span className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-700 rounded-full px-2.5 py-0.5 font-medium"><CheckCircle2 className="w-3 h-3" /> Valid until {format(d, "d MMM yyyy")}</span>;
 }
 
-const DBS_TYPES = ["DBS Check (Basic)", "DBS Check (Standard)", "DBS Check (Enhanced)", "PVG Scheme (Scotland)"];
+const DBS_TYPES = ["Basic", "Standard", "Enhanced", "PVG Scheme", "None"];
 
 interface Cert {
   id: number;
@@ -38,8 +38,8 @@ interface Cert {
   issuer: string | null;
   completed_date: string | null;
   expiry_date: string | null;
-  notes: string | null;
-  object_path: string | null;
+  canDelete: boolean;
+  hasFile: boolean;
 }
 
 interface PortalData {
@@ -103,10 +103,12 @@ export default function ContractorPortalPage() {
   const [certIssuer, setCertIssuer] = useState("");
   const [certCompleted, setCertCompleted] = useState("");
   const [certExpiry, setCertExpiry] = useState("");
-  const [certNotes, setCertNotes] = useState("");
   const [certFile, setCertFile] = useState<File | null>(null);
   const [certUploading, setCertUploading] = useState(false);
   const [certSaving, setCertSaving] = useState(false);
+  const [certError, setCertError] = useState<string | null>(null);
+  const [downloadingCert, setDownloadingCert] = useState<number | null>(null);
+  const [deletingCert, setDeletingCert] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -158,7 +160,10 @@ export default function ContractorPortalPage() {
         const allowedTypes = ["application/pdf", "image/jpeg", "image/png"];
         if (!allowedTypes.includes(certFile.type.toLowerCase())) throw new Error("Certificate files must be PDF, JPEG, or PNG");
         const urlRes = await fetch(apiUrl(`${token}/upload-url`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contentType: certFile.type }) });
-        if (!urlRes.ok) throw new Error("Could not get upload URL");
+        if (!urlRes.ok) {
+          const failure = await urlRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(failure?.error ?? "Could not get upload URL");
+        }
         const { uploadUrl, objectPath: op } = await urlRes.json();
         // Step 2: upload directly to GCS
         const putRes = await fetch(uploadUrl, { method: "PUT", body: certFile, headers: { "Content-Type": certFile.type || "application/octet-stream" } });
@@ -180,14 +185,18 @@ export default function ContractorPortalPage() {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
-      const newCert = await res.json();
-      setData(d => d ? { ...d, certificates: [...d.certificates, newCert] } : d);
-      // Reset form
-      setCertName(""); setCertIssuer(""); setCertCompleted(""); setCertExpiry(""); setCertNotes(""); setCertFile(null);
+      // Creation succeeded; never leave the form open for an accidental retry
+      // if refreshing the server-owned capability flags fails.
+      setCertName(""); setCertIssuer(""); setCertCompleted(""); setCertExpiry(""); setCertFile(null);
       if (fileRef.current) fileRef.current.value = "";
       setShowAddCert(false);
+      const refreshed = await fetch(apiUrl(token));
+      if (!refreshed.ok) throw new Error("Certificate saved, but the list could not be refreshed. Please reload the page.");
+      const updated: PortalData = await refreshed.json();
+      setData(updated);
+      setCertError(null);
     } catch (e: any) {
-      alert(e.message ?? "Could not add certificate");
+      setCertError(e instanceof Error ? e.message : "Could not add certificate");
     } finally {
       setCertSaving(false);
       setCertUploading(false);
@@ -196,8 +205,38 @@ export default function ContractorPortalPage() {
 
   async function handleDeleteCert(certId: number) {
     if (!token || !confirm("Remove this certificate?")) return;
-    const res = await fetch(apiUrl(`${token}/certificates/${certId}`), { method: "DELETE" });
-    if (res.ok) setData(d => d ? { ...d, certificates: d.certificates.filter(c => c.id !== certId) } : d);
+    setCertError(null);
+    setDeletingCert(certId);
+    try {
+      const res = await fetch(apiUrl(`${token}/certificates/${certId}`), { method: "DELETE" });
+      if (!res.ok) {
+        const failure = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(failure?.error ?? "Could not remove certificate");
+      }
+      setData(d => d ? { ...d, certificates: d.certificates.filter(c => c.id !== certId) } : d);
+    } catch (e) {
+      setCertError(e instanceof Error ? e.message : "Could not remove certificate");
+    } finally {
+      setDeletingCert(null);
+    }
+  }
+
+  async function handleDownloadCert(certId: number) {
+    if (!token) return;
+    setCertError(null);
+    setDownloadingCert(certId);
+    try {
+      // The portal API returns a short-lived signed URL from its token-scoped
+      // /download endpoint (it does not stream the file from /file).
+      const res = await fetch(apiUrl(`${token}/certificates/${certId}/download`));
+      const result = await res.json() as { downloadUrl?: string; error?: string };
+      if (!res.ok || !result.downloadUrl) throw new Error(result.error ?? "Could not prepare certificate download");
+      window.location.assign(result.downloadUrl);
+    } catch (e) {
+      setCertError(e instanceof Error ? e.message : "Could not download certificate");
+    } finally {
+      setDownloadingCert(null);
+    }
   }
 
   if (loading) return (
@@ -218,6 +257,23 @@ export default function ContractorPortalPage() {
 
   if (!data) return null;
 
+  const today = format(new Date(), "yyyy-MM-dd");
+  const warnings: string[] = [];
+  const insuranceDate = insuranceExpiry || "";
+  if (!insuranceDate) warnings.push("Insurance expiry date missing");
+  else if (insuranceDate < today) warnings.push("Insurance expired");
+  else if (differenceInDays(new Date(`${insuranceDate}T12:00:00`), new Date()) <= 30) warnings.push("Insurance expiring soon");
+  if (!dbsType || dbsType === "None") warnings.push("DBS / PVG check missing");
+  else if (!dbsExpiryDate) warnings.push("DBS / PVG expiry date missing");
+  else if (dbsExpiryDate < today) warnings.push("DBS / PVG check expired");
+  else if (differenceInDays(new Date(`${dbsExpiryDate}T12:00:00`), new Date()) <= 30) warnings.push("DBS / PVG check expiring soon");
+  if (!data.certificates.length) warnings.push("No certificates on record");
+  for (const cert of data.certificates) {
+    const expiry = toDateInput(cert.expiry_date);
+    if (expiry && expiry < today) warnings.push(`${cert.certificate_name} expired`);
+    else if (expiry && differenceInDays(new Date(`${expiry}T12:00:00`), new Date()) <= 30) warnings.push(`${cert.certificate_name} expiring soon`);
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -237,6 +293,19 @@ export default function ContractorPortalPage() {
           <p className="text-slate-500 mt-1 text-sm">
             Please review and update your compliance details below. Any changes are sent directly to your client's ComplyTrack account.
           </p>
+        </div>
+
+        <div className={`rounded-2xl border p-5 ${warnings.length ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`} data-testid="status-compliance-summary">
+          <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+            {warnings.length ? <AlertTriangle className="w-5 h-5 text-amber-600" /> : <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+            Compliance summary
+          </h2>
+          {warnings.length ? (
+            <ul className="mt-2 text-sm text-amber-900 list-disc list-inside space-y-1">
+              {warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
+            </ul>
+          ) : <p className="mt-2 text-sm text-emerald-800">Insurance, DBS / PVG and recorded certificates have no current expiry warnings.</p>}
+          <p className="mt-2 text-xs text-slate-500">Details shown here reflect your entered dates; save changes below to send them to your client.</p>
         </div>
 
         {/* Insurance card */}
@@ -261,7 +330,10 @@ export default function ContractorPortalPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Check type</label>
-              <select value={dbsType} onChange={e => setDbsType(e.target.value)}
+              <select value={dbsType} onChange={e => {
+                setDbsType(e.target.value);
+                if (e.target.value === "None") setDbsExpiryDate("");
+              }}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
                 <option value="">— Select —</option>
                 {DBS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -290,6 +362,8 @@ export default function ContractorPortalPage() {
         {/* Contact details */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           <h2 className="font-semibold text-slate-900">Contact details</h2>
+          <div className="text-sm"><span className="text-slate-500">Company: </span><span className="text-slate-900" data-testid="text-contractor-company">{data.company || "Not provided"}</span></div>
+          <div className="text-sm"><span className="text-slate-500">Email: </span><span className="text-slate-900" data-testid="text-contractor-email">{data.email}</span></div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
             <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. 07700 900000"
@@ -320,6 +394,7 @@ export default function ContractorPortalPage() {
               <Plus className="w-3.5 h-3.5" /> Add certificate
             </button>
           </div>
+          {certError && <div role="alert" data-testid="status-certificate-error" className="mx-6 mt-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{certError}</div>}
 
           {/* Add cert panel */}
           {showAddCert && (
@@ -330,8 +405,14 @@ export default function ContractorPortalPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Certificate name *</label>
-                <input value={certName} onChange={e => setCertName(e.target.value)} placeholder="e.g. IPAF, First Aid, Gas Safe…"
+                <input list="certificate-presets" value={certName} onChange={e => {
+                  setCertName(e.target.value);
+                  if (!certExpiry && certCompleted) setCertExpiry(suggestExpiry(e.target.value, certCompleted));
+                }} placeholder="Choose a common certificate or enter your own"
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                <datalist id="certificate-presets">
+                  {Object.keys(CERT_EXPIRY_YEARS).map(name => <option key={name} value={name} />)}
+                </datalist>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -347,17 +428,11 @@ export default function ContractorPortalPage() {
                   }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Expiry date</label>
-                  <input type="date" value={certExpiry} onChange={e => setCertExpiry(e.target.value)}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Notes (optional)</label>
-                  <input value={certNotes} onChange={e => setCertNotes(e.target.value)} placeholder="Cert number, renewal info…"
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
-                </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Expiry date</label>
+                <input type="date" value={certExpiry} onChange={e => setCertExpiry(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                <p className="mt-1 text-xs text-slate-500">A common renewal interval is suggested for preset certificates. Check your certificate and edit this date if needed.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -391,9 +466,14 @@ export default function ContractorPortalPage() {
                       <ExpiryChip date={cert.expiry_date} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => handleDeleteCert(cert.id)} className="text-slate-300 hover:text-red-500 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="inline-flex items-center gap-3">
+                        {cert.hasFile && <button type="button" onClick={() => handleDownloadCert(cert.id)} disabled={downloadingCert === cert.id} aria-label={`Download ${cert.certificate_name}`} data-testid={`button-download-certificate-${cert.id}`} className="text-slate-500 hover:text-slate-900 transition-colors disabled:opacity-50">
+                          {downloadingCert === cert.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                        </button>}
+                        {cert.canDelete && <button type="button" onClick={() => handleDeleteCert(cert.id)} disabled={deletingCert === cert.id} aria-label={`Remove ${cert.certificate_name}`} data-testid={`button-delete-certificate-${cert.id}`} className="text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50">
+                          {deletingCert === cert.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>}
+                      </div>
                     </td>
                   </tr>
                 ))}

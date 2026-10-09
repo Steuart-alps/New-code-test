@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { AuditLog } from "@/components/audit-log";
 import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-context";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
@@ -11,16 +13,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useListSites } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useLocation } from "wouter";
 import {
   Lock, Plus, Pencil, Trash2, Search, Wrench, AlertTriangle, CheckCircle2,
   Clock, Loader2, ImagePlus, X, ImageOff, Send, UserCog, BarChart3, LayoutGrid,
-  Play, MapPin, User, Calendar, FileText, Paperclip, Settings2,
+  Play, FileText, Paperclip, Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getApiErrorMessage } from "@/lib/api";
 import { format } from "date-fns";
+import { elapsedBoardDays, FixTrackBoard, type FixTrackBoardIssue } from "@/components/fix-track-board";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -85,21 +88,13 @@ interface ContractorRecord {
   trades?: string[];
 }
 
-interface Issue {
-  id: number;
-  title: string;
-  issueType: string;
-  location: string;
+interface Issue extends FixTrackBoardIssue {
   description?: string | null;
-  priority: string;
-  status: string;
   reportedBy: string;
   reportedDate: string;
   assignedTo?: string | null;
   contractorId?: number | null;
-  contractorName?: string | null;
   contractorEmail?: string | null;
-  targetDate?: string | null;
   resolvedDate?: string | null;
   solutionNotes?: string | null;
   completionDocumentPath?: string | null;
@@ -115,9 +110,7 @@ interface Issue {
   };
   mediaUrls: string[];
   siteId?: number | null;
-  siteName?: string | null;
   createdAt: string;
-  isOverdue: boolean;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -153,14 +146,24 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   issueId?: number;
   isNew?: boolean;
 }) {
-  const { data: sites = [] } = useListSites();
   const { toast } = useToast();
+  const clientApiFetch = useActiveClientApi();
+  const { activeClientId } = useAuth();
+  const { data: sites = [] } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ["sites", activeClientId],
+    queryFn: async () => {
+      const response = await clientApiFetch("/sites");
+      if (!response.ok) throw new Error("Could not load sites");
+      return response.json();
+    },
+    enabled: !!activeClientId,
+  });
   const { data: formOptions } = useFormOptions();
   const issueTypeOptions = pickOptions(formOptions, "fixtrack_issue_types");
   // Keep the record's current type selectable even if it was later removed from
   // the effective list, so editing other fields doesn't force a type change.
   const currentType = form.issueType as string | undefined;
-  const formIssueTypeOptions = currentType && !issueTypeOptions.includes(currentType)
+  const formIssueTypeOptions = !isNew && currentType && !issueTypeOptions.includes(currentType)
     ? [...issueTypeOptions, currentType]
     : issueTypeOptions;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -168,11 +171,12 @@ function IssueForm({ form, setForm, issueId, isNew }: {
   const [contractors, setContractors] = useState<ContractorRecord[]>([]);
 
   useEffect(() => {
-    apiFetch("/contractors")
+    setContractors([]);
+    clientApiFetch("/contractors")
       .then(r => r.ok ? r.json() : [])
       .then(setContractors)
       .catch(() => {});
-  }, []);
+  }, [activeClientId, clientApiFetch]);
 
   const mediaUrls: string[] = form.mediaUrls ?? [];
 
@@ -211,11 +215,13 @@ function IssueForm({ form, setForm, issueId, isNew }: {
     const newPaths: string[] = [];
     for (const file of files) {
       try {
-        const res = await apiFetch(`/fix-track/issues/${issueId}/request-upload`, {
+        const res = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
           method: "POST",
           body: JSON.stringify({ name: file.name, contentType: file.type }),
         });
-        if (!res.ok) throw new Error("Could not get upload URL");
+        if (!res.ok) {
+          throw new Error(await getApiErrorMessage(res, "Could not get upload URL"));
+        }
         const { uploadUrl, objectPath } = await res.json();
         const up = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
         if (!up.ok) throw new Error("Upload failed");
@@ -242,7 +248,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
 
       <div className="grid grid-cols-2 gap-4">
         <F label="Issue Type *">
-          <Select value={form.issueType ?? "general"} onValueChange={handleTypeChange}>
+          <Select value={form.issueType ?? ""} onValueChange={handleTypeChange}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {formIssueTypeOptions.map(k => (
@@ -439,7 +445,7 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
     .sort((a, b) => new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime())
     .slice(0, 6);
 
-  const daysOpen = (d: string) => Math.floor((today.getTime() - new Date(d).getTime()) / 86_400_000);
+  const daysOpen = (d: string) => elapsedBoardDays(d, today);
   const maxType  = Math.max(...byType.map(t => t.count), 1);
   const maxSite  = Math.max(...bySite.map(([, c]) => c), 1);
 
@@ -581,118 +587,11 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
 
 // ── Priority board ────────────────────────────────────────────────────────────
 
-const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-const DAY_MS = 86_400_000;
-
-function startOfLocalDay(value: string | Date): Date {
-  const date = typeof value === "string" ? new Date(`${value.slice(0, 10)}T00:00:00`) : new Date(value);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function elapsedDays(from: string, to = new Date()): number {
-  return Math.max(0, Math.floor((startOfLocalDay(to).getTime() - startOfLocalDay(from).getTime()) / DAY_MS));
-}
-
-function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue) => void }) {
-  // Open issues only, grouped by trade area (issueType).
-  const open = issues.filter(i => i.status === "reported" || i.status === "in_progress");
-
-  const columns = [...new Set(open.map(i => i.issueType))]
-    .map(key => ({
-      key,
-      meta: issueTypeMeta(key),
-      items: open
-        .filter(i => i.issueType === key)
-        .sort((a, b) => {
-          const pr = (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99);
-          if (pr !== 0) return pr;
-          // Older first (by reported date)
-          return new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
-        }),
-    }))
-    .filter(c => c.items.length > 0);
-
-  if (columns.length === 0) {
-    return (
-      <div className="py-20 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
-        <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-        <p className="text-sm font-medium">No open issues — nothing to action right now</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex gap-4 overflow-x-auto pb-4">
-      {columns.map(({ key, meta, items }) => (
-        <div key={key} className="flex-shrink-0 w-72">
-          <div className="flex items-center justify-between mb-2 px-1">
-            <span className={cn("inline-flex items-center text-xs px-2 py-0.5 rounded-md border font-medium", meta.color)}>
-              {meta.label}
-            </span>
-            <span className="text-xs text-muted-foreground font-medium tabular-nums">{items.length}</span>
-          </div>
-          <div className="space-y-2">
-            {items.map(issue => {
-              const priorityMeta = PRIORITIES[issue.priority] ?? PRIORITIES.medium;
-              const statusMeta   = STATUSES[issue.status] ?? STATUSES.reported;
-              const daysOpen = elapsedDays(issue.reportedDate);
-              return (
-                <button
-                  key={issue.id}
-                  onClick={() => onEdit(issue)}
-                  className={cn(
-                    "w-full text-left bg-card border rounded-lg p-3 transition-shadow hover:shadow-md",
-                    issue.priority === "urgent" ? "border-l-4 border-l-rose-500" : "border-border",
-                  )}
-                >
-                  <div className="font-medium text-sm mb-1.5 line-clamp-2">{issue.title}</div>
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    <div className="truncate flex items-center gap-1">
-                      <MapPin className="w-3 h-3 flex-shrink-0" />
-                      <span>{issue.siteName ?? "No site"}</span>
-                    </div>
-                    <div className="truncate flex items-center gap-1">
-                      <User className="w-3 h-3 flex-shrink-0" />
-                      <span>{issue.contractorName ?? "Unassigned"}</span>
-                    </div>
-                    {issue.targetDate && (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 flex-shrink-0" />
-                        <span>Target {format(startOfLocalDay(issue.targetDate), "dd/MM/yyyy")}</span>
-                      </div>
-                    )}
-                    {!issue.targetDate && (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 flex-shrink-0" />
-                        <span>No target date</span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <span className="font-medium text-foreground">{daysOpen} {daysOpen === 1 ? "day" : "days"} open</span>
-                      {issue.isOverdue && (
-                        <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FixTrackPage() {
-  const { hasService, user } = useAuth();
+  const { hasService, user, activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
   const clientCanAdmin = useCanAdmin();
   const canAdmin = clientCanAdmin || useIsMaintenanceManager();
   const canEdit = user?.role !== "client_viewer";
@@ -716,38 +615,55 @@ export default function FixTrackPage() {
   const [notifying, setNotifying]         = useState<Record<number, boolean>>({});
   const [renotifyIssue, setRenotifyIssue] = useState<Issue | null>(null);
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"timing" | "audit">("timing");
   const [staleDays, setStaleDays] = useState(7);
   const [savingAlertSettings, setSavingAlertSettings] = useState(false);
 
   const [, setLocation] = useLocation();
 
+  useEffect(() => {
+    if (!dialogOpen || editing) return;
+    setForm(current => {
+      if (issueTypeOptions.includes(current.issueType)) return current;
+      const issueType = issueTypeOptions[0] ?? "";
+      return {
+        ...current,
+        issueType,
+        priority: AUTO_PRIORITY[issueType] ?? "medium",
+      };
+    });
+  }, [dialogOpen, editing, issueTypeOptions]);
+
   async function load() {
     setLoading(true);
     try {
-      const res = await apiFetch("/fix-track/issues");
+      const res = await clientApiFetch("/fix-track/issues");
       if (res.ok) setIssues(await res.json());
     } finally { setLoading(false); }
   }
 
-  useEffect(() => { if (hasFixtrack) load(); }, [hasFixtrack]);
+  useEffect(() => {
+    setIssues([]);
+    if (hasFixtrack) load();
+  }, [hasFixtrack, activeClientId]);
 
   async function openAlertSettings() {
+    setSettingsTab("timing");
     setAlertSettingsOpen(true);
     try {
-      const res = await apiFetch("/fix-track/alert-settings");
+      const res = await clientApiFetch("/fix-track/alert-settings");
       if (!res.ok) throw new Error("Could not load alert settings");
       const data = await res.json();
       setStaleDays(data.staleDays);
     } catch (err: any) {
       toast({ title: "Could not load alert settings", description: err.message, variant: "destructive" });
-      setAlertSettingsOpen(false);
     }
   }
 
   async function saveAlertSettings() {
     setSavingAlertSettings(true);
     try {
-      const res = await apiFetch("/fix-track/alert-settings", {
+      const res = await clientApiFetch("/fix-track/alert-settings", {
         method: "PUT",
         body: JSON.stringify({ staleDays }),
       });
@@ -767,8 +683,8 @@ export default function FixTrackPage() {
     const today = new Date().toISOString().slice(0, 10);
     setEditing(null);
     setForm({
-      issueType:    "general",
-      priority:     AUTO_PRIORITY["general"] ?? "low",
+      issueType:    issueTypeOptions[0] ?? "",
+      priority:     AUTO_PRIORITY[issueTypeOptions[0] ?? ""] ?? "medium",
       status:       "reported",
       reportedDate: today,
       reportedBy:   user?.name ?? "",
@@ -810,10 +726,10 @@ export default function FixTrackPage() {
       delete payload.resolvedDate;
 
       if (editing) {
-        const res = await apiFetch(`/fix-track/issues/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
+        const res = await clientApiFetch(`/fix-track/issues/${editing.id}`, { method: "PUT", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
       } else {
-        const res = await apiFetch("/fix-track/issues", { method: "POST", body: JSON.stringify(payload) });
+        const res = await clientApiFetch("/fix-track/issues", { method: "POST", body: JSON.stringify(payload) });
         if (!res.ok) throw new Error((await res.json()).error ?? "Create failed");
         const created = await res.json();
         setEditing(created);
@@ -831,13 +747,29 @@ export default function FixTrackPage() {
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this issue report?")) return;
-    await apiFetch(`/fix-track/issues/${id}`, { method: "DELETE" });
+    const issue = issues.find((item) => item.id === id);
+    if (issue?.emailRequestStatus === "sent" && issue.targetDate) {
+      const cancellation = await clientApiFetch(`/fix-track/issues/${id}/request-cancellation`, { method: "POST" });
+      const body = await cancellation.json().catch(() => null);
+      if (!cancellation.ok) {
+        toast({ title: "Could not cancel the calendar booking", description: body?.error ?? "Request failed", variant: "destructive" });
+        return;
+      }
+      await load();
+      toast({ title: "Calendar cancellation queued", description: "A manager must approve it before it is sent." });
+      return;
+    }
+    const deleted = await clientApiFetch(`/fix-track/issues/${id}`, { method: "DELETE" });
+    if (!deleted.ok) {
+      const body = await deleted.json().catch(() => null);
+      throw new Error(body?.error ?? "Delete failed");
+    }
     await load();
     toast({ title: "Issue deleted" });
   }
 
   async function quickStatus(issue: Issue, newStatus: string) {
-    await apiFetch(`/fix-track/issues/${issue.id}`, {
+    await clientApiFetch(`/fix-track/issues/${issue.id}`, {
       method: "PUT",
       body: JSON.stringify({
         status: newStatus,
@@ -849,7 +781,7 @@ export default function FixTrackPage() {
   async function handleNotify(issue: Issue, _force = false, mode: "assign" | "quote" = "assign") {
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}/send-to-contractor`, { method: "POST" });
       const body = await res.json();
       if (res.status === 409 && body.alreadySent) {
         // Ask the manager to confirm before resending
@@ -878,7 +810,7 @@ export default function FixTrackPage() {
   async function handleRequestSend(issue: Issue, mode: "assign" | "quote") {
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/request-send`, {
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}/request-send`, {
         method: "POST", body: JSON.stringify({ mode }),
       });
       const body = await res.json();
@@ -897,7 +829,7 @@ export default function FixTrackPage() {
 
   async function handleRejectSend(issue: Issue) {
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/reject-send`, { method: "POST" });
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}/reject-send`, { method: "POST" });
       if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
       toast({ title: "Request dismissed" });
       await load();
@@ -910,7 +842,7 @@ export default function FixTrackPage() {
     if (!issue.quote?.id) return;
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const res = await apiFetch(`/fix-track/quotes/${issue.quote.id}/accept`, { method: "POST" });
+      const res = await clientApiFetch(`/fix-track/quotes/${issue.quote.id}/accept`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       toast({ title: "Quote accepted", description: "The job has been assigned." });
       await load();
@@ -925,7 +857,7 @@ export default function FixTrackPage() {
     if (!issue.quote?.id) return;
     setNotifying(n => ({ ...n, [issue.id]: true }));
     try {
-      const res = await apiFetch(`/fix-track/quotes/${issue.quote.id}/decline`, { method: "POST" });
+      const res = await clientApiFetch(`/fix-track/quotes/${issue.quote.id}/decline`, { method: "POST" });
       if (!res.ok) throw new Error(await res.text());
       toast({ title: "Quote declined" });
       await load();
@@ -997,6 +929,12 @@ export default function FixTrackPage() {
               triggerLabel="Customise types"
               labelFor={v => issueTypeMeta(v).label}
             />
+            <FormOptionsEditor
+              optionKey="fixtrack_trades"
+              title="Contractor trades"
+              triggerLabel="Customise trades"
+              labelFor={humanizeType}
+            />
             <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
               <Plus className="w-4 h-4" /> Report Issue
             </Button>
@@ -1004,9 +942,16 @@ export default function FixTrackPage() {
         </div>
 
         <Dialog open={alertSettingsOpen} onOpenChange={setAlertSettingsOpen}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Urgent job alert timing</DialogTitle>
+              <DialogTitle>FixTrack settings</DialogTitle>
+            </DialogHeader>
+            <div className="flex gap-2 border-b border-border">
+              <Button type="button" variant={settingsTab === "timing" ? "secondary" : "ghost"} onClick={() => setSettingsTab("timing")} data-testid="tab-fix-timing">Alert timing</Button>
+              {clientCanAdmin && <Button type="button" variant={settingsTab === "audit" ? "secondary" : "ghost"} onClick={() => setSettingsTab("audit")} data-testid="tab-fix-audit">Audit log</Button>}
+            </div>
+            {settingsTab === "audit" && clientCanAdmin ? <AuditLog module="fix" /> : <>
+            <DialogHeader>
               <DialogDescription>
                 Choose how long an urgent maintenance job can go without an update before managers are alerted. Jobs past their target date are alerted regardless of this setting.
               </DialogDescription>
@@ -1034,6 +979,7 @@ export default function FixTrackPage() {
                 {savingAlertSettings ? "Saving…" : "Save timing"}
               </Button>
             </DialogFooter>
+            </>}
           </DialogContent>
         </Dialog>
 
@@ -1080,7 +1026,13 @@ export default function FixTrackPage() {
         {activeTab === "board" && (
           loading
             ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
-            : <FixTrackBoard issues={issues} onEdit={openEdit} />
+            : <FixTrackBoard
+              issues={issues}
+              onEdit={openEdit}
+              issueTypeMeta={issueTypeMeta}
+              priorities={PRIORITIES}
+              statuses={STATUSES}
+            />
         )}
 
         {/* Issues tab — Filters */}

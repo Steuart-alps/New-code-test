@@ -50,12 +50,14 @@ variable is unset:
 
 - Stripe: `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY`, else Replit's connector
   (`api-server/src/lib/stripeClient.ts`, `scripts/src/stripeClient.ts`).
-- File storage: Google Cloud Storage via `GCS_SERVICE_ACCOUNT_JSON` or
-  `GOOGLE_APPLICATION_CREDENTIALS`, else the Replit sidecar at `127.0.0.1:1106`
-  (`api-server/src/lib/objectStorage.ts`).
+- File storage: Google Cloud Storage via `GCS_SERVICE_ACCOUNT_JSON`,
+  `GOOGLE_APPLICATION_CREDENTIALS`, `GCS_PROJECT_ID`, or local ADC; in Replit,
+  it falls back to the sidecar at `127.0.0.1:1106` when no GCS credentials are
+  configured. Configure paths with `PRIVATE_OBJECT_DIR` /
+  `PUBLIC_OBJECT_SEARCH_PATHS` or the `GCS_*_BUCKET` / prefix variables.
 - Public URL: `getPublicAppUrl()` in `api-server/src/lib/email.ts` —
-  `PUBLIC_APP_URL`, else `REPLIT_DOMAINS`, else localhost. Use it rather than
-  reading `REPLIT_DOMAINS` directly.
+  `PUBLIC_APP_URL`, else `REPLIT_DOMAINS`, then `RENDER_EXTERNAL_URL`, then
+  localhost. Use it rather than reading `REPLIT_DOMAINS` directly.
 - `.replit`, the `@replit/vite-plugin-*` plugins (gated on `REPL_ID`) and the
   mobile `dev` script remain for the Replit deployment; use `dev:local` elsewhere.
 

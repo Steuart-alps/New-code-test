@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/api";
 import { trackModuleActivation } from "@/lib/analytics";
-import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
+import { CreditCard, LogOut, RefreshCw, Lock, CheckCircle2, ShieldCheck, KeyRound, Flame, UtensilsCrossed, Droplets, Wrench, Building2, BookOpen, Waves, TreePine, AlertOctagon, Bike, Leaf, PlugZap, Bug, Sunrise, Sunset } from "lucide-react";
 import alpsLogo from "@/assets/alps-logo.png";
 
 const ADDONS = [
@@ -449,6 +450,13 @@ export default function TrialEndedPage() {
 
         {/* Actions */}
         <div className="px-6 pb-4 pt-4 relative z-10 space-y-3">
+          {(user?.role === "client_admin" || user?.role === "consultant") && (
+            <p className="text-center text-sm text-muted-foreground">
+              If your subscription was cancelled, you can{" "}
+              <Link href="/settings" className="underline underline-offset-2">request data deletion</Link>.
+              {user.role === "consultant" && <> You can also <Link href="/clients" className="underline underline-offset-2">view pending requests</Link>.</>}
+            </p>
+          )}
           {canPay && (
             <Button className="w-full h-12 bg-[#162D42] hover:bg-[#162D42]/90 text-white rounded-[2px]" onClick={startCheckout} disabled={checkingOut}>
               <CreditCard className="mr-2 h-4 w-4" />
@@ -462,9 +470,18 @@ export default function TrialEndedPage() {
         </div>
 
         <div className="px-6 pb-8 pt-2 border-t border-border/50 mt-2 flex justify-center relative z-10">
-          <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
-            <LogOut className="mr-2 h-4 w-4" /> Log out
-          </Button>
+          <div className="flex w-full flex-col items-center gap-2">
+            <Link
+              href="/account-security"
+              className="inline-flex items-center justify-center gap-2 text-sm font-medium text-[#162D42] underline underline-offset-2 hover:text-primary"
+              data-testid="link-account-security-locked"
+            >
+              <KeyRound className="h-4 w-4" /> Account security
+            </Link>
+            <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-[#162D42]">
+              <LogOut className="mr-2 h-4 w-4" /> Log out
+            </Button>
+          </div>
         </div>
       </div>
 

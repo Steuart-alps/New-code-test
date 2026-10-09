@@ -4,6 +4,10 @@ export {
   runContractorComplianceReminderJob,
   getContractorComplianceAlerts,
   INSURANCE_LEAD_DAYS,
+  DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+  MIN_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+  MAX_CONTRACTOR_COMPLIANCE_LEAD_DAYS,
+  parseContractorComplianceLeadDays,
   DBS_MAX_AGE_YEARS,
 } from "../src/lib/contractorComplianceReminders";
 export { db, pool } from "@workspace/db";

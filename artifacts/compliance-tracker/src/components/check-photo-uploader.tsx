@@ -14,17 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { useAuth } from "@/context/auth-context";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
-async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
+async function parsePhotoResponse<T = any>(res: Response): Promise<T> {
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
@@ -46,6 +43,8 @@ export interface CheckPhotoUploaderProps {
   entityType: string;
   entityId: number;
   required?: boolean;
+  /** Configured minimum when photos are required. */
+  minPhotos?: number;
   /** When true, renders in a compact inline strip rather than a full grid. */
   compact?: boolean;
   /** Preserve photo viewing while suppressing upload and deletion controls. */
@@ -108,12 +107,19 @@ export function CheckPhotoUploader({
   entityType,
   entityId,
   required = false,
+  minPhotos = 1,
   compact = false,
   readOnly = false,
   onCountChange,
 }: CheckPhotoUploaderProps) {
+  const { activeClientId } = useAuth();
+  const request = useActiveClientApi();
+  const apiFetch = useCallback(async <T = any,>(path: string, init?: RequestInit): Promise<T> => {
+    return parsePhotoResponse<T>(await request(path, init));
+  }, [request]);
   const [photos, setPhotos] = useState<CheckPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +134,7 @@ export function CheckPhotoUploader({
   const fetchPhotos = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const data = await apiFetch<any[]>(`/photos?entityType=${encodeURIComponent(entityType)}&entityId=${entityId}`);
       // API returns snake_case; normalise to camelCase for the component
       const normalised: CheckPhoto[] = data.map(p => ({
@@ -140,12 +147,12 @@ export function CheckPhotoUploader({
       }));
       setPhotos(normalised);
       onCountChange?.(normalised.length);
-    } catch {
-      // Silently fail — photos are supplementary
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : "Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [entityType, entityId, onCountChange]);
+  }, [entityType, entityId, onCountChange, apiFetch]);
 
   useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
 
@@ -223,7 +230,7 @@ export function CheckPhotoUploader({
 
   // ── Photo serving URL ─────────────────────────────────────────────────────
 
-  const photoUrl = (objectPath: string) => `${apiBase}/storage${objectPath}`;
+  const photoUrl = (objectPath: string) => `${apiBase}/storage${objectPath}${activeClientId ? `?clientId=${activeClientId}` : ""}`;
   const photoLabel = (index: number) => `photo ${index + 1} of ${photos.length}`;
 
   const openLightbox = (photo: CheckPhoto, index: number, opener: HTMLElement) => {
@@ -257,11 +264,21 @@ export function CheckPhotoUploader({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const loadErrorNotice = loadError && (
+    <div role="alert" className="text-xs text-destructive">
+      Could not load photos: {loadError}
+      <Button type="button" variant="ghost" size="sm" onClick={() => void fetchPhotos()}>
+        Retry photos
+      </Button>
+    </div>
+  );
+
   if (compact) {
     return (
       <div ref={containerRef} className="flex items-center gap-2 flex-wrap mt-1">
         {status}
         {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" aria-label="Loading photos" />}
+        {loadErrorNotice}
         {photos.map((p, index) => (
           <div key={p.id} className="relative group w-10 h-10 rounded-sm overflow-hidden border border-border flex-shrink-0">
             <button
@@ -304,8 +321,13 @@ export function CheckPhotoUploader({
           }
         </button>}
         {!readOnly && fileInput}
-        {required && photos.length === 0 && (
-          <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">Photo required</Badge>
+        {required && (
+          <Badge variant="outline" className={cn("text-xs",
+            photos.length < minPhotos
+              ? "text-amber-700 border-amber-300 bg-amber-50"
+              : "text-emerald-700 border-emerald-300 bg-emerald-50")}>
+            {minPhotos === 1 ? "Photo required" : `${minPhotos} photos required`} · {photos.length}/{minPhotos}
+          </Badge>
         )}
         {lightboxEl}
       </div>
@@ -352,9 +374,10 @@ export function CheckPhotoUploader({
         </div>
       )}
 
-      {!loading && photos.length === 0 && (
+      {loadErrorNotice}
+      {!loading && !loadError && photos.length === 0 && (
         <p className="text-xs text-muted-foreground italic py-1">
-          {required ? "At least one photo is required for this check." : "No photos attached."}
+              {required ? `At least ${minPhotos} ${minPhotos === 1 ? "photo is" : "photos are"} required for this check.` : "No photos attached."}
         </p>
       )}
 

@@ -9,11 +9,99 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary List feedback for the selected client (administrators only)
+ */
+export const ListFeedbackReportsQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional(),
+  "category": zod.enum(['feedback', 'bug', 'feature']).optional(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional()
+})
+
+export const ListFeedbackReportsResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "submitterName": zod.string().nullable()
+})
+export const ListFeedbackReportsResponse = zod.array(ListFeedbackReportsResponseItem)
+
+
+/**
+ * @summary Update the status or internal response for a report in the selected client
+ */
+export const UpdateFeedbackReportParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFeedbackReportQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const updateFeedbackReportBodyInternalNoteMax = 5000;
+
+
+
+export const UpdateFeedbackReportBody = zod.object({
+  "status": zod.enum(['new', 'reviewing', 'resolved']).optional(),
+  "internalNote": zod.string().max(updateFeedbackReportBodyInternalNoteMax).optional()
+})
+
+export const UpdateFeedbackReportResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "category": zod.enum(['feedback', 'bug', 'feature']),
+  "summary": zod.string(),
+  "details": zod.string(),
+  "pagePath": zod.string().nullable(),
+  "emailStatus": zod.string(),
+  "createdAt": zod.date(),
+  "status": zod.enum(['new', 'reviewing', 'resolved']),
+  "internalNote": zod.string(),
+  "updatedAt": zod.date().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "submitterName": zod.string().nullable()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
   "status": zod.string()
 })
+
+
+/**
+ * Returns at most 50 changes, newest first.
+ * @summary List the latest changes in a compliance module
+ */
+export const ListAuditLogQueryParams = zod.object({
+  "module": zod.enum(['fire', 'legionella', 'kitchen', 'fix', 'safe', 'train', 'doc', 'incidents'])
+})
+
+export const ListAuditLogResponseItem = zod.object({
+  "id": zod.number(),
+  "tableName": zod.string(),
+  "rowId": zod.number(),
+  "action": zod.enum(['create', 'update', 'delete']),
+  "changedBy": zod.number().nullable(),
+  "changedAt": zod.date(),
+  "diff": zod.record(zod.string(), zod.object({
+  "before": zod.unknown(),
+  "after": zod.unknown()
+})),
+  "actorName": zod.string().nullable()
+})
+export const ListAuditLogResponse = zod.array(ListAuditLogResponseItem).max(50)
 
 
 /**
@@ -718,6 +806,9 @@ export const GetDashboardStatsResponse = zod.object({
 /**
  * @summary Get all app settings
  */
+export const getSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
+
 export const GetSettingsResponse = zod.object({
   "smtpHost": zod.string().nullish(),
   "smtpPort": zod.string().nullish(),
@@ -726,13 +817,19 @@ export const GetSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
+  "companyName": zod.string().nullish(),
+  "accountTimezone": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(getSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
 })
 
 
 /**
  * @summary Update app settings
  */
+export const updateSettingsBodyStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
+
 export const UpdateSettingsBody = zod.object({
   "smtpHost": zod.string().nullish(),
   "smtpPort": zod.string().nullish(),
@@ -741,8 +838,14 @@ export const UpdateSettingsBody = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
+  "companyName": zod.string().nullish(),
+  "accountTimezone": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsBodyStorageWarningThresholdBytesRegExp).nullish()
 })
+
+export const updateSettingsResponseStorageWarningThresholdBytesRegExp = new RegExp('^[0-9]+$');
+
 
 export const UpdateSettingsResponse = zod.object({
   "smtpHost": zod.string().nullish(),
@@ -752,7 +855,947 @@ export const UpdateSettingsResponse = zod.object({
   "smtpFrom": zod.string().nullish(),
   "smtpFromName": zod.string().nullish(),
   "defaultLeadTimeDays": zod.string().nullish(),
-  "companyName": zod.string().nullish()
+  "contractorComplianceLeadTimeDays": zod.string().nullish(),
+  "companyName": zod.string().nullish(),
+  "accountTimezone": zod.string().nullish(),
+  "storageWarningThresholdBytes": zod.string().regex(updateSettingsResponseStorageWarningThresholdBytesRegExp).nullish()
+})
+
+
+/**
+ * @summary Get the current client's privacy-governance records
+ */
+export const GetPrivacyGovernanceQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const getPrivacyGovernanceResponseBreachesItemOneAffectedSubjectsEstimateMin = 0;
+
+export const getPrivacyGovernanceResponseBreachesItemOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const GetPrivacyGovernanceResponse = zod.object({
+  "program": zod.union([zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})),zod.null()]),
+  "activities": zod.array(zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+}))),
+  "rightsRequests": zod.array(zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+}))),
+  "retentionSchedules": zod.array(zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+}))),
+  "retentionVerifications": zod.array(zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "scheduleId": zod.number(),
+  "verifiedBy": zod.number().nullable(),
+  "verifiedAt": zod.date()
+}))),
+  "processors": zod.array(zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+}))),
+  "breaches": zod.array(zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(getPrivacyGovernanceResponseBreachesItemOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(getPrivacyGovernanceResponseBreachesItemOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+})))
+})
+
+
+/**
+ * @summary Save the client's controller and processor responsibilities
+ */
+export const SavePrivacyProgramQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+export const SavePrivacyProgramBody = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+})
+
+export const SavePrivacyProgramResponse = zod.object({
+  "customerRole": zod.enum(['controller', 'joint_controller', 'processor', 'mixed']),
+  "controllerName": zod.string().nullable(),
+  "controllerContact": zod.string().nullable(),
+  "dpoContact": zod.string().nullable(),
+  "noticeUrl": zod.string().nullable(),
+  "noticeVersion": zod.string().nullable(),
+  "noticeReviewedAt": zod.date().nullable(),
+  "processorAgreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "processorAgreementReviewedAt": zod.date().nullable(),
+  "responsibilitiesNotes": zod.string().nullable(),
+  "privacyOwner": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+}))
+
+
+/**
+ * @summary Add a processing, rights, retention, processor or breach record
+ */
+export const CreatePrivacyRecordQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const createPrivacyRecordBodyFiveAffectedSubjectsEstimateMin = 0;
+
+export const createPrivacyRecordBodyFiveAffectedRecordsEstimateMin = 0;
+
+
+
+export const CreatePrivacyRecordBody = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(createPrivacyRecordBodyFiveAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(createPrivacyRecordBodyFiveAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+})])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const createPrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin = 0;
+
+export const createPrivacyRecordResponseFiveOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const CreatePrivacyRecordResponse = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+})),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+})),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+})),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+})),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(createPrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(createPrivacyRecordResponseFiveOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+}))])
+
+
+/**
+ * @summary Update a privacy record without changing its tenant
+ */
+
+
+
+export const UpdatePrivacyRecordParams = zod.object({
+  "kind": zod.enum(['activity', 'rights_request', 'retention', 'processor', 'breach']),
+  "id": zod.coerce.number().min(1)
+})
+
+export const UpdatePrivacyRecordQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const updatePrivacyRecordBodyFiveAffectedSubjectsEstimateMin = 0;
+
+export const updatePrivacyRecordBodyFiveAffectedRecordsEstimateMin = 0;
+
+
+
+export const UpdatePrivacyRecordBody = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(updatePrivacyRecordBodyFiveAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(updatePrivacyRecordBodyFiveAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+})])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const updatePrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin = 0;
+
+export const updatePrivacyRecordResponseFiveOneAffectedRecordsEstimateMin = 0;
+
+
+
+export const UpdatePrivacyRecordResponse = zod.union([zod.object({
+  "kind": zod.enum(['activity']),
+  "name": zod.string().min(1),
+  "purpose": zod.string().min(1),
+  "dataSubjects": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "article6Basis": zod.enum(['consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests', 'other']),
+  "article6Rationale": zod.string().nullable(),
+  "specialCategoryData": zod.boolean(),
+  "article9Condition": zod.string().nullable(),
+  "article9Rationale": zod.string().nullable(),
+  "recipients": zod.string().nullable(),
+  "transferDetails": zod.string().nullable(),
+  "retentionCriteria": zod.string().min(1),
+  "securityMeasures": zod.string().nullable(),
+  "dpiaClassification": zod.enum(['not_screened', 'not_required', 'required', 'in_progress', 'completed']),
+  "dpiaRationale": zod.string().nullable(),
+  "dpiaCompletedAt": zod.date().nullable(),
+  "owner": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['activity'])
+})),zod.object({
+  "kind": zod.enum(['rights_request']),
+  "requestType": zod.enum(['access', 'rectification', 'erasure', 'restriction', 'portability', 'objection', 'other']),
+  "subjectName": zod.string().min(1),
+  "subjectContact": zod.string().nullable(),
+  "scopeDescription": zod.string().min(1),
+  "receivedAt": zod.date(),
+  "extendedDueAt": zod.date().nullable(),
+  "extensionReason": zod.string().nullable(),
+  "identityStatus": zod.enum(['not_started', 'in_progress', 'verified', 'failed']),
+  "identityMethod": zod.string().nullable(),
+  "identityEvidence": zod.string().nullable(),
+  "status": zod.enum(['received', 'in_progress', 'waiting_for_information', 'completed', 'refused', 'withdrawn']),
+  "decision": zod.enum(['granted', 'partially_granted', 'refused', 'not_applicable']).nullable(),
+  "decisionRationale": zod.string().nullable(),
+  "responseSentAt": zod.date().nullable(),
+  "responseEvidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "dueAt": zod.date(),
+  "identityVerifiedAt": zod.date().nullable(),
+  "identityVerifiedBy": zod.number().nullable(),
+  "decidedAt": zod.date().nullable(),
+  "decidedBy": zod.number().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['rights_request'])
+})),zod.object({
+  "kind": zod.enum(['retention']),
+  "recordCategory": zod.string().min(1),
+  "scopeDescription": zod.string().min(1),
+  "retentionPeriod": zod.string().min(1),
+  "retentionTrigger": zod.string().min(1),
+  "justification": zod.string().min(1),
+  "legalHoldActive": zod.boolean(),
+  "legalHoldReason": zod.string().nullable(),
+  "deletionException": zod.boolean(),
+  "deletionExceptionReason": zod.string().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['retention'])
+})),zod.object({
+  "kind": zod.enum(['processor']),
+  "organizationName": zod.string().min(1),
+  "role": zod.enum(['processor', 'subprocessor']),
+  "parentProcessor": zod.string().nullable(),
+  "serviceDescription": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "processingCountries": zod.string().min(1),
+  "transferMechanism": zod.enum(['not_assessed', 'no_restricted_transfer', 'adequacy', 'uk_idta', 'eu_scc', 'uk_addendum', 'other']),
+  "transferSafeguards": zod.string().nullable(),
+  "transferAssessment": zod.string().nullable(),
+  "agreementStatus": zod.enum(['not_assessed', 'in_place', 'pending', 'not_required']),
+  "agreementReviewedAt": zod.date().nullable(),
+  "transferReviewedAt": zod.date().nullable(),
+  "reviewDueAt": zod.date().nullable(),
+  "active": zod.boolean()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['processor'])
+})),zod.object({
+  "kind": zod.enum(['breach']),
+  "discoveredAt": zod.date(),
+  "occurredFrom": zod.date().nullable(),
+  "occurredTo": zod.date().nullable(),
+  "description": zod.string().min(1),
+  "dataCategories": zod.string().min(1),
+  "affectedSubjectsEstimate": zod.number().min(updatePrivacyRecordResponseFiveOneAffectedSubjectsEstimateMin).nullable(),
+  "affectedRecordsEstimate": zod.number().min(updatePrivacyRecordResponseFiveOneAffectedRecordsEstimateMin).nullable(),
+  "riskLevel": zod.enum(['under_assessment', 'unlikely', 'risk', 'high_risk']),
+  "assessmentStatus": zod.enum(['assessing', 'contained', 'closed']),
+  "assessmentRationale": zod.string().nullable(),
+  "containmentSteps": zod.string().nullable(),
+  "authorityNotificationRequired": zod.boolean().nullable(),
+  "authorityNotifiedAt": zod.date().nullable(),
+  "authorityNotificationReference": zod.string().nullable(),
+  "individualNotificationRequired": zod.boolean().nullable(),
+  "individualNotificationDueAt": zod.date().nullable(),
+  "individualsNotifiedAt": zod.date().nullable(),
+  "evidence": zod.string().nullable()
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "authorityNotificationDueAt": zod.date(),
+  "assessedAt": zod.date().nullable(),
+  "assessedBy": zod.number().nullable(),
+  "closedAt": zod.date().nullable(),
+  "createdBy": zod.number().nullable(),
+  "updatedBy": zod.number().nullable(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})).and(zod.object({
+  "kind": zod.enum(['breach'])
+}))])
+
+
+/**
+ * @summary Record evidence of deletion, an active legal hold or a deletion exception
+ */
+
+
+
+export const AddPrivacyRetentionVerificationParams = zod.object({
+  "id": zod.coerce.number().min(1)
+})
+
+export const AddPrivacyRetentionVerificationQueryParams = zod.object({
+  "clientId": zod.coerce.number().optional()
+})
+
+
+
+
+
+
+export const AddPrivacyRetentionVerificationBody = zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+})
+
+
+
+
+
+
+export const AddPrivacyRetentionVerificationResponse = zod.object({
+  "outcome": zod.enum(['deletion_verified', 'legal_hold_confirmed', 'exception_confirmed']),
+  "recordsReviewed": zod.string().min(1),
+  "verificationMethod": zod.string().min(1),
+  "evidence": zod.string().min(1)
+}).and(zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "scheduleId": zod.number(),
+  "verifiedBy": zod.number().nullable(),
+  "verifiedAt": zod.date()
+}))
+
+
+/**
+ * @summary Get storage usage for the current account
+ */
+export const getStorageUsageResponseUsedBytesMin = 0;
+
+export const getStorageUsageResponseObjectCountMin = 0;
+
+
+export const getStorageUsageResponseMonthlyDownloadBytesMin = 0;
+
+export const getStorageUsageResponseMonthRegExp = new RegExp('^[0-9]{4}-[0-9]{2}$');
+export const getStorageUsageResponseEstimatedCostStorageMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostTotalMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostIncludedStorageBytesMin = 0;
+
+export const getStorageUsageResponseEstimatedCostExcessStorageBytesMin = 0;
+
+export const getStorageUsageResponseEstimatedCostProviderMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin = 0;
+
+export const getStorageUsageResponseEstimatedCostMarkupPercentMin = 0;
+
+
+
+export const GetStorageUsageResponse = zod.object({
+  "usedBytes": zod.number().min(getStorageUsageResponseUsedBytesMin),
+  "objectCount": zod.number().min(getStorageUsageResponseObjectCountMin),
+  "warningThresholdBytes": zod.number().min(1),
+  "warning": zod.boolean(),
+  "monthlyDownloadBytes": zod.number().min(getStorageUsageResponseMonthlyDownloadBytesMin).nullable(),
+  "monthlyDownloadTrackingAvailable": zod.boolean(),
+  "month": zod.string().regex(getStorageUsageResponseMonthRegExp),
+  "estimatedCost": zod.object({
+  "currency": zod.enum(['USD']),
+  "storageMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostStorageMinorUnitsMin),
+  "downloadMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostDownloadMinorUnitsMin),
+  "totalMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostTotalMinorUnitsMin),
+  "includedStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostIncludedStorageBytesMin),
+  "excessStorageBytes": zod.number().min(getStorageUsageResponseEstimatedCostExcessStorageBytesMin),
+  "providerMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostProviderMinorUnitsMin),
+  "markupMinorUnits": zod.number().min(getStorageUsageResponseEstimatedCostMarkupMinorUnitsMin),
+  "markupPercent": zod.number().min(getStorageUsageResponseEstimatedCostMarkupPercentMin)
+}).nullable()
 })
 
 
@@ -933,10 +1976,12 @@ export const GetFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const GetFoodSafetyConfigResponse = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),
   "food_default_sv_items": zod.string().nullish(),
+  "food_probe_names": zod.string().nullish(),
   "food_show_deliveries": zod.string().nullish(),
   "food_show_cold_food": zod.string().nullish(),
   "food_show_hot_temperature": zod.string().nullish(),
@@ -946,6 +1991,7 @@ export const GetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -963,10 +2009,12 @@ export const UpdateFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const UpdateFoodSafetyConfigBody = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),
   "food_default_sv_items": zod.string().nullish(),
+  "food_probe_names": zod.string().nullish(),
   "food_show_deliveries": zod.string().nullish(),
   "food_show_cold_food": zod.string().nullish(),
   "food_show_hot_temperature": zod.string().nullish(),
@@ -976,6 +2024,7 @@ export const UpdateFoodSafetyConfigBody = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -996,10 +2045,12 @@ export const ResetFoodSafetyConfigQueryParams = zod.object({
 })
 
 export const ResetFoodSafetyConfigResponse = zod.object({
+  "food_temperature_rules": zod.string().optional().describe('Validated JSON containing numeric min\/max ranges and maximum cooling minutes; authoritative for new readings.'),
   "food_cold_units": zod.string().nullish(),
   "food_default_hot_items": zod.string().nullish(),
   "food_default_holding_items": zod.string().nullish(),
   "food_default_sv_items": zod.string().nullish(),
+  "food_probe_names": zod.string().nullish(),
   "food_show_deliveries": zod.string().nullish(),
   "food_show_cold_food": zod.string().nullish(),
   "food_show_hot_temperature": zod.string().nullish(),
@@ -1009,6 +2060,7 @@ export const ResetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -1020,58 +2072,429 @@ export const ResetFoodSafetyConfigResponse = zod.object({
 /**
  * @summary Get Fire safety configuration
  */
+export const GetFireSafetyConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific FireTrack control profile.')
+})
+
+export const getFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const GetFireSafetyConfigResponse = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 
 /**
  * @summary Update Fire safety configuration
  */
+export const UpdateFireSafetyConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Save the site-specific FireTrack control profile.')
+})
+
+export const updateFireSafetyConfigBodyControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const UpdateFireSafetyConfigBody = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateFireSafetyConfigBodyControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
+
+export const updateFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
 
 export const UpdateFireSafetyConfigResponse = zod.object({
   "fire_alarm_zones": zod.string().optional(),
   "fire_extinguisher_points": zod.string().optional(),
   "fire_show_drill": zod.string().optional(),
   "fire_default_performer": zod.string().optional(),
-  "fire_escape_routes": zod.string().optional()
+  "fire_escape_routes": zod.string().optional(),
+  "fire_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "controlProfile": zod.object({
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentDate": zod.date().nullish(),
+  "nextReviewDate": zod.date().nullish(),
+  "responsiblePerson": zod.string().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "evacuationPeepArrangements": zod.string().nullish(),
+  "maintenanceEvidenceReference": zod.string().nullish(),
+  "defectClosureVerification": zod.string().nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateFireSafetyConfigResponseControlProfileFrequencyDaysMaxOne)).optional()
+}).optional()
 })
 
 
 /**
  * @summary Get Water safety configuration
  */
+export const GetLegionellaConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific LegionellaTrack control profile.')
+})
+
+export const getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const GetLegionellaConfigResponse = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(getLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
+}).optional()
 })
 
 
 /**
  * @summary Update Water safety configuration
  */
+export const UpdateLegionellaConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Save the site-specific LegionellaTrack control profile.')
+})
+
+export const updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne = 3650;
+
+
+
 export const UpdateLegionellaConfigBody = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigBodyControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
+}).optional()
 })
+
+export const updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne = 3650;
+
+
 
 export const UpdateLegionellaConfigResponse = zod.object({
   "water_non_sentinel_outlets": zod.string().optional(),
   "water_default_performer": zod.string().optional(),
-  "water_sentinel_outlets": zod.string().optional()
+  "water_sentinel_outlets": zod.string().optional(),
+  "water_frequency_days": zod.string().optional().describe('JSON object mapping check types to risk-assessed intervals in days.'),
+  "siteId": zod.number().nullish(),
+  "effectiveTemperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional().describe('Effective minimum and maximum temperatures for each temperature check type.'),
+  "controlProfile": zod.object({
+  "systemInventoryReference": zod.string().nullish(),
+  "writtenControlSchemeReference": zod.string().nullish(),
+  "riskAssessmentReference": zod.string().nullish(),
+  "riskAssessmentReviewDate": zod.date().nullish(),
+  "competentPerson": zod.string().nullish(),
+  "samplingLabRecordReference": zod.string().nullish(),
+  "controlLimitsRationale": zod.string().nullish(),
+  "remedialVerificationReference": zod.string().nullish(),
+  "schemeReviewDate": zod.date().nullish(),
+  "ukNation": zod.enum(['england', 'scotland', 'wales', 'northern_ireland']).nullish(),
+  "frequencyDays": zod.record(zod.string(), zod.number().min(1).max(updateLegionellaConfigResponseControlProfileFrequencyDaysMaxOne)).optional(),
+  "temperatureLimits": zod.record(zod.string(), zod.object({
+  "min": zod.number().optional(),
+  "max": zod.number().optional()
+})).optional()
+}).optional()
+})
+
+
+/**
+ * @summary List hot tub water safety logbook entries
+ */
+export const ListHotTubChecksQueryParams = zod.object({
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']).optional(),
+  "siteId": zod.coerce.number().optional()
+})
+
+export const ListHotTubChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+export const ListHotTubChecksResponse = zod.array(ListHotTubChecksResponseItem)
+
+
+/**
+ * @summary Record a hot tub water safety check
+ */
+export const CreateHotTubCheckBody = zod.unknown().and(zod.unknown()).and(zod.object({
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail']),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish()
+})).describe('pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.')
+
+export const CreateHotTubCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
+})
+
+
+/**
+ * @summary Get hot tub water safety configuration
+ */
+export const GetHotTubConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().optional().describe('Return the site-specific HotTubTrack control profile.')
+})
+
+export const getHotTubConfigResponseOperatingRangesPhMinMin = 0;
+export const getHotTubConfigResponseOperatingRangesPhMinMax = 14;
+
+export const getHotTubConfigResponseOperatingRangesPhMaxMin = 0;
+export const getHotTubConfigResponseOperatingRangesPhMaxMax = 14;
+
+export const getHotTubConfigResponseOperatingRangesSanitiserMinMin = 0;
+
+export const getHotTubConfigResponseOperatingRangesSanitiserMaxMin = 0;
+
+export const getHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const getHotTubConfigResponseOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const GetHotTubConfigResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(getHotTubConfigResponseOperatingRangesPhMinMin).max(getHotTubConfigResponseOperatingRangesPhMinMax),
+  "max": zod.number().min(getHotTubConfigResponseOperatingRangesPhMaxMin).max(getHotTubConfigResponseOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(getHotTubConfigResponseOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(getHotTubConfigResponseOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(getHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin).max(getHotTubConfigResponseOperatingRangesTemperatureMaxMax)
+})
+}),
+  "controlProfile": zod.record(zod.string(), zod.unknown()).nullish(),
+  "disclaimer": zod.string()
+})
+
+
+/**
+ * @summary Update hot tub water safety configuration
+ */
+export const UpdateHotTubConfigQueryParams = zod.object({
+  "siteId": zod.coerce.number().describe('Save the site-specific HotTubTrack control profile.')
+})
+
+export const updateHotTubConfigBodyOperatingRangesPhMinMin = 0;
+export const updateHotTubConfigBodyOperatingRangesPhMinMax = 14;
+
+export const updateHotTubConfigBodyOperatingRangesPhMaxMin = 0;
+export const updateHotTubConfigBodyOperatingRangesPhMaxMax = 14;
+
+export const updateHotTubConfigBodyOperatingRangesSanitiserMinMin = 0;
+
+export const updateHotTubConfigBodyOperatingRangesSanitiserMaxMin = 0;
+
+export const updateHotTubConfigBodyOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const updateHotTubConfigBodyOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const UpdateHotTubConfigBody = zod.object({
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(updateHotTubConfigBodyOperatingRangesPhMinMin).max(updateHotTubConfigBodyOperatingRangesPhMinMax),
+  "max": zod.number().min(updateHotTubConfigBodyOperatingRangesPhMaxMin).max(updateHotTubConfigBodyOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(updateHotTubConfigBodyOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(updateHotTubConfigBodyOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(updateHotTubConfigBodyOperatingRangesTemperatureMaxExclusiveMin).max(updateHotTubConfigBodyOperatingRangesTemperatureMaxMax)
+})
+}).optional()
+})
+
+export const updateHotTubConfigResponseOperatingRangesPhMinMin = 0;
+export const updateHotTubConfigResponseOperatingRangesPhMinMax = 14;
+
+export const updateHotTubConfigResponseOperatingRangesPhMaxMin = 0;
+export const updateHotTubConfigResponseOperatingRangesPhMaxMax = 14;
+
+export const updateHotTubConfigResponseOperatingRangesSanitiserMinMin = 0;
+
+export const updateHotTubConfigResponseOperatingRangesSanitiserMaxMin = 0;
+
+export const updateHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin = 0;
+export const updateHotTubConfigResponseOperatingRangesTemperatureMaxMax = 40;
+
+
+
+export const UpdateHotTubConfigResponse = zod.object({
+  "siteId": zod.number().nullable(),
+  "operatingRanges": zod.object({
+  "ph": zod.object({
+  "min": zod.number().min(updateHotTubConfigResponseOperatingRangesPhMinMin).max(updateHotTubConfigResponseOperatingRangesPhMinMax),
+  "max": zod.number().min(updateHotTubConfigResponseOperatingRangesPhMaxMin).max(updateHotTubConfigResponseOperatingRangesPhMaxMax)
+}),
+  "sanitiser": zod.object({
+  "min": zod.number().min(updateHotTubConfigResponseOperatingRangesSanitiserMinMin),
+  "max": zod.number().min(updateHotTubConfigResponseOperatingRangesSanitiserMaxMin)
+}),
+  "temperature": zod.object({
+  "max": zod.number().gt(updateHotTubConfigResponseOperatingRangesTemperatureMaxExclusiveMin).max(updateHotTubConfigResponseOperatingRangesTemperatureMaxMax)
+})
+}),
+  "controlProfile": zod.record(zod.string(), zod.unknown()).nullish(),
+  "disclaimer": zod.string()
+})
+
+
+/**
+ * @summary Update a hot tub check entry
+ */
+export const UpdateHotTubCheckParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateHotTubCheckBody = zod.object({
+  "checkDate": zod.string().optional(),
+  "result": zod.enum(['pass', 'fail']).optional(),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish()
+}).describe('For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.')
+
+export const UpdateHotTubCheckResponse = zod.object({
+  "id": zod.number(),
+  "clientId": zod.number(),
+  "siteId": zod.number().nullish(),
+  "hotTubId": zod.number().nullish(),
+  "checkType": zod.enum(['water_chemistry', 'temperature', 'filter_clean', 'cover_inspection', 'drain_refill', 'microbiological_test', 'risk_assessment']),
+  "checkDate": zod.string(),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
+  "session": zod.enum(['morning', 'midday', 'evening']).nullish(),
+  "phValue": zod.number().nullish(),
+  "sanitiserLevel": zod.number().nullish(),
+  "temperature": zod.number().nullish(),
+  "location": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "createdAt": zod.date(),
+  "updatedAt": zod.date()
 })
 
 
@@ -1081,7 +2504,8 @@ export const UpdateLegionellaConfigResponse = zod.object({
 export const GetBikeTrackConfigResponse = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 
@@ -1091,13 +2515,15 @@ export const GetBikeTrackConfigResponse = zod.object({
 export const UpdateBikeTrackConfigBody = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 export const UpdateBikeTrackConfigResponse = zod.object({
   "bike_default_deposit_pence": zod.string().optional(),
   "bike_hire_duration_hours": zod.string().optional(),
-  "bike_require_helmet": zod.string().optional()
+  "bike_require_helmet": zod.string().optional(),
+  "bike_overdue_repeat_interval_days": zod.enum(['0', '1', '3', '7', '14']).optional()
 })
 
 
@@ -1642,7 +3068,11 @@ export const CreateFoodSafetyRecordQueryParams = zod.object({
   "siteId": zod.coerce.number().optional().describe('Scope the new record to a site. Omit for the whole-organisation diary.')
 })
 
+export const createFoodSafetyRecordBodyMobileEntryIdRegExp = new RegExp('^[A-Za-z0-9_-]{12,100}$');
+
+
 export const CreateFoodSafetyRecordBody = zod.object({
+  "mobileEntryId": zod.string().regex(createFoodSafetyRecordBodyMobileEntryIdRegExp).optional().describe('Stable device submission identifier retained across retries.'),
   "recordDate": zod.string(),
   "deliveries": zod.array(zod.unknown()).optional(),
   "coldFood": zod.array(zod.unknown()).optional(),
@@ -1763,7 +3193,32 @@ export const UpdateFoodSafetyRecordParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateFoodSafetyRecordBodyMobileEntryIdRegExp = new RegExp('^[A-Za-z0-9_-]{12,100}$');
+export const updateFoodSafetyRecordBodyMobileRecordDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
 export const UpdateFoodSafetyRecordBody = zod.object({
+  "mobileEntryId": zod.string().regex(updateFoodSafetyRecordBodyMobileEntryIdRegExp).optional().describe('Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.'),
+  "mobileRecordDate": zod.string().regex(updateFoodSafetyRecordBodyMobileRecordDateRegExp).optional().describe('Original device-local diary date; must match the target record.'),
+  "expectedUpdatedAt": zod.date().optional().describe('Updated-at value returned when the web diary was loaded.'),
+  "expectedRecord": zod.object({
+  "deliveries": zod.array(zod.unknown()).optional(),
+  "coldFood": zod.array(zod.unknown()).optional(),
+  "hotTemperature": zod.array(zod.unknown()).optional(),
+  "cooling": zod.array(zod.unknown()).optional(),
+  "reheating": zod.array(zod.unknown()).optional(),
+  "hotHolding": zod.array(zod.unknown()).optional(),
+  "sousVide": zod.array(zod.unknown()).optional(),
+  "cookingLimit": zod.string().nullish(),
+  "coolingLimit": zod.string().nullish(),
+  "reheatingLimit": zod.string().nullish(),
+  "hotHoldingLimit": zod.string().nullish(),
+  "correctives": zod.string().nullish(),
+  "managerSignature": zod.string().nullish(),
+  "performedBy": zod.string().nullish(),
+  "staffRosterId": zod.number().nullish(),
+  "submittedAt": zod.date().nullish()
+}).optional().describe('The web diary baseline used for safe three-way merging.'),
   "mobileTemperatureLog": zod.object({
   "coldFood": zod.array(zod.unknown()),
   "expectedColdFood": zod.array(zod.unknown()),
@@ -1785,7 +3240,7 @@ export const UpdateFoodSafetyRecordBody = zod.object({
   "hotHoldingLimit": zod.string().optional(),
   "correctives": zod.string().optional(),
   "managerSignature": zod.string().optional(),
-  "submittedAt": zod.string().optional()
+  "submittedAt": zod.date().nullish()
 })
 
 export const UpdateFoodSafetyRecordResponse = zod.object({
@@ -1823,7 +3278,7 @@ export const ListLegionellaChecksResponseItem = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -1837,16 +3292,16 @@ export const ListLegionellaChecksResponse = zod.array(ListLegionellaChecksRespon
 /**
  * @summary Record a Legionella water safety check
  */
-export const CreateLegionellaCheckBody = zod.object({
+export const CreateLegionellaCheckBody = zod.unknown().and(zod.object({
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail']),
   "temperature": zod.number().nullish(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish()
-})
+})).describe('temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.')
 
 export const CreateLegionellaCheckResponse = zod.object({
   "id": zod.number(),
@@ -1854,7 +3309,7 @@ export const CreateLegionellaCheckResponse = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -1873,13 +3328,118 @@ export const GetLegionellaStatusQueryParams = zod.object({
 
 export const GetLegionellaStatusResponseItem = zod.object({
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
-  "frequencyDays": zod.number(),
+  "frequencyDays": zod.number().nullable(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
   "dueDate": zod.string().nullish(),
-  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never', 'plan_required'])
 })
 export const GetLegionellaStatusResponse = zod.array(GetLegionellaStatusResponseItem)
+
+
+/**
+ * @summary Read the site's approved or review-required monitoring plan
+ */
+export const GetLegionellaMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetLegionellaMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the site plan or flag a material change
+ */
+export const UpdateLegionellaMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdateLegionellaMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdateLegionellaMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Read the site's spa monitoring plan
+ */
+export const GetHotTubMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetHotTubMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the spa plan or flag a material change
+ */
+export const UpdateHotTubMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdateHotTubMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdateHotTubMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Read the site's pool monitoring plan
+ */
+export const GetPoolMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const GetPoolMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
+
+
+/**
+ * @summary Approve the pool plan or flag a material change
+ */
+export const UpdatePoolMonitoringPlanQueryParams = zod.object({
+  "siteId": zod.coerce.number()
+})
+
+export const UpdatePoolMonitoringPlanBody = zod.object({
+  "action": zod.enum(['approve', 'flag_change']),
+  "riskAssessmentReference": zod.string().optional(),
+  "writtenSchemeReference": zod.string().optional(),
+  "competentPerson": zod.string().optional(),
+  "materialChangeNote": zod.string().optional(),
+  "frequencies": zod.record(zod.string(), zod.number()).optional()
+})
+
+export const UpdatePoolMonitoringPlanResponse = zod.object({
+  "profile": zod.record(zod.string(), zod.unknown()),
+  "approved": zod.boolean()
+})
 
 
 /**
@@ -1891,13 +3451,13 @@ export const UpdateLegionellaCheckParams = zod.object({
 
 export const UpdateLegionellaCheckBody = zod.object({
   "checkDate": zod.string().optional(),
-  "result": zod.enum(['pass', 'fail', 'action_required']).optional(),
+  "result": zod.enum(['pass', 'fail']).optional(),
   "temperature": zod.number().nullish(),
   "siteId": zod.number().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "performedBy": zod.string().nullish()
-})
+}).describe('For an existing temperature check, temperature is required. New results use pass or fail.')
 
 export const UpdateLegionellaCheckResponse = zod.object({
   "id": zod.number(),
@@ -1905,7 +3465,7 @@ export const UpdateLegionellaCheckResponse = zod.object({
   "siteId": zod.number().nullish(),
   "checkType": zod.enum(['calorifier_temp', 'hot_sentinel_temp', 'hot_nonsent_temp', 'cold_tank_temp', 'cold_sentinel_temp', 'cold_nonsent_temp', 'cold_tank_inspection', 'cold_tank_clean', 'calorifier_inspection', 'calorifier_clean', 'shower_clean', 'tmv_service', 'outlet_flush']),
   "checkDate": zod.string(),
-  "result": zod.enum(['pass', 'fail', 'action_required']),
+  "result": zod.enum(['pass', 'fail', 'action_required']).describe('New records use pass or fail; historical action_required records remain readable.'),
   "temperature": zod.string().nullish(),
   "location": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -1923,3 +3483,5 @@ export const DeleteLegionellaCheckParams = zod.object({
 })
 
 export const DeleteLegionellaCheckResponse = zod.void()
+
+

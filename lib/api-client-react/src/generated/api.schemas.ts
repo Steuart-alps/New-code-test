@@ -5,8 +5,90 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+export type FeedbackReportCategory = typeof FeedbackReportCategory[keyof typeof FeedbackReportCategory];
+
+
+export const FeedbackReportCategory = {
+  feedback: 'feedback',
+  bug: 'bug',
+  feature: 'feature',
+} as const;
+
+export type FeedbackReportStatus = typeof FeedbackReportStatus[keyof typeof FeedbackReportStatus];
+
+
+export const FeedbackReportStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export interface FeedbackReport {
+  id: number;
+  clientId: number;
+  category: FeedbackReportCategory;
+  summary: string;
+  details: string;
+  /** @nullable */
+  pagePath: string | null;
+  emailStatus: string;
+  createdAt: string;
+  status: FeedbackReportStatus;
+  internalNote: string;
+  /** @nullable */
+  updatedAt: string | null;
+  /** @nullable */
+  updatedBy: number | null;
+  /** @nullable */
+  submitterName: string | null;
+}
+
+export type FeedbackReportUpdateStatus = typeof FeedbackReportUpdateStatus[keyof typeof FeedbackReportUpdateStatus];
+
+
+export const FeedbackReportUpdateStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export interface FeedbackReportUpdate {
+  status?: FeedbackReportUpdateStatus;
+  /** @maxLength 5000 */
+  internalNote?: string;
+}
+
 export interface HealthStatus {
   status: string;
+}
+
+export type AuditLogEntryAction = typeof AuditLogEntryAction[keyof typeof AuditLogEntryAction];
+
+
+export const AuditLogEntryAction = {
+  create: 'create',
+  update: 'update',
+  delete: 'delete',
+} as const;
+
+export interface AuditFieldChange {
+  before: unknown;
+  after: unknown;
+}
+
+export type AuditLogEntryDiff = {[key: string]: AuditFieldChange};
+
+export interface AuditLogEntry {
+  id: number;
+  tableName: string;
+  rowId: number;
+  action: AuditLogEntryAction;
+  /** @nullable */
+  changedBy: number | null;
+  changedAt: string;
+  diff: AuditLogEntryDiff;
+  /** @nullable */
+  actorName: string | null;
 }
 
 export interface ErrorResponse {
@@ -245,6 +327,454 @@ export interface DashboardStats {
   certificatesExpiringSoon: number;
 }
 
+export type PrivacyProgramInputCustomerRole = typeof PrivacyProgramInputCustomerRole[keyof typeof PrivacyProgramInputCustomerRole];
+
+
+export const PrivacyProgramInputCustomerRole = {
+  controller: 'controller',
+  joint_controller: 'joint_controller',
+  processor: 'processor',
+  mixed: 'mixed',
+} as const;
+
+export type PrivacyProgramInputProcessorAgreementStatus = typeof PrivacyProgramInputProcessorAgreementStatus[keyof typeof PrivacyProgramInputProcessorAgreementStatus];
+
+
+export const PrivacyProgramInputProcessorAgreementStatus = {
+  not_assessed: 'not_assessed',
+  in_place: 'in_place',
+  pending: 'pending',
+  not_required: 'not_required',
+} as const;
+
+export interface PrivacyProgramInput {
+  customerRole: PrivacyProgramInputCustomerRole;
+  controllerName: string | null;
+  controllerContact: string | null;
+  dpoContact: string | null;
+  noticeUrl: string | null;
+  noticeVersion: string | null;
+  noticeReviewedAt: string | null;
+  processorAgreementStatus: PrivacyProgramInputProcessorAgreementStatus;
+  processorAgreementReviewedAt: string | null;
+  responsibilitiesNotes: string | null;
+  privacyOwner: string | null;
+}
+
+export type PrivacyProgram = PrivacyProgramInput & ({
+  id: number;
+  clientId: number;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyProcessingActivityInputKind = typeof PrivacyProcessingActivityInputKind[keyof typeof PrivacyProcessingActivityInputKind];
+
+
+export const PrivacyProcessingActivityInputKind = {
+  activity: 'activity',
+} as const;
+
+export type PrivacyProcessingActivityInputArticle6Basis = typeof PrivacyProcessingActivityInputArticle6Basis[keyof typeof PrivacyProcessingActivityInputArticle6Basis];
+
+
+export const PrivacyProcessingActivityInputArticle6Basis = {
+  consent: 'consent',
+  contract: 'contract',
+  legal_obligation: 'legal_obligation',
+  vital_interests: 'vital_interests',
+  public_task: 'public_task',
+  legitimate_interests: 'legitimate_interests',
+  other: 'other',
+} as const;
+
+export type PrivacyProcessingActivityInputDpiaClassification = typeof PrivacyProcessingActivityInputDpiaClassification[keyof typeof PrivacyProcessingActivityInputDpiaClassification];
+
+
+export const PrivacyProcessingActivityInputDpiaClassification = {
+  not_screened: 'not_screened',
+  not_required: 'not_required',
+  required: 'required',
+  in_progress: 'in_progress',
+  completed: 'completed',
+} as const;
+
+export interface PrivacyProcessingActivityInput {
+  kind: PrivacyProcessingActivityInputKind;
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 1 */
+  purpose: string;
+  /** @minLength 1 */
+  dataSubjects: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  article6Basis: PrivacyProcessingActivityInputArticle6Basis;
+  article6Rationale: string | null;
+  specialCategoryData: boolean;
+  article9Condition: string | null;
+  article9Rationale: string | null;
+  recipients: string | null;
+  transferDetails: string | null;
+  /** @minLength 1 */
+  retentionCriteria: string;
+  securityMeasures: string | null;
+  dpiaClassification: PrivacyProcessingActivityInputDpiaClassification;
+  dpiaRationale: string | null;
+  dpiaCompletedAt: string | null;
+  owner: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyProcessingActivityKind = typeof PrivacyProcessingActivityKind[keyof typeof PrivacyProcessingActivityKind];
+
+
+export const PrivacyProcessingActivityKind = {
+  activity: 'activity',
+} as const;
+
+export type PrivacyProcessingActivity = PrivacyProcessingActivityInput & ({
+  kind: PrivacyProcessingActivityKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRightsRequestInputKind = typeof PrivacyRightsRequestInputKind[keyof typeof PrivacyRightsRequestInputKind];
+
+
+export const PrivacyRightsRequestInputKind = {
+  rights_request: 'rights_request',
+} as const;
+
+export type PrivacyRightsRequestInputRequestType = typeof PrivacyRightsRequestInputRequestType[keyof typeof PrivacyRightsRequestInputRequestType];
+
+
+export const PrivacyRightsRequestInputRequestType = {
+  access: 'access',
+  rectification: 'rectification',
+  erasure: 'erasure',
+  restriction: 'restriction',
+  portability: 'portability',
+  objection: 'objection',
+  other: 'other',
+} as const;
+
+export type PrivacyRightsRequestInputIdentityStatus = typeof PrivacyRightsRequestInputIdentityStatus[keyof typeof PrivacyRightsRequestInputIdentityStatus];
+
+
+export const PrivacyRightsRequestInputIdentityStatus = {
+  not_started: 'not_started',
+  in_progress: 'in_progress',
+  verified: 'verified',
+  failed: 'failed',
+} as const;
+
+export type PrivacyRightsRequestInputStatus = typeof PrivacyRightsRequestInputStatus[keyof typeof PrivacyRightsRequestInputStatus];
+
+
+export const PrivacyRightsRequestInputStatus = {
+  received: 'received',
+  in_progress: 'in_progress',
+  waiting_for_information: 'waiting_for_information',
+  completed: 'completed',
+  refused: 'refused',
+  withdrawn: 'withdrawn',
+} as const;
+
+export type PrivacyRightsRequestInputDecision = typeof PrivacyRightsRequestInputDecision[keyof typeof PrivacyRightsRequestInputDecision] | null;
+
+
+export const PrivacyRightsRequestInputDecision = {
+  granted: 'granted',
+  partially_granted: 'partially_granted',
+  refused: 'refused',
+  not_applicable: 'not_applicable',
+} as const;
+
+export interface PrivacyRightsRequestInput {
+  kind: PrivacyRightsRequestInputKind;
+  requestType: PrivacyRightsRequestInputRequestType;
+  /** @minLength 1 */
+  subjectName: string;
+  subjectContact: string | null;
+  /** @minLength 1 */
+  scopeDescription: string;
+  receivedAt: string;
+  extendedDueAt: string | null;
+  extensionReason: string | null;
+  identityStatus: PrivacyRightsRequestInputIdentityStatus;
+  identityMethod: string | null;
+  identityEvidence: string | null;
+  status: PrivacyRightsRequestInputStatus;
+  decision: PrivacyRightsRequestInputDecision;
+  decisionRationale: string | null;
+  responseSentAt: string | null;
+  responseEvidence: string | null;
+}
+
+export type PrivacyRightsRequestKind = typeof PrivacyRightsRequestKind[keyof typeof PrivacyRightsRequestKind];
+
+
+export const PrivacyRightsRequestKind = {
+  rights_request: 'rights_request',
+} as const;
+
+export type PrivacyRightsRequest = PrivacyRightsRequestInput & ({
+  kind: PrivacyRightsRequestKind;
+  id: number;
+  clientId: number;
+  dueAt: string;
+  identityVerifiedAt: string | null;
+  identityVerifiedBy: number | null;
+  decidedAt: string | null;
+  decidedBy: number | null;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRetentionScheduleInputKind = typeof PrivacyRetentionScheduleInputKind[keyof typeof PrivacyRetentionScheduleInputKind];
+
+
+export const PrivacyRetentionScheduleInputKind = {
+  retention: 'retention',
+} as const;
+
+export interface PrivacyRetentionScheduleInput {
+  kind: PrivacyRetentionScheduleInputKind;
+  /** @minLength 1 */
+  recordCategory: string;
+  /** @minLength 1 */
+  scopeDescription: string;
+  /** @minLength 1 */
+  retentionPeriod: string;
+  /** @minLength 1 */
+  retentionTrigger: string;
+  /** @minLength 1 */
+  justification: string;
+  legalHoldActive: boolean;
+  legalHoldReason: string | null;
+  deletionException: boolean;
+  deletionExceptionReason: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyRetentionScheduleKind = typeof PrivacyRetentionScheduleKind[keyof typeof PrivacyRetentionScheduleKind];
+
+
+export const PrivacyRetentionScheduleKind = {
+  retention: 'retention',
+} as const;
+
+export type PrivacyRetentionSchedule = PrivacyRetentionScheduleInput & ({
+  kind: PrivacyRetentionScheduleKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyProcessorInputKind = typeof PrivacyProcessorInputKind[keyof typeof PrivacyProcessorInputKind];
+
+
+export const PrivacyProcessorInputKind = {
+  processor: 'processor',
+} as const;
+
+export type PrivacyProcessorInputRole = typeof PrivacyProcessorInputRole[keyof typeof PrivacyProcessorInputRole];
+
+
+export const PrivacyProcessorInputRole = {
+  processor: 'processor',
+  subprocessor: 'subprocessor',
+} as const;
+
+export type PrivacyProcessorInputTransferMechanism = typeof PrivacyProcessorInputTransferMechanism[keyof typeof PrivacyProcessorInputTransferMechanism];
+
+
+export const PrivacyProcessorInputTransferMechanism = {
+  not_assessed: 'not_assessed',
+  no_restricted_transfer: 'no_restricted_transfer',
+  adequacy: 'adequacy',
+  uk_idta: 'uk_idta',
+  eu_scc: 'eu_scc',
+  uk_addendum: 'uk_addendum',
+  other: 'other',
+} as const;
+
+export type PrivacyProcessorInputAgreementStatus = typeof PrivacyProcessorInputAgreementStatus[keyof typeof PrivacyProcessorInputAgreementStatus];
+
+
+export const PrivacyProcessorInputAgreementStatus = {
+  not_assessed: 'not_assessed',
+  in_place: 'in_place',
+  pending: 'pending',
+  not_required: 'not_required',
+} as const;
+
+export interface PrivacyProcessorInput {
+  kind: PrivacyProcessorInputKind;
+  /** @minLength 1 */
+  organizationName: string;
+  role: PrivacyProcessorInputRole;
+  parentProcessor: string | null;
+  /** @minLength 1 */
+  serviceDescription: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  /** @minLength 1 */
+  processingCountries: string;
+  transferMechanism: PrivacyProcessorInputTransferMechanism;
+  transferSafeguards: string | null;
+  transferAssessment: string | null;
+  agreementStatus: PrivacyProcessorInputAgreementStatus;
+  agreementReviewedAt: string | null;
+  transferReviewedAt: string | null;
+  reviewDueAt: string | null;
+  active: boolean;
+}
+
+export type PrivacyProcessorKind = typeof PrivacyProcessorKind[keyof typeof PrivacyProcessorKind];
+
+
+export const PrivacyProcessorKind = {
+  processor: 'processor',
+} as const;
+
+export type PrivacyProcessor = PrivacyProcessorInput & ({
+  kind: PrivacyProcessorKind;
+  id: number;
+  clientId: number;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyBreachInputKind = typeof PrivacyBreachInputKind[keyof typeof PrivacyBreachInputKind];
+
+
+export const PrivacyBreachInputKind = {
+  breach: 'breach',
+} as const;
+
+export type PrivacyBreachInputRiskLevel = typeof PrivacyBreachInputRiskLevel[keyof typeof PrivacyBreachInputRiskLevel];
+
+
+export const PrivacyBreachInputRiskLevel = {
+  under_assessment: 'under_assessment',
+  unlikely: 'unlikely',
+  risk: 'risk',
+  high_risk: 'high_risk',
+} as const;
+
+export type PrivacyBreachInputAssessmentStatus = typeof PrivacyBreachInputAssessmentStatus[keyof typeof PrivacyBreachInputAssessmentStatus];
+
+
+export const PrivacyBreachInputAssessmentStatus = {
+  assessing: 'assessing',
+  contained: 'contained',
+  closed: 'closed',
+} as const;
+
+export interface PrivacyBreachInput {
+  kind: PrivacyBreachInputKind;
+  discoveredAt: string;
+  occurredFrom: string | null;
+  occurredTo: string | null;
+  /** @minLength 1 */
+  description: string;
+  /** @minLength 1 */
+  dataCategories: string;
+  /** @minimum 0 */
+  affectedSubjectsEstimate: number | null;
+  /** @minimum 0 */
+  affectedRecordsEstimate: number | null;
+  riskLevel: PrivacyBreachInputRiskLevel;
+  assessmentStatus: PrivacyBreachInputAssessmentStatus;
+  assessmentRationale: string | null;
+  containmentSteps: string | null;
+  authorityNotificationRequired: boolean | null;
+  authorityNotifiedAt: string | null;
+  authorityNotificationReference: string | null;
+  individualNotificationRequired: boolean | null;
+  individualNotificationDueAt: string | null;
+  individualsNotifiedAt: string | null;
+  evidence: string | null;
+}
+
+export type PrivacyBreachKind = typeof PrivacyBreachKind[keyof typeof PrivacyBreachKind];
+
+
+export const PrivacyBreachKind = {
+  breach: 'breach',
+} as const;
+
+export type PrivacyBreach = PrivacyBreachInput & ({
+  kind: PrivacyBreachKind;
+  id: number;
+  clientId: number;
+  authorityNotificationDueAt: string;
+  assessedAt: string | null;
+  assessedBy: number | null;
+  closedAt: string | null;
+  createdBy: number | null;
+  updatedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+});
+
+export type PrivacyRecordInput = PrivacyProcessingActivityInput | PrivacyRightsRequestInput | PrivacyRetentionScheduleInput | PrivacyProcessorInput | PrivacyBreachInput;
+
+export type PrivacyRecord = PrivacyProcessingActivity | PrivacyRightsRequest | PrivacyRetentionSchedule | PrivacyProcessor | PrivacyBreach;
+
+export type PrivacyRetentionVerificationInputOutcome = typeof PrivacyRetentionVerificationInputOutcome[keyof typeof PrivacyRetentionVerificationInputOutcome];
+
+
+export const PrivacyRetentionVerificationInputOutcome = {
+  deletion_verified: 'deletion_verified',
+  legal_hold_confirmed: 'legal_hold_confirmed',
+  exception_confirmed: 'exception_confirmed',
+} as const;
+
+export interface PrivacyRetentionVerificationInput {
+  outcome: PrivacyRetentionVerificationInputOutcome;
+  /** @minLength 1 */
+  recordsReviewed: string;
+  /** @minLength 1 */
+  verificationMethod: string;
+  /** @minLength 1 */
+  evidence: string;
+}
+
+export type PrivacyRetentionVerification = PrivacyRetentionVerificationInput & ({
+  id: number;
+  clientId: number;
+  scheduleId: number;
+  verifiedBy: number | null;
+  verifiedAt: string;
+});
+
+export interface PrivacyGovernanceResponse {
+  program: PrivacyProgram | null;
+  activities: PrivacyProcessingActivity[];
+  rightsRequests: PrivacyRightsRequest[];
+  retentionSchedules: PrivacyRetentionSchedule[];
+  retentionVerifications: PrivacyRetentionVerification[];
+  processors: PrivacyProcessor[];
+  breaches: PrivacyBreach[];
+}
+
 export interface AppSettings {
   smtpHost?: string | null;
   smtpPort?: string | null;
@@ -253,7 +783,57 @@ export interface AppSettings {
   smtpFrom?: string | null;
   smtpFromName?: string | null;
   defaultLeadTimeDays?: string | null;
+  contractorComplianceLeadTimeDays?: string | null;
   companyName?: string | null;
+  accountTimezone?: string | null;
+  /** @pattern ^[0-9]+$ */
+  storageWarningThresholdBytes?: string | null;
+}
+
+export type StorageUsageEstimatedCostCurrency = typeof StorageUsageEstimatedCostCurrency[keyof typeof StorageUsageEstimatedCostCurrency];
+
+
+export const StorageUsageEstimatedCostCurrency = {
+  USD: 'USD',
+} as const;
+
+export type StorageUsageEstimatedCost = {
+  currency: StorageUsageEstimatedCostCurrency;
+  /** @minimum 0 */
+  storageMinorUnits: number;
+  /** @minimum 0 */
+  downloadMinorUnits: number;
+  /** @minimum 0 */
+  totalMinorUnits: number;
+  /** @minimum 0 */
+  includedStorageBytes: number;
+  /** @minimum 0 */
+  excessStorageBytes: number;
+  /** @minimum 0 */
+  providerMinorUnits: number;
+  /** @minimum 0 */
+  markupMinorUnits: number;
+  /** @minimum 0 */
+  markupPercent: number;
+} | null;
+
+export interface StorageUsage {
+  /** @minimum 0 */
+  usedBytes: number;
+  /** @minimum 0 */
+  objectCount: number;
+  /** @minimum 1 */
+  warningThresholdBytes: number;
+  warning: boolean;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  monthlyDownloadBytes: number | null;
+  monthlyDownloadTrackingAvailable: boolean;
+  /** @pattern ^[0-9]{4}-[0-9]{2}$ */
+  month: string;
+  estimatedCost: StorageUsageEstimatedCost;
 }
 
 export type SendRemindersResponseDetailsItemStatus = typeof SendRemindersResponseDetailsItemStatus[keyof typeof SendRemindersResponseDetailsItemStatus];
@@ -396,24 +976,279 @@ export interface FireSafetyStatus {
   status: FireSafetyStatusStatus;
 }
 
+export type FireControlProfileUkNation = typeof FireControlProfileUkNation[keyof typeof FireControlProfileUkNation] | null;
+
+
+export const FireControlProfileUkNation = {
+  england: 'england',
+  scotland: 'scotland',
+  wales: 'wales',
+  northern_ireland: 'northern_ireland',
+} as const;
+
+export type FireControlProfileFrequencyDays = {[key: string]: number};
+
+export interface FireControlProfile {
+  riskAssessmentReference?: string | null;
+  riskAssessmentDate?: string | null;
+  nextReviewDate?: string | null;
+  responsiblePerson?: string | null;
+  ukNation?: FireControlProfileUkNation;
+  evacuationPeepArrangements?: string | null;
+  maintenanceEvidenceReference?: string | null;
+  defectClosureVerification?: string | null;
+  frequencyDays?: FireControlProfileFrequencyDays;
+}
+
 export interface FireSafetyConfig {
   fire_alarm_zones?: string;
   fire_extinguisher_points?: string;
   fire_show_drill?: string;
   fire_default_performer?: string;
   fire_escape_routes?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  fire_frequency_days?: string;
+  siteId?: number | null;
+  controlProfile?: FireControlProfile;
+}
+
+export interface TemperatureLimit {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * Effective minimum and maximum temperatures for each temperature check type.
+ */
+export type LegionellaConfigEffectiveTemperatureLimits = {[key: string]: TemperatureLimit};
+
+export type LegionellaControlProfileUkNation = typeof LegionellaControlProfileUkNation[keyof typeof LegionellaControlProfileUkNation] | null;
+
+
+export const LegionellaControlProfileUkNation = {
+  england: 'england',
+  scotland: 'scotland',
+  wales: 'wales',
+  northern_ireland: 'northern_ireland',
+} as const;
+
+export type LegionellaControlProfileFrequencyDays = {[key: string]: number};
+
+export type LegionellaControlProfileTemperatureLimits = {[key: string]: TemperatureLimit};
+
+export interface LegionellaControlProfile {
+  systemInventoryReference?: string | null;
+  writtenControlSchemeReference?: string | null;
+  riskAssessmentReference?: string | null;
+  riskAssessmentReviewDate?: string | null;
+  competentPerson?: string | null;
+  samplingLabRecordReference?: string | null;
+  controlLimitsRationale?: string | null;
+  remedialVerificationReference?: string | null;
+  schemeReviewDate?: string | null;
+  ukNation?: LegionellaControlProfileUkNation;
+  frequencyDays?: LegionellaControlProfileFrequencyDays;
+  temperatureLimits?: LegionellaControlProfileTemperatureLimits;
 }
 
 export interface LegionellaConfig {
   water_non_sentinel_outlets?: string;
   water_default_performer?: string;
   water_sentinel_outlets?: string;
+  /** JSON object mapping check types to risk-assessed intervals in days. */
+  water_frequency_days?: string;
+  siteId?: number | null;
+  /** Effective minimum and maximum temperatures for each temperature check type. */
+  effectiveTemperatureLimits?: LegionellaConfigEffectiveTemperatureLimits;
+  controlProfile?: LegionellaControlProfile;
 }
+
+export type HotTubCheckType = typeof HotTubCheckType[keyof typeof HotTubCheckType];
+
+
+export const HotTubCheckType = {
+  water_chemistry: 'water_chemistry',
+  temperature: 'temperature',
+  filter_clean: 'filter_clean',
+  cover_inspection: 'cover_inspection',
+  drain_refill: 'drain_refill',
+  microbiological_test: 'microbiological_test',
+  risk_assessment: 'risk_assessment',
+} as const;
+
+/**
+ * New records use pass or fail; historical action_required records remain readable.
+ */
+export type HotTubCheckResult = typeof HotTubCheckResult[keyof typeof HotTubCheckResult];
+
+
+export const HotTubCheckResult = {
+  pass: 'pass',
+  fail: 'fail',
+  action_required: 'action_required',
+} as const;
+
+export type HotTubCheckSession = typeof HotTubCheckSession[keyof typeof HotTubCheckSession] | null;
+
+
+export const HotTubCheckSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+export interface HotTubCheck {
+  id: number;
+  clientId: number;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  checkType: HotTubCheckType;
+  checkDate: string;
+  /** New records use pass or fail; historical action_required records remain readable. */
+  result: HotTubCheckResult;
+  session?: HotTubCheckSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateHotTubCheckRequestResult = typeof CreateHotTubCheckRequestResult[keyof typeof CreateHotTubCheckRequestResult];
+
+
+export const CreateHotTubCheckRequestResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export type CreateHotTubCheckRequestSession = typeof CreateHotTubCheckRequestSession[keyof typeof CreateHotTubCheckRequestSession] | null;
+
+
+export const CreateHotTubCheckRequestSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+/**
+ * pH and sanitiserLevel are required for water_chemistry; temperature is required for temperature checks.
+ */
+export type CreateHotTubCheckRequest = unknown & unknown & ({
+  checkType: HotTubCheckType;
+  checkDate: string;
+  result: CreateHotTubCheckRequestResult;
+  session?: CreateHotTubCheckRequestSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+});
+
+export type UpdateHotTubCheckRequestResult = typeof UpdateHotTubCheckRequestResult[keyof typeof UpdateHotTubCheckRequestResult];
+
+
+export const UpdateHotTubCheckRequestResult = {
+  pass: 'pass',
+  fail: 'fail',
+} as const;
+
+export type UpdateHotTubCheckRequestSession = typeof UpdateHotTubCheckRequestSession[keyof typeof UpdateHotTubCheckRequestSession] | null;
+
+
+export const UpdateHotTubCheckRequestSession = {
+  morning: 'morning',
+  midday: 'midday',
+  evening: 'evening',
+} as const;
+
+/**
+ * For an existing water_chemistry check, phValue and sanitiserLevel are required; for an existing temperature check, temperature is required.
+ */
+export interface UpdateHotTubCheckRequest {
+  checkDate?: string;
+  result?: UpdateHotTubCheckRequestResult;
+  session?: UpdateHotTubCheckRequestSession;
+  phValue?: number | null;
+  sanitiserLevel?: number | null;
+  temperature?: number | null;
+  siteId?: number | null;
+  hotTubId?: number | null;
+  location?: string | null;
+  notes?: string | null;
+  performedBy?: string | null;
+}
+
+export type HotTubConfigControlProfile = { [key: string]: unknown } | null;
+
+export type HotTubOperatingRangesPh = {
+  /**
+     * @minimum 0
+     * @maximum 14
+     */
+  min: number;
+  /**
+     * @minimum 0
+     * @maximum 14
+     */
+  max: number;
+};
+
+export type HotTubOperatingRangesSanitiser = {
+  /** @minimum 0 */
+  min: number;
+  /** @minimum 0 */
+  max: number;
+};
+
+export type HotTubOperatingRangesTemperature = {
+  /**
+     * @maximum 40
+     * @exclusiveMinimum 0
+     */
+  max: number;
+};
+
+export interface HotTubOperatingRanges {
+  ph: HotTubOperatingRangesPh;
+  sanitiser: HotTubOperatingRangesSanitiser;
+  temperature: HotTubOperatingRangesTemperature;
+}
+
+export interface HotTubConfig {
+  siteId: number | null;
+  operatingRanges: HotTubOperatingRanges;
+  controlProfile?: HotTubConfigControlProfile;
+  disclaimer: string;
+}
+
+export interface HotTubConfigUpdate {
+  operatingRanges?: HotTubOperatingRanges;
+}
+
+export type BikeTrackConfigBikeOverdueRepeatIntervalDays = typeof BikeTrackConfigBikeOverdueRepeatIntervalDays[keyof typeof BikeTrackConfigBikeOverdueRepeatIntervalDays];
+
+
+export const BikeTrackConfigBikeOverdueRepeatIntervalDays = {
+  NUMBER_0: '0',
+  NUMBER_1: '1',
+  NUMBER_3: '3',
+  NUMBER_7: '7',
+  NUMBER_14: '14',
+} as const;
 
 export interface BikeTrackConfig {
   bike_default_deposit_pence?: string;
   bike_hire_duration_hours?: string;
   bike_require_helmet?: string;
+  bike_overdue_repeat_interval_days?: BikeTrackConfigBikeOverdueRepeatIntervalDays;
 }
 
 export interface GreenTrackConfig {
@@ -611,11 +1446,25 @@ export interface PoolTrackConfig {
   pool_default_performer?: string;
 }
 
+/**
+ * Food-safety jurisdiction used to choose the standard reheating limit.
+ */
+export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisdiction[keyof typeof FoodSafetyConfigFoodJurisdiction] | null;
+
+
+export const FoodSafetyConfigFoodJurisdiction = {
+  scotland: 'scotland',
+  england_wales: 'england_wales',
+} as const;
+
 export interface FoodSafetyConfig {
+  /** Validated JSON containing numeric min/max ranges and maximum cooling minutes; authoritative for new readings. */
+  food_temperature_rules?: string;
   food_cold_units?: string | null;
   food_default_hot_items?: string | null;
   food_default_holding_items?: string | null;
   food_default_sv_items?: string | null;
+  food_probe_names?: string | null;
   food_show_deliveries?: string | null;
   food_show_cold_food?: string | null;
   food_show_hot_temperature?: string | null;
@@ -625,6 +1474,8 @@ export interface FoodSafetyConfig {
   food_show_sous_vide?: string | null;
   food_num_fridges?: string | null;
   food_num_freezers?: string | null;
+  /** Food-safety jurisdiction used to choose the standard reheating limit. */
+  food_jurisdiction?: FoodSafetyConfigFoodJurisdiction;
   food_cooking_limit?: string | null;
   food_cooling_limit?: string | null;
   food_reheating_limit?: string | null;
@@ -685,6 +1536,11 @@ export interface FoodSafetyRecord {
 }
 
 export interface CreateFoodSafetyRecordRequest {
+  /**
+     * Stable device submission identifier retained across retries.
+     * @pattern ^[A-Za-z0-9_-]{12,100}$
+     */
+  mobileEntryId?: string;
   recordDate: string;
   deliveries?: unknown[];
   coldFood?: unknown[];
@@ -697,6 +1553,28 @@ export interface CreateFoodSafetyRecordRequest {
   correctives?: string;
   managerSignature?: string;
   submittedAt?: string;
+}
+
+/**
+ * The web diary baseline used for safe three-way merging.
+ */
+export interface FoodSafetyRecordSnapshot {
+  deliveries?: unknown[];
+  coldFood?: unknown[];
+  hotTemperature?: unknown[];
+  cooling?: unknown[];
+  reheating?: unknown[];
+  hotHolding?: unknown[];
+  sousVide?: unknown[];
+  cookingLimit?: string | null;
+  coolingLimit?: string | null;
+  reheatingLimit?: string | null;
+  hotHoldingLimit?: string | null;
+  correctives?: string | null;
+  managerSignature?: string | null;
+  performedBy?: string | null;
+  staffRosterId?: number | null;
+  submittedAt?: string | null;
 }
 
 export type MobileTemperatureLogDelivery = { [key: string]: unknown };
@@ -722,6 +1600,19 @@ export interface MobileTemperatureLog {
 }
 
 export interface UpdateFoodSafetyRecordRequest {
+  /**
+     * Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.
+     * @pattern ^[A-Za-z0-9_-]{12,100}$
+     */
+  mobileEntryId?: string;
+  /**
+     * Original device-local diary date; must match the target record.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  mobileRecordDate?: string;
+  /** Updated-at value returned when the web diary was loaded. */
+  expectedUpdatedAt?: string;
+  expectedRecord?: FoodSafetyRecordSnapshot;
   mobileTemperatureLog?: MobileTemperatureLog;
   deliveries?: unknown[];
   coldFood?: unknown[];
@@ -733,7 +1624,7 @@ export interface UpdateFoodSafetyRecordRequest {
   hotHoldingLimit?: string;
   correctives?: string;
   managerSignature?: string;
-  submittedAt?: string;
+  submittedAt?: string | null;
 }
 
 export type LegionellaCheckType = typeof LegionellaCheckType[keyof typeof LegionellaCheckType];
@@ -755,6 +1646,9 @@ export const LegionellaCheckType = {
   outlet_flush: 'outlet_flush',
 } as const;
 
+/**
+ * New records use pass or fail; historical action_required records remain readable.
+ */
 export type LegionellaCheckResult = typeof LegionellaCheckResult[keyof typeof LegionellaCheckResult];
 
 
@@ -770,6 +1664,7 @@ export interface LegionellaCheck {
   siteId?: number | null;
   checkType: LegionellaCheckType;
   checkDate: string;
+  /** New records use pass or fail; historical action_required records remain readable. */
   result: LegionellaCheckResult;
   temperature?: string | null;
   location?: string | null;
@@ -785,10 +1680,12 @@ export type CreateLegionellaCheckRequestResult = typeof CreateLegionellaCheckReq
 export const CreateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
-  action_required: 'action_required',
 } as const;
 
-export interface CreateLegionellaCheckRequest {
+/**
+ * temperature is required for calorifier_temp, hot_sentinel_temp, hot_nonsent_temp, cold_tank_temp, cold_sentinel_temp, and cold_nonsent_temp checks.
+ */
+export type CreateLegionellaCheckRequest = unknown & ({
   checkType: LegionellaCheckType;
   checkDate: string;
   result: CreateLegionellaCheckRequestResult;
@@ -797,7 +1694,7 @@ export interface CreateLegionellaCheckRequest {
   location?: string | null;
   notes?: string | null;
   performedBy?: string | null;
-}
+});
 
 export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckRequestResult[keyof typeof UpdateLegionellaCheckRequestResult];
 
@@ -805,9 +1702,11 @@ export type UpdateLegionellaCheckRequestResult = typeof UpdateLegionellaCheckReq
 export const UpdateLegionellaCheckRequestResult = {
   pass: 'pass',
   fail: 'fail',
-  action_required: 'action_required',
 } as const;
 
+/**
+ * For an existing temperature check, temperature is required. New results use pass or fail.
+ */
 export interface UpdateLegionellaCheckRequest {
   checkDate?: string;
   result?: UpdateLegionellaCheckRequestResult;
@@ -835,16 +1734,90 @@ export const LegionellaStatusStatus = {
   due_soon: 'due_soon',
   overdue: 'overdue',
   never: 'never',
+  plan_required: 'plan_required',
 } as const;
 
 export interface LegionellaStatus {
   checkType: LegionellaCheckType;
-  frequencyDays: number;
+  /** @nullable */
+  frequencyDays: number | null;
   lastDate?: string | null;
   lastResult: LegionellaStatusLastResult;
   dueDate?: string | null;
   status: LegionellaStatusStatus;
 }
+
+export type WaterMonitoringPlanInputAction = typeof WaterMonitoringPlanInputAction[keyof typeof WaterMonitoringPlanInputAction];
+
+
+export const WaterMonitoringPlanInputAction = {
+  approve: 'approve',
+  flag_change: 'flag_change',
+} as const;
+
+export type WaterMonitoringPlanInputFrequencies = {[key: string]: number};
+
+export interface WaterMonitoringPlanInput {
+  action: WaterMonitoringPlanInputAction;
+  riskAssessmentReference?: string;
+  writtenSchemeReference?: string;
+  competentPerson?: string;
+  materialChangeNote?: string;
+  frequencies?: WaterMonitoringPlanInputFrequencies;
+}
+
+export type WaterMonitoringPlanResultProfile = { [key: string]: unknown };
+
+export interface WaterMonitoringPlanResult {
+  profile: WaterMonitoringPlanResultProfile;
+  approved: boolean;
+}
+
+export type ListFeedbackReportsParams = {
+clientId?: number;
+category?: ListFeedbackReportsCategory;
+status?: ListFeedbackReportsStatus;
+};
+
+export type ListFeedbackReportsCategory = typeof ListFeedbackReportsCategory[keyof typeof ListFeedbackReportsCategory];
+
+
+export const ListFeedbackReportsCategory = {
+  feedback: 'feedback',
+  bug: 'bug',
+  feature: 'feature',
+} as const;
+
+export type ListFeedbackReportsStatus = typeof ListFeedbackReportsStatus[keyof typeof ListFeedbackReportsStatus];
+
+
+export const ListFeedbackReportsStatus = {
+  new: 'new',
+  reviewing: 'reviewing',
+  resolved: 'resolved',
+} as const;
+
+export type UpdateFeedbackReportParams = {
+clientId?: number;
+};
+
+export type ListAuditLogParams = {
+module: ListAuditLogModule;
+};
+
+export type ListAuditLogModule = typeof ListAuditLogModule[keyof typeof ListAuditLogModule];
+
+
+export const ListAuditLogModule = {
+  fire: 'fire',
+  legionella: 'legionella',
+  kitchen: 'kitchen',
+  fix: 'fix',
+  safe: 'safe',
+  train: 'train',
+  doc: 'doc',
+  incidents: 'incidents',
+} as const;
 
 export type ListComplianceItemsParams = {
 status?: ListComplianceItemsStatus;
@@ -872,6 +1845,26 @@ export const ListComplianceItemsPriority = {
   high: 'high',
   critical: 'critical',
 } as const;
+
+export type GetPrivacyGovernanceParams = {
+clientId?: number;
+};
+
+export type SavePrivacyProgramParams = {
+clientId?: number;
+};
+
+export type CreatePrivacyRecordParams = {
+clientId?: number;
+};
+
+export type UpdatePrivacyRecordParams = {
+clientId?: number;
+};
+
+export type AddPrivacyRetentionVerificationParams = {
+clientId?: number;
+};
 
 export type ListFireSafetyChecksParams = {
 checkType?: FireCheckType;
@@ -905,6 +1898,53 @@ export type ResetFoodSafetyConfigParams = {
  * When provided, clears only that site's overrides. Without it, resets the client-level template to defaults.
  */
 siteId?: number;
+};
+
+export type GetFireSafetyConfigParams = {
+/**
+ * Return the site-specific FireTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateFireSafetyConfigParams = {
+/**
+ * Save the site-specific FireTrack control profile.
+ */
+siteId?: number;
+};
+
+export type GetLegionellaConfigParams = {
+/**
+ * Return the site-specific LegionellaTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateLegionellaConfigParams = {
+/**
+ * Save the site-specific LegionellaTrack control profile.
+ */
+siteId?: number;
+};
+
+export type ListHotTubChecksParams = {
+checkType?: HotTubCheckType;
+siteId?: number;
+};
+
+export type GetHotTubConfigParams = {
+/**
+ * Return the site-specific HotTubTrack control profile.
+ */
+siteId?: number;
+};
+
+export type UpdateHotTubConfigParams = {
+/**
+ * Save the site-specific HotTubTrack control profile.
+ */
+siteId: number;
 };
 
 export type ListPATTestsParams = {
@@ -984,3 +2024,28 @@ siteId?: number;
 export type GetLegionellaStatusParams = {
 siteId?: number;
 };
+
+export type GetLegionellaMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdateLegionellaMonitoringPlanParams = {
+siteId: number;
+};
+
+export type GetHotTubMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdateHotTubMonitoringPlanParams = {
+siteId: number;
+};
+
+export type GetPoolMonitoringPlanParams = {
+siteId: number;
+};
+
+export type UpdatePoolMonitoringPlanParams = {
+siteId: number;
+};
+

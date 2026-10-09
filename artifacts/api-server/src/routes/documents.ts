@@ -4,11 +4,14 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { clientDocumentsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, getClientId, canAccessClient } from "../middleware/requireAuth";
+import { requireAuth, getClientId, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import {
   ObjectStorageService,
   ObjectNotFoundError,
+  ObjectOwnershipError,
 } from "../lib/objectStorage";
+import { ObjectPermission } from "../lib/objectAcl";
+import { createDownloadMeter } from "../lib/downloadUsage";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -42,7 +45,7 @@ const CreateDocBody = z.object({
   mimeType: z.string().optional().nullable(),
 });
 
-router.post("/documents", requireAuth, async (req, res) => {
+router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -64,19 +67,35 @@ router.post("/documents", requireAuth, async (req, res) => {
 
   const { name, description, objectPath, fileSize, mimeType } = parsed.data;
 
-  const [doc] = await db
-    .insert(clientDocumentsTable)
-    .values({
-      clientId,
-      name,
-      description: description ?? null,
-      objectPath,
-      fileSize: fileSize ?? null,
-      mimeType: mimeType ?? null,
-      uploadedById: user.id,
-      uploadedByName: user.name,
-    })
-    .returning();
+  try {
+    // Registration is the point at which a presigned upload becomes a tenant
+    // document. Finalize first so a caller cannot attach another tenant's
+    // object path to this client's database row.
+    await storage.finalizeTenantUpload(objectPath, clientId);
+  } catch (err) {
+    if (err instanceof ObjectOwnershipError) {
+      res.status(403).json({ error: "Object does not belong to this client" });
+      return;
+    }
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Uploaded object not found" });
+      return;
+    }
+    req.log.error({ err }, "Could not finalize document upload");
+    res.status(400).json({ error: "Uploaded file could not be verified" });
+    return;
+  }
+
+  const [doc] = await db.insert(clientDocumentsTable).values({
+    clientId,
+    name,
+    description: description ?? null,
+    objectPath,
+    fileSize: fileSize ?? null,
+    mimeType: mimeType ?? null,
+    uploadedById: user.id,
+    uploadedByName: user.name,
+  }).returning();
 
   res.status(201).json(doc);
 });
@@ -88,7 +107,7 @@ const UpdateDocBody = z.object({
   description: z.string().max(2000).optional().nullable(),
 });
 
-router.patch("/documents/:id", requireAuth, async (req, res) => {
+router.patch("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -133,7 +152,7 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
 
 // ── Delete a document (removes DB record; object storage is cleaned by GC) ───
 
-router.delete("/documents/:id", requireAuth, async (req, res) => {
+router.delete("/documents/:id", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
   const clientId = getClientId(req);
   if (!clientId) {
@@ -191,7 +210,31 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
 
   try {
     const file = await storage.getObjectEntityFile(doc.objectPath);
-    const response = await storage.downloadObject(file, 0 /* no cache for private docs */);
+    await storage.assertTenantObjectOwnership(file, clientId);
+    const canRead = await storage.canAccessObjectEntity({
+      userId: String(clientId),
+      objectFile: file,
+      requestedPermission: ObjectPermission.READ,
+    });
+    if (!canRead) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const [metadata] = await file.getMetadata();
+    const rawRange = req.header("range");
+    let range: { start: number; end: number } | undefined;
+    if (rawRange) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rawRange.trim());
+      const size = Number(metadata.size);
+      if (!match || (!match[1] && !match[2])) { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = Math.min(match[2] ? Number(match[2]) : size - 1, size - 1);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+        res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return;
+      }
+      range = { start, end };
+    }
+    const response = await storage.downloadObject(file, 0 /* no cache for private docs */, range);
 
     // Force a download with the original filename
     const safeName = doc.name.replace(/[^a-zA-Z0-9._\- ]/g, "_");
@@ -204,6 +247,11 @@ router.get("/documents/:id/download", requireAuth, async (req, res) => {
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
+      const meter = createDownloadMeter(clientId);
+      nodeStream.on("data", (chunk) => meter.add(chunk));
+      const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
+      nodeStream.once("end", commit);
+      nodeStream.once("close", commit);
       nodeStream.pipe(res);
     } else {
       res.end();

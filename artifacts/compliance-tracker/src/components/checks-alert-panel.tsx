@@ -5,12 +5,12 @@ import { AlertTriangle, Clock, ChevronDown, ChevronUp, ArrowRight, RefreshCw } f
 import { cn } from "@/lib/utils";
 
 interface CheckAlert {
-  module: "fire" | "legionella" | "pool";
+  module: "fire" | "legionella" | "pool" | "hot_tub";
   moduleLabel: string;
   modulePath: string;
   checkType: string;
   checkLabel: string;
-  status: "overdue" | "due_soon" | "never";
+  status: "overdue" | "due_soon" | "never" | "plan_required" | "action_required";
   lastDate: string | null;
   dueDate: string | null;
   daysUntilDue: number | null;
@@ -18,6 +18,7 @@ interface CheckAlert {
 }
 
 function daysLabel(a: CheckAlert): string {
+  if (a.status === "plan_required") return "Plan review required";
   if (a.daysUntilDue === null) return "No record";
   if (a.daysUntilDue < 0) {
     const n = Math.abs(a.daysUntilDue);
@@ -51,7 +52,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
     if (r.ok) {
       const data: CheckAlert[] = await r.json();
       const visible = moduleFilter ? data.filter(a => a.module === moduleFilter) : data;
-      setAlerts(visible.filter(a => a.status === "overdue" || a.status === "due_soon"));
+      setAlerts(visible.filter(a => a.status === "overdue" || a.status === "due_soon" || a.status === "plan_required"));
     }
     setLoading(false);
   }
@@ -63,6 +64,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
 
   const overdue = alerts.filter(a => a.status === "overdue");
   const dueSoon = alerts.filter(a => a.status === "due_soon");
+  const planRequired = alerts.filter(a => a.status === "plan_required");
   const hasOverdue = overdue.length > 0;
 
   if (compact) {
@@ -79,6 +81,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
         <span>
           {hasOverdue
             ? `${overdue.length} check${overdue.length !== 1 ? "s" : ""} overdue`
+            : planRequired.length ? `${planRequired.length} site monitoring plan${planRequired.length !== 1 ? "s" : ""} need review`
             : `${dueSoon.length} check${dueSoon.length !== 1 ? "s" : ""} due soon`}
         </span>
         <button
@@ -97,7 +100,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
   }
 
   // Full card view
-  const sortedAlerts = [...overdue, ...dueSoon];
+  const sortedAlerts = [...overdue, ...planRequired, ...dueSoon];
   const MAX_COLLAPSED = 4;
   const showExpander = sortedAlerts.length > MAX_COLLAPSED;
   const visibleAlerts = expanded ? sortedAlerts : sortedAlerts.slice(0, MAX_COLLAPSED);
@@ -125,6 +128,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
         <span className={cn("font-semibold text-sm", hasOverdue ? "text-red-800" : "text-amber-800")}>
           {hasOverdue
             ? `${overdue.length} safety check${overdue.length !== 1 ? "s" : ""} overdue`
+            : planRequired.length ? `${planRequired.length} site monitoring plan${planRequired.length !== 1 ? "s" : ""} need review`
             : `${dueSoon.length} safety check${dueSoon.length !== 1 ? "s" : ""} due soon`}
           {overdue.length > 0 && dueSoon.length > 0 &&
             <span className="font-normal opacity-70 ml-1">· {dueSoon.length} more due soon</span>}
@@ -169,7 +173,7 @@ export function ChecksAlertPanel({ moduleFilter, compact = false }: Props) {
                       {a.checkLabel}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {lastLabel(a.lastDate)} · {a.frequencyLabel}
+                      {a.status === "plan_required" ? a.frequencyLabel : `${lastLabel(a.lastDate)} · ${a.frequencyLabel}`}
                     </p>
                   </div>
                   <div className="text-right ml-4 flex-shrink-0">

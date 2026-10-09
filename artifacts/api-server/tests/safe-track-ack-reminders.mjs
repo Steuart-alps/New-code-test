@@ -28,7 +28,16 @@ try {
     banner: { js: "import { createRequire as __bannerCrReq } from 'node:module'; globalThis.require = __bannerCrReq(import.meta.url);" },
   });
   const lib = await import(new URL(`file://${outFile}`).href);
-  const { db, sql, runSafeTrackAckReminderJob, getOutstandingSafeTrackAcknowledgements, registerSafeTrackAckReminderSchedule } = lib;
+  const {
+    db,
+    sql,
+    runSafeTrackAckReminderJob,
+    getOutstandingSafeTrackAcknowledgements,
+    parseSafeTrackReminderSettings,
+    isSafeTrackReminderDue,
+    MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES,
+    registerSafeTrackAckReminderSchedule,
+  } = lib;
   pool = lib.pool;
   const tag = `safe-ack-${Date.now()}`;
   const insertClient = async (suffix) => {
@@ -47,7 +56,7 @@ try {
   const department = await db.execute(sql`INSERT INTO departments (client_id, name) VALUES (${primary}, 'Operations') RETURNING id`);
   const departmentId = department.rows[0].id;
   await db.execute(sql`UPDATE sites SET department_id = ${departmentId} WHERE id = ${siteId} AND client_id = ${primary}`);
-  const active = await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, department, active) VALUES (${primary}, 'Active', ${siteId}, 'differently formatted dept', true) RETURNING id`);
+  const active = await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, department, email, active) VALUES (${primary}, 'Active', ${siteId}, 'differently formatted dept', 'staff@test.local', true) RETURNING id`);
   await db.execute(sql`INSERT INTO staff_roster (client_id, name, site_id, active) VALUES (${primary}, 'Inactive', ${siteId}, false)`);
   await db.execute(sql`INSERT INTO staff_roster (client_id, name, active) VALUES (${primary}, 'Elsewhere', true)`);
   const doc = await db.execute(sql`
@@ -69,24 +78,84 @@ try {
   const remaining = await getOutstandingSafeTrackAcknowledgements(primary);
   assert.deepEqual(remaining.map((gap) => gap.title), ["Second required document"]);
   await db.execute(sql`DELETE FROM safe_track_acknowledgements WHERE client_id = ${primary}`);
+  assert.deepEqual(parseSafeTrackReminderSettings({}), {
+    frequency: "daily",
+    time: "08:50",
+    timeZone: "Europe/London",
+  });
+  assert.equal(
+    isSafeTrackReminderDue(
+      new Date("2026-01-07T08:49:00.000Z"),
+      parseSafeTrackReminderSettings({}),
+    ),
+    false,
+  );
+  assert.equal(
+    isSafeTrackReminderDue(
+      new Date("2026-01-07T08:50:00.000Z"),
+      parseSafeTrackReminderSettings({}),
+    ),
+    true,
+  );
+  const weeklySettings = parseSafeTrackReminderSettings({
+    safeTrackReminderFrequency: "weekly",
+    safeTrackReminderTime: "08:50",
+    accountTimezone: "Europe/London",
+  });
+  assert.equal(isSafeTrackReminderDue(new Date("2026-01-05T08:50:00.000Z"), weeklySettings), true);
+  assert.equal(isSafeTrackReminderDue(new Date("2026-01-06T08:50:00.000Z"), weeklySettings), false);
   const sent = [];
   const deps = {
-    now: () => new Date(),
+    now: () => new Date("2026-01-05T08:50:00.000Z"),
     listClients: async () => [{ id: primary, name: "Primary" }],
+    getSettings: async () => ({
+      safeTrackReminderFrequency: "weekly",
+      safeTrackReminderTime: "08:50",
+      accountTimezone: "Europe/London",
+    }),
     isSafeTrackEntitled: async () => true,
     getRecipients: async () => ({ emails: ["manager@test.local", "MANAGER@test.local", "failed@test.local"] }),
     send: async ({ to, html }) => {
       if (to === "failed@test.local") throw new Error("mail failure");
       assert.match(html, /Risk Assessment/);
-      assert.match(html, /Waiting on: Active/);
+      if (to === "staff@test.local") {
+        assert.match(html, /Your SafeTrack sign-offs are outstanding/);
+        assert.doesNotMatch(html, /Waiting on:/);
+      } else {
+        assert.match(html, /Waiting on: Active/);
+      }
       sent.push(to);
     },
   };
   // Two concurrent real database claims: only one scheduler gets the digest.
   const [one, two] = await Promise.all([runSafeTrackAckReminderJob(deps), runSafeTrackAckReminderJob(deps)]);
   assert.equal(one.remindersClaimed + two.remindersClaimed, 1);
-  assert.equal(sent.length, 1);
+  assert.deepEqual(sent.sort(), ["manager@test.local", "staff@test.local"]);
   assert.equal(one.errors + two.errors, 1, "partial email failure remains isolated");
+  let largeManagerHtml = "";
+  const largeDocs = Array.from({ length: 250 }, (_, index) => ({
+    title: `Required document ${index} ${"Long title ".repeat(8)}`,
+    docType: "Risk Assessment",
+    siteName: "Main site",
+    outstanding: Array.from({ length: 30 }, (_, staffIndex) => `Staff member ${staffIndex} ${"Very long name ".repeat(4)}`),
+    outstandingCount: 30,
+    acknowledgedCount: 70,
+    staffTotal: 100,
+  }));
+  const largeDigest = await runSafeTrackAckReminderJob({
+    ...deps,
+    getOutstanding: async () => largeDocs,
+    getStaffOutstanding: async () => [],
+    getRecipients: async () => ({ emails: ["manager@test.local"] }),
+    claim: async () => 987654,
+    send: async ({ html }) => { largeManagerHtml = html; },
+    appUrl: () => "https://app.example",
+  });
+  assert.equal(largeDigest.emailsSent, 1);
+  assert.ok(Buffer.byteLength(largeManagerHtml, "utf8") <= MAX_SAFE_TRACK_MANAGER_EMAIL_BYTES);
+  assert.match(largeManagerHtml, /7500 outstanding acknowledgements/);
+  assert.match(largeManagerHtml, /Additional documents not shown/);
+  assert.match(largeManagerHtml, /https:\/\/app\.example\/safe-track/);
   let fullyAcknowledgedSendCalled = false;
   const fullyAcknowledged = await runSafeTrackAckReminderJob({
     ...deps,
@@ -99,7 +168,7 @@ try {
   assert.equal(fullyAcknowledgedSendCalled, false);
   const schedules = [];
   registerSafeTrackAckReminderSchedule((expression, task) => schedules.push({ expression, task }), async () => {});
-  assert.equal(schedules[0].expression, "50 8 * * *");
+  assert.equal(schedules[0].expression, "*/5 * * * *");
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {

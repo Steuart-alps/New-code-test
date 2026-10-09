@@ -211,7 +211,7 @@ export async function sendCancellationWarningEmail(opts: {
   // supplies a period end.
   if (!accessEndsDate || accessEndsDate.getTime() <= Date.now()) return { emailsSent: 0 };
   const accessEndsStr = accessEndsDate.toLocaleDateString(
-    "en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" },
+    "en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "Europe/London" },
   );
   // A changed cutoff warrants a fresh notice; otherwise the same recipient is
   // sent at most once. This key is intentionally stable for a missing Stripe
@@ -219,7 +219,7 @@ export async function sendCancellationWarningEmail(opts: {
   const cutoffKey = accessEndsDate.toISOString();
 
   const appUrl = deps.getAppUrl?.() ?? getPublicAppUrl();
-  const settingsUrl = `${appUrl}/settings`;
+  const settingsUrl = `${appUrl}/settings#data-export`;
   const billingUrl = `${appUrl}/billing`;
   const safeCompany = escapeHtml(client.name);
   const subject = "Your ComplyTrack access is ending — export your records";
@@ -536,30 +536,60 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
   let clientsDeleted = 0;
   const now = new Date();
 
-  const due = await db
-    .select()
-    .from(clientsTable)
-    .where(
-      and(
-        isNotNull(clientsTable.dataDeletionScheduledAt),
-        lte(clientsTable.dataDeletionScheduledAt, now),
-        isNull(clientsTable.dataDeletedAt),
-      ),
-    );
+  const due = await db.execute(sql`
+    SELECT c.id, c.name FROM clients c
+    WHERE c.data_deleted_at IS NULL
+      AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
+        OR EXISTS (
+          SELECT 1 FROM client_data_deletion_requests r
+          WHERE r.client_id = c.id AND r.status = 'approved'
+            AND r.earliest_deletion_at <= now()
+        ))
+  `);
 
-  for (const client of due) {
+  for (const client of due.rows as Array<{ id: number; name: string }>) {
     try {
-      logger.info({ clientId: client.id }, "Starting data deletion for client");
-      await deleteAllClientData(client.id);
-
-      await db.execute(sql`
-        UPDATE clients SET data_deleted_at = ${now}, updated_at = ${now} WHERE id = ${client.id}
-      `);
+      // Submission and direct client deletion use the same per-client lock.
+      // Recheck both the 30-day window and legal holds after acquiring it,
+      // then hold the lock until the deletion and completion marker finish.
+      const deleted = await db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${client.id})`);
+        const guard = await tx.execute(sql`
+          SELECT c.id FROM clients c WHERE c.id = ${client.id}
+            AND c.data_deleted_at IS NULL
+            AND ((c.data_deletion_scheduled_at IS NOT NULL AND c.data_deletion_scheduled_at <= now())
+              OR EXISTS (SELECT 1 FROM client_data_deletion_requests r
+                WHERE r.client_id = c.id AND r.status = 'approved'
+                  AND r.earliest_deletion_at <= now()))
+            AND NOT EXISTS (SELECT 1 FROM client_data_deletion_requests r
+              WHERE r.client_id = c.id
+                AND (r.status = 'pending' OR (r.status = 'approved' AND r.earliest_deletion_at > now())))
+            AND NOT EXISTS (SELECT 1 FROM privacy_retention_schedules h
+              WHERE h.client_id = c.id AND h.active = true
+                AND (h.legal_hold_active = true OR h.deletion_exception = true))
+        `);
+        if (guard.rows.length === 0) return false;
+        logger.info({ clientId: client.id }, "Starting data deletion for client");
+        await deleteAllClientData(client.id);
+        await tx.execute(sql`
+          UPDATE clients SET data_deleted_at = ${now}, updated_at = ${now}
+          WHERE id = ${client.id}
+        `);
+        await tx.execute(sql`
+          UPDATE client_data_deletion_requests SET status = 'completed'
+          WHERE client_id = ${client.id} AND status = 'approved'
+        `);
+        return true;
+      });
+      if (!deleted) {
+        logger.info({ clientId: client.id }, "Scheduled deletion deferred for review, retention window or legal hold");
+        continue;
+      }
       clientsDeleted++;
       logger.info({ clientId: client.id }, "Client data permanently deleted");
 
       // Notify system admin.
-      const adminEmail = process.env.ADMIN_EMAIL;
+      const adminEmail = process.env.ADMIN_EMAIL?.trim();
       if (adminEmail) {
         const safeCompany = escapeHtml(client.name);
         await sendSystemEmail({
@@ -568,6 +598,8 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
           html: `<p>All compliance records for <strong>${safeCompany}</strong> (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.</p>`,
           text: `All compliance records for ${client.name} (client id ${client.id}) have been permanently deleted as scheduled under the ${RETENTION_MONTHS}-month data retention policy.`,
         }).catch((err) => logger.error({ err }, "Deletion confirmation email failed"));
+      } else {
+        logger.error({ clientId: client.id }, "ADMIN_EMAIL not configured — data-deletion confirmation email was not sent");
       }
     } catch (err) {
       logger.error({ err, clientId: client.id }, "Data deletion failed for client — will retry tomorrow");
@@ -585,6 +617,22 @@ export async function runDataDeletionJob(): Promise<{ clientsDeleted: number }> 
  * missing table (schema drift) never aborts the whole deletion run.
  */
 async function deleteAllClientData(cid: number): Promise<void> {
+  // audit_log, like audit_events, is retained inspection evidence, not an
+  // operational compliance table. Source DELETEs append redacted historical
+  // diffs in the same transaction. Do not disable triggers or purge this ledger
+  // here: its history (including historical personal data) needs a separately
+  // authorised evidence-retention decision. The legal-hold/review gate above
+  // still applies; users are anonymised below and the tenant row is retained.
+  // Remove the tenant's privacy records only after the scheduled-delete guard
+  // above confirms there is no active legal hold or recorded exception.
+  await db.execute(sql`DELETE FROM privacy_retention_verifications WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_rights_requests WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_breaches WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_retention_schedules WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_processors WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_processing_activities WHERE client_id = ${cid}`).catch(() => {});
+  await db.execute(sql`DELETE FROM privacy_programs WHERE client_id = ${cid}`).catch(() => {});
+
   // ─ Swim track (surveillance_checks refs sessions) ──────────────────────────
   await db.execute(sql`DELETE FROM swim_surveillance_checks WHERE client_id = ${cid}`).catch(() => {});
   await db.execute(sql`DELETE FROM swim_incidents             WHERE client_id = ${cid}`).catch(() => {});

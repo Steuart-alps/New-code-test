@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { useRoute, useLocation } from "wouter";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, Loader2, Clock,
-  MapPin, User, FileText, Send, Camera, Wrench
+  MapPin, User, FileText, Send, Camera, Wrench, ImagePlus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DrawnSignatureDialog } from "@/components/drawn-signature-dialog";
@@ -54,6 +54,64 @@ interface Issue {
   updatedAt?: string;
   statusEvents?: Array<{ status: string; createdAt: string }>;
   notes?: IssueNote[];
+}
+
+type MediaUploadProgress = {
+  fileName: string;
+  fileIndex: number;
+  fileCount: number;
+  percent: number;
+  stage: "preparing" | "uploading" | "saving";
+};
+
+const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
+const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  avif: "image/avif",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+};
+
+function mediaContentType(file: File): string {
+  if (file.type) return file.type.toLowerCase();
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return MEDIA_TYPE_BY_EXTENSION[extension] ?? "";
+}
+
+function privateObjectUrl(objectPath: string): string {
+  const normalizedPath = objectPath.startsWith("/objects/")
+    ? objectPath
+    : `/objects/${objectPath.replace(/^\/+/, "")}`;
+  return `${API_BASE}/storage${normalizedPath}`;
+}
+
+function putFileWithProgress(
+  uploadUrl: string,
+  file: File,
+  contentType: string,
+  onProgress: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", uploadUrl);
+    request.setRequestHeader("Content-Type", contentType);
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) resolve();
+      else reject(new Error(`Storage upload failed (${request.status}).`));
+    });
+    request.addEventListener("error", () => reject(new Error("Network error while uploading the file.")));
+    request.addEventListener("abort", () => reject(new Error("Upload was cancelled.")));
+    request.send(file);
+  });
 }
 
 const ISSUE_TYPES: Record<string, { label: string; color: string }> = {
@@ -170,13 +228,16 @@ function MediaGallery({ urls }: { urls: string[] }) {
     <>
       <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
         {urls.map((url, idx) => {
-          const isVideo = /\.(mp4|mov|webm|avi)$/i.test(url);
-          const src = `/api/storage/objects/${url}`;
+          const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
+          const src = privateObjectUrl(url);
           
           return (
             <button
               key={url}
+              type="button"
               onClick={() => { setInitialIndex(idx); setViewerOpen(true); }}
+              aria-label={`Open issue media ${idx + 1}`}
+              data-testid={`button-open-issue-media-${idx}`}
               className="relative w-28 h-28 flex-shrink-0 rounded-xl overflow-hidden border border-border bg-muted/30 snap-start active:scale-95 transition-transform"
             >
               {isVideo ? (
@@ -202,8 +263,8 @@ function MediaGallery({ urls }: { urls: string[] }) {
           
           <div className="flex-1 flex overflow-x-auto snap-x snap-mandatory pt-16">
             {urls.map((url, idx) => {
-              const isVideo = /\.(mp4|mov|webm|avi)$/i.test(url);
-              const src = `/api/storage/objects/${url}`;
+              const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
+              const src = privateObjectUrl(url);
               
               return (
                 <div 
@@ -230,7 +291,8 @@ function MediaGallery({ urls }: { urls: string[] }) {
 
 export default function FixTrackDetailPage() {
   const [, params] = useRoute("/fix-track/:id");
-  const { user, hasService } = useAuth();
+  const { user, hasService, activeClientId } = useAuth();
+  const clientApiFetch = useActiveClientApi();
   const hasFixtrack = hasService("fixtrack");
   const canEdit = user?.role !== "client_viewer";
   const { toast } = useToast();
@@ -244,12 +306,17 @@ export default function FixTrackDetailPage() {
   const [savingNote, setSavingNote] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<MediaUploadProgress | null>(null);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   
   const bottomRef = useRef<HTMLDivElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   async function loadIssue() {
     try {
-      const res = await apiFetch(`/fix-track/issues/${params?.id}`);
+      const res = await clientApiFetch(`/fix-track/issues/${params?.id}`);
       if (!res.ok) throw new Error("Not found");
       const data = await res.json();
       setIssue(data);
@@ -261,13 +328,125 @@ export default function FixTrackDetailPage() {
     }
   }
 
+  async function uploadIssueMedia(files: File[]) {
+    if (!issue || !canEdit || mediaUploading || files.length === 0) return;
+
+    const issueId = issue.id;
+    setMediaUploading(true);
+    setMediaUploadError(null);
+    let uploadedCount = 0;
+    const failures: string[] = [];
+
+    try {
+      for (const [index, file] of files.entries()) {
+        try {
+          const contentType = mediaContentType(file);
+          if (!Object.values(MEDIA_TYPE_BY_EXTENSION).includes(contentType)) {
+            throw new Error("Use a JPEG, PNG, WebP, MP4, MOV, or WebM file.");
+          }
+          if (contentType.startsWith("image/") && file.size > 10 * 1024 * 1024) {
+            throw new Error("Photos must be 10 MB or smaller.");
+          }
+          if (contentType.startsWith("video/") && file.size > 250 * 1024 * 1024) {
+            throw new Error("Videos must be 250 MB or smaller.");
+          }
+
+          setMediaUploadProgress({
+            fileName: file.name,
+            fileIndex: index + 1,
+            fileCount: files.length,
+            percent: 0,
+            stage: "preparing",
+          });
+          const urlResponse = await clientApiFetch(`/fix-track/issues/${issueId}/request-upload`, {
+            method: "POST",
+            body: JSON.stringify({ name: file.name, contentType }),
+          });
+          if (!urlResponse.ok) {
+            const body = await urlResponse.json().catch(() => null);
+            throw new Error(body?.error ?? "Could not prepare the upload.");
+          }
+          const upload = await urlResponse.json();
+          if (!upload?.uploadUrl || !upload?.objectPath) {
+            throw new Error("The server returned an invalid upload URL.");
+          }
+
+          setMediaUploadProgress({
+            fileName: file.name,
+            fileIndex: index + 1,
+            fileCount: files.length,
+            percent: 0,
+            stage: "uploading",
+          });
+          await putFileWithProgress(upload.uploadUrl, file, contentType, (percent) => {
+            setMediaUploadProgress({
+              fileName: file.name,
+              fileIndex: index + 1,
+              fileCount: files.length,
+              percent,
+              stage: "uploading",
+            });
+          });
+
+          setMediaUploadProgress({
+            fileName: file.name,
+            fileIndex: index + 1,
+            fileCount: files.length,
+            percent: 100,
+            stage: "saving",
+          });
+          const attachResponse = await clientApiFetch(`/fix-track/issues/${issueId}/media`, {
+            method: "POST",
+            body: JSON.stringify({ objectPath: upload.objectPath }),
+          });
+          if (!attachResponse.ok) {
+            const body = await attachResponse.json().catch(() => null);
+            throw new Error(body?.error ?? "The upload completed but could not be attached to the issue.");
+          }
+          const attached = await attachResponse.json();
+          if (!Array.isArray(attached?.mediaUrls)) {
+            throw new Error("The server did not confirm the uploaded media.");
+          }
+          setIssue((current) => current?.id === issueId
+            ? { ...current, mediaUrls: attached.mediaUrls }
+            : current);
+          uploadedCount += 1;
+        } catch (error) {
+          failures.push(`${file.name}: ${error instanceof Error ? error.message : "Upload failed."}`);
+        }
+      }
+
+      if (uploadedCount > 0) {
+        toast({
+          title: uploadedCount === 1 ? "Media added" : `${uploadedCount} media items added`,
+          description: "The issue gallery has been updated.",
+        });
+      }
+      if (failures.length > 0) {
+        setMediaUploadError(failures.join("\n"));
+        toast({ title: "Some media could not be added", description: failures[0], variant: "destructive" });
+      }
+    } finally {
+      setMediaUploading(false);
+      setMediaUploadProgress(null);
+    }
+  }
+
+  function handleMediaSelection(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (files.length > 0) void uploadIssueMedia(files);
+  }
+
   useEffect(() => {
+    setIssue(null);
+    setLoading(true);
     if (!hasFixtrack) {
       setLocation("/fix-track");
       return;
     }
     if (params?.id) loadIssue();
-  }, [params?.id, hasFixtrack]);
+  }, [params?.id, hasFixtrack, activeClientId]);
 
   async function handleStatusChange(newStatus: string, resolverSignature?: string) {
     if (!issue || statusBusy) return;
@@ -279,7 +458,7 @@ export default function FixTrackDetailPage() {
     try {
       const payload = { status: newStatus, ...(resolverSignature ? { resolverSignature } : {}) };
       
-      const res = await apiFetch(`/fix-track/issues/${issue.id}`, {
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -299,7 +478,7 @@ export default function FixTrackDetailPage() {
     if (!noteText.trim() || !issue || savingNote) return;
     setSavingNote(true);
     try {
-      const res = await apiFetch(`/fix-track/issues/${issue.id}/notes`, {
+      const res = await clientApiFetch(`/fix-track/issues/${issue.id}/notes`, {
         method: "POST",
         body: JSON.stringify({ note: noteText.trim() }),
       });
@@ -438,18 +617,93 @@ export default function FixTrackDetailPage() {
             </div>
           )}
 
-          {((issue.mediaUrls && issue.mediaUrls.length > 0) || issue.completionDocumentPath) && (
+          {((issue.mediaUrls && issue.mediaUrls.length > 0) || issue.completionDocumentPath || canEdit) && (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <Camera className="w-4 h-4 text-muted-foreground" /> Attachments
               </h3>
               {issue.mediaUrls && issue.mediaUrls.length > 0 && <MediaGallery urls={issue.mediaUrls} />}
+              {canEdit && (
+                <div className="space-y-3">
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleMediaSelection}
+                    data-testid="input-capture-issue-media"
+                  />
+                  <input
+                    ref={mediaInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,video/mp4,video/quicktime,video/webm"
+                    multiple
+                    className="hidden"
+                    onChange={handleMediaSelection}
+                    data-testid="input-select-issue-media"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={mediaUploading}
+                      onClick={() => cameraInputRef.current?.click()}
+                      data-testid="button-capture-issue-media"
+                    >
+                      <Camera className="mr-2 h-4 w-4" />
+                      Take photo or video
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={mediaUploading}
+                      onClick={() => mediaInputRef.current?.click()}
+                      data-testid="button-select-issue-media"
+                    >
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      Choose from device
+                    </Button>
+                  </div>
+                  {mediaUploadProgress && (
+                    <div className="space-y-1 rounded-lg border bg-muted/30 p-3" role="status" aria-live="polite" data-testid="status-issue-media-upload">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate">
+                          {mediaUploadProgress.stage === "preparing" && "Preparing"}
+                          {mediaUploadProgress.stage === "uploading" && `Uploading ${mediaUploadProgress.fileIndex} of ${mediaUploadProgress.fileCount}`}
+                          {mediaUploadProgress.stage === "saving" && "Saving to issue"}
+                          {`: ${mediaUploadProgress.fileName}`}
+                        </span>
+                        {mediaUploadProgress.stage === "uploading" && <span>{mediaUploadProgress.percent}%</span>}
+                        {mediaUploadProgress.stage !== "uploading" && <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
+                      </div>
+                      {mediaUploadProgress.stage === "uploading" && (
+                        <progress
+                          className="h-2 w-full accent-primary"
+                          value={mediaUploadProgress.percent}
+                          max={100}
+                          aria-label={`Upload progress for ${mediaUploadProgress.fileName}`}
+                          data-testid="progress-issue-media-upload"
+                        />
+                      )}
+                    </div>
+                  )}
+                  {mediaUploadError && (
+                    <p className="text-sm text-destructive whitespace-pre-line" role="alert" data-testid="error-issue-media-upload">
+                      {mediaUploadError}
+                    </p>
+                  )}
+                </div>
+              )}
               {issue.completionDocumentPath && (
                 <a
-                  href={`/api/storage/objects/${issue.completionDocumentPath}`}
+                  href={privateObjectUrl(issue.completionDocumentPath)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 mt-2 px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:underline transition-all hover:bg-blue-100"
+                  data-testid="link-issue-completion-document"
                 >
                   <FileText className="w-4 h-4" /> View Completion Document
                 </a>

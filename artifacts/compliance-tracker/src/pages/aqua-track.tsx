@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -34,6 +34,7 @@ import {
 } from "@workspace/api-client-react";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
@@ -69,13 +70,6 @@ const CHECK_TYPE_LABELS: Record<string, string> = {
   closing:  "Closing check",
   weekly:  "Full water balance (weekly)",
 };
-const CHECK_TYPE_FREQ: Record<string, string> = {
-  routine: "Every 2 hours",
-  opening: "Daily",
-  closing: "Daily",
-  weekly:  "Weekly",
-};
-
 type ValLevel = "ok" | "warn" | "fail";
 
 function pHLevel(v: number | null): ValLevel {
@@ -178,7 +172,7 @@ interface PoolCheck {
   notes: string | null;
 }
 
-function PoolConfigDialog() {
+function PoolConfigDialog({ onChanged }: { onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const { data: config } = useGetPoolTrackConfig();
   const { toast } = useToast();
@@ -217,6 +211,8 @@ function PoolConfigDialog() {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetPoolTrackConfigQueryKey() });
+          queryClient.invalidateQueries({ queryKey: ["water-monitoring-plan", "pool-track"] });
+          onChanged();
           toast({ title: "Template saved", description: "Pool settings updated." });
           setOpen(false);
         },
@@ -692,7 +688,7 @@ function IncidentDialog({ open, onClose, incident, sites, onSaved }: { open: boo
 type Tab = "water-quality" | "sessions" | "surveillance" | "first-aid" | "incidents";
 
 export default function AquaTrackPage() {
-  const { hasService } = useAuth();
+  const { hasService, activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -710,27 +706,31 @@ export default function AquaTrackPage() {
   const [quickCheckType, setQuickCheckType] = useState<string | undefined>();
   const [poolChecks, setPoolChecks] = useState<PoolCheck[]>([]);
   const [poolStatus, setPoolStatus] = useState<any[]>([]);
+  const poolRequestSequence = useRef(0);
   const [poolLoading, setPoolLoading] = useState(true);
 
   const { data: sites = [] } = useListSites({ query: { enabled: hasAqua, queryKey: getListSitesQueryKey() } }) as any;
 
   const fetchPoolData = async () => {
+    const sequence = ++poolRequestSequence.current;
     setPoolLoading(true);
+    setPoolStatus([]);
     try {
       const params = new URLSearchParams();
       if (filterType) params.set("checkType", filterType);
       if (filterSite) params.set("siteId", String(filterSite));
       const [checksData, statusData] = await Promise.all([
         apiFetch<PoolCheck[]>(`/pool-track?${params}`),
-        apiFetch<any[]>(`/pool-track/status${filterSite ? `?siteId=${filterSite}` : ""}`),
+        filterSite ? apiFetch<any[]>(`/pool-track/status?siteId=${filterSite}`) : Promise.resolve([]),
       ]);
+      if (sequence !== poolRequestSequence.current) return;
       setPoolChecks(checksData);
       setPoolStatus(statusData);
     } catch { /* handled per-check */ }
-    finally { setPoolLoading(false); }
+    finally { if (sequence === poolRequestSequence.current) setPoolLoading(false); }
   };
 
-  useMemo(() => { if (hasAqua && activeTab === "water-quality") fetchPoolData(); }, [hasAqua, activeTab, filterType, filterSite]);
+  useEffect(() => { if (hasAqua && activeTab === "water-quality") void fetchPoolData(); }, [hasAqua, activeTab, filterType, filterSite, activeClientId]);
 
   const handlePoolDelete = async (id: number) => {
     if (!confirm("Delete this check record?")) return;
@@ -831,7 +831,7 @@ export default function AquaTrackPage() {
           <div className="flex items-center gap-2 shrink-0">
             {activeTab === "water-quality" && (
               <>
-                {canAdmin && <PoolConfigDialog />}
+                {canAdmin && <PoolConfigDialog onChanged={fetchPoolData} />}
                 <PoolRecordDialog siteId={filterSite} onSaved={fetchPoolData} open={poolRecordOpen} onOpenChange={setPoolRecordOpen} defaultCheckType={quickCheckType} />
               </>
             )}
@@ -903,13 +903,26 @@ export default function AquaTrackPage() {
         ══════════════════════════════════════════════════════════════════ */}
         {activeTab === "water-quality" && (
           <div className="space-y-5">
+            {(sites as any[]).length > 0 && (
+              <div className="flex items-center gap-2"><Label>Monitoring site</Label>
+                <Select value={filterSite ? String(filterSite) : "all"} onValueChange={value => setFilterSite(value === "all" ? undefined : Number(value))}>
+                  <SelectTrigger className="w-56"><SelectValue placeholder="Select a site" /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">Select a site</SelectItem>
+                    {(sites as any[]).map((site: any) => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <WaterMonitoringPlan module="pool-track" siteId={filterSite} checks={CHECK_TYPE_LABELS} unit="hours"
+              canManage={canAdmin} onChanged={fetchPoolData} />
             {/* Status cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {filterSite && <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {poolLoading
                 ? Array.from({ length: 4 }).map((_, i) => <Card key={i} className="animate-pulse"><CardContent className="p-4 h-20" /></Card>)
                 : poolStatus.map(item => (
                     <Card key={item.checkType}
                       className={cn("border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                        item.status === "plan_required" ? "border-l-slate-400 bg-slate-50/50" :
                         item.status === "overdue"  ? "border-l-rose-500 bg-rose-50/50" :
                         item.status === "due_soon" ? "border-l-amber-500 bg-amber-50/50" :
                         item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
@@ -918,7 +931,10 @@ export default function AquaTrackPage() {
                       onClick={() => { setQuickCheckType(item.checkType); setPoolRecordOpen(true); }}>
                       <CardHeader className="pb-1 pt-3 px-4"><CardTitle className="text-xs font-medium leading-snug">{CHECK_TYPE_LABELS[item.checkType] ?? item.checkType}</CardTitle></CardHeader>
                       <CardContent className="pb-3 px-4 space-y-0.5">
-                        <div className="text-xs text-muted-foreground">{CHECK_TYPE_FREQ[item.checkType]}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {item.status === "plan_required" ? "Plan required" : `Every ${item.frequencyHours} hours`}
+                        </div>
+                        {item.dueDate && <div className="text-xs text-muted-foreground">Next: {new Date(item.dueDate).toLocaleString("en-GB")}</div>}
                         {item.lastDate && <div className="text-xs text-muted-foreground">Last: {format(new Date(item.lastDate), "dd/MM/yy")}{item.lastTime && ` ${item.lastTime}`}</div>}
                         {item.status === "never" && <div className="text-xs text-muted-foreground italic">Not recorded yet</div>}
                         {item.result && (
@@ -934,7 +950,7 @@ export default function AquaTrackPage() {
                     </Card>
                   ))
               }
-            </div>
+            </div>}
 
             {/* Alert banners */}
             {(overduePool.length > 0 || dueSoonPool.length > 0) && (

@@ -13,6 +13,7 @@ import {
   Building2, UtensilsCrossed, Building, PenLine, Sunrise, Sunset,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { monthDayStatuses, type HistoryChecklist, type HistorySignoff } from "@/lib/daily-track-month-status";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -198,11 +199,6 @@ function Legend() {
 
 // ── Month overview ────────────────────────────────────────────────────────────
 
-interface HistoryChecklist { checkDate: string; siteId: number | null; checklistType: string; submittedAt: string | null }
-interface HistorySignoff { signoffDate: string; siteId: number | null; submittedAt: string | null }
-
-type DayStatus = "complete" | "partial" | "missing" | "future";
-
 function monthLabel(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -215,7 +211,8 @@ function shiftMonth(ym: string, delta: number): string {
 }
 
 function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: string) => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const lastMonth = shiftMonth(today.slice(0, 7), -1);
   const [month, setMonth] = useState(lastMonth);
   const [siteId, setSiteId] = useState<"all" | number>("all");
@@ -242,44 +239,9 @@ function MonthOverview({ sites, onPickDay }: { sites: Site[]; onPickDay: (date: 
 
   const selectedSites = siteId === "all" ? sites : sites.filter(site => site.id === siteId);
   const expectedPerDay = selectedSites.length * COLUMNS.length;
-  const siteIds = new Set(selectedSites.map(s => s.id));
-  const checklistTypes = new Set(COLUMNS.filter(column => column.key !== "signoff").map(column => column.key));
-
-  const dayStatuses: { date: string; status: DayStatus; submitted: number; started: number }[] = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = `${month}-${String(d).padStart(2, "0")}`;
-    if (date > today) { dayStatuses.push({ date, status: "future", submitted: 0, started: 0 }); continue; }
-    // Count distinct (site, requirement) pairs so duplicate or site-less rows
-    // can't make an incomplete day look complete.
-    const started = new Set<string>();
-    const done = new Set<string>();
-    for (const c of rows?.checklists ?? []) {
-      if (
-        c.checkDate === date
-        && c.siteId != null
-        && siteIds.has(c.siteId)
-        && checklistTypes.has(c.checklistType as Exclude<ColKey, "signoff">)
-      ) {
-        const key = `${c.siteId}:${c.checklistType}`;
-        started.add(key);
-        if (c.submittedAt) done.add(key);
-      }
-    }
-    for (const s of rows?.signoffs ?? []) {
-      if (s.signoffDate === date && s.siteId != null && siteIds.has(s.siteId)) {
-        const key = `${s.siteId}:signoff`;
-        started.add(key);
-        if (s.submittedAt) done.add(key);
-      }
-    }
-    const submitted = done.size;
-    const status: DayStatus =
-      expectedPerDay === 0 ? "missing"
-      : submitted >= expectedPerDay ? "complete"
-      : started.size > 0 ? "partial"
-      : "missing";
-    dayStatuses.push({ date, status, submitted, started: started.size });
-  }
+  const dayStatuses = monthDayStatuses(
+    month, today, selectedSites, rows?.checklists ?? [], rows?.signoffs ?? [],
+  );
 
   const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday = 0
   const incompleteDays = dayStatuses.filter(d => d.status === "partial" || d.status === "missing").length;

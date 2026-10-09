@@ -2,13 +2,14 @@
 - [Stripe discount redemptions](stripe-discount-redemptions.md) — recurring code uses token-bound Checkout reservations; reconcile Stripe before releasing any timed-out claim.
 - [No-proration billing outbox](billing-no-proration.md) — added sites billed via per-site event outbox + idempotent claiming; never charge from quantity deltas; skip only strictly pre-subscription rows.
 - [Multi-tenant authz](multitenant-authz.md) — tenant access enforced via consultant_clients membership + canAccessClient/enforceClientAccess; never trust client-supplied clientId.
-- [Typecheck vs build](typecheck-vs-build.md) — `tsc` typecheck fails repo-wide (codegen/db dist absent); dev workflows use esbuild/vite, which is the real build signal.
+- [Typecheck and Orval barrels](typecheck-vs-build.md) — root typecheck is valid; keep manual Orval barrel exports single-quoted so regeneration remains idempotent.
 - [Schema change workflow](schema-changes.md) — drizzle push is interactive (unusable headless); prod schema comes from api-server runtime migrations, so every new table/column must be added there too.
 - [Session expiry handling](session-expiry-handling.md) — API-client 401s fire setUnauthorizedHandler (registered in auth-context) to clear auth and route to login; stale prod sessions caused "Site not found".
-- [Testing internal jobs](job-testing-pattern.md) — test cron-style jobs by injecting deps + esbuild-bundling a TS entry; neutralize/restore real dev rows around table-scanning jobs.
+- [Integration and job testing](job-testing-pattern.md) — bundle workspace TS helpers; own test APIs and capture mail explicitly; restore existing rows touched by jobs.
+- [Background-job test scoping](background-job-test-scoping.md) — tenant-sweeping jobs see unrelated DB fixtures, so assert recipient-scoped delivery instead of global candidate counts.
 - [Validation steps setup](validation-steps.md) — test suites run as validation steps; server-dependent tests must self-boot; validation names can't collide with existing workflows.
 - [Trial lock enforcement](trial-lock.md) — expired trials 402-lock all data routes via cached Stripe check; allowlist /auth,/billing,/healthz; refresh-access endpoint busts cache for instant unlock.
-- [API route middleware](api-route-middleware.md) — admin guard in routes is `requireClientAdmin` from `requireAuth.ts`; no separate middleware file; `requireCanAdmin` does not exist.
+- [API route middleware](api-route-middleware.md) — admin guards live in requireAuth; root-mounted auth middleware intercepts later public routes, so mount public routers first.
 - [Mobile app plan](mobile-app-plan.md) — Expo SDK 54 app built; screens, API calls, design tokens, known gaps (KitchenTrack, 2FA, push notifs) documented.
 - [Mobile auth architecture](mobile-auth-architecture.md) — bearer token auth via mobile_sessions table; loadUser checks both session cookie and Authorization: Bearer header.
 - [Contractor compliance fields](contractor-compliance-fields.md) — Gas Safe reg, public liability expiry, DBS date deferred; user wants them on contractor records eventually.
@@ -25,12 +26,16 @@
 - [Task completion patterns](task-completion-patterns.md) — task queue lags codebase heavily; audit before building; subagent delegation patterns; full scheduler/trial-ended inventory.
 - [Signup verification tests](signup-verification-tests.md) — self-registration tests must explicitly verify the email token before expecting an authenticated session.
 - [UK compliance controls](uk-compliance-controls.md) — present guidance as support, not certification; verified action closure needs independent, atomic evidence-backed state changes.
+- [Water monitoring due states](water-monitoring-due-states.md) — only current approved site plans can drive water, pool, or spa due dates; missing or changed controls mean review required.
+- [Water outlet read boundaries](water-outlet-read-boundaries.md) — scope both outlet rows and joined readings by site department; legacy cross-site outlet links may exist.
 - [AnyTrack roadmap](anytrack-roadmap.md) — keep user-configurable tracks as a future direction; prioritise completing and improving the main tracks first.
 - [API test readiness](api-test-readiness.md) — integration tests must wait for `/readyz`; `/healthz` becomes available before runtime migrations and Stripe initialization finish.
 - [Check results and remediation](check-results-remediation.md) — observations are immutable Pass/Fail evidence; failed checks open a separate insert-once remediation action.
 - [Metro image parser security](metro-image-parser-security.md) — Expo/Metro uses an archived vulnerable parser; keep the API-compatible maintained fork override until upstream replaces it.
 - [Post-merge pnpm contention](post-merge-pnpm-contention.md) — skip workspace install when pnpm's installed lock marker already matches; active workflows can otherwise stall it silently.
 - [Object ACL finalization](object-acl-finalization.md) — presigned PUT creation does not create the object; assign tenant ACL only after the direct upload completes.
+- [Export attachment trust](export-attachment-trust.md) — ZIP exports require a private tenant ACL; never claim an unmarked object while exporting a DB reference.
+- [Storage happy-path fixture](storage-happy-path-fixture.md) — required object-storage tests need a dedicated bucket plus Google signing credentials; never reuse the application bucket.
 - [Concurrent task reconciliation](concurrent-task-reconciliation.md) — task merges can drop untracked main-workspace helpers; recheck status and typecheck immediately after reconciliation.
 - [Restart-safe notification delivery](restart-safe-notification-delivery.md) — daily digests use leased claims plus a stable provider key so crash recovery cannot lose or duplicate email.
 - [Deferred contractor email evidence](deferred-contractor-email-evidence.md) — quote document inclusion and real private-document draft verification were explicitly cancelled; retain as deferred scope.
@@ -39,3 +44,28 @@
 - [Roster reconciliation identity](roster-reconciliation-identity.md) — payroll IDs are authoritative; preserve roster IDs, adopt legacy rows only by one unambiguous match, and deactivate rather than delete.
 - [Staff kiosk security](staff-kiosk-security.md) — public roster access uses rotatable tenant tokens; verified actions use short-lived one-use capabilities and atomic PIN lockout.
 - [Mobile draft hydration](mobile-draft-hydration.md) — server refreshes must never overwrite dirty mobile form state; reset abandoned edits before changing query scope.
+- [Custom form-option semantics](custom-form-option-semantics.md) — customize only business vocabularies; new records use active values, while edits preserve disabled legacy values.
+- [Track record lock](daily-entry-cutoff.md) — staff get the scheduled day plus one correction day; older records lock, while client admins and consultants can override.
+- [Browser CSRF and test sessions](csrf-test-sessions.md) — production cookie mutations require a session-bound header; legacy integration fixtures need the explicit test-only bypass.
+- [Track evidence profiles](track-evidence-profiles.md) — source-linked Fire/Legionella action sign-off requires structured, independently reviewed profile evidence; manual actions retain the generic contract.
+- [OpenAPI nullable object generation](openapi-nullable-object-generation.md) — keep referenced object schemas non-nullable; put nullability on the containing property to avoid invalid generated TypeScript.
+- [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
+- [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
+- [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from Replit storage cost plus a 20% ALPS margin.
+- [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
+- [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
+- [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.
+- [Browser engine runtime](browser-engine-runtime.md) — Playwright WebKit needs exact native sonames that may be unavailable even after its browser archive is installed.
+- [Browser test API proxy](browser-test-api-proxy.md) — real-browser tests against a private API must enrol mandatory 2FA and strip the Vite origin from upstream requests.
+- [API codegen launcher drift](api-codegen-launcher-drift.md) — a stale Orval workspace launcher can point at a missing peer variant and produce misleading generated-client diffs.
+- [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
+- [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
+- [Shell runtime stalls](shell-runtime-loader-hangs.md) — distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
+- [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
+- [Orphaned workflow children](workflow-orphaned-children.md) — surviving Vite children can force restarted workflows off the registered preview port.
+- [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
+- [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
+- [PAT history provenance](pat-history-provenance.md) — migrated names/locations are best-known, not verified at the inspection date; preserve provenance rather than silently rewriting history.
+- [Local calendar-day math](local-calendar-day-math.md) — date-only ages must use local calendar dates, not elapsed milliseconds, to stay correct across DST.
+- [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction.
+- [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.

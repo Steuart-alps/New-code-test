@@ -65,6 +65,7 @@ try {
 
   const created = await owner.request("POST", "/contractors", {
     name: "Portal Owner Contractor", email: `owner-contractor-${Date.now()}@test.local`,
+    dbsType: "DBS Check (Basic)", dbsIssueDate: "2026-01-01", dbsExpiryDate: "2028-01-01",
   });
   const second = await owner.request("POST", "/contractors", {
     name: "Other Owner Contractor", email: `other-contractor-${Date.now()}@test.local`,
@@ -74,6 +75,10 @@ try {
   });
   const contractorId = created.data?.id, secondId = second.data?.id, foreignId = foreignContractor.data?.id;
   check("contractors created", [contractorId, secondId, foreignId].every(Number.isInteger));
+  check("manager records use canonical DBS types and dates",
+    created.data?.dbsType === "Basic"
+    && String(created.data?.dbsIssueDate).startsWith("2026-01-01")
+    && String(created.data?.dbsExpiryDate).startsWith("2028-01-01"));
 
   check("anonymous cannot issue", (await publicRequest("POST", `/contractors/${contractorId}/portal-link`, {})).status === 401);
   const viewerEmail = `portal-viewer-${Date.now()}@test.local`;
@@ -85,11 +90,21 @@ try {
   check("viewer cannot issue", (await viewer("POST", `/contractors/${contractorId}/portal-link`, {})).status === 403);
   check("foreign manager cannot issue", (await foreign.request("POST", `/contractors/${contractorId}/portal-link`, {})).status === 404);
 
+  // Allow reminder coverage to run independently of public portal fixtures.
+  if (process.env.CONTRACTOR_RESEND_ONLY !== "1") {
   const issue1 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, { expiresInDays: 2 });
   const token1 = issue1.data?.token;
   check("manager issue returns plaintext token once", issue1.status === 201 && typeof token1 === "string" && token1.length === 64);
   const view1 = await publicRequest("GET", `/contractor-portal/${token1}`);
   check("token sees only bound contractor", view1.status === 200 && view1.data?.name === created.data.name && !("notes" in view1.data));
+  check("contractor portal reads the canonical DBS value", view1.data?.dbsType === "Basic");
+  const [portalEvidence] = (await db.execute(sql`
+    SELECT id FROM public_link_access_evidence
+    WHERE client_id = ${owner.clientId} AND link_type = 'contractor_portal'
+      AND token_fingerprint = ${digest(token1)}
+    LIMIT 1
+  `)).rows;
+  check("valid contractor portal access leaves access evidence", portalEvidence?.id != null);
 
   const issue2 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
   const token2 = issue2.data?.token;
@@ -98,14 +113,47 @@ try {
   check("portal raw token is not stored", storedToken?.token == null && storedToken?.token_hash === digest(token2));
   check("reissue invalidates old token", (await publicRequest("GET", `/contractor-portal/${token1}`)).status === 404);
 
+  const reminderToken = crypto.randomBytes(32).toString("hex");
+  await db.execute(sql`
+    INSERT INTO contractor_portal_reminder_tokens (portal_token_id, issuance_hash, token_hash, expires_at)
+    SELECT id, token_hash, ${digest(reminderToken)}, now() + interval '90 days'
+    FROM contractor_portal_tokens WHERE contractor_id=${contractorId}
+  `);
+  check("supplemental reminder uses normal portal validation",
+    (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 200);
   await db.execute(sql`UPDATE contractor_portal_tokens SET expires_at = now() - interval '1 minute' WHERE token_hash = ${digest(token2)}`);
   check("expired token rejected", (await publicRequest("GET", `/contractor-portal/${token2}`)).status === 404);
+  check("reminder retains own lifetime after canonical expiry",
+    (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 200);
+  await db.execute(sql`UPDATE contractor_portal_reminder_tokens SET expires_at=now() - interval '1 minute' WHERE token_hash=${digest(reminderToken)}`);
+  check("expired reminder rejected", (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 404);
+  await db.execute(sql`UPDATE contractor_portal_reminder_tokens SET expires_at=now() + interval '90 days' WHERE token_hash=${digest(reminderToken)}`);
+  await owner.request("DELETE", `/contractors/${contractorId}/portal-link`);
+  check("manager revocation invalidates child reminder",
+    (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 404);
   const issue3 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
   const token3 = issue3.data.token;
+  check("manual reissue cannot resurrect earlier reminder",
+    (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 404);
 
   await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${foreign.clientId} WHERE token_hash = ${digest(token3)}`);
   check("token/client inconsistency rejected", (await publicRequest("GET", `/contractor-portal/${token3}`)).status === 404);
   await db.execute(sql`UPDATE contractor_portal_tokens SET client_id = ${owner.clientId} WHERE token_hash = ${digest(token3)}`);
+
+  const portalDbsChange = await publicRequest("PUT", `/contractor-portal/${token3}`, {
+    dbsType: "PVG Scheme", dbsExpiryDate: "2028-03-01",
+  });
+  const portalDbsView = await publicRequest("GET", `/contractor-portal/${token3}`);
+  check("contractor can update PVG expiry with a canonical type",
+    portalDbsChange.status === 200 && portalDbsView.data?.dbsType === "PVG Scheme"
+      && String(portalDbsView.data?.dbsExpiryDate).startsWith("2028-03-01"));
+  const portalNone = await publicRequest("PUT", `/contractor-portal/${token3}`, {
+    dbsType: "None", dbsExpiryDate: "2028-03-01",
+  });
+  const clearedDbs = await publicRequest("GET", `/contractor-portal/${token3}`);
+  check("choosing None clears a previously saved DBS expiry",
+    portalNone.status === 200 && clearedDbs.data?.dbsType === "None"
+      && clearedDbs.data?.dbsExpiryDate === null);
 
   const managerCert = await owner.request("POST", `/contractors/${contractorId}/certificates`, {
     certificateName: "Manager certificate", issuer: "Issuer", notes: "manager-only-note",
@@ -114,21 +162,86 @@ try {
     certificateName: "Other certificate", notes: "other-manager-note",
   });
   check("manager certificates created", managerCert.status === 201 && foreignCert.status === 201);
+  const [managerProvenance] = (await db.execute(sql`
+    SELECT portal_created FROM contractor_certificates WHERE id = ${managerCert.data.id}
+  `)).rows;
+  check("manager-created certificate defaults to non-portal provenance", managerProvenance?.portal_created === false);
   const portalAfterCert = await publicRequest("GET", `/contractor-portal/${token3}`);
   const visible = portalAfterCert.data?.certificates ?? [];
   check("manager notes never disclosed", visible.some(c => c.id === managerCert.data.id) && visible.every(c => !("notes" in c)));
+  check("certificate object paths are never exposed by the portal", visible.every(c => !("object_path" in c)));
+  check("manager certificate is visible but not portal-deletable",
+    visible.some(c => c.id === managerCert.data.id && c.canDelete === false && c.hasFile === false));
+  check("portal cannot delete a manager-created certificate",
+    (await publicRequest("DELETE", `/contractor-portal/${token3}/certificates/${managerCert.data.id}`)).status === 404
+      && (await owner.request("GET", `/contractors/${contractorId}/certificates`)).data?.some(c => c.id === managerCert.data.id));
   check("other contractor certificate excluded", !visible.some(c => c.id === foreignCert.data.id));
+  const certUrl = `/contractors/${contractorId}/certificates`;
+  check("manager certificate list includes the created certificate",
+    (await owner.request("GET", certUrl)).data?.some(c => c.id === managerCert.data.id));
+  const changedCert = await owner.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+    certificateName: "Updated licence", issuer: "New issuer",
+    completedDate: "2026-01-01", expiryDate: "2027-01-01", notes: "Updated by manager",
+  });
+  check("manager can edit certificate dates and notes", changedCert.status === 200
+    && changedCert.data?.certificate_name === "Updated licence"
+    && changedCert.data?.notes === "Updated by manager");
+  check("certificate completion cannot be later than expiry",
+    (await owner.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+      certificateName: "Invalid", completedDate: "2027-01-01", expiryDate: "2026-01-01",
+    })).status === 400);
+  check("another client cannot list certificates",
+    (await foreign.request("GET", certUrl)).status === 404);
+  check("another client cannot edit certificates",
+    (await foreign.request("PUT", `${certUrl}/${managerCert.data.id}`, {
+      certificateName: "Foreign edit",
+    })).status === 404);
+  check("another client cannot delete certificates",
+    (await foreign.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 404);
+  check("manager can delete a certificate",
+    (await owner.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 204);
+  check("deleting an absent certificate returns 404",
+    (await owner.request("DELETE", `${certUrl}/${managerCert.data.id}`)).status === 404);
+  await db.execute(sql`UPDATE contractors SET updated_at = now() - interval '2 days'
+    WHERE id = ${contractorId} AND client_id = ${owner.clientId}`);
   const portalCreate = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
     certificateName: "Portal certificate", notes: "must-not-be-accepted",
   });
-  const [stored] = (await db.execute(sql`SELECT notes FROM contractor_certificates WHERE id = ${portalCreate.data?.id}`)).rows;
+  const [stored] = (await db.execute(sql`SELECT notes, portal_created FROM contractor_certificates WHERE id = ${portalCreate.data?.id}`)).rows;
   check("portal notes ignored rather than accepted", portalCreate.status === 201 && stored?.notes == null);
+  check("portal-created certificate is explicitly marked and response is safe",
+    stored?.portal_created === true && portalCreate.data?.canDelete === true && portalCreate.data?.hasFile === false
+      && !("object_path" in portalCreate.data) && !("notes" in portalCreate.data));
+  const createdView = await publicRequest("GET", `/contractor-portal/${token3}`);
+  check("portal-created certificate is deletable in list",
+    createdView.data?.certificates?.some(c => c.id === portalCreate.data.id && c.canDelete === true && c.hasFile === false));
+  const [afterCreate] = (await db.execute(sql`SELECT updated_at FROM contractors WHERE id = ${contractorId}`)).rows;
+  check("certificate creation refreshes contractor timestamp",
+    new Date(afterCreate?.updated_at).getTime() > Date.now() - 60_000);
   check("token cannot delete other contractor certificate",
     (await publicRequest("DELETE", `/contractor-portal/${token3}/certificates/${foreignCert.data.id}`)).status === 404);
-  check("missing object rejected",
-    (await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
-      certificateName: "Missing upload", objectPath: `/objects/uploads/tenant-${owner.clientId}/does-not-exist`,
-    })).status === 404);
+  const invalidToken = "0".repeat(64);
+  check("invalid token cannot view certificates",
+    (await publicRequest("GET", `/contractor-portal/${invalidToken}`)).status === 404);
+  check("invalid token cannot create certificates",
+    (await publicRequest("POST", `/contractor-portal/${invalidToken}/certificates`, { certificateName: "Invalid" })).status === 404);
+  check("invalid token cannot delete certificates",
+    (await publicRequest("DELETE", `/contractor-portal/${invalidToken}/certificates/${portalCreate.data.id}`)).status === 404);
+  check("invalid token cannot download certificates",
+    (await publicRequest("GET", `/contractor-portal/${invalidToken}/certificates/${portalCreate.data.id}/download`)).status === 404);
+  await db.execute(sql`UPDATE contractors SET updated_at = now() - interval '2 days'
+    WHERE id = ${contractorId} AND client_id = ${owner.clientId}`);
+  check("portal can delete its own certificate",
+    (await publicRequest("DELETE", `/contractor-portal/${token3}/certificates/${portalCreate.data.id}`)).status === 200);
+  const [afterDelete] = (await db.execute(sql`SELECT updated_at FROM contractors WHERE id = ${contractorId}`)).rows;
+  check("certificate deletion refreshes contractor timestamp",
+    new Date(afterDelete?.updated_at).getTime() > Date.now() - 60_000);
+  check("deleted portal certificate no longer visible",
+    !(await publicRequest("GET", `/contractor-portal/${token3}`)).data?.certificates?.some(c => c.id === portalCreate.data.id));
+  const missingUpload = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
+    certificateName: "Missing upload", objectPath: `/objects/uploads/tenant-${owner.clientId}/does-not-exist`,
+  });
+  check("missing or inaccessible object rejected", [403, 404].includes(missingUpload.status), String(missingUpload.status));
   check("foreign object path rejected",
     (await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
       certificateName: "Foreign upload", objectPath: `/objects/uploads/tenant-${foreign.clientId}/foreign`,
@@ -146,6 +259,9 @@ try {
         && finalizedRow?.object_path?.startsWith(`/objects/finalized/tenant-${owner.clientId}/`)
         && finalizedRow.object_path !== stagedPath,
       `${finalized.status}: ${JSON.stringify(finalized.data)}`);
+    check("uploaded certificate exposes only file availability and ownership",
+      finalized.data?.hasFile === true && finalized.data?.canDelete === true
+        && !("object_path" in finalized.data) && !("notes" in finalized.data));
   } else {
     console.log("SKIP: valid finalized object (set CONTRACTOR_PORTAL_TEST_OBJECT_PATH to a real reserved PDF fixture)");
   }
@@ -160,6 +276,34 @@ try {
   `)).rows;
   check("plaintext token only in issuance response",
     !JSON.stringify(contractorView.data).includes(token3) && !JSON.stringify(auditRows).includes(token3));
+
+  }
+  // Resends preserve the latest dispatched snapshot and never send directly.
+  const item = (await db.execute(sql`INSERT INTO compliance_items (client_id, contractor_id, title)
+    VALUES (${owner.clientId}, ${contractorId}, 'Resend fixture') RETURNING id`)).rows[0];
+  const resendPath = `/contractors/${contractorId}/reminders/${item.id}/resend`;
+  check("resend requires prior delivery", (await owner.request("POST", resendPath)).status === 404);
+  check("viewer cannot resend", (await viewer("POST", resendPath)).status === 403);
+  check("foreign tenant cannot resend", (await foreign.request("POST", resendPath)).status === 404);
+  check("anonymous cannot resend", (await publicRequest("POST", resendPath)).status === 401);
+  const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:resend-fixture\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  await db.execute(sql`INSERT INTO contractor_email_queue
+    (client_id, contractor_id, entity_type, entity_id, mode, email_type, status, to_email,
+     subject, body_html, body_text, ics_content, ics_filename, idempotency_key, sent_at)
+    VALUES (${owner.clientId}, ${contractorId}, 'compliance', ${item.id}, 'assign', 'reminder', 'sent',
+     ${created.data.email}, 'Latest reminder', '<p>Latest reminder</p>', 'Latest reminder',
+     ${ics}, 'visit.ics', ${crypto.randomUUID()}, now())`);
+  const attempts = await Promise.all([owner.request("POST", resendPath), owner.request("POST", resendPath)]);
+  check("concurrent resends create only one approval", attempts.map(r => r.status).sort().join(",") === "202,409");
+  const draft = (await db.execute(sql`SELECT * FROM contractor_email_queue
+    WHERE client_id=${owner.clientId} AND entity_id=${item.id} AND status='pending'`)).rows[0];
+  check("resend preserves content and calendar", draft?.subject === "Latest reminder"
+    && draft?.ics_content === ics && draft?.ics_filename === "visit.ics" && draft?.sent_at == null);
+  check("resend records requesting manager", Number.isInteger(draft?.requested_by));
+  check("wrong contractor cannot resend item",
+    (await owner.request("POST", `/contractors/${secondId}/reminders/${item.id}/resend`)).status === 404);
+  await db.execute(sql`UPDATE compliance_items SET status='completed' WHERE id=${item.id}`);
+  check("completed requirement cannot resend", (await owner.request("POST", resendPath)).status === 404);
 
   console.log(`${passed} contractor portal route checks passed, ${failures} failed`);
 } finally {

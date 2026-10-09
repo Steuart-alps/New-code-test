@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuditLog } from "@/components/audit-log";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Droplets, Plus, AlertTriangle, CheckCircle2, Clock, CalendarX, Filter, Pencil, Trash2, Lock, ThermometerSun, Settings, X, XCircle, ShieldAlert } from "lucide-react";
@@ -38,6 +39,7 @@ import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { cn } from "@/lib/utils";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
+import { WaterMonitoringPlan } from "@/components/water-monitoring-plan";
 
 // HSG274 Part 2 Table 2.1
 const CHECK_TYPE_LABELS: Record<LegionellaCheckType, string> = {
@@ -114,7 +116,8 @@ function ResultBadge({ result }: { result: string }) {
   );
 }
 
-function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never"; lastResult?: string | null }) {
+function StatusBadge({ status, lastResult }: { status: "ok" | "due_soon" | "overdue" | "never" | "plan_required"; lastResult?: string | null }) {
+  if (status === "plan_required") return <Badge variant="outline">Plan required</Badge>;
   if (lastResult === "fail")
     return (
       <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
@@ -159,33 +162,93 @@ function parseJsonArray<T>(raw: string | undefined | null, fallback: T[] = []): 
   try { return JSON.parse(raw) as T[]; } catch { return fallback; }
 }
 
-function LegionellaConfigDialog() {
+function parseJsonRecord(raw: string | undefined | null, fallback: Record<string, number>): Record<string, number> {
+  if (!raw) return fallback;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, number> : fallback;
+  } catch { return fallback; }
+}
+
+const DEFAULT_LEGIONELLA_FREQUENCIES: Record<string, number> = {
+  calorifier_temp: 7, hot_sentinel_temp: 30, hot_nonsent_temp: 90,
+  cold_tank_temp: 30, cold_sentinel_temp: 30, cold_nonsent_temp: 90,
+  cold_tank_inspection: 183, cold_tank_clean: 365, calorifier_inspection: 365,
+  calorifier_clean: 365, shower_clean: 90, tmv_service: 365, outlet_flush: 7,
+};
+
+type LegionellaProfileState = {
+  systemInventoryReference: string;
+  writtenControlSchemeReference: string;
+  riskAssessmentReference: string;
+  riskAssessmentReviewDate: string;
+  competentPerson: string;
+  samplingLabRecordReference: string;
+  controlLimitsRationale: string;
+  remedialVerificationReference: string;
+  schemeReviewDate: string;
+  ukNation: string;
+  temperatureLimits: Record<string, { min?: number; max?: number }>;
+};
+
+function LegionellaConfigDialog({ siteId }: { siteId?: number }) {
   const [open, setOpen] = useState(false);
-  const { data: config } = useGetLegionellaConfig();
+  const { data: config } = useGetLegionellaConfig(siteId ? { siteId } : undefined);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateConfig = useUpdateLegionellaConfig();
 
   const [defaultPerformer, setDefaultPerformer] = useState("");
   const [nonSentinelOutlets, setNonSentinelOutlets] = useState<string[]>([]);
+  const [frequencyDays, setFrequencyDays] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, value]) => [key, String(value)])),
+  );
+  const [profile, setProfile] = useState<LegionellaProfileState>({
+    systemInventoryReference: "", writtenControlSchemeReference: "", riskAssessmentReference: "",
+    riskAssessmentReviewDate: "", competentPerson: "", samplingLabRecordReference: "",
+    controlLimitsRationale: "", remedialVerificationReference: "", schemeReviewDate: "", ukNation: "",
+    temperatureLimits: {},
+  });
 
   useEffect(() => {
     if (!config || !open) return;
     setDefaultPerformer(config.water_default_performer ?? "");
     setNonSentinelOutlets(parseJsonArray<string>(config.water_non_sentinel_outlets));
+    const saved = parseJsonRecord(config.water_frequency_days, DEFAULT_LEGIONELLA_FREQUENCIES);
+     const savedProfile: any = config.controlProfile ?? {};
+    setFrequencyDays(Object.fromEntries(Object.keys(DEFAULT_LEGIONELLA_FREQUENCIES).map(key => [key, String(savedProfile.frequencyDays?.[key] ?? saved[key] ?? DEFAULT_LEGIONELLA_FREQUENCIES[key])])));
+    setProfile({
+      systemInventoryReference: savedProfile.systemInventoryReference ?? "",
+      writtenControlSchemeReference: savedProfile.writtenControlSchemeReference ?? "",
+      riskAssessmentReference: savedProfile.riskAssessmentReference ?? "",
+      riskAssessmentReviewDate: savedProfile.riskAssessmentReviewDate ?? "",
+      competentPerson: savedProfile.competentPerson ?? "",
+      samplingLabRecordReference: savedProfile.samplingLabRecordReference ?? "",
+      controlLimitsRationale: savedProfile.controlLimitsRationale ?? "",
+      remedialVerificationReference: savedProfile.remedialVerificationReference ?? "",
+      schemeReviewDate: savedProfile.schemeReviewDate ?? "",
+      ukNation: savedProfile.ukNation ?? "",
+       temperatureLimits: savedProfile.temperatureLimits ?? (config as any).effectiveTemperatureLimits ?? {},
+    });
   }, [config, open]);
 
   const handleSave = () => {
+    const numericFrequencies = Object.fromEntries(Object.entries(frequencyDays).map(([key, value]) => [key, Math.max(1, Number(value) || DEFAULT_LEGIONELLA_FREQUENCIES[key])]));
+    if (!window.confirm("Save these site control limits? They are local controls for the written scheme and do not override the benchmark guidance.")) return;
     updateConfig.mutate(
       {
         data: {
           water_default_performer: defaultPerformer,
           water_non_sentinel_outlets: JSON.stringify(nonSentinelOutlets.filter(Boolean)),
-        },
+          ...(siteId ? { controlProfile: { ...profile, frequencyDays: numericFrequencies, temperatureLimits: profile.temperatureLimits } } : { water_frequency_days: JSON.stringify(numericFrequencies) }),
+        } as any,
+        params: siteId ? { siteId } : undefined,
       },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
+          queryClient.invalidateQueries({ queryKey: ["water-monitoring-plan", "legionella"] });
           toast({ title: "Template saved", description: "New checks will use these defaults." });
           setOpen(false);
         },
@@ -209,9 +272,11 @@ function LegionellaConfigDialog() {
         </DialogHeader>
 
         <Tabs defaultValue="defaults" className="flex-1 min-h-0 flex flex-col">
-          <TabsList className="shrink-0 w-full grid grid-cols-2">
+           <TabsList className="shrink-0 w-full grid grid-cols-4">
             <TabsTrigger value="defaults">Defaults</TabsTrigger>
             <TabsTrigger value="nonsent">Non-sentinel</TabsTrigger>
+             <TabsTrigger value="controls">Controls</TabsTrigger>
+             <TabsTrigger value="audit" data-testid="tab-legionella-audit">Audit log</TabsTrigger>
           </TabsList>
 
           <TabsContent value="defaults" className="flex-1 overflow-y-auto space-y-4 pt-4 px-1">
@@ -221,6 +286,19 @@ function LegionellaConfigDialog() {
                 placeholder="e.g. Responsible person" className="rounded-sm" />
               <p className="text-xs text-muted-foreground">Pre-fills the "Performed by" field on every new check.</p>
             </div>
+             <div className="space-y-2">
+               <Label>Frequency suggestions (days)</Label>
+               <p className="text-xs text-muted-foreground">These benchmark suggestions do not drive due statuses. Select a site and approve its monitoring plan for the site's actual intervals.</p>
+               <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
+                 {Object.entries(DEFAULT_LEGIONELLA_FREQUENCIES).map(([key, fallback]) => (
+                   <div key={key} className="space-y-1">
+                     <Label className="text-xs">{CHECK_TYPE_LABELS[key as LegionellaCheckType]}</Label>
+                     <Input type="number" min={1} max={3650} value={frequencyDays[key] ?? fallback}
+                       onChange={e => setFrequencyDays(current => ({ ...current, [key]: e.target.value }))} className="h-8 rounded-sm" />
+                   </div>
+                 ))}
+               </div>
+             </div>
           </TabsContent>
 
           <TabsContent value="nonsent" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
@@ -244,6 +322,54 @@ function LegionellaConfigDialog() {
               </Button>
             </div>
           </TabsContent>
+           <TabsContent value="controls" className="flex-1 overflow-y-auto space-y-3 pt-4 px-1">
+             {!siteId && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm p-2">Choose a site in the history filter to save a site-specific control profile.</p>}
+             <p className="text-xs text-muted-foreground">Record the site water-system controls and evidence references used during inspection.</p>
+              <div className="space-y-2 rounded-sm border border-amber-200 bg-amber-50 p-3">
+                <Label>Site temperature limits (°C)</Label>
+                <p className="text-xs text-amber-800">These are effective local controls only; they never rewrite or override the written scheme or benchmark guidance.</p>
+                {Array.from(TEMPERATURE_TYPES).map(key => (
+                  <div key={key} className="grid grid-cols-[1fr_80px_80px] gap-2 items-center">
+                    <span className="text-xs">{CHECK_TYPE_LABELS[key]}</span>
+                    <Input type="number" step="0.1" placeholder="Min" disabled={!siteId}
+                      value={profile.temperatureLimits[key]?.min ?? ""}
+                      onChange={e => setProfile(p => ({ ...p, temperatureLimits: { ...p.temperatureLimits, [key]: { ...p.temperatureLimits[key], min: e.target.value === "" ? undefined : Number(e.target.value) } } }))} />
+                    <Input type="number" step="0.1" placeholder="Max" disabled={!siteId}
+                      value={profile.temperatureLimits[key]?.max ?? ""}
+                      onChange={e => setProfile(p => ({ ...p, temperatureLimits: { ...p.temperatureLimits, [key]: { ...p.temperatureLimits[key], max: e.target.value === "" ? undefined : Number(e.target.value) } } }))} />
+                  </div>
+                ))}
+              </div>
+             {([
+               ["systemInventoryReference", "Water-system inventory reference"],
+               ["writtenControlSchemeReference", "Written control scheme reference"],
+               ["riskAssessmentReference", "Legionella risk assessment reference"],
+               ["riskAssessmentReviewDate", "Risk assessment review date"],
+               ["competentPerson", "Responsible / competent person"],
+               ["samplingLabRecordReference", "Sampling and laboratory record reference"],
+               ["controlLimitsRationale", "Control limits and rationale"],
+               ["remedialVerificationReference", "Remedial verification reference"],
+               ["schemeReviewDate", "Scheme applicability review date"],
+             ] as const).map(([key, label]) => (
+               <div key={key} className="space-y-1">
+                 <Label>{label}</Label>
+                 {key.toLowerCase().includes("date") ? (
+                   <Input type="date" value={profile[key]} disabled={!siteId} onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 ) : (
+                   <Textarea rows={key === "controlLimitsRationale" ? 3 : 1} value={profile[key]} disabled={!siteId}
+                     onChange={e => setProfile(current => ({ ...current, [key]: e.target.value }))} />
+                 )}
+               </div>
+             ))}
+             <div className="space-y-1">
+               <Label>UK nation</Label>
+               <Select value={profile.ukNation || "none"} disabled={!siteId} onValueChange={value => setProfile(current => ({ ...current, ukNation: value === "none" ? "" : value }))}>
+                 <SelectTrigger><SelectValue placeholder="Select nation" /></SelectTrigger>
+                 <SelectContent><SelectItem value="none">Not set</SelectItem><SelectItem value="england">England</SelectItem><SelectItem value="scotland">Scotland</SelectItem><SelectItem value="wales">Wales</SelectItem><SelectItem value="northern_ireland">Northern Ireland</SelectItem></SelectContent>
+               </Select>
+             </div>
+           </TabsContent>
+          <TabsContent value="audit" className="flex-1 overflow-y-auto pt-4 px-1"><AuditLog module="legionella" /></TabsContent>
         </Tabs>
 
         <DialogFooter className="shrink-0 pt-2 border-t border-border mt-2">
@@ -694,8 +820,18 @@ function RecordCheckDialog({
   }, [open]);
 
   const isTemperatureCheck = TEMPERATURE_TYPES.has(checkType);
+  const effectiveLimit = (config as any)?.effectiveTemperatureLimits?.[checkType] ??
+    (config as any)?.controlProfile?.temperatureLimits?.[checkType];
+  const enteredTemperature = temperature === "" ? null : Number(temperature);
+  const localLimitWarning = isTemperatureCheck && enteredTemperature !== null && effectiveLimit &&
+    ((effectiveLimit.min !== undefined && enteredTemperature < effectiveLimit.min) ||
+      (effectiveLimit.max !== undefined && enteredTemperature > effectiveLimit.max));
 
   const handleSubmit = async () => {
+    if (isTemperatureCheck && !temperature) {
+      toast({ title: "Temperature reading is required", variant: "destructive" });
+      return;
+    }
     const data: CreateLegionellaCheckRequest & { staffRosterId?: number | null } = {
       checkType,
       checkDate,
@@ -710,10 +846,10 @@ function RecordCheckDialog({
     createCheck.mutate(
       { data },
       {
-        onSuccess: () => {
+        onSuccess: (response: any) => {
           queryClient.invalidateQueries({ queryKey: getListLegionellaChecksQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey() });
-          toast({ title: "Check recorded", description: "Legionella check saved successfully." });
+          toast({ title: "Check recorded", description: `Server outcome: ${response?.result ?? result}.` });
           setOpen(false);
           setTemperature("");
           setLocation("");
@@ -787,6 +923,12 @@ function RecordCheckDialog({
                   className="pl-9"
                 />
               </div>
+            </div>
+          )}
+          {localLimitWarning && (
+            <div className="flex items-start gap-2 rounded-sm border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              This reading is outside the effective site limit. The server will evaluate the result on save.
             </div>
           )}
 
@@ -977,7 +1119,7 @@ export default function LegionellaPage() {
 
   const { data: status, isLoading: statusLoading, error: statusError } = useGetLegionellaStatus(
     { siteId: filterSite },
-    { query: { enabled: hasLegionellatrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) } }
+    { query: { enabled: hasLegionellatrack && !!filterSite, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
 
@@ -1063,13 +1205,28 @@ export default function LegionellaPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {canAdmin && <LegionellaConfigDialog />}
+            {canAdmin && <LegionellaConfigDialog siteId={filterSite} />}
             <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
           </div>
         </div>
 
+        {sites && sites.length > 0 && (
+          <div className="flex items-center gap-2"><Label>Monitoring site</Label>
+            <Select value={filterSite ? String(filterSite) : "all"} onValueChange={value => setFilterSite(value === "all" ? undefined : Number(value))}>
+              <SelectTrigger className="w-56"><SelectValue placeholder="Select a site" /></SelectTrigger>
+              <SelectContent><SelectItem value="all">Select a site</SelectItem>
+                {sites.map(site => <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <WaterMonitoringPlan module="legionella" siteId={filterSite} checks={CHECK_TYPE_LABELS} unit="days"
+          canManage={canAdmin} onChanged={() => {
+            queryClient.invalidateQueries({ queryKey: getGetLegionellaStatusQueryKey({ siteId: filterSite }) });
+            queryClient.invalidateQueries({ queryKey: getGetLegionellaConfigQueryKey() });
+          }} />
         {/* Status Overview */}
-        {statusLoading ? (
+        {filterSite && (statusLoading ? (
           <Card>
             <CardContent className="p-12 flex justify-center">
               <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -1082,7 +1239,9 @@ export default function LegionellaPage() {
                 key={item.checkType}
                 className={cn(
                   "border-l-4 transition-all hover:shadow-md cursor-pointer group",
-                  item.lastResult === "fail"
+                  item.status === "plan_required"
+                    ? "border-l-slate-400 bg-slate-50/50"
+                    : item.lastResult === "fail"
                     ? "border-l-red-600 bg-red-100/60"
                     : item.lastResult === "action_required"
                     ? "border-l-orange-600 bg-orange-100/60"
@@ -1101,13 +1260,15 @@ export default function LegionellaPage() {
                     <CardTitle className="text-sm font-medium leading-tight">
                       {checkTypeLabel(item.checkType)}
                     </CardTitle>
-                    <StatusBadge status={item.status} lastResult={item.lastResult} />
+                    {item.status === "plan_required"
+                      ? <Badge variant="outline">Plan required</Badge>
+                      : <StatusBadge status={item.status} lastResult={item.lastResult} />}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1">
-                  <div className="text-xs text-muted-foreground">
+                  {item.status === "plan_required" ? <p className="text-xs text-muted-foreground">Approve the site's monitoring plan to calculate a due date.</p> : <div className="text-xs text-muted-foreground">
                     <span className="font-medium">Frequency:</span> Every {item.frequencyDays} days
-                  </div>
+                  </div>}
                   {item.lastDate && (
                     <div className="text-xs text-muted-foreground">
                       <span className="font-medium">Last check:</span>{" "}
@@ -1130,7 +1291,7 @@ export default function LegionellaPage() {
               </Card>
             ))}
           </div>
-        )}
+        ))}
 
         {/* Sentinel Outlets — per-outlet monthly tracking */}
         <SentinelOutletsPanel canAdmin={canAdmin} />

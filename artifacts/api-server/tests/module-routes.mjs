@@ -10,6 +10,10 @@
 //
 // Usage: node tests/module-routes.mjs
 // Exits 0 when all checks pass, 1 otherwise.
+import { testDocTrainFlows } from "./doc-train-flows.mjs";
+import { randomUUID } from "node:crypto";
+
+const runId = randomUUID();
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
 
@@ -62,7 +66,7 @@ function isoDate(daysOffset = 0) {
 // Check types: alarm, emergency_lights, extinguishers, fire_doors, fire_drill
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function testFireSafety(req) {
+async function testFireSafety(req, siteId) {
   console.log("\n── FireTrack ──");
 
   const TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill"];
@@ -149,7 +153,25 @@ async function testFireSafety(req) {
   check("fire-safety: alarm check yesterday is not overdue", alarmStatus?.status !== "overdue", `status=${alarmStatus?.status}`);
   check("fire-safety: latest failed alarm result is surfaced", alarmStatus?.lastResult === "fail", `lastResult=${alarmStatus?.lastResult}`);
 
-  // 7. DELETE
+  // 7. Site-specific control profile and risk-assessed cadence
+  const profilePut = await req("PUT", `/fire-safety/config?siteId=${siteId}`, {
+    controlProfile: {
+      ukNation: "england",
+      responsiblePerson: "Site Fire Marshal",
+      riskAssessmentReference: "FRA-TEST-01",
+      frequencyDays: { alarm: 14 },
+    },
+  });
+  expectOk("fire-safety: save site control profile", profilePut.status);
+  check("fire-safety: profile is site scoped", profilePut.data?.siteId === siteId && profilePut.data?.controlProfile?.riskAssessmentReference === "FRA-TEST-01");
+  const profileGet = await req("GET", `/fire-safety/config?siteId=${siteId}`);
+  expectOk("fire-safety: read site control profile", profileGet.status);
+  check("fire-safety: site frequency overrides default", profileGet.data?.controlProfile?.frequencyDays?.alarm === 14);
+  const siteStatus = await req("GET", `/fire-safety/status?siteId=${siteId}`);
+  const siteAlarm = (siteStatus.data ?? []).find((s) => s.checkType === "alarm");
+  check("fire-safety: status uses site frequency", siteAlarm?.frequencyDays === 14);
+
+  // 8. DELETE
   const delId = createdIds["fire_drill"];
   const delRes = await req("DELETE", `/fire-safety/${delId}`);
   check("fire-safety: DELETE /:id → 204", delRes.status === 204, `got ${delRes.status}`);
@@ -181,7 +203,7 @@ async function testFireSafety(req) {
 //              tank_inspection, risk_assessment
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function testLegionella(req) {
+async function testLegionella(req, siteId) {
   console.log("\n── LegionellaTrack ──");
 
   // Actual HSG274 check types from the route
@@ -274,7 +296,7 @@ async function testLegionella(req) {
   const put404 = await req("PUT", "/legionella/999999999", { result: "pass" });
   check("legionella: PUT non-existent → 404", put404.status === 404, `got ${put404.status}`);
 
-  // 6. Status endpoint — all 6 types present with correct shape
+  // 6. Without an approved site scheme there is no defensible due state.
   const statusRes = await req("GET", "/legionella/status");
   expectOk("legionella: GET /status", statusRes.status);
   check("legionella: status returns array", Array.isArray(statusRes.data), `got ${typeof statusRes.data}`);
@@ -284,21 +306,50 @@ async function testLegionella(req) {
     `missing: ${TYPES.filter((t) => !(statusRes.data ?? []).some((s) => s.checkType === t)).join(", ")}`,
   );
   for (const entry of statusRes.data ?? []) {
-    check(`legionella: status.${entry.checkType} has frequencyDays`, typeof entry.frequencyDays === "number", `got ${entry.frequencyDays}`);
+    check(`legionella: status.${entry.checkType} has no generic frequency`, entry.frequencyDays === null, `got ${entry.frequencyDays}`);
     check(`legionella: status.${entry.checkType} has lastDate`, entry.lastDate !== undefined, "lastDate field missing");
     check(`legionella: status.${entry.checkType} has lastResult`, entry.lastResult !== undefined, "lastResult field missing");
-    check(`legionella: status.${entry.checkType} has valid status`, ["ok", "due_soon", "overdue", "never"].includes(entry.status), `got ${entry.status}`);
+    check(`legionella: status.${entry.checkType} requires a site plan`, entry.status === "plan_required", `got ${entry.status}`);
   }
 
-  const coldTankStatus = (statusRes.data ?? []).find((s) => s.checkType === "cold_tank_temp");
-  check("legionella: latest failed cold-tank result is surfaced", coldTankStatus?.lastResult === "fail", `lastResult=${coldTankStatus?.lastResult}`);
+  // 7. Site-specific written scheme profile and risk-assessed cadence
+  const profilePut = await req("PUT", `/legionella/config?siteId=${siteId}`, {
+    controlProfile: {
+      ukNation: "england",
+      systemInventoryReference: "WSI-TEST-01",
+      writtenControlSchemeReference: "WCS-TEST-01",
+      competentPerson: "Water Hygiene Lead",
+      frequencyDays: { hot_sentinel_temp: 45 },
+    },
+  });
+  expectOk("legionella: save site control profile", profilePut.status);
+  check("legionella: profile is site scoped", profilePut.data?.siteId === siteId && profilePut.data?.controlProfile?.writtenControlSchemeReference === "WCS-TEST-01");
+  const profileGet = await req("GET", `/legionella/config?siteId=${siteId}`);
+  expectOk("legionella: read site control profile", profileGet.status);
+  check("legionella: site frequency overrides default", profileGet.data?.controlProfile?.frequencyDays?.hot_sentinel_temp === 45);
+  const siteStatus = await req("GET", `/legionella/status?siteId=${siteId}`);
+  const siteSentinel = (siteStatus.data ?? []).find((s) => s.checkType === "hot_sentinel_temp");
+  check("legionella: unapproved legacy controls never drive due state", siteSentinel?.status === "plan_required");
+  const frequencies = Object.fromEntries(statusRes.data.map(s => [s.checkType, s.checkType === "hot_sentinel_temp" ? 45 : 30]));
+  const plan = await req("PUT", `/legionella/monitoring-plan?siteId=${siteId}`, {
+    action: "approve", riskAssessmentReference: "RA-01", writtenSchemeReference: "WCS-TEST-01",
+    competentPerson: "Water Hygiene Lead", frequencies,
+  });
+  check("legionella: manager approves complete site monitoring plan", plan.status === 200 && plan.data?.approved);
+  const approvedStatus = await req("GET", `/legionella/status?siteId=${siteId}`);
+  check("legionella: status uses approved site frequency",
+    approvedStatus.data?.find(s => s.checkType === "hot_sentinel_temp")?.frequencyDays === 45);
 
-  // calorifier_clean is annual (365 days) — a record from yesterday must be "ok"
-  const annualStatus = (statusRes.data ?? []).find((s) => s.checkType === "calorifier_clean");
-  check("legionella: annual calorifier_clean not overdue after recent check", annualStatus?.status === "ok", `status=${annualStatus?.status}`);
-
-  // 7. DELETE
-  const delId = createdIds["shower_clean"];
+  // 8. DELETE
+  const protectedId = createdIds["shower_clean"];
+  const protectedDelete = await req("DELETE", `/legionella/${protectedId}`);
+  check("legionella: failed check with linked action cannot be deleted", protectedDelete.status === 409,
+    `got ${protectedDelete.status}`);
+  const deletable = await req("POST", "/legionella", {
+    checkType: "shower_clean", checkDate: isoDate(), result: "pass", siteId,
+  });
+  check("legionella: passing check can be created for deletion", deletable.status === 201);
+  const delId = deletable.data?.id;
   const delRes = await req("DELETE", `/legionella/${delId}`);
   check("legionella: DELETE /:id → 204", delRes.status === 204, `got ${delRes.status}`);
 
@@ -412,6 +463,53 @@ async function testFoodSafety(req) {
   expectOk("food-safety: GET /by-date/:date", byDateRes.status);
   check("food-safety: /by-date returns correct id", byDateRes.data?.id === recordId, `got id=${byDateRes.data?.id}`);
   check("food-safety: /by-date returns deliveries array", Array.isArray(byDateRes.data?.deliveries), `got ${typeof byDateRes.data?.deliveries}`);
+
+  // A web form can be stale after mobile appended a row. The web's own edit
+  // should merge that identifiable append instead of replacing it.
+  const staleBaseline = byDateRes.data;
+  const secondEntryId = `mobile-test-${Date.now()}-b`;
+  const secondAppend = await req("POST", "/food-safety/append", {
+    recordDate,
+    recordedAt: `${recordDate}T13:00:00+00:00`,
+    entryId: secondEntryId,
+    section: "hotTemperature",
+    row: { item: "Mobile soup", coreTemp: "77.1" },
+  });
+  expectOk("food-safety: mobile append after web load", secondAppend.status, [201]);
+  const staleWebSave = await req("PUT", `/food-safety/${recordId}`, {
+    expectedUpdatedAt: staleBaseline?.updatedAt,
+    expectedRecord: { hotTemperature: staleBaseline?.hotTemperature ?? [] },
+    hotTemperature: [
+      ...(staleBaseline?.hotTemperature ?? []),
+      { item: "Web soup", coreTemp: "78.0" },
+    ],
+  });
+  expectOk("food-safety: stale web save merges mobile append", staleWebSave.status, [200]);
+  const mergedHotRows = staleWebSave.data?.hotTemperature ?? staleWebSave.data?.hot_temperature ?? [];
+  check(
+    "food-safety: merged web save keeps mobile row",
+    mergedHotRows.some((row) => row?._entryId === secondEntryId),
+    `rows=${JSON.stringify(mergedHotRows)}`,
+  );
+  check(
+    "food-safety: merged web save keeps web edit",
+    mergedHotRows.some((row) => row?.item === "Web soup"),
+    `rows=${JSON.stringify(mergedHotRows)}`,
+  );
+
+  // Two writers editing the same scalar field cannot be merged safely.
+  const conflictBaseline = (await req("GET", `/food-safety/by-date/${recordDate}`)).data;
+  const competingEdit = await req("PUT", `/food-safety/${recordId}`, {
+    correctives: "Another manager's edit",
+  });
+  expectOk("food-safety: competing web edit", competingEdit.status, [200]);
+  const conflictSave = await req("PUT", `/food-safety/${recordId}`, {
+    expectedUpdatedAt: conflictBaseline?.updatedAt,
+    expectedRecord: { correctives: conflictBaseline?.correctives ?? null },
+    correctives: "Stale overwrite attempt",
+  });
+  check("food-safety: unsafe stale web save → 409", conflictSave.status === 409, `got ${conflictSave.status}`);
+  check("food-safety: conflict response identifies diary conflict", conflictSave.data?.code === "DIARY_CONFLICT", `got ${JSON.stringify(conflictSave.data)}`);
 
   // 8. GET /food-safety?date= — same record
   const byQueryRes = await req("GET", `/food-safety?date=${recordDate}`);
@@ -591,6 +689,93 @@ async function testSiteFiltering(req, siteId) {
   check("site-filter: POST with foreign siteId → 400", wrongSite.status === 400, `got ${wrongSite.status}`);
 }
 
+async function testCleaningSiteFiltering(req, siteId, otherSiteId) {
+  console.log("\n── KitchenTrack cleaning site scope ──");
+  const date = isoDate(-4);
+  const frequency = "daily";
+
+  const firstTask = await req("POST", "/kitchen-cleaning/tasks", {
+    siteId,
+    area: "Kitchen A",
+    task: "Clean the prep area",
+    frequency,
+  });
+  const secondTask = await req("POST", "/kitchen-cleaning/tasks", {
+    siteId: otherSiteId,
+    area: "Kitchen B",
+    task: "Clean the service area",
+    frequency,
+  });
+  expectOk("cleaning: create first site task", firstTask.status, [201]);
+  expectOk("cleaning: create second site task", secondTask.status, [201]);
+
+  const firstTasks = await req("GET", `/kitchen-cleaning/tasks?siteId=${siteId}`);
+  expectOk("cleaning: get first site tasks", firstTasks.status);
+  check(
+    "cleaning: first site task filter excludes other site",
+    (firstTasks.data ?? []).some((task) => task.id === firstTask.data?.id) &&
+      !(firstTasks.data ?? []).some((task) => task.id === secondTask.data?.id),
+  );
+
+  const firstLog = await req("POST", "/kitchen-cleaning/logs", {
+    siteId,
+    logDate: date,
+    frequency,
+    completions: [{
+      taskId: firstTask.data?.id,
+      taskName: "Clean the prep area",
+      done: true,
+      doneBy: "Site A staff",
+    }],
+    signedBy: "Site A staff",
+    submittedAt: null,
+  });
+  const secondLog = await req("POST", "/kitchen-cleaning/logs", {
+    siteId: otherSiteId,
+    logDate: date,
+    frequency,
+    completions: [{
+      taskId: secondTask.data?.id,
+      taskName: "Clean the service area",
+      done: true,
+      doneBy: "Site B staff",
+    }],
+    signedBy: "Site B staff",
+    submittedAt: null,
+  });
+  expectOk("cleaning: save first site log", firstLog.status, [201]);
+  expectOk("cleaning: save second site log for same date", secondLog.status, [201]);
+  check("cleaning: first log is stamped with first site", firstLog.data?.site_id === siteId);
+  check("cleaning: second log is stamped with second site", secondLog.data?.site_id === otherSiteId);
+
+  const filteredLog = await req("GET", `/kitchen-cleaning/logs?date=${date}&frequency=${frequency}&siteId=${siteId}`);
+  expectOk("cleaning: get first site log", filteredLog.status);
+  check(
+    "cleaning: log filter cannot return other site",
+    filteredLog.data?.site_id === siteId &&
+      filteredLog.data?.completions?.[0]?.doneBy === "Site A staff",
+  );
+
+  const filteredHistory = await req("GET", `/kitchen-cleaning/logs/history?siteId=${siteId}`);
+  expectOk("cleaning: get first site history", filteredHistory.status);
+  check(
+    "cleaning: history filter excludes other site",
+    (filteredHistory.data ?? []).every((log) => log.site_id === siteId || log.site_id === null),
+  );
+
+  const foreignRead = await req("GET", "/kitchen-cleaning/tasks?siteId=999999999");
+  check("cleaning: foreign site read is rejected", foreignRead.status === 403, `got ${foreignRead.status}`);
+  const foreignWrite = await req("POST", "/kitchen-cleaning/logs", {
+    siteId: 999999999,
+    logDate: isoDate(-5),
+    frequency,
+    completions: [],
+    signedBy: "No access",
+    submittedAt: null,
+  });
+  check("cleaning: foreign site write is rejected", foreignWrite.status === 403, `got ${foreignWrite.status}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,7 +784,7 @@ async function main() {
   const req = makeSession();
 
   // Register a fresh account
-  const email = `modules-${Date.now()}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = `modules-${runId}@test.local`;
   const regRes = await req("POST", "/auth/register", {
     name: "Module Test Account",
     email,
@@ -633,11 +818,29 @@ async function main() {
   }
   const siteId = siteRes.data?.id;
   check("setup: site created", typeof siteId === "number", `siteId=${siteId}`);
+  const secondSiteRes = await req("POST", "/sites", {
+    name: "Module Test Kitchen B",
+    seedStarterChecks: false,
+  });
+  if (secondSiteRes.status !== 201) {
+    console.error("FATAL: second site creation failed", secondSiteRes.status, secondSiteRes.data);
+    process.exit(1);
+  }
+  const secondSiteId = secondSiteRes.data?.id;
 
-  await testFireSafety(req);
-  await testLegionella(req);
+  await testFireSafety(req, siteId);
+  await testLegionella(req, siteId);
   await testFoodSafety(req);
   await testSiteFiltering(req, siteId);
+  await testCleaningSiteFiltering(req, siteId, secondSiteId);
+  await testDocTrainFlows({
+    managerReq: req,
+    makeSession,
+    check,
+    expectOk,
+    siteId,
+    isoDate,
+  });
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

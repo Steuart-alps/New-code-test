@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
@@ -150,7 +150,34 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  await db.delete(clientsTable).where(eq(clientsTable.id, id));
+  const result = await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(106, ${id})`);
+    const erasureReview = await tx.execute(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM client_data_deletion_requests
+        WHERE client_id = ${id}
+          AND (status = 'pending' OR
+               (status = 'approved' AND earliest_deletion_at > now()))
+      ) AS blocked
+    `);
+    if ((erasureReview.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "request";
+    const holdCheck = await tx.execute(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM privacy_retention_schedules
+        WHERE client_id = ${id}
+          AND active = true
+          AND (legal_hold_active = true OR deletion_exception = true)
+      ) AS blocked
+    `);
+    if ((holdCheck.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "hold";
+    await tx.delete(clientsTable).where(eq(clientsTable.id, id));
+    return "deleted";
+  });
+  if (result !== "deleted") {
+    return res.status(409).json({ error: result === "request"
+      ? "Account deletion requires manual review and the full 30-day retention window"
+      : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
+  }
   res.json({ ok: true });
 });
 

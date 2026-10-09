@@ -1,20 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings } from "@workspace/api-client-react";
+import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { apiFetch as authenticatedApiFetch } from "@/lib/api";
+import { useActiveClientApi } from "@/hooks/use-active-client-api";
+import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package } from "lucide-react";
+import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { clearModuleActivation, trackModuleActivation } from "@/lib/analytics";
+import { clearModuleActivation, trackModuleActivation, trackServiceActionOutcome } from "@/lib/analytics";
+import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -66,6 +71,201 @@ function StatusBadge({ status }: { status: string | null }) {
     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
       <RefreshCw className="w-3.5 h-3.5" /> Pending verification
     </span>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit += 1;
+  } while (value >= 1024 && unit < units.length - 1);
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unit]}`;
+}
+
+function StorageUsageCard() {
+  const { toast } = useToast();
+  const { activeClientId } = useAuth();
+  const [thresholdGb, setThresholdGb] = useState("5");
+  const [saving, setSaving] = useState(false);
+  const [storagePurchaseBusy, setStoragePurchaseBusy] = useState(false);
+  const usageQuery = useGetStorageUsage({
+    query: {
+      queryKey: ["/api/storage/usage", activeClientId],
+      enabled: activeClientId !== null,
+      retry: false,
+    },
+  });
+  const usage = usageQuery.data;
+
+  useEffect(() => {
+    if (usage) {
+      setThresholdGb(String(Number((usage.warningThresholdBytes / (1024 ** 3)).toFixed(3))));
+    }
+  }, [usage]);
+
+  const saveThreshold = async () => {
+    const gigabytes = Number(thresholdGb);
+    const bytes = Math.round(gigabytes * 1024 ** 3);
+    if (!Number.isFinite(gigabytes) || gigabytes <= 0 || bytes < 1024 ** 2) {
+      toast({ title: "Enter a warning threshold of at least 0.001 GB", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await authenticatedApiFetch(`/settings?clientId=${activeClientId}`, {
+        method: "PUT",
+        body: JSON.stringify({ storageWarningThresholdBytes: String(bytes) }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Request failed (${response.status})`);
+      }
+      await usageQuery.refetch();
+      toast({ title: "Storage warning threshold saved" });
+    } catch (err: any) {
+      toast({ title: "Couldn't save storage warning", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const buyAdditionalStorage = async () => {
+    const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
+    const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
+    setStoragePurchaseBusy(true);
+    try {
+      const response = await authenticatedApiFetch("/billing/storage", {
+        method: "POST",
+        body: JSON.stringify({ gib, requestId: crypto.randomUUID() }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+      toast({
+        title: "Additional storage added",
+        description: `${gib} GiB has been added to your monthly Stripe subscription.`,
+      });
+      await usageQuery.refetch();
+    } catch (err: any) {
+      toast({ title: "Couldn't add storage", description: err.message, variant: "destructive" });
+    } finally {
+      setStoragePurchaseBusy(false);
+    }
+  };
+
+  const percent = usage
+    ? Math.min(100, Math.round((usage.usedBytes / usage.warningThresholdBytes) * 100))
+    : 0;
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <div className="flex items-center gap-2">
+          <HardDrive className="w-5 h-5 text-sky-600" />
+          <CardTitle className="font-display">File Storage</CardTitle>
+        </div>
+        <CardDescription>
+          Monitor retained documents and evidence for this account. The warning is informational and never blocks or deletes files.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-5">
+        {usageQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <RefreshCw className="h-4 w-4 animate-spin" /> Calculating current usage…
+          </div>
+        ) : usage ? (
+          <>
+            {usage.warning && (
+              <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-medium">Storage warning threshold reached</p>
+                  <p className="text-sm">Review retained files or raise the warning level. Uploads will continue normally.</p>
+                </div>
+              </div>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Retained storage</p>
+                <p className="mt-1 text-2xl font-semibold">{formatBytes(usage.usedBytes)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{usage.objectCount.toLocaleString()} stored {usage.objectCount === 1 ? "file" : "files"}</p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Downloads this month</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {usage.monthlyDownloadTrackingAvailable && usage.monthlyDownloadBytes !== null
+                    ? formatBytes(usage.monthlyDownloadBytes)
+                    : "Not available"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {usage.monthlyDownloadTrackingAvailable
+                    ? `Authoritative streamed traffic for ${usage.month}. Retries and partial downloads count separately.`
+                    : "Download traffic is not currently measured."}
+                </p>
+                <p className="mt-2 text-sm font-medium">
+                  {usage.estimatedCost
+                    ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
+                      ? `Estimated excess storage charge: $${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month`
+                      : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
+                    : "Storage pricing is currently unavailable for this subscription."}
+                </p>
+                {usage.estimatedCost && (usage.estimatedCost.excessStorageBytes ?? 0) > 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Based on Replit’s storage cost plus a {usage.estimatedCost.markupPercent ?? 20}% ALPS margin.
+                    Downloads are measured separately and are not charged here.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={buyAdditionalStorage}
+                  disabled={storagePurchaseBusy}
+                >
+                  {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
+                  {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>{percent}% of warning level</span>
+                <span className="text-muted-foreground">{formatBytes(usage.warningThresholdBytes)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className={`h-full rounded-full ${usage.warning ? "bg-amber-500" : "bg-sky-600"}`} style={{ width: `${percent}%` }} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Storage usage is temporarily unavailable.</p>
+            <Button type="button" size="sm" variant="outline" onClick={() => usageQuery.refetch()}>Try again</Button>
+          </div>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="storage-warning-gb">Warn me at (GB)</Label>
+            <Input
+              id="storage-warning-gb"
+              type="number"
+              min="0.001"
+              max="10240"
+              step="0.1"
+              value={thresholdGb}
+              onChange={(event) => setThresholdGb(event.target.value)}
+            />
+          </div>
+          <Button type="button" variant="outline" disabled={saving || usageQuery.isLoading || activeClientId === null} onClick={saveThreshold}>
+            {saving ? "Saving…" : "Save warning level"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -531,46 +731,44 @@ const TRACK_SUMMARY_MODULES = [
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
-function TrackSummaryRoutingCard({
-  value,
-  seniorEmail,
-  onSaved,
-}: {
-  value: string | null | undefined;
-  seniorEmail: string;
-  onSaved: (value: string) => void;
-}) {
+function TrackSummaryRoutingCard() {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const canAdmin = useCanAdmin();
   const [users, setUsers] = useState<DeptUser[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [routing, setRouting] = useState<Record<string, number[]>>({});
+  const [routing, setRouting] = useState<Record<string, { managerIds: number[]; departmentIds: number[] }>>({});
+  const [seniorEmail, setSeniorEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    try {
-      const parsed = value ? JSON.parse(value) : {};
-      setRouting(parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {});
-    } catch {
-      setRouting({});
-    }
-  }, [value]);
-
-  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const scope = activeClientId != null ? `?clientId=${activeClientId}` : "";
     Promise.all([
-      apiFetch<DeptUser[]>("/users"),
-      apiFetch<Department[]>("/departments"),
+      apiFetch<DeptUser[]>(`/users${scope}`),
+      apiFetch<Department[]>(`/departments${scope}`),
+      apiFetch<{ notificationEmail?: string; trackSummaryRouting?: string }>(`/settings${scope}`),
     ])
-      .then(([userList, departmentList]) => {
+      .then(([userList, departmentList, settings]) => {
+        if (cancelled) return;
         setUsers(userList);
         setDepartments(departmentList);
+        setSeniorEmail(settings.notificationEmail ?? "");
+        const parsed = settings.trackSummaryRouting ? JSON.parse(settings.trackSummaryRouting) : {};
+        const normalized = Object.fromEntries(Object.entries(parsed).map(([key, entry]) =>
+          [key, Array.isArray(entry) ? { managerIds: entry, departmentIds: [] } : entry]
+        )) as Record<string, { managerIds: number[]; departmentIds: number[] }>;
+        setRouting(normalized);
       })
       .catch((err: Error) => {
+        if (cancelled) return;
         toast({ title: "Couldn't load track recipients", description: err.message, variant: "destructive" });
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
 
   const managers = users.filter(
     (user) => user.active !== false && (user.role === "client_admin" || user.role === "client_staff"),
@@ -579,9 +777,16 @@ function TrackSummaryRoutingCard({
 
   const toggleManager = (module: string, userId: number) => {
     setRouting((current) => {
-      const selected = new Set(current[module] ?? []);
+      const selected = new Set(current[module]?.managerIds ?? []);
       selected.has(userId) ? selected.delete(userId) : selected.add(userId);
-      return { ...current, [module]: [...selected] };
+      return { ...current, [module]: { managerIds: [...selected], departmentIds: current[module]?.departmentIds ?? [] } };
+    });
+  };
+  const toggleDepartment = (module: string, departmentId: number) => {
+    setRouting((current) => {
+      const selected = new Set(current[module]?.departmentIds ?? []);
+      selected.has(departmentId) ? selected.delete(departmentId) : selected.add(departmentId);
+      return { ...current, [module]: { managerIds: current[module]?.managerIds ?? [], departmentIds: [...selected] } };
     });
   };
 
@@ -589,11 +794,15 @@ function TrackSummaryRoutingCard({
     setSaving(true);
     try {
       const serialized = JSON.stringify(routing);
-      await apiFetch("/settings", {
+      const scope = activeClientId != null ? `?clientId=${activeClientId}` : "";
+      const response = await authenticatedApiFetch(`/settings${scope}`, {
         method: "PUT",
         body: JSON.stringify({ trackSummaryRouting: serialized }),
       });
-      onSaved(serialized);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? `Request failed (${response.status})`);
+      }
       toast({ title: "Track summary routing saved" });
     } catch (err: any) {
       toast({ title: "Couldn't save routing", description: err.message, variant: "destructive" });
@@ -610,7 +819,9 @@ function TrackSummaryRoutingCard({
           <CardTitle className="font-display">Track Summary Recipients</CardTitle>
         </div>
         <CardDescription>
-          Senior management receives every track. Assign the relevant department managers below so they receive only the tracks they oversee.
+          Senior management receives every enabled track. Choose departments or named staff for additional track-specific digests.
+          By default, tracks are matched to relevant departments by name, but only designated department managers receive them.
+          Designate managers on the Users page. Each recipient gets one combined email; read-only viewers are excluded.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-5">
@@ -636,7 +847,8 @@ function TrackSummaryRoutingCard({
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border">
             {TRACK_SUMMARY_MODULES.map((track) => {
-              const selectedIds = routing[track.key] ?? [];
+              const selectedIds = routing[track.key]?.managerIds ?? [];
+              const selectedDepartments = routing[track.key]?.departmentIds ?? [];
               const selectedManagers = managers.filter((manager) => selectedIds.includes(manager.id));
               return (
                 <details key={track.key} className="group">
@@ -644,12 +856,39 @@ function TrackSummaryRoutingCard({
                     <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
                     <span className="flex-1 text-sm font-medium">{track.label}</span>
                     <span className="max-w-[55%] truncate text-xs text-muted-foreground">
-                      {selectedManagers.length > 0
-                        ? selectedManagers.map((manager) => manager.name).join(", ")
-                        : "Senior management only"}
+                      {!Object.hasOwn(routing, track.key)
+                        ? "Automatic department match"
+                        : [...departments.filter((department) => selectedDepartments.includes(department.id)).map((department) => department.name),
+                            ...selectedManagers.map((manager) => manager.name)].join(", ") || "Senior management only"}
                     </span>
                   </summary>
                   <div className="grid gap-2 border-t border-border/60 bg-muted/10 px-10 py-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold text-muted-foreground">Departments (designated managers only)</span>
+                      {Object.hasOwn(routing, track.key) && <Button size="sm" variant="ghost" disabled={!canAdmin || saving}
+                        onClick={() => setRouting((current) => {
+                          const next = { ...current }; delete next[track.key]; return next;
+                        })}>Restore automatic routing</Button>}
+                    </div>
+                    {!Object.hasOwn(routing, track.key) && (
+                      <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-md border border-border bg-background p-3">
+                        <p className="text-xs text-muted-foreground">Automatic matching is on. Customizing replaces the automatic department matches for this track; senior management still receives it.</p>
+                        <Button size="sm" variant="outline" disabled={!canAdmin || saving}
+                          onClick={() => setRouting((current) => ({
+                            ...current, [track.key]: { managerIds: [], departmentIds: [] },
+                          }))}>Customize</Button>
+                      </div>
+                    )}
+                    {departments.map((department) => (
+                      <label key={department.id} className="flex items-center gap-2 rounded-md border border-border bg-background p-2.5 text-sm">
+                        <input type="checkbox" checked={selectedDepartments.includes(department.id)}
+                          onChange={() => toggleDepartment(track.key, department.id)}
+                          disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
+                          className="h-4 w-4 accent-primary" />
+                        {department.name}
+                      </label>
+                    ))}
+                    <span className="sm:col-span-2 text-xs font-semibold text-muted-foreground">Named managers</span>
                     {managers.map((manager) => {
                       const department = departments.find((item) => item.id === manager.departmentId);
                       return (
@@ -659,7 +898,7 @@ function TrackSummaryRoutingCard({
                             className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
                             checked={selectedIds.includes(manager.id)}
                             onChange={() => toggleManager(track.key, manager.id)}
-                            disabled={!canAdmin || saving}
+                            disabled={!canAdmin || saving || !Object.hasOwn(routing, track.key)}
                           />
                           <span>
                             <span className="block font-medium">{manager.name}</span>
@@ -1082,6 +1321,7 @@ function BillingCard() {
   const [config, setConfig] = useState<BillingConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const fetchConfig = () => {
@@ -1107,6 +1347,21 @@ function BillingCard() {
     }
   };
 
+  const startCheckout = async () => {
+    setCheckoutBusy(true);
+    try {
+      const data = await apiFetch<{ url: string }>("/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (!data.url) throw new Error("Could not start checkout");
+      window.location.href = data.url;
+    } catch (err: any) {
+      toast({ title: "Couldn't start checkout", description: err.message, variant: "destructive" });
+      setCheckoutBusy(false);
+    }
+  };
+
   const handleServiceAction = async (serviceKey: string, action: "add" | "remove") => {
     const isAdd = action === "add";
     const amountPence = config?.services?.catalog.find((c) => c.key === serviceKey)?.amountPence || 1000;
@@ -1122,18 +1377,31 @@ function BillingCard() {
 
     setActionBusy(serviceKey);
     try {
-      const res = await apiFetch<{ ok: boolean; paymentPending?: boolean }>("/billing/services", {
+      const response = await authenticatedApiFetch("/billing/services", {
         method: "POST",
         body: JSON.stringify({ service: serviceKey, action }),
       });
-      if (res.paymentPending) {
+      const res = await response.json().catch(() => null) as {
+        ok?: boolean;
+        entitled?: boolean | "all" | string[];
+        paymentPending?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(res?.error ?? `Request failed (${response.status})`);
+      if (!res || typeof res.ok !== "boolean") throw new Error("Invalid service action response");
+      const confirmed = trackServiceActionOutcome(serviceKey, action, {
+        ok: res.ok,
+        entitled: res.entitled,
+        paymentPending: res.paymentPending,
+      });
+      if (res.paymentPending || (isAdd && !confirmed)) {
         toast({ title: "Payment pending", description: "Action succeeded but the payment requires attention in the billing portal.", variant: "default" });
       } else {
         toast({ title: `Service ${isAdd ? "added" : "removed"} successfully` });
       }
-      if (isAdd && !res.paymentPending) {
+      if (isAdd && confirmed) {
         trackModuleActivation(activeClientId, serviceKey);
-      } else {
+      } else if (!isAdd && confirmed) {
         clearModuleActivation(activeClientId, serviceKey);
       }
       fetchConfig();
@@ -1158,7 +1426,7 @@ function BillingCard() {
 
   return (
     <>
-      <Card className="shadow-lg border-border/50 bg-card mb-6">
+      <Card id="billing" className="shadow-lg border-border/50 bg-card mb-6">
         <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-primary" />
@@ -1197,9 +1465,15 @@ function BillingCard() {
                 <div className="text-sm text-muted-foreground">
                   Status: <span className="font-medium text-foreground capitalize">{status}</span>
                 </div>
-                <Button variant="outline" onClick={openPortal} disabled={busy}>
-                  <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
-                </Button>
+                {hasSubscription ? (
+                  <Button variant="outline" onClick={openPortal} disabled={busy}>
+                    <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
+                  </Button>
+                ) : canAdmin ? (
+                  <Button onClick={startCheckout} disabled={checkoutBusy}>
+                    <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Set up billing"}
+                  </Button>
+                ) : null}
               </div>
 
               {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (
@@ -1327,6 +1601,15 @@ function DataExportCard() {
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const canAdmin = useCanAdmin();
+  useEffect(() => {
+    if (canAdmin && window.location.hash === "#data-export") {
+      const frame = window.requestAnimationFrame(() => {
+        document.getElementById("data-export")?.scrollIntoView({ block: "start" });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    return undefined;
+  }, [canAdmin]);
   if (!canAdmin) return null;
 
   async function handleExport() {
@@ -1355,7 +1638,7 @@ function DataExportCard() {
   }
 
   return (
-    <Card className="shadow-lg border-border/50 bg-card">
+    <Card id="data-export" className="scroll-mt-6 shadow-lg border-border/50 bg-card">
       <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
         <div className="flex items-center gap-2">
           <Download className="w-5 h-5 text-primary" />
@@ -1369,7 +1652,7 @@ function DataExportCard() {
         <div className="flex items-start gap-4">
           <div className="flex-1 text-sm text-muted-foreground space-y-1">
             <p>The export includes every record scoped to your account: sites, departments, staff, all compliance logs and contractor records.</p>
-            <p className="text-xs">File attachments (PDFs, photos) are referenced by URL in the CSV — they are not bundled into the ZIP.</p>
+            <p className="text-xs">Available private file attachments (PDFs, photos) are included in the ZIP. Check its manifest for any files that could not be bundled.</p>
           </div>
           <Button onClick={handleExport} disabled={busy} className="shrink-0 gap-2">
             {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
@@ -1481,34 +1764,37 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
 function PhotoRequirementsCard() {
   const canAdmin = useCanAdmin();
   const { toast } = useToast();
+  const request = useActiveClientApi();
+  const rules = usePhotoRequirements();
+  const queryClient = useQueryClient();
   const [requirements, setRequirements] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch<{ entity_type: string; required: boolean }[]>("/photos/requirements")
-      .then(rows => {
-        const map: Record<string, boolean> = {};
-        rows.forEach((r: { entity_type: string; required: boolean }) => { map[r.entity_type] = r.required; });
-        setRequirements(map);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+    const map: Record<string, boolean> = {};
+    Object.entries(rules.requirements).forEach(([key, rule]) => { map[key] = rule.required; });
+    setRequirements(map);
+  }, [rules.requirements]);
 
   const toggle = (entityType: string) => {
     setRequirements(prev => ({ ...prev, [entityType]: !prev[entityType] }));
   };
 
   const handleSave = async () => {
+    if (rules.isLoading || rules.error) return;
     setSaving(true);
     try {
       const items = Object.keys(PHOTO_ENTITY_LABELS).map(k => ({
         entityType: k,
         required: requirements[k] ?? false,
-        minPhotos: 1,
+        minPhotos: rules.requirements[k]?.minPhotos ?? 1,
       }));
-      await apiFetch("/photos/requirements", { method: "PUT", body: JSON.stringify(items) });
+      const response = await request("/photos/requirements", { method: "PUT", body: JSON.stringify(items) });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? `Request failed (${response.status})`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["photo-requirements"] });
       toast({ title: "Photo requirements saved" });
     } catch (err: any) {
       toast({ title: "Failed to save", description: err.message, variant: "destructive" });
@@ -1531,9 +1817,14 @@ function PhotoRequirementsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        {loading ? (
+        {rules.isLoading ? (
           <div className="p-6 flex justify-center">
             <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : rules.error ? (
+          <div role="alert" className="p-6 text-sm text-destructive">
+            Could not load photo requirements. Existing rules have not been changed.
+            <Button type="button" variant="ghost" onClick={rules.retry}>Retry photo requirements</Button>
           </div>
         ) : (
           <>
@@ -1742,32 +2033,38 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     companyName: "",
     defaultLeadTimeDays: "30",
+    contractorComplianceLeadTimeDays: "30",
     notificationEmail: "",
     maintenanceEmail: "",
     additionalReminderEmails: "",
     notifyClientAdmins: "false",
+    safeTrackReminderFrequency: "daily",
+    safeTrackReminderTime: "08:50",
     smtpFrom: "",
     smtpFromName: "",
     resendApiKey: "",
+    accountTimezone: "Europe/London",
   });
 
   const [testEmail, setTestEmail] = useState("");
-  const [trackSummaryRouting, setTrackSummaryRouting] = useState("");
 
   useEffect(() => {
     if (settings) {
       setFormData({
         companyName: settings.companyName || "",
         defaultLeadTimeDays: settings.defaultLeadTimeDays || "30",
+        contractorComplianceLeadTimeDays: (settings as any).contractorComplianceLeadTimeDays || "30",
         notificationEmail: (settings as any).notificationEmail || "",
         maintenanceEmail: (settings as any).maintenanceEmail || "",
         additionalReminderEmails: (settings as any).additionalReminderEmails || "",
         notifyClientAdmins: (settings as any).notifyClientAdmins || "false",
+        safeTrackReminderFrequency: (settings as any).safeTrackReminderFrequency || "daily",
+        safeTrackReminderTime: (settings as any).safeTrackReminderTime || "08:50",
         smtpFrom: settings.smtpFrom || "",
         smtpFromName: settings.smtpFromName || "",
         resendApiKey: (settings as any).resendApiKey || "",
+        accountTimezone: settings.accountTimezone || "Europe/London",
       });
-      setTrackSummaryRouting((settings as any).trackSummaryRouting || "");
     }
   }, [settings]);
 
@@ -1785,6 +2082,11 @@ export default function SettingsPage() {
     await triggerTestEmail.mutateAsync({ data: { to: testEmail } });
   };
 
+  if (billingLocked) return (
+    <AppLayout title="Settings">
+      <div className="max-w-4xl"><DataDeletionRequestCard /></div>
+    </AppLayout>
+  );
   if (isLoading) return <AppLayout title="Settings"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mt-10" /></AppLayout>;
 
   return (
@@ -1792,14 +2094,12 @@ export default function SettingsPage() {
       <div className="max-w-4xl space-y-6">
         <BillingCard />
         <InvoicesCard />
+        {canAdmin && <StorageUsageCard />}
         <DataExportCard />
+        <DataDeletionRequestCard />
         <DepartmentsCard />
         {canAdmin && <RequiredActionTemplatesCard />}
-        <TrackSummaryRoutingCard
-          value={trackSummaryRouting}
-          seniorEmail={formData.notificationEmail}
-          onSaved={setTrackSummaryRouting}
-        />
+        <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
@@ -1821,6 +2121,19 @@ export default function SettingsPage() {
                   <p className="text-xs text-muted-foreground">Reminders sent this many days before a check is due. Default: 30 days.</p>
                   <Input type="number" name="defaultLeadTimeDays" value={formData.defaultLeadTimeDays} onChange={handleChange} />
                 </div>
+                <div className="space-y-1.5 col-span-2">
+                  <Label>Account Timezone</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
+                  </p>
+                  <Input
+                    name="accountTimezone"
+                    value={formData.accountTimezone}
+                    onChange={handleChange}
+                    placeholder="Europe/London"
+                    autoComplete="off"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1837,6 +2150,44 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
+              <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
+                <div>
+                  <Label>SafeTrack acknowledgement reminders</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Choose how often account admins and staff are reminded about outstanding SafeTrack sign-offs.
+                    The delivery time uses your account timezone.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeTrackReminderFrequency">Frequency</Label>
+                    <Select
+                      value={formData.safeTrackReminderFrequency}
+                      onValueChange={(value) =>
+                        setFormData((prev) => ({ ...prev, safeTrackReminderFrequency: value }))
+                      }
+                    >
+                      <SelectTrigger id="safeTrackReminderFrequency">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Every day</SelectItem>
+                        <SelectItem value="weekly">Once a week</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeTrackReminderTime">Preferred delivery time</Label>
+                    <Input
+                      id="safeTrackReminderTime"
+                      type="time"
+                      name="safeTrackReminderTime"
+                      value={formData.safeTrackReminderTime}
+                      onChange={handleChange}
+                    />
+                  </div>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <Label>Admin / Owner Notification Email</Label>
                 <p className="text-xs text-muted-foreground">
@@ -1849,6 +2200,22 @@ export default function SettingsPage() {
                   value={formData.notificationEmail}
                   onChange={handleChange}
                   placeholder="owner@yourcompany.com"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Contractor expiry warning lead time (days)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Send insurance, DBS / PVG, and certificate warnings this many days before expiry. Existing accounts use 30 days.
+                </p>
+                <Input
+                  type="number"
+                  name="contractorComplianceLeadTimeDays"
+                  min="0"
+                  max="365"
+                  step="1"
+                  value={formData.contractorComplianceLeadTimeDays}
+                  onChange={handleChange}
                 />
               </div>
 
@@ -1978,7 +2345,7 @@ export default function SettingsPage() {
         </form>
 
         {/* Two-Factor Authentication */}
-        <TwoFactorCard />
+        <TwoFactorCard key={user?.id ?? "signed-out"} />
         <PasskeyCard />
       </div>
     </AppLayout>
@@ -1986,9 +2353,10 @@ export default function SettingsPage() {
 }
 
 // ── Two-Factor Authentication card ───────────────────────────────────────────
-function TwoFactorCard() {
+export function TwoFactorCard() {
   const { user, refresh } = useAuth();
   const { toast } = useToast();
+  const passwordInputRef = useRef<HTMLInputElement>(null);
 
   type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating";
   const [step, setStep] = useState<SetupStep>("idle");
@@ -1998,8 +2366,36 @@ function TwoFactorCard() {
   const [error, setError] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [regeneratePassword, setRegeneratePassword] = useState("");
+  const [regenerationPending, setRegenerationPending] = useState(false);
 
   const enabled = user?.totpEnabled ?? false;
+  const userId = user?.id ?? null;
+  const recoveryCodesQuery = useQuery({
+    queryKey: ["auth", "recovery-codes-remaining", userId],
+    queryFn: async () => {
+      if (userId === null) throw new Error("Unable to verify the signed-in user.");
+      const data = await apiFetch<{
+        user?: { id?: number; recoveryCodesRemaining?: number };
+        error?: string;
+      }>("/auth/me");
+      if (data?.user?.id !== userId) throw new Error("Unable to verify recovery code count for this account.");
+      const remaining = data.user.recoveryCodesRemaining;
+      if (!Number.isSafeInteger(remaining) || remaining! < 0) {
+        throw new Error("The server returned an invalid recovery code count.");
+      }
+      return remaining!;
+    },
+    enabled: userId !== null && enabled,
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    refetchInterval: enabled ? 30_000 : false,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (step === "regenerating") passwordInputRef.current?.focus();
+  }, [step]);
 
   async function startSetup() {
     setError("");
@@ -2022,6 +2418,7 @@ function TwoFactorCard() {
     try {
       const result = await apiFetch<{ ok: boolean; recoveryCodes: string[] }>("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code: code.replace(/\s/g, "") }) });
       await refresh();
+      await recoveryCodesQuery.refetch();
       setRecoveryCodes(result.recoveryCodes);
       toast({ title: "Two-factor authentication enabled" });
       setStep("idle");
@@ -2037,18 +2434,29 @@ function TwoFactorCard() {
 
   async function handleRegenerate(e: React.FormEvent) {
     e.preventDefault();
+    if (regenerationPending) return;
     setError("");
+    setRegenerationPending(true);
     try {
-      const result = await apiFetch<{ recoveryCodes: string[] }>("/auth/2fa/recovery-codes/regenerate", {
+      const response = await authenticatedApiFetch("/auth/2fa/recovery-codes/regenerate", {
         method: "POST",
         body: JSON.stringify({ password: regeneratePassword }),
       });
+      const result = await response.json().catch(() => null) as { recoveryCodes?: unknown; error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? `Request failed (${response.status})`);
+      if (!Array.isArray(result?.recoveryCodes) || !result.recoveryCodes.every((recoveryCode): recoveryCode is string => typeof recoveryCode === "string")) {
+        throw new Error("The server did not return recovery codes.");
+      }
       setRecoveryCodes(result.recoveryCodes);
       setRegeneratePassword("");
       setStep("idle");
       toast({ title: "Recovery codes regenerated", description: "Your previous recovery codes no longer work." });
+      await refresh();
+      await recoveryCodesQuery.refetch();
     } catch (e: any) {
       setError(e.message ?? "Failed to regenerate recovery codes");
+    } finally {
+      setRegenerationPending(false);
     }
   }
 
@@ -2075,6 +2483,36 @@ function TwoFactorCard() {
       <CardContent className="pt-6">
         {enabled ? (
           <div className="space-y-4">
+            {recoveryCodesQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground" role="status" data-testid="status-recovery-code-count-loading">
+                Checking your unused recovery codes…
+              </p>
+            ) : recoveryCodesQuery.isError ? (
+              <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm" role="alert" data-testid="status-recovery-code-count-error">
+                <span>Unable to load your unused recovery code count: {recoveryCodesQuery.error.message}</span>
+                <Button size="sm" variant="outline" className="rounded-sm" onClick={() => recoveryCodesQuery.refetch()} data-testid="button-retry-recovery-code-count">
+                  Retry
+                </Button>
+              </div>
+            ) : recoveryCodesQuery.data !== undefined && (
+              <>
+                <p className="text-sm" data-testid="text-recovery-code-count">
+                  {recoveryCodesQuery.data} unused recovery {recoveryCodesQuery.data === 1 ? "code" : "codes"} remaining.
+                </p>
+                {recoveryCodesQuery.data <= 3 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm" role="alert" data-testid="status-recovery-code-warning">
+                    <p className="font-medium">
+                      {recoveryCodesQuery.data === 0
+                        ? "You have no unused recovery codes. Generate a new set now to avoid losing backup access to your account."
+                        : `Only ${recoveryCodesQuery.data} unused recovery ${recoveryCodesQuery.data === 1 ? "code remains" : "codes remain"}. Generate a new set soon.`}
+                    </p>
+                    <Button size="sm" className="rounded-sm" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-regenerate-recovery-codes-warning">
+                      {recoveryCodesQuery.data === 0 ? "Generate new codes now" : "Regenerate recovery codes"}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
             {recoveryCodes.length > 0 && (
               <div className="px-4 py-3 rounded-sm bg-amber-50 border border-amber-300 text-amber-900 text-sm space-y-2">
                 <p className="font-semibold">Save your recovery codes</p>
@@ -2106,7 +2544,7 @@ function TwoFactorCard() {
             </div>
             {step === "idle" && (
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }}>
+                <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-view-regenerate-recovery-codes">
                   <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
                 </Button>
                 <p className="text-xs text-muted-foreground">Two-factor authentication is required for all ComplyTrack user accounts. Contact an administrator if you lose access to your authenticator.</p>
@@ -2115,11 +2553,13 @@ function TwoFactorCard() {
             {step === "regenerating" && (
               <form onSubmit={handleRegenerate} className="space-y-3 max-w-sm">
                 <p className="text-sm text-muted-foreground">For security, existing codes cannot be viewed. Enter your password to replace them with 10 new codes.</p>
-                <Input type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus className="rounded-sm" />
+                <Input ref={passwordInputRef} type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus disabled={regenerationPending} className="rounded-sm" data-testid="input-recovery-code-password" />
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 <div className="flex gap-2">
-                  <Button type="submit" className="rounded-sm" disabled={!regeneratePassword}>Regenerate codes</Button>
-                  <Button type="button" variant="outline" className="rounded-sm" onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
+                  <Button type="submit" className="rounded-sm" disabled={!regeneratePassword || regenerationPending} data-testid="button-submit-recovery-code-regeneration">
+                    {regenerationPending ? "Regenerating…" : "Regenerate codes"}
+                  </Button>
+                  <Button type="button" variant="outline" className="rounded-sm" disabled={regenerationPending} onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
                 </div>
               </form>
             )}

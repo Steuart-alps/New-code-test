@@ -5,9 +5,23 @@
  * Compliance Tracker API
  * OpenAPI spec version: 0.2.0
  */
+import type { FoodSafetyRecordSnapshot } from './foodSafetyRecordSnapshot';
 import type { MobileTemperatureLog } from './mobileTemperatureLog';
 
 export interface UpdateFoodSafetyRecordRequest {
+  /**
+     * Stable device submission identifier retained across retries; requires mobileTemperatureLog and mobileRecordDate.
+     * @pattern ^[A-Za-z0-9_-]{12,100}$
+     */
+  mobileEntryId?: string;
+  /**
+     * Original device-local diary date; must match the target record.
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  mobileRecordDate?: string;
+  /** Updated-at value returned when the web diary was loaded. */
+  expectedUpdatedAt?: Date;
+  expectedRecord?: FoodSafetyRecordSnapshot;
   mobileTemperatureLog?: MobileTemperatureLog;
   deliveries?: unknown[];
   coldFood?: unknown[];
@@ -19,5 +33,5 @@ export interface UpdateFoodSafetyRecordRequest {
   hotHoldingLimit?: string;
   correctives?: string;
   managerSignature?: string;
-  submittedAt?: string;
+  submittedAt?: Date | null;
 }
