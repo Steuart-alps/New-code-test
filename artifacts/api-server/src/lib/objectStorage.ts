@@ -35,48 +35,21 @@ export type {
   AllowedUploadType,
 } from "./uploadValidation";
 
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 const gcsServiceAccountJson = process.env.GCS_SERVICE_ACCOUNT_JSON?.trim();
 const projectId = process.env.GCS_PROJECT_ID?.trim();
 
-// Use normal Google credentials for explicit service-account/ADC settings, or
-// outside Replit where local gcloud ADC or workload identity may be available.
-// In Replit, retain the Object Storage sidecar fallback when no GCS credentials
-// are configured.
-const useStandardGcs = Boolean(
-  gcsServiceAccountJson ||
-  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-  projectId ||
-  !process.env.REPL_ID
-);
-
+// Google Cloud Storage with standard Google credentials only: an explicit
+// service-account key (GCS_SERVICE_ACCOUNT_JSON), GOOGLE_APPLICATION_CREDENTIALS,
+// or ambient Application Default Credentials. With none of these, storage
+// operations fail and upload signing answers OBJECT_STORAGE_UNAVAILABLE; there
+// is no other fallback, and session credentials are never sent to storage.
 function createObjectStorageClient(): Storage {
-  if (useStandardGcs) {
-    const options: ConstructorParameters<typeof Storage>[0] = {};
-    if (projectId) options.projectId = projectId;
-    if (gcsServiceAccountJson) {
-      options.credentials = JSON.parse(gcsServiceAccountJson);
-    }
-    return new Storage(options);
+  const options: ConstructorParameters<typeof Storage>[0] = {};
+  if (projectId) options.projectId = projectId;
+  if (gcsServiceAccountJson) {
+    options.credentials = JSON.parse(gcsServiceAccountJson);
   }
-
-  return new Storage({
-    credentials: {
-      audience: "replit",
-      subject_token_type: "access_token",
-      token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-      type: "external_account",
-      credential_source: {
-        url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-        format: {
-          type: "json",
-          subject_token_field_name: "access_token",
-        },
-      },
-      universe_domain: "googleapis.com",
-    },
-    projectId: "",
-  });
+  return new Storage(options);
 }
 
 export const objectStorageClient = createObjectStorageClient();
@@ -724,45 +697,17 @@ async function signObjectURL({
   /** Bound into a GCS V4 PUT signature when provided. */
   contentType?: string;
 }): Promise<string> {
-  if (useStandardGcs) {
-    const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
-    const [signedUrl] = await objectStorageClient
-      .bucket(bucketName)
-      .file(objectName)
-      .getSignedUrl({
-        version: "v4",
-        action,
-        expires: Date.now() + ttlSec * 1000,
-        ...(method === "PUT" && contentType ? { contentType } : {}),
-      });
-    return signedUrl;
-  }
-
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-    ...(contentType ? { content_type: contentType } : {}),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, make sure you're running on Replit`
-    );
-  }
-  const json = await response.json() as { signed_url: string };
-  return json.signed_url;
+  const action = method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+  const [signedUrl] = await objectStorageClient
+    .bucket(bucketName)
+    .file(objectName)
+    .getSignedUrl({
+      version: "v4",
+      action,
+      expires: Date.now() + ttlSec * 1000,
+      ...(method === "PUT" && contentType ? { contentType } : {}),
+    });
+  return signedUrl;
 }
 
 function getConfiguredBucket(kind: "private" | "public"): string {

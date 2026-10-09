@@ -64,7 +64,7 @@ export interface StripeAttemptResult {
   catalogueVerified: boolean;
 }
 
-export type StripeCredentialSource = "env" | "replit-connector" | null;
+export type StripeCredentialSource = "env" | null;
 
 export interface StripeStartupLogger {
   info(obj: object, msg: string): void;

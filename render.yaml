@@ -61,6 +61,11 @@ services:
         sync: false
       - key: PUBLIC_OBJECT_SEARCH_PATHS
         sync: false
+      # First-party analytics: bearer token for the read-only
+      # /api/internal/analytics/summary route (unset = route disabled).
+      # Generate with `openssl rand -hex 32`.
+      - key: ANALYTICS_READ_TOKEN
+        sync: false
 
 databases:
   - name: complytrack-db

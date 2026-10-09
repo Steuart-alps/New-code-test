@@ -1,13 +1,13 @@
 import { isServiceEntitled } from "./service-action-outcome";
+import { apiFetch } from "./api";
 type AnalyticsData = Record<string, string | number | boolean>;
 
-declare global {
-  interface Window {
-    umami?: {
-      track(name: string, data?: AnalyticsData): void | Promise<unknown>;
-    };
-  }
-}
+// First-party analytics: events go to the app's own API, which stores them in
+// its Postgres only if the event name and every dimension value are on the
+// server-side allowlist (api-server src/lib/analytics.ts). A new event needs a
+// registry entry there as well as a typed helper here. Never send client,
+// site, user or record identity, names, dates, free text or content.
+const ANALYTICS_ENDPOINT = "/analytics/events";
 
 const ACTIVATION_PREFIX = "complytrack:analytics:module-activation:";
 const FIRST_USE_PREFIX = "complytrack:analytics:module-first-use:";
@@ -43,11 +43,20 @@ function remove(key: string): void {
   }
 }
 
+/**
+ * Best-effort: never throws, never blocks the caller and swallows failed or
+ * rejected requests. Sent through the shared apiFetch (session cookie plus
+ * CSRF token) with keepalive so an event survives a following navigation.
+ */
 export function trackEvent(name: string, data?: AnalyticsData): void {
   if (typeof window === "undefined") return;
   try {
-    void Promise.resolve(window.umami?.track(name, data)).catch(() => {
-      // A rejected tracker request must also remain harmless.
+    void Promise.resolve(apiFetch(ANALYTICS_ENDPOINT, {
+      method: "POST",
+      body: JSON.stringify({ event: name, dimensions: data ?? {} }),
+      keepalive: true,
+    })).catch(() => {
+      // A rejected analytics request must also remain harmless.
     });
   } catch {
     // Analytics must never break the app.
@@ -70,6 +79,24 @@ export function trackServiceActionOutcome(
 export function trackTrainingMatrixDownload(siteFilter: string): void {
   trackEvent("training_matrix_download_started", {
     site_scope: siteFilter === "all" ? "all_sites" : "selected_site",
+  });
+}
+
+export type InspectionPdfSiteScope = "all_sites" | "selected_site";
+export type InspectionPdfRecordScope = "empty" | "has_records";
+
+/**
+ * A generated HotTubTrack inspection-log PDF download. Only fixed enum scopes
+ * are sent; never site/tub names or ids, dates, search text or report content.
+ */
+export function trackInspectionPdfDownload(scope: {
+  siteScope: InspectionPdfSiteScope;
+  recordScope: InspectionPdfRecordScope;
+}): void {
+  trackEvent("inspection_pdf_download_started", {
+    module: "hottubtrack",
+    site_scope: scope.siteScope === "all_sites" ? "all_sites" : "selected_site",
+    record_scope: scope.recordScope === "empty" ? "empty" : "has_records",
   });
 }
 

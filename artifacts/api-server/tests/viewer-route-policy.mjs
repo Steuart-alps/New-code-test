@@ -30,6 +30,9 @@ function routeException(file, method, path) {
   if (name === "feedback.ts" && method === "POST" && path === "/feedback") {
     return "feedback submission";
   }
+  if (name === "analytics.ts" && method === "POST" && path === "/analytics/events") {
+    return "first-party analytics event (no tenant data)";
+  }
   if (name === "mobile.ts" && ["POST", "DELETE"].includes(method) && path === "/mobile/push-token") {
     return "mobile push-token registration";
   }

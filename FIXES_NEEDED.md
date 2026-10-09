@@ -233,7 +233,7 @@ Daily Diary landing view calls (`food-safety.ts:597-599`), so the daily diary
 
 ## 3. Documentation cleanup (not a bug — feature was removed, docs weren't)
 
-`replit.md` documents `GET/POST /api/compliance-items?type=external|internal`
+`docs/ARCHITECTURE.md` documents `GET/POST /api/compliance-items?type=external|internal`
 and separate "EXTERNAL COMPLIANCE" / "INTERNAL COMPLIANCE" nav sections.
 Neither exists anymore:
 
@@ -247,7 +247,7 @@ Neither exists anymore:
   `insertComplianceItemSchema` just ignores the unknown field.
 
 This isn't causing a live bug (nothing depends on the filter), but the
-`replit.md` API reference and nav description are stale and should be
+`docs/ARCHITECTURE.md` API reference and nav description are stale and should be
 updated to match the current unified-list design — otherwise the next person
 (human or agent) will "fix" a phantom bug or build against a param that does
 nothing.

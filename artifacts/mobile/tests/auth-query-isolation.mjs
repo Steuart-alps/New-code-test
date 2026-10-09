@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium } from '@playwright/test';
@@ -73,7 +72,7 @@ async function awaitPending() {
 try {
   browser = await chromium.launch({
     headless: true, args: ['--no-sandbox'],
-    executablePath: process.env.CHROMIUM_PATH ?? (existsSync('/repl/tools/bin/chromium') ? '/repl/tools/bin/chromium' : undefined),
+    executablePath: process.env.CHROMIUM_PATH,
   });
   const page = await browser.newPage();
   const errors = [];

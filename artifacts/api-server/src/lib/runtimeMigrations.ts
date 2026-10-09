@@ -593,6 +593,26 @@ export async function runRuntimeMigrations() {
       ON "auth_rate_limit_counters" ("expires_at")
     `);
 
+    // First-party product analytics: allowlisted event names and enum
+    // dimensions only. No user, client, session, IP or user-agent column by
+    // design; rows are purged after 13 months (lib/analytics.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "analytics_events" (
+        "id" bigserial PRIMARY KEY,
+        "event_name" text NOT NULL,
+        "dimensions" jsonb NOT NULL DEFAULT '{}'::jsonb,
+        "occurred_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_analytics_events_occurred_at"
+      ON "analytics_events" ("occurred_at")
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_analytics_events_name_occurred_at"
+      ON "analytics_events" ("event_name", "occurred_at")
+    `);
+
     // Authoritative streamed download accounting. Raw events are retained for
     // idempotent completion/reconciliation; the month table serves dashboard reads.
     await db.execute(sql`

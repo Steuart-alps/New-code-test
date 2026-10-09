@@ -208,16 +208,11 @@ const cases = {
     assert.equal(alive(serverPid), false);
   },
 
-  async "checks that .replit routes every validation through the runner"() {
-    const t = setup({ one: { stage: "static", class: "light", cmd: "true" }, two: { stage: "static", class: "light", cmd: "true" } });
-    const replit = path.join(t.dir, ".replit");
-    const workflow = (name, args) => `[[workflows.workflow]]\nname = "${name}"\nauthor = "agent"\n\n[[workflows.workflow.tasks]]\ntask = "shell.exec"\nargs = "${args}"\n\n[workflows.workflow.metadata]\nisValidation = true\n\n`;
-    fs.writeFileSync(replit, workflow("one", "node scripts/validate.mjs one") + workflow("two", "node scripts/validate.mjs two"));
-    assert.equal((await run(["--check-config"], { ...t.env, VALIDATE_REPLIT_PATH: replit }).done).code, 0);
-    fs.writeFileSync(replit, workflow("one", "node scripts/validate.mjs one") + workflow("two", "pnpm run two"));
-    const bad = await run(["--check-config"], { ...t.env, VALIDATE_REPLIT_PATH: replit }).done;
-    assert.equal(bad.code, 1);
-    assert.match(bad.output, /"two" should run/);
+  async "rejects the removed --check-config option"() {
+    const t = setup({ one: { stage: "static", class: "light", cmd: "true" } });
+    const { code, output } = await run(["--check-config"], t.env).done;
+    assert.equal(code, 2);
+    assert.match(output, /Unknown option --check-config/);
   },
 };
 
