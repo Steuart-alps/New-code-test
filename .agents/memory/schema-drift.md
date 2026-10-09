@@ -22,3 +22,5 @@ Rule: never trust the `CREATE TABLE IF NOT EXISTS` definitions in the api-server
 **Why:** Either shortcut silently supplies precisely the missing columns the check is meant to detect. A real blank run exposed migration-order dependencies and stale BikeTrack, FixTrack, water-temperature and kitchen-diary definitions that ordinary shared-dev tests could not reveal.
 
 **How to apply:** Use a disposable local PostgreSQL cluster with a scrubbed child environment, wait for readiness, and run migrations twice. Stub external storage only at its boundary; keep route validation and database writes real. Do not inherit application database or service credentials.
+
+**Push-only legacy tables:** `certificates` (item/contractor certificate history) existed only via drizzle push, so GET /compliance-items 500'd on runtime-migrated databases. It is now created in runtimeMigrations; the fresh-schema routes test lists the register with empty history, an own certificate and a foreign tenant's certificate. Check other Drizzle tables read by list routes the same way.
