@@ -18,6 +18,7 @@ async function buildAll() {
     entryPoints: {
       index: path.resolve(artifactDir, "src/bootstrap.ts"),
       "pdf-validation-worker": path.resolve(artifactDir, "src/workers/pdfValidationWorker.ts"),
+      "contractor-key-preflight": path.resolve(artifactDir, "src/scripts/contractorKeyPreflight.ts"),
     },
     platform: "node",
     bundle: true,

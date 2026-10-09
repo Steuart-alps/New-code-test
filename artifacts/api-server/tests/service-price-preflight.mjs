@@ -26,6 +26,8 @@ try {
     SERVICE_PRICE_CATALOGUE,
     evaluateServicePricePreflight,
     getServicePriceReadinessBlocker,
+    addonPurchaseAvailability,
+    ADDON_KEYS,
   } =
     await import(new URL(`file://${outFile}`).href);
   const required = SERVICE_PRICE_CATALOGUE.map((service) => service.key);
@@ -99,6 +101,16 @@ try {
     "a successful repair's final complete preflight must clear the blocker",
   );
 
+  // Client-facing add-on availability reuses the activation preflight.
+  assert.deepEqual(addonPurchaseAvailability(complete), { checked: true, unavailable: [] });
+  assert.deepEqual(addonPurchaseAvailability(mixed), { checked: true, unavailable: ["fixtrack", "doctrack"].sort((a, b) => ADDON_KEYS.indexOf(a) - ADDON_KEYS.indexOf(b)) },
+    "missing and duplicate add-on prices are both unpurchasable");
+  const legacyPoolLost = evaluateServicePricePreflight(required.filter((key) => key !== "pooltrack" && key !== "core" && key !== "bundle"));
+  assert.deepEqual(addonPurchaseAvailability(legacyPoolLost), { checked: true, unavailable: ["pooltrack"] },
+    "only add-on keys are reported; legacy PoolTrack is reported rather than dropped");
+  assert.deepEqual(addonPurchaseAvailability(null), { checked: false, unavailable: [] },
+    "an unread catalogue is reported as unchecked, never as fully available");
+
   const [adminRoute, startup, billingRoute, app] = await Promise.all([
     (await import("node:fs/promises")).readFile(path.join(apiDir, "src/routes/admin.ts"), "utf8"),
     (await import("node:fs/promises")).readFile(path.join(apiDir, "src/index.ts"), "utf8"),
@@ -121,8 +133,15 @@ try {
     "the preflight must remain read-only",
   );
   assert.match(startup, /const preflight = await getServicePricePreflight\(\);/);
-  assert.match(startup, /const readinessBlocker = await initStripe\(\);\s+markApplicationReady\(readinessBlocker\);/);
-  assert.match(app, /status: readinessBlocker \? "degraded" : "starting"/);
+  // Start-up is supervised and bounded; the catalogue verdict still feeds /readyz
+  // (state mapping covered by tests/stripe-startup-readiness.mjs).
+  assert.match(startup, /startStripeInitialization\(\{[\s\S]*runAttempt: initStripe,/);
+  assert.match(startup, /blocker: getServicePriceReadinessBlocker\(\{/);
+  assert.match(app, /computeReadiness\(applicationReady, getBillingReadiness\(\)\)/);
+  assert.match(billingRoute, /if \(!isBillingActivationAllowed\(\)\) \{\s+return res\.status\(503\)/,
+    "checkout must refuse while the catalogue is unverified");
+  assert.match(billingRoute, /if \(action === "add" && !isBillingActivationAllowed\(\)\) \{\s+return res\.status\(503\)/,
+    "add-on activation must refuse while the catalogue is unverified");
   const activation = billingRoute.indexOf('if (action === "add")');
   const activationPreflight = billingRoute.indexOf("const pricePreflight = await getServicePricePreflight();");
   assert.ok(
@@ -137,6 +156,10 @@ try {
   assert.match(billingRoute, /duplicateServicePrices: pricePreflight\.duplicates/);
   assert.match(billingRoute, /action === "add" &&[\s\S]*pricePreflight\.duplicates\.includes\(service\)/,
     "ambiguity must block additions, not removals");
+  const configRoute = billingRoute.slice(billingRoute.indexOf('router.get("/config"'), billingRoute.indexOf('router.get("/plans"'));
+  assert.match(configRoute, /addonPurchaseAvailability\(await getServicePricePreflight\(\)\)/,
+    "Settings availability must come from the same preflight activation enforces");
+  assert.match(configRoute, /addonAvailability,/);
   const servicesSource = await (await import("node:fs/promises")).readFile(path.join(apiDir, "src/lib/services.ts"), "utf8");
   const liveQuery = servicesSource.slice(servicesSource.indexOf("async function listLiveMonthlyPriceServiceKeys"), servicesSource.indexOf("export type Entitlements"));
   assert.doesNotMatch(liveQuery, /SELECT DISTINCT/, "live prices must retain duplicates");
