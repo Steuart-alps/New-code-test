@@ -78,6 +78,7 @@
 - [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction; hold times and per-item rules replace section values.
 - [Shared auth rate limits](shared-auth-rate-limits.md) — production login/register/reset limits share PostgreSQL counters; reset reserves then releases non-failures.
 - [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.
+- [Recovery-code replacement lock](recovery-code-replacement-lock.md) — per-user advisory lock (ns "RCOD") serializes replaceRecoveryCodes; regression barrier row-locks old codes so it reproduces without the fix.
 - [Per-run test fixture cleanup](test-fixture-cleanup.md) — suites purge only their own run-owned tenants via tests/fixture-ownership.mjs; never hand-delete clients (audit ledgers block it).
 - [API test lock inventory](api-test-lock-inventory.md) — classify every new api-server test:* script in test-api-integration-lock.sh; fresh-schema runs are locked, never pure.
 - [Completed-work adoption analytics](module-work-analytics.md) — first saved record/completed check after activation comes from an allowlisted API-mutation observer; add new endpoints to its rules.
@@ -85,3 +86,4 @@
 - [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.
 - [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
 - [Two-factor reset alert outbox](two-factor-reset-alerts.md) — admin 2FA reset alerts are queued in the reset transaction and retried; queue holds no secrets or rendered mail; provider key covers rendered content.
+- [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
