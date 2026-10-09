@@ -68,4 +68,5 @@
 - [PAT history provenance](pat-history-provenance.md) — migrated names/locations are best-known, not verified at the inspection date; preserve provenance rather than silently rewriting history.
 - [Local calendar-day math](local-calendar-day-math.md) — date-only ages must use local calendar dates, not elapsed milliseconds, to stay correct across DST.
 - [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction; hold times and per-item rules replace section values.
+- [Shared auth rate limits](shared-auth-rate-limits.md) — production login/register/reset limits share PostgreSQL counters; reset reserves then releases non-failures.
 - [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.
