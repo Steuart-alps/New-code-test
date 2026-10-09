@@ -541,8 +541,9 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
       }
       return res.json({ ok: true, entitled: activation.entitled });
     } else {
-      const price = await getServicePrice(service);
-      if (!price) return res.status(400).json({ error: "Service price not configured" });
+      // Removal needs only the client's own subscription item, never the
+      // catalogue price: an archived or missing price must not trap a client
+      // in a service they want to stop paying for. No proration, no refund.
       if (!existingItem) return res.status(409).json({ error: "Service not active" });
       await stripe.subscriptionItems.del(existingItem.id, { proration_behavior: "none" });
     }
