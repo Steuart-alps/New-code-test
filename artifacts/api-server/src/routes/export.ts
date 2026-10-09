@@ -586,6 +586,13 @@ router.get(
       archive.append(rawToCsv(patReplacements.rows), { name: "pat-track/replacements.csv" });
       const patFailures = await db.execute(sql`SELECT * FROM pat_failures WHERE client_id = ${cid} ORDER BY id`);
       archive.append(rawToCsv(patFailures.rows), { name: "pat-track/failures.csv" });
+      // Supplemental location corrections sit beside, never over, the recorded
+      // failure location and its provenance (failures.csv snapshot_source).
+      const patFailureCorrections = await db.execute(sql`
+        SELECT id, failure_id, previous_location_text, corrected_location_text, reason, corrected_by_name, created_at
+        FROM pat_failure_location_corrections WHERE client_id = ${cid} ORDER BY failure_id, id
+      `);
+      archive.append(rawToCsv(patFailureCorrections.rows), { name: "pat-track/failure-location-corrections.csv" });
 
       // ── PestTrack ─────────────────────────────────────────────────────────
       const pestVisits = await db.select().from(pestVisitsTable).where(eq(pestVisitsTable.clientId, cid));

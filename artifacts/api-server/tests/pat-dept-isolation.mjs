@@ -477,6 +477,108 @@ async function main() {
   check("untested room has untested status", overdueById.get(untestedRoom.data.id)?.status === "untested");
   check("inactive room is excluded", !overdueIds.has(inactiveRoom.data.id));
 
+  // Failure location is recorded once. Resolving a failure after a room rename
+  // must not recapture the live name, move the failure, or edit the location.
+  const failureRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Failure room A" });
+  const otherFailureRoom = await admin("POST", "/pat-track/rooms", { siteId: alphaSite.data.id, name: "Other failure room" });
+  const failureCertificate = await admin("POST", "/pat-track/certificates", {
+    ...certificateBody(alphaSite.data.id, failureRoom.data.id, "FAILURE-CERT"), roomIds: [failureRoom.data.id, otherFailureRoom.data.id],
+  });
+  const roomFailure = await staff("POST", "/pat-track/failures", {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Failed kettle",
+    actionTaken: "Removed from use", resolution: "Awaiting replacement", locationText: null,
+  });
+  const areaFailure = await admin("POST", "/pat-track/failures", {
+    certificateId: failureCertificate.data.id, roomId: null, locationText: "Plant cupboard", applianceName: "Failed pump",
+  });
+  for (const [name, response] of [["failure room", failureRoom], ["other failure room", otherFailureRoom],
+    ["failure certificate", failureCertificate], ["room failure", roomFailure], ["area failure", areaFailure]]) {
+    expectStatus(`create ${name}`, response, [201]);
+  }
+  check("new failure records room name and location", roomFailure.data?.room_name_snapshot === "Failure room A"
+    && roomFailure.data?.location_text === "Failure room A" && roomFailure.data?.snapshot_source === "recorded");
+  check("new area failure records its supplied location", areaFailure.data?.location_text === "Plant cupboard"
+    && areaFailure.data?.room_id === null && areaFailure.data?.snapshot_source === "recorded");
+  expectStatus("rename room with a recorded failure", await admin("PUT", `/pat-track/rooms/${failureRoom.data.id}`, {
+    siteId: alphaSite.data.id, name: "Failure room B",
+  }), [200]);
+  const failureById = async (session, id, query = "") => (await session("GET", `/pat-track/failures${query}`)).data?.find(f => f.id === id);
+  const renamedFailure = await failureById(staff, roomFailure.data.id);
+  check("failure list shows recorded room, not the live name", renamedFailure?.room_name === "Failure room A"
+    && renamedFailure?.location_text === "Failure room A", JSON.stringify(renamedFailure));
+  check("failure list separately reports the current room name", renamedFailure?.current_room_name === "Failure room B");
+  // The web form re-sends the recorded certificate, room and location unchanged.
+  const resolvedFailure = await staff("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, locationText: "Failure room A",
+    applianceName: "Failed kettle", actionTaken: "Replaced", resolvedDate: fixtureDate,
+  });
+  expectStatus("department staff resolve failure after room rename", resolvedFailure, [200]);
+  check("resolution keeps recorded location", resolvedFailure.data?.location_text === "Failure room A"
+    && resolvedFailure.data?.room_name_snapshot === "Failure room A" && resolvedFailure.data?.snapshot_source === "recorded");
+  check("resolution edit is applied", String(resolvedFailure.data?.resolved_date ?? "").slice(0, 10) === fixtureDate
+    && resolvedFailure.data?.action_taken === "Replaced");
+  check("omitted resolution text is kept", resolvedFailure.data?.resolution === "Awaiting replacement");
+  expectStatus("status-only edit without location fields", await admin("PUT", `/pat-track/failures/${areaFailure.data.id}`, {
+    applianceName: "Failed pump", resolvedDate: fixtureDate,
+  }), [200]);
+  check("status-only edit keeps area location", (await failureById(admin, areaFailure.data.id))?.location_text === "Plant cupboard");
+  const reassignRoom = await admin("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: otherFailureRoom.data.id, applianceName: "Failed kettle",
+  });
+  expectStatus("failure cannot move to another room", reassignRoom, [409]);
+  check("room reassignment is identified", reassignRoom.data?.code === "PAT_FAILURE_REASSIGNMENT");
+  expectStatus("failure cannot move to another certificate", await admin("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: alphaCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Failed kettle",
+  }), [409]);
+  expectStatus("area failure cannot gain a room", await admin("PUT", `/pat-track/failures/${areaFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Failed pump",
+  }), [409]);
+  const silentLocation = await admin("PUT", `/pat-track/failures/${areaFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: null, locationText: "Boiler room", applianceName: "Failed pump",
+  });
+  expectStatus("ordinary edit cannot rewrite location", silentLocation, [409]);
+  check("location edit points to the correction policy", silentLocation.data?.code === "PAT_FAILURE_LOCATION_LOCKED");
+  check("rejected edits leave location intact", (await failureById(admin, areaFailure.data.id))?.location_text === "Plant cupboard");
+  const correctionPath = `/pat-track/failures/${areaFailure.data.id}/location-corrections`;
+  expectStatus("staff cannot record location correction", await staff("POST", correctionPath, {
+    correctedLocationText: "Boiler room", reason: "Original sheet says boiler room",
+  }), [403]);
+  expectStatus("viewer cannot record location correction", await viewer("POST", correctionPath, {
+    correctedLocationText: "Boiler room", reason: "Original sheet says boiler room",
+  }), [403]);
+  expectStatus("correction requires a reason", await admin("POST", correctionPath, { correctedLocationText: "Boiler room" }), [400]);
+  const correction = await admin("POST", correctionPath, {
+    correctedLocationText: "Boiler room", reason: "Original sheet says boiler room",
+  });
+  expectStatus("administrator records explicit location correction", correction, [201]);
+  check("correction records previous location", correction.data?.previous_location_text === "Plant cupboard");
+  expectStatus("unchanged correction is rejected", await admin("POST", correctionPath, {
+    correctedLocationText: "Boiler room", reason: "Repeat",
+  }), [409]);
+  const correctedFailure = await failureById(staff, areaFailure.data.id);
+  check("correction is shown beside the retained original", correctedFailure?.location_text === "Plant cupboard"
+    && correctedFailure?.corrected_location_text === "Boiler room" && correctedFailure?.correction_count === 1
+    && correctedFailure?.correction_reason === "Original sheet says boiler room", JSON.stringify(correctedFailure));
+  const correctionHistory = await staff("GET", correctionPath);
+  expectStatus("department staff can audit corrections", correctionHistory, [200]);
+  check("correction history is listed", correctionHistory.data?.length === 1);
+  expectStatus("other department cannot edit failure", await betaStaff("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Changed",
+  }), [403]);
+  expectStatus("other department cannot read corrections", await betaStaff("GET", correctionPath), [403]);
+  check("other department cannot list failure", !(await betaStaff("GET", "/pat-track/failures")).data?.some(f => f.id === roomFailure.data.id));
+  expectStatus("viewer cannot resolve failure", await viewer("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Failed kettle", resolvedDate: fixtureDate,
+  }), [403]);
+  expectStatus("foreign tenant cannot resolve failure", await foreign("PUT", `/pat-track/failures/${roomFailure.data.id}`, {
+    certificateId: failureCertificate.data.id, roomId: failureRoom.data.id, applianceName: "Failed kettle", resolvedDate: fixtureDate,
+  }), [404]);
+  expectStatus("foreign tenant cannot correct location", await foreign("POST", correctionPath, {
+    correctedLocationText: "Foreign", reason: "Foreign tenant",
+  }), [404]);
+  expectStatus("foreign tenant cannot read corrections", await foreign("GET", correctionPath), [404]);
+  expectStatus("foreign tenant cannot use foreign site filter", await foreign("GET", `/pat-track/failures?siteId=${alphaSite.data.id}`), [400]);
+
   // The cancellation/client export must preserve every certificate-led PAT
   // entity without depending on object storage availability.
   const exportResponse = await fetch(`${BASE}/export`, { headers: { cookie: admin.cookie() } });
@@ -490,7 +592,7 @@ async function main() {
       "pat-track/equipment-templates.csv", "pat-track/equipment-template-items.csv",
       "pat-track/rooms.csv", "pat-track/certificates.csv",
       "pat-track/certificate-rooms.csv", "pat-track/replacements.csv",
-      "pat-track/failures.csv",
+      "pat-track/failures.csv", "pat-track/failure-location-corrections.csv",
     ]) check(`export includes ${filename}`, entries.includes(filename));
     const legacyHistoryCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/tests.csv"], { encoding: "utf8" });
     check("client export preserves snapshot columns", legacyHistoryCsv.includes("siteIdSnapshot")
@@ -504,6 +606,13 @@ async function main() {
       roomHistoryCsv.includes("Alpha room") && roomHistoryCsv.includes('Suite ""201"", East'));
     check("certificate-room export never substitutes the current name",
       !roomHistoryCsv.includes("Current room name"));
+    const failureCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/failures.csv"], { encoding: "utf8" });
+    check("failure export retains recorded location and provenance", failureCsv.includes("snapshot_source")
+      && failureCsv.includes("Failure room A") && failureCsv.includes("Plant cupboard"));
+    check("failure export never substitutes the renamed room", !failureCsv.includes("Failure room B"));
+    const correctionCsv = execFileSync("unzip", ["-p", exportPath, "pat-track/failure-location-corrections.csv"], { encoding: "utf8" });
+    check("failure correction export keeps reason and both locations", correctionCsv.includes("Original sheet says boiler room")
+      && correctionCsv.includes("Plant cupboard") && correctionCsv.includes("Boiler room"));
   } finally {
     await rm(exportPath, { force: true });
   }
