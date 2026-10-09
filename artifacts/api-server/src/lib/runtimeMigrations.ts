@@ -3585,6 +3585,91 @@ async function migrateIncidents() {
   `);
 }
 
+async function migrateFeedbackReviewHistory() {
+  // Optimistic concurrency: every accepted status/note change bumps the
+  // revision, and updates must name the revision they were drafted against.
+  await db.execute(sql`
+    ALTER TABLE feedback_reports ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 0
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS feedback_report_reviews (
+      id serial PRIMARY KEY,
+      report_id integer NOT NULL REFERENCES feedback_reports(id) ON DELETE CASCADE,
+      client_id integer NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      revision integer NOT NULL,
+      actor_id integer REFERENCES users(id) ON DELETE SET NULL,
+      previous_status text NOT NULL,
+      status text NOT NULL,
+      previous_internal_note text NOT NULL,
+      internal_note text NOT NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_feedback_report_reviews_report_revision"
+    ON feedback_report_reviews (report_id, revision)
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_feedback_report_reviews_client_report"
+    ON feedback_report_reviews (client_id, report_id)
+  `);
+  // Review history is append-only. A row's tenant must match its report; rows
+  // cannot be edited except for the FK nulling the actor when a user is
+  // removed; and they are deleted only by the report/client cascade, so the
+  // history follows the report's existing retention rather than its own.
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "enforce_feedback_review_tenant"()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM feedback_reports
+        WHERE id = NEW.report_id AND client_id = NEW.client_id
+      ) THEN
+        RAISE EXCEPTION 'Feedback review tenant must match its report';
+      END IF;
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION "protect_feedback_review_history"()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.actor_id IS NULL
+          AND (NEW.id, NEW.report_id, NEW.client_id, NEW.revision, NEW.previous_status, NEW.status,
+               NEW.previous_internal_note, NEW.internal_note, NEW.created_at)
+            IS NOT DISTINCT FROM
+              (OLD.id, OLD.report_id, OLD.client_id, OLD.revision, OLD.previous_status, OLD.status,
+               OLD.previous_internal_note, OLD.internal_note, OLD.created_at)
+        THEN
+          RETURN NEW;
+        END IF;
+        RAISE EXCEPTION 'Feedback review history is append-only';
+      END IF;
+      IF EXISTS (SELECT 1 FROM feedback_reports WHERE id = OLD.report_id)
+        AND EXISTS (SELECT 1 FROM clients WHERE id = OLD.client_id)
+      THEN
+        RAISE EXCEPTION 'Feedback review history is append-only';
+      END IF;
+      RETURN OLD;
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS "feedback_report_reviews_tenant_guard" ON feedback_report_reviews`);
+  await db.execute(sql`
+    CREATE TRIGGER "feedback_report_reviews_tenant_guard"
+    BEFORE INSERT ON feedback_report_reviews
+    FOR EACH ROW EXECUTE FUNCTION "enforce_feedback_review_tenant"()
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS "feedback_report_reviews_append_only" ON feedback_report_reviews`);
+  await db.execute(sql`
+    CREATE TRIGGER "feedback_report_reviews_append_only"
+    BEFORE UPDATE OR DELETE ON feedback_report_reviews
+    FOR EACH ROW EXECUTE FUNCTION "protect_feedback_review_history"()
+  `);
+}
+
 async function migrateComplianceAuditTrail() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "audit_events" (
@@ -4385,6 +4470,7 @@ async function migrateDoctrackSafetrackMerge() {
       ADD COLUMN IF NOT EXISTS updated_by integer REFERENCES users(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS updated_at timestamp
   `);
+  await migrateFeedbackReviewHistory();
 
   // 5. Migrate acknowledgements — only for rows whose source doc was already migrated.
   {

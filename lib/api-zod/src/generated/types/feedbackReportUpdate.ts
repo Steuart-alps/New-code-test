@@ -8,6 +8,11 @@
 import type { FeedbackReportUpdateStatus } from './feedbackReportUpdateStatus';
 
 export interface FeedbackReportUpdate {
+  /**
+     * The report revision the draft was based on; a stale value returns 409.
+     * @minimum 0
+     */
+  expectedRevision: number;
   status?: FeedbackReportUpdateStatus;
   /** @maxLength 5000 */
   internalNote?: string;
