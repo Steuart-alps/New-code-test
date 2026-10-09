@@ -557,6 +557,25 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
 
+    // Password reset and invitation set-up links (lib/db passwordResetTokensTable).
+    // It was only ever created by drizzle push, but forgot-password,
+    // reset-password and the user invite/resend-invite routes all depend on it,
+    // so a runtime-migrated database must have it too. Existing tables are left
+    // as they are; only missing nullable/defaulted columns are added.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+        "id"         serial PRIMARY KEY,
+        "user_id"    integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "token"      text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "used_at"    timestamp,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+
     // Shared authentication throttles keep sign-in quotas consistent across
     // API processes. Only HMACed IP/namespace keys are persisted.
     await db.execute(sql`
@@ -863,6 +882,10 @@ export async function runRuntimeMigrations() {
       REFERENCES "departments"("id") ON DELETE SET NULL
     `);
 
+    // Inductions and competency sign-offs were only ever created by drizzle
+    // push; see migrateSafeTrackPushOnlyTables below.
+    await migrateSafeTrackPushOnlyTables();
+
     // ---- FixTrack issues table ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "fix_track_issues" (
@@ -1048,6 +1071,35 @@ export async function runRuntimeMigrations() {
       CREATE INDEX IF NOT EXISTS "IDX_contractor_certificates_contractor"
       ON "contractor_certificates" ("contractor_id")
     `);
+
+    // Legacy item/contractor certificate history (lib/db certificatesTable).
+    // It was only ever created by drizzle push, but the compliance register,
+    // dashboard stats, item certificates and tenant export all read it, so a
+    // runtime-migrated database must have it too. Ownership has no client_id:
+    // a row belongs to the tenant of its compliance item or contractor.
+    // Existing tables are left as they are; only missing nullable columns are
+    // added so a drifted legacy table can still serve these reads.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "certificates" (
+        "id"            serial PRIMARY KEY,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "item_id"       integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+        "name"          text NOT NULL,
+        "file_url"      text,
+        "issue_date"    timestamp,
+        "expiry_date"   timestamp,
+        "notes"         text,
+        "created_at"    timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "file_url" text`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "issue_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "expiry_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "notes" text`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_item" ON "certificates" ("item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_contractor" ON "certificates" ("contractor_id")`);
 
     // Deduplication log for contractor compliance-expiry reminders. One row per
     // (client, contractor, milestone), where milestone encodes the reminder
@@ -2022,6 +2074,61 @@ async function migrateTrainTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_train_track_client" ON "train_track_records" ("client_id")`);
+}
+
+// ---- SafeTrack inductions and competency sign-offs ----
+// lib/db safeInductionsTable / safeCompetencySignoffsTable. Both tables existed
+// only via drizzle push, yet the SafeTrack routes, the daily-entry cutoff,
+// photo ownership checks and offboarding all read them, so a runtime-migrated
+// database must create them. Ownership is the tenant's client_id (cascade on
+// client deletion); site and creator links are optional and cleared when the
+// site or user is removed. Existing tables are left as they are: only missing
+// nullable or defaulted columns are added, so a drifted legacy table can still
+// serve these routes.
+async function migrateSafeTrackPushOnlyTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_inductions" (
+      "id"           serial PRIMARY KEY,
+      "client_id"    integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"      integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"   text NOT NULL,
+      "start_date"   date NOT NULL,
+      "completed_at" date,
+      "checklist"    text,
+      "notes"        text,
+      "created_by"   integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"   timestamp NOT NULL DEFAULT now(),
+      "updated_at"   timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "completed_at" date`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "checklist" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_competency_signoffs" (
+      "id"            serial PRIMARY KEY,
+      "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"       integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"    text NOT NULL,
+      "task_name"     text NOT NULL,
+      "signed_off_by" text NOT NULL,
+      "signed_off_at" date NOT NULL,
+      "notes"         text,
+      "created_by"    integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"    timestamp NOT NULL DEFAULT now(),
+      "updated_at"    timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
 }
 
 // ---- SafeTrack handbook ----

@@ -22,6 +22,7 @@ import { sql } from "drizzle-orm";
 import { getServicePricePreflight, type ServicePricePreflight } from "./services";
 import { sendSystemEmail } from "./email";
 import { logger } from "./logger";
+import { getBillingReadiness, isStripeCatalogueVerified } from "./stripeStartup";
 
 export const SERVICE_PRICE_AUDIT_KEY = "service_prices";
 /** Hourly at :25 — off the busy :00/:30 marks used by the daily jobs. */
@@ -290,9 +291,20 @@ export async function runServicePriceAudit(options: {
 }
 
 /** Scheduler wrapper: never throws into node-cron. */
-export async function runScheduledServicePriceAudit(): Promise<void> {
+export async function runScheduledServicePriceAudit(
+  options: Parameters<typeof runServicePriceAudit>[0] = {},
+): Promise<void> {
+  // Audit only once this process has read the synced Stripe catalogue. While
+  // Stripe is still initializing, unconfigured or failing, the local price
+  // tables may be empty or stale, and comparing against them would raise a
+  // false "missing price" alert (and later a false recovery). The next
+  // scheduled run picks the audit up once the catalogue is verified.
+  if (!isStripeCatalogueVerified()) {
+    logger.debug({ billing: getBillingReadiness().phase }, "Stripe service-price audit skipped until the catalogue is verified");
+    return;
+  }
   try {
-    const result = await runServicePriceAudit();
+    const result = await runServicePriceAudit(options);
     if (result.status !== "healthy" && result.status !== "ongoing") {
       logger.info({ result }, "Stripe service-price audit complete");
     }

@@ -33,7 +33,7 @@ try {
 } finally {
   await rm(temp, { recursive: true, force: true });
 }
-const { db, sql, pool, SERVICE_PRICE_CATALOGUE, evaluateServicePricePreflight, runServicePriceAudit, decideServicePriceAudit } = lib;
+const { db, sql, pool, SERVICE_PRICE_CATALOGUE, evaluateServicePricePreflight, runServicePriceAudit, runScheduledServicePriceAudit, decideServicePriceAudit } = lib;
 after(() => pool.end());
 
 const required = SERVICE_PRICE_CATALOGUE.map((service) => service.key);
@@ -50,6 +50,16 @@ async function reset() {
     .filter((line) => !JSON.parse(line).subject.includes("Stripe service prices"));
   await writeFile(outbox, kept.map((line) => `${line}\n`).join(""));
 }
+
+test("the scheduled audit waits until this process has verified the Stripe catalogue", async () => {
+  await reset();
+  // This process never initialized Stripe. Even when the price read reports
+  // a missing price, the scheduled run must not alert (or later report a
+  // false recovery) until the catalogue has been verified.
+  await runScheduledServicePriceAudit({ readPreflight: catalogue({ missing: ["doctrack"] }) });
+  assert.deepEqual(await state(), [], "no incident is recorded before the catalogue is verified");
+  assert.deepEqual(await auditMail(), [], "no alert is sent before the catalogue is verified");
+});
 
 test("alerts once per incident, re-alerts changes and reports recovery", async () => {
   await reset();
@@ -165,5 +175,5 @@ test("the audit is read-only towards Stripe, prices, subscriptions and charges",
     assert.equal(write[2], "service_price_audit_state", `unexpected write: ${write[0]}`);
   }
   const startup = await readFile(path.join(apiDir, "src/index.ts"), "utf8");
-  assert.match(startup, /cron\.schedule\(SERVICE_PRICE_AUDIT_CRON, runScheduledServicePriceAudit\)/);
+  assert.match(startup, /cron\.schedule\(SERVICE_PRICE_AUDIT_CRON, \(\) => runScheduledServicePriceAudit\(\)\)/);
 });
