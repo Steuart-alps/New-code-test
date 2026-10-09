@@ -63,6 +63,158 @@ function expect(method, path, response, condition, message) {
   assert.ok(condition, `${message}; ${responseContext(method, path, response)}`);
 }
 
+// SafeTrack inductions and competency sign-offs: both tables used to exist only
+// via drizzle push. Create and read one of each for the current tenant, then
+// prove a second tenant can neither list, update, delete nor attach to them.
+// Restores the caller's session cookie before returning.
+async function checkSafeTrackTenantIsolation({ stamp, password, siteId, clientId }) {
+  const tenantCookie = cookie;
+  const today = new Date().toISOString().slice(0, 10);
+  const inductionsPath = "/safe-track/inductions";
+  const competencyPath = "/safe-track/competency";
+
+  const emptyInductions = await request("GET", inductionsPath);
+  expectStatus("GET", inductionsPath, emptyInductions, 200);
+  expect("GET", inductionsPath, emptyInductions,
+    Array.isArray(emptyInductions.data) && emptyInductions.data.length === 0,
+    "a new tenant must start with no inductions");
+  const emptyCompetency = await request("GET", competencyPath);
+  expectStatus("GET", competencyPath, emptyCompetency, 200);
+  expect("GET", competencyPath, emptyCompetency,
+    Array.isArray(emptyCompetency.data) && emptyCompetency.data.length === 0,
+    "a new tenant must start with no competency sign-offs");
+
+  const induction = await request("POST", inductionsPath, {
+    staffName: "Fresh Schema Starter",
+    startDate: today,
+    checklist: "Fire exits; first aid; welfare",
+    notes: `Tenant induction ${stamp}`,
+    siteId,
+  });
+  expectStatus("POST", inductionsPath, induction, 201);
+  expect("POST", inductionsPath, induction,
+    Number.isInteger(induction.data?.id)
+      && induction.data.clientId === clientId
+      && induction.data.siteId === siteId
+      && induction.data.startDate === today
+      && induction.data.completedAt === null
+      && Number.isInteger(induction.data.createdBy),
+    "induction must be stored for this tenant, site and creator");
+
+  const signoff = await request("POST", competencyPath, {
+    staffName: "Fresh Schema Starter",
+    taskName: "Slicer operation",
+    signedOffBy: "Fresh Schema Manager",
+    signedOffAt: today,
+    notes: `Tenant sign-off ${stamp}`,
+    siteId,
+  });
+  expectStatus("POST", competencyPath, signoff, 201);
+  expect("POST", competencyPath, signoff,
+    Number.isInteger(signoff.data?.id)
+      && signoff.data.clientId === clientId
+      && signoff.data.siteId === siteId
+      && signoff.data.signedOffAt === today,
+    "competency sign-off must be stored for this tenant and site");
+
+  const ownInductionPath = `${inductionsPath}/${induction.data.id}`;
+  const ownSignoffPath = `${competencyPath}/${signoff.data.id}`;
+  const completed = await request("PUT", ownInductionPath, { completedAt: today });
+  expectStatus("PUT", ownInductionPath, completed, 200);
+  expect("PUT", ownInductionPath, completed, completed.data?.completedAt === today,
+    "the owning tenant must be able to complete its induction");
+
+  const listedInductions = await request("GET", inductionsPath);
+  expectStatus("GET", inductionsPath, listedInductions, 200);
+  expect("GET", inductionsPath, listedInductions,
+    Array.isArray(listedInductions.data)
+      && listedInductions.data.length === 1
+      && listedInductions.data[0].id === induction.data.id
+      && listedInductions.data[0].completedAt === today,
+    "the induction list must return the saved induction");
+  const listedCompetency = await request("GET", competencyPath);
+  expectStatus("GET", competencyPath, listedCompetency, 200);
+  expect("GET", competencyPath, listedCompetency,
+    Array.isArray(listedCompetency.data)
+      && listedCompetency.data.length === 1
+      && listedCompetency.data[0].id === signoff.data.id
+      && listedCompetency.data[0].taskName === "Slicer operation",
+    "the competency list must return the saved sign-off");
+
+  // A second, unrelated tenant.
+  cookie = "";
+  const foreignEmail = `fresh-schema-safetrack-${stamp}@test.local`;
+  const registered = await request("POST", "/auth/register", {
+    name: "Fresh Schema SafeTrack Foreign Manager",
+    email: foreignEmail,
+    password,
+  });
+  expectStatus("POST", "/auth/register", registered, 200);
+  const verifyPath = `/auth/verify-email?token=${encodeURIComponent(registered.data?.verificationToken)}`;
+  expectStatus("GET", verifyPath, await request("GET", verifyPath), 200);
+  expectStatus("POST", "/auth/login", await request("POST", "/auth/login", { email: foreignEmail, password }), 200);
+  const foreignMe = await request("GET", "/auth/me");
+  expectStatus("GET", "/auth/me", foreignMe, 200);
+  const foreignClientId = (foreignMe.data.user ?? foreignMe.data).clientId;
+  expect("GET", "/auth/me", foreignMe,
+    Number.isInteger(foreignClientId) && foreignClientId !== clientId,
+    "the second registration must belong to a separate tenant");
+
+  const foreignInductions = await request("GET", inductionsPath);
+  expectStatus("GET", inductionsPath, foreignInductions, 200);
+  expect("GET", inductionsPath, foreignInductions,
+    Array.isArray(foreignInductions.data) && foreignInductions.data.length === 0,
+    "another tenant must not see this tenant's inductions");
+  const foreignCompetency = await request("GET", competencyPath);
+  expectStatus("GET", competencyPath, foreignCompetency, 200);
+  expect("GET", competencyPath, foreignCompetency,
+    Array.isArray(foreignCompetency.data) && foreignCompetency.data.length === 0,
+    "another tenant must not see this tenant's competency sign-offs");
+
+  expectStatus("PUT", ownInductionPath,
+    await request("PUT", ownInductionPath, { notes: "Cross-tenant edit" }), 404);
+  expectStatus("PUT", ownSignoffPath,
+    await request("PUT", ownSignoffPath, { notes: "Cross-tenant edit" }), 404);
+  expectStatus("DELETE", ownInductionPath, await request("DELETE", ownInductionPath), 404);
+  expectStatus("DELETE", ownSignoffPath, await request("DELETE", ownSignoffPath), 404);
+  // A client-supplied site of another tenant must be rejected, not attached.
+  expectStatus("POST", inductionsPath, await request("POST", inductionsPath, {
+    staffName: "Cross-tenant starter",
+    startDate: today,
+    siteId,
+  }), 400);
+
+  const foreignInduction = await request("POST", inductionsPath, {
+    staffName: "Foreign Starter",
+    startDate: today,
+    notes: "Foreign tenant induction",
+  });
+  expectStatus("POST", inductionsPath, foreignInduction, 201);
+  expect("POST", inductionsPath, foreignInduction,
+    foreignInduction.data?.clientId === foreignClientId,
+    "the foreign induction must belong to the foreign tenant");
+
+  cookie = tenantCookie;
+  const afterInductions = await request("GET", inductionsPath);
+  expectStatus("GET", inductionsPath, afterInductions, 200);
+  expect("GET", inductionsPath, afterInductions,
+    Array.isArray(afterInductions.data)
+      && afterInductions.data.length === 1
+      && afterInductions.data[0].id === induction.data.id
+      && afterInductions.data[0].notes === `Tenant induction ${stamp}`
+      && !JSON.stringify(afterInductions.data).includes("Foreign"),
+    "this tenant's inductions must be unchanged and exclude the foreign tenant's");
+  const afterCompetency = await request("GET", competencyPath);
+  expectStatus("GET", competencyPath, afterCompetency, 200);
+  expect("GET", competencyPath, afterCompetency,
+    Array.isArray(afterCompetency.data)
+      && afterCompetency.data.length === 1
+      && afterCompetency.data[0].notes === `Tenant sign-off ${stamp}`,
+    "this tenant's competency sign-off must be unchanged by the other tenant");
+  expectStatus("PUT", `${inductionsPath}/${foreignInduction.data.id}`,
+    await request("PUT", `${inductionsPath}/${foreignInduction.data.id}`, { notes: "Reverse edit" }), 404);
+}
+
 async function main() {
   const stamp = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   const password = "password-123";
@@ -202,6 +354,8 @@ async function main() {
     Array.isArray(listedTraining.data) && listedTraining.data.some((row) => row.id === training.data.id),
     "created TrainTrack record must appear in the record list",
   );
+
+  await checkSafeTrackTenantIsolation({ stamp, password, siteId, clientId });
 
   // KitchenTrack weekly reviews
   const weeklyPath = "/kitchen-weekly/weekly";
