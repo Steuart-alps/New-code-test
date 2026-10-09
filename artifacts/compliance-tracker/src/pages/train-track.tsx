@@ -61,7 +61,7 @@ import {
 import { cn } from "@/lib/utils";
 import { printHtmlDocument } from "@/lib/download";
 import { SignaturePad } from "@/components/signature-pad";
-import { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv } from "@/lib/training-matrix";
+import { buildTrainingMatrix, certificateStatus, normaliseStaffName, trainingMatrixToCsv } from "@/lib/training-matrix";
 import { trackTrainingMatrixDownload } from "@/lib/analytics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -75,6 +75,8 @@ interface TrainingRecord {
   site_name: string | null;
   record_type: RecordType;
   staff_name: string;
+  /** Stable roster identity; null on legacy, name-only records. */
+  staff_roster_id: number | null;
   training_type: string | null;
   document_title: string | null;
   document_type: string | null;
@@ -93,10 +95,14 @@ interface Site {
 }
 
 interface StaffMember {
+  id: number;
   name: string;
   site_id: number | null;
+  site_name: string | null;
   active: boolean;
 }
+
+const NO_ROSTER_LINK = "none";
 
 type CertStatus = "expired" | "expiring_soon" | "valid" | "no_expiry";
 
@@ -159,9 +165,10 @@ function useTrainTrackApi() {
 
 // ─── Empty forms ──────────────────────────────────────────────────────────────
 
-const emptyCert     = () => ({ staffName: "", trainingType: "", customType: "", provider: "", completedDate: "", expiryDate: "", siteId: "", notes: "", signature: null as string | null });
-const emptySignoff  = () => ({ staffName: "", documentTitle: "", documentType: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
-const emptyInternal = () => ({ staffName: "", trainingType: "", customType: "", trainer: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
+// staffRosterId is the roster member's id as a string, or "" when unlinked.
+const emptyCert     = () => ({ staffName: "", staffRosterId: "", trainingType: "", customType: "", provider: "", completedDate: "", expiryDate: "", siteId: "", notes: "", signature: null as string | null });
+const emptySignoff  = () => ({ staffName: "", staffRosterId: "", documentTitle: "", documentType: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
+const emptyInternal = () => ({ staffName: "", staffRosterId: "", trainingType: "", customType: "", trainer: "", completedDate: "", siteId: "", notes: "", signature: null as string | null });
 
 // Suggested expiry periods (years) for well-known certificate types.
 // Used to auto-populate the expiry date when a type is selected.
@@ -259,6 +266,12 @@ export default function TrainTrackPage() {
   const [certForm,     setCertForm]     = useState(emptyCert());
   const [signoffForm,  setSignoffForm]  = useState(emptySignoff());
   const [internalForm, setInternalForm] = useState(emptyInternal());
+  const currentStaff = tab === "certificate" ? certForm : tab === "signoff" ? signoffForm : internalForm;
+  function setStaffFields(patch: { staffName?: string; staffRosterId?: string }) {
+    if (tab === "certificate") setCertForm(f => ({ ...f, ...patch }));
+    else if (tab === "signoff") setSignoffForm(f => ({ ...f, ...patch }));
+    else setInternalForm(f => ({ ...f, ...patch }));
+  }
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -365,6 +378,7 @@ export default function TrainTrackPage() {
         && otherTrainingEnabled;
       setCertForm({
         staffName: r.staff_name,
+        staffRosterId: r.staff_roster_id != null ? String(r.staff_roster_id) : "",
         trainingType: useOtherDescription ? "Other" : (r.training_type ?? ""),
         customType: useOtherDescription ? (r.training_type ?? "") : "",
         provider: r.provider ?? "",
@@ -377,6 +391,7 @@ export default function TrainTrackPage() {
     } else if (r.record_type === "signoff") {
       setSignoffForm({
         staffName: r.staff_name,
+        staffRosterId: r.staff_roster_id != null ? String(r.staff_roster_id) : "",
         documentTitle: r.document_title ?? "",
         documentType: r.document_type ?? "",
         completedDate: r.completed_date?.slice(0, 10) ?? "",
@@ -390,6 +405,7 @@ export default function TrainTrackPage() {
         && otherTrainingEnabled;
       setInternalForm({
         staffName: r.staff_name,
+        staffRosterId: r.staff_roster_id != null ? String(r.staff_roster_id) : "",
         trainingType: useOtherDescription ? "Other" : (r.training_type ?? ""),
         customType: useOtherDescription ? (r.training_type ?? "") : "",
         trainer: r.trainer ?? "",
@@ -424,6 +440,7 @@ export default function TrainTrackPage() {
         body = {
           recordType: "certificate",
           staffName: f.staffName.trim(),
+          staffRosterId: f.staffRosterId ? Number(f.staffRosterId) : null,
           trainingType,
           provider: f.provider.trim(),
           completedDate: f.completedDate,
@@ -440,6 +457,7 @@ export default function TrainTrackPage() {
         body = {
           recordType: "signoff",
           staffName: f.staffName.trim(),
+          staffRosterId: f.staffRosterId ? Number(f.staffRosterId) : null,
           documentTitle: f.documentTitle.trim(),
           documentType: f.documentType || null,
           completedDate: f.completedDate,
@@ -464,6 +482,7 @@ export default function TrainTrackPage() {
         body = {
           recordType: "internal",
           staffName: f.staffName.trim(),
+          staffRosterId: f.staffRosterId ? Number(f.staffRosterId) : null,
           trainingType,
           trainer: f.trainer.trim(),
           completedDate: f.completedDate,
@@ -572,7 +591,7 @@ ${rows.map(r => `<tr>
   function handleDownloadMatrix() {
     const matrix = buildTrainingMatrix(certs, activeStaff, siteFilter);
 
-    if (matrix.staffNames.length === 0 || matrix.types.length === 0) {
+    if (matrix.rows.length === 0 || matrix.types.length === 0) {
       toast({
         title: "No certificates to export",
         description: siteFilter === "all"
@@ -596,7 +615,16 @@ ${rows.map(r => `<tr>
     trackTrainingMatrixDownload(siteFilter);
     link.remove();
     URL.revokeObjectURL(url);
-    toast({ title: "Training matrix downloaded" });
+    // Legacy certificates without a roster link are attributed by name only
+    // when exactly one roster member in scope has that name. The rest are left
+    // out rather than guessed; say so, so nobody reads "Missing" as final.
+    const unmatched = matrix.unmatchedCertificates.length;
+    toast({
+      title: "Training matrix downloaded",
+      ...(unmatched > 0 ? {
+        description: `${unmatched} certificate${unmatched === 1 ? " is" : "s are"} not linked to a single active roster member and ${unmatched === 1 ? "is" : "are"} not included. Edit ${unmatched === 1 ? "it" : "them"} and choose the roster member.`,
+      } : {}),
+    });
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -806,6 +834,14 @@ ${rows.map(r => `<tr>
                           <User className="w-3.5 h-3.5 text-[#162D42]/60" />
                         </div>
                         <span className="font-medium">{r.staff_name}</span>
+                        {r.staff_roster_id == null && (
+                          <span
+                            className="text-[10px] uppercase tracking-wide text-muted-foreground border border-dashed rounded-sm px-1"
+                            title="Not linked to a roster member. The training matrix matches it by name only when exactly one active roster member has this name."
+                          >
+                            Not linked
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{r.training_type}</td>
@@ -1010,16 +1046,49 @@ ${rows.map(r => `<tr>
           <div className="space-y-4 py-1">
             {/* Staff name — common to all */}
             <div>
+              <Label>Roster member</Label>
+              <Select
+                value={currentStaff.staffRosterId || NO_ROSTER_LINK}
+                onValueChange={v => {
+                  const member = activeStaff.find(m => String(m.id) === v);
+                  setStaffFields(v === NO_ROSTER_LINK
+                    ? { staffRosterId: "" }
+                    : { staffRosterId: v, ...(member ? { staffName: member.name } : {}) });
+                }}
+              >
+                <SelectTrigger className="mt-1 rounded-sm" aria-label="Roster member">
+                  <SelectValue placeholder="Not linked to the roster" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ROSTER_LINK}>Not linked to the roster</SelectItem>
+                  {activeStaff.map(member => (
+                    <SelectItem key={member.id} value={String(member.id)}>
+                      {member.name}{member.site_name ? ` — ${member.site_name}` : ""}
+                    </SelectItem>
+                  ))}
+                  {currentStaff.staffRosterId && !activeStaff.some(m => String(m.id) === currentStaff.staffRosterId) && (
+                    <SelectItem value={currentStaff.staffRosterId}>
+                      {currentStaff.staffName} (inactive roster member)
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Linking keeps the training matrix correct when staff share a name.
+              </p>
+            </div>
+            <div>
               <Label htmlFor="staffName">Staff Member *</Label>
               <Input
                 id="staffName"
                 placeholder="Full name"
-                value={tab === "certificate" ? certForm.staffName : tab === "signoff" ? signoffForm.staffName : internalForm.staffName}
+                value={currentStaff.staffName}
                 onChange={e => {
                   const v = e.target.value;
-                  if (tab === "certificate") setCertForm(f => ({ ...f, staffName: v }));
-                  else if (tab === "signoff") setSignoffForm(f => ({ ...f, staffName: v }));
-                  else setInternalForm(f => ({ ...f, staffName: v }));
+                  const linked = activeStaff.find(m => String(m.id) === currentStaff.staffRosterId);
+                  // Retyping the name to someone else drops the roster link.
+                  const keepLink = !!linked && normaliseStaffName(linked.name) === normaliseStaffName(v);
+                  setStaffFields({ staffName: v, ...(linked && !keepLink ? { staffRosterId: "" } : {}) });
                 }}
                 className="mt-1 rounded-sm"
               />

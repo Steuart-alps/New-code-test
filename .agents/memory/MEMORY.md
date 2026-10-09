@@ -91,3 +91,4 @@
 - [Replit removed; Render only](replit-removed-render-only.md) — 2026-10-09: all Replit fallbacks/files/packages removed; env vars only; what replaced each fallback; stripe-replit-sync kept.
 - [PDF export failure recovery](pdf-export-failure-recovery.md) — jsPDF output() alerts and returns undefined on error; failed lazy imports need a page reload; show recovery actions, not raw errors.
 - [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
+- [Training matrix identity](training-matrix-identity.md) — certificates link to roster by staff_roster_id; legacy name-only rows match only one unambiguous in-scope roster member, else reported as unmatched.

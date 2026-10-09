@@ -21,6 +21,22 @@ async function canAccessSite(clientId: number, siteId: number | null | undefined
   return !!site && (departmentId === null || site.department_id === null || site.department_id === departmentId);
 }
 
+// A roster link is accepted only for a roster member of this tenant whose
+// site (if any) is visible in the caller's active department. Unknown and
+// foreign ids get the same answer so ids cannot be probed across tenants.
+async function canLinkRosterMember(clientId: number, staffRosterId: number | null | undefined, departmentId: number | null) {
+  if (staffRosterId == null) return true;
+  const result = await db.execute(sql`
+    SELECT sr.site_id FROM staff_roster sr
+    WHERE sr.id = ${staffRosterId} AND sr.client_id = ${clientId}
+    LIMIT 1
+  `);
+  const member = (result.rows ?? [])[0] as any;
+  return !!member && await canAccessSite(clientId, member.site_id, departmentId);
+}
+
+const staffRosterIdField = z.number().int().positive().nullable().optional();
+
 export const RECORD_TYPES = ["certificate", "signoff", "internal"] as const;
 export type RecordType = typeof RECORD_TYPES[number];
 
@@ -66,6 +82,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
   z.object({
     recordType: z.literal("certificate"),
     staffName: z.string().min(1).max(300),
+    staffRosterId: staffRosterIdField,
     trainingType: z.string().min(1).max(300),
     provider: z.string().min(1).max(300),
     completedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -78,6 +95,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
   z.object({
     recordType: z.literal("signoff"),
     staffName: z.string().min(1).max(300),
+    staffRosterId: staffRosterIdField,
     documentTitle: z.string().min(1).max(500),
     documentType: z.enum(DOCUMENT_TYPES).nullable().optional(),
     completedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -89,6 +107,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
   z.object({
     recordType: z.literal("internal"),
     staffName: z.string().min(1).max(300),
+    staffRosterId: staffRosterIdField,
     trainingType: z.string().min(1).max(300),
     trainer: z.string().min(1).max(300),
     completedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -100,6 +119,7 @@ const recordCreate = z.discriminatedUnion("recordType", [
 
 const recordUpdate = z.object({
   staffName: z.string().min(1).max(300).optional(),
+  staffRosterId: staffRosterIdField,
   trainingType: z.string().min(1).max(300).nullable().optional(),
   documentTitle: z.string().min(1).max(500).nullable().optional(),
   documentType: z.enum(DOCUMENT_TYPES).nullable().optional(),
@@ -122,7 +142,7 @@ router.get("/records", requireAuth, async (req, res) => {
 
   const result = await db.execute(sql`
     SELECT r.id, r.client_id, r.site_id, r.record_type,
-           r.staff_name, r.training_type, r.document_title, r.document_type,
+           r.staff_name, r.staff_roster_id, r.training_type, r.document_title, r.document_type,
            r.provider, r.trainer,
             r.completed_date, r.expiry_date, r.notes, r.signature,
            r.created_at, r.updated_at,
@@ -173,6 +193,9 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
   if (!await canAccessSite(clientId, d.siteId, getActiveDepartmentId(req))) {
     return res.status(403).json({ error: "Site not accessible" });
   }
+  if (!await canLinkRosterMember(clientId, d.staffRosterId, getActiveDepartmentId(req))) {
+    return res.status(400).json({ error: "Staff member not found" });
+  }
   const trainingType = "trainingType" in d ? d.trainingType : null;
   const documentTitle = "documentTitle" in d ? d.documentTitle : null;
   const documentType = "documentType" in d ? (d.documentType ?? null) : null;
@@ -182,11 +205,11 @@ router.post("/records", requireAuth, denyViewers, async (req, res) => {
 
   const result = await db.execute(sql`
     INSERT INTO train_track_records
-      (client_id, site_id, record_type, staff_name, training_type,
+      (client_id, site_id, record_type, staff_name, staff_roster_id, training_type,
        document_title, document_type, provider, trainer,
        completed_date, expiry_date, notes, signature)
     VALUES
-      (${clientId}, ${d.siteId ?? null}, ${d.recordType}, ${d.staffName},
+      (${clientId}, ${d.siteId ?? null}, ${d.recordType}, ${d.staffName}, ${d.staffRosterId ?? null},
        ${trainingType}, ${documentTitle}, ${documentType},
        ${provider}, ${trainer},
        ${d.completedDate}::date, ${expiryDate}::date, ${d.notes ?? null}, ${d.signature ?? null})
@@ -208,7 +231,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const parsed = recordUpdate.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
   const existing = await db.execute(sql`
-    SELECT site_id, record_type, training_type FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
+    SELECT site_id, record_type, training_type, staff_roster_id FROM train_track_records WHERE id = ${id} AND client_id = ${clientId} LIMIT 1
   `);
   const record = (existing.rows ?? [])[0] as any;
   if (!record || !await canAccessSite(clientId, record.site_id, getActiveDepartmentId(req))) {
@@ -216,6 +239,14 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   }
   if (parsed.data.siteId !== undefined && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req))) {
     return res.status(403).json({ error: "Site not accessible" });
+  }
+  // Re-saving an unchanged link is always allowed; a new link is validated.
+  if (
+    parsed.data.staffRosterId != null
+    && parsed.data.staffRosterId !== record.staff_roster_id
+    && !await canLinkRosterMember(clientId, parsed.data.staffRosterId, getActiveDepartmentId(req))
+  ) {
+    return res.status(400).json({ error: "Staff member not found" });
   }
   if (parsed.data.trainingType !== undefined) {
     if (record.record_type === "signoff" && parsed.data.trainingType !== null) {
@@ -236,7 +267,7 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   }
 
   const {
-    staffName, trainingType, documentTitle, documentType, provider, trainer,
+    staffName, staffRosterId, trainingType, documentTitle, documentType, provider, trainer,
     completedDate, expiryDate, siteId, notes, signature,
   } = parsed.data;
 
@@ -250,10 +281,12 @@ router.patch("/records/:id", requireAuth, denyViewers, async (req, res) => {
   const hasTrainType = trainingType !== undefined;
   const hasCompleted = completedDate !== undefined;
   const hasSignature = signature !== undefined;
+  const hasRosterId  = staffRosterId !== undefined;
 
   await db.execute(sql`
     UPDATE train_track_records
     SET staff_name     = COALESCE(${staffName ?? null}, staff_name),
+        staff_roster_id = CASE WHEN ${hasRosterId}::boolean THEN ${staffRosterId ?? null}::integer ELSE staff_roster_id END,
         training_type  = CASE WHEN ${hasTrainType}::boolean  THEN ${trainingType ?? null}  ELSE training_type  END,
         document_title = CASE WHEN ${hasDocTitle}::boolean   THEN ${documentTitle ?? null} ELSE document_title END,
         document_type  = CASE WHEN ${hasDocType}::boolean    THEN ${documentType ?? null}  ELSE document_type  END,

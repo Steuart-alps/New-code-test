@@ -117,6 +117,7 @@ const freshSchema = new Set([
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
+  "test:train-track-roster-identity",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
 const pure = new Set([
