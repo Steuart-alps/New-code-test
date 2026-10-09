@@ -9,36 +9,316 @@ import {
   digestBearerToken,
   encryptTokenPayload,
   decryptTokenPayload,
+  isDamagedTokenPayload,
   tokenPayloadNeedsReencryption,
   validateTokenEncryptionConfig,
+  describeTokenKeyConfiguration,
 } from "./bearerTokens";
+
+// ── Queued contractor credentials: bounded startup passes ─────────────────────
+// Both passes below select only the rows that still need work, in id order,
+// and lock and commit one bounded batch at a time. Rows already secured on the
+// current key are neither decrypted nor locked, so restarts stay fast as the
+// queue history grows, and an interrupted pass resumes where it stopped (the
+// selection predicate is the progress record).
+
+export const QUEUE_MIGRATION_BATCH_SIZE = 200;
+
+export interface QueueMigrationOptions {
+  /** Restrict to one row (targeted maintenance and isolated tests). */
+  queueId?: number;
+  batchSize?: number;
+  /** Called after each batch commits, with the ids that batch locked. */
+  onBatchCommitted?: (batch: { index: number; ids: number[]; updated: number }) => void | Promise<void>;
+}
+
+/**
+ * Rows that still hold a raw quote token or bearer link (same routes as the
+ * scrub below). Inlined as a literal, not a parameter, so the planner can
+ * match it to the partial index of the same predicate and a restart reads
+ * only legacy rows instead of every draft's HTML.
+ */
+const LEGACY_QUEUE_PREDICATE = sql.raw(`(
+  quote_token IS NOT NULL
+  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+)`);
+/** "<format>.<key label>" of an envelope; legacy 3-part payloads yield "<iv>.<tag>". */
+const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) || '.' || split_part(encrypted_token_payload, '.', 2))`);
+
+/**
+ * Indexes that keep both passes proportional to the rows needing work. The
+ * envelope-key index is deliberately not partial: the planner only uses
+ * expression statistics from non-partial indexes, and without them it would
+ * estimate half the history as candidates and scan every row.
+ */
+export async function ensureQueueMigrationIndexes(): Promise<void> {
+  // The partial index must match LEGACY_QUEUE_PREDICATE exactly; v2 adds the
+  // compliance /schedule/ route. Drop the earlier definition so the planner
+  // and the scrub agree on which rows are candidates.
+  await db.execute(sql`DROP INDEX IF EXISTS "IDX_contractor_email_queue_legacy_credentials"`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials_v2"
+    ON contractor_email_queue (id) WHERE ${LEGACY_QUEUE_PREDICATE}`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_envelope_key"
+    ON contractor_email_queue (${ENVELOPE_KEY_SQL}, id)`);
+}
 
 /**
  * Re-encrypt queued credentials onto the configured current key. Supplying an
  * ID is useful for targeted maintenance and isolated integration tests.
  */
-export async function reencryptQueuedTokenPayloads(queueId?: number): Promise<number> {
+export async function reencryptQueuedTokenPayloads(
+  queueIdOrOptions?: number | QueueMigrationOptions,
+): Promise<number> {
+  const options: QueueMigrationOptions = typeof queueIdOrOptions === "number"
+    ? { queueId: queueIdOrOptions }
+    : queueIdOrOptions ?? {};
   validateTokenEncryptionConfig();
-  return db.transaction(async (tx) => {
-    const rows = await tx.execute(sql`SELECT id, encrypted_token_payload
+  const { currentVersion } = describeTokenKeyConfiguration();
+  const currentKey = `v2.${currentVersion}`;
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let lastId = 0;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const batch = await db.transaction(async (tx) => {
+      // Envelopes already on the current key are excluded before locking.
+      const rows = await tx.execute(sql`SELECT id, encrypted_token_payload
+        FROM contractor_email_queue
+        WHERE id > ${lastId}
+          AND encrypted_token_payload IS NOT NULL
+          AND (${ENVELOPE_KEY_SQL} < ${currentKey} OR ${ENVELOPE_KEY_SQL} > ${currentKey})
+          ${options.queueId == null ? sql`` : sql`AND id=${options.queueId}`}
+        ORDER BY id
+        LIMIT ${batchSize}
+        FOR UPDATE`);
+      const ids: number[] = [];
+      let changed = 0;
+      for (const row of rows.rows as any[]) {
+        ids.push(Number(row.id));
+        const encoded = String(row.encrypted_token_payload);
+        if (!tokenPayloadNeedsReencryption(encoded)) continue;
+        let replacement: string;
+        try {
+          replacement = encryptTokenPayload(decryptTokenPayload(encoded));
+        } catch (err) {
+          // A damaged draft stays as it is (preview and dispatch refuse it); a
+          // missing key is a configuration error and still stops startup.
+          if (!isDamagedTokenPayload(err)) throw err;
+          logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+          continue;
+        }
+        const result = await tx.execute(sql`UPDATE contractor_email_queue
+          SET encrypted_token_payload=${replacement}, updated_at=now()
+          WHERE id=${row.id}
+            AND encrypted_token_payload=${encoded}
+          RETURNING id`);
+        if ((result.rows as any[])[0]) changed++;
+      }
+      return { ids, changed };
+    });
+    if (batch.ids.length === 0) break;
+    lastId = batch.ids[batch.ids.length - 1];
+    updated += batch.changed;
+    await options.onBatchCommitted?.({ index, ids: batch.ids, updated: batch.changed });
+  }
+  return updated;
+}
+
+/**
+ * Move raw bearer links and legacy quote tokens out of queued drafts into the
+ * encrypted payload, leaving placeholders. Must finish before readiness so no
+ * plaintext credential is served or dispatched.
+ */
+export async function scrubLegacyQueuedCredentials(options: QueueMigrationOptions = {}): Promise<number> {
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let lastId = 0;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const batch = await db.transaction(async (tx) => {
+      // Only drafts that still hold a raw quote token or a raw bearer link are
+      // read and locked; secured history is filtered out by the predicate.
+      const legacy = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
+        subject, body_html, body_text, email_preview_json, encrypted_token_payload
+        FROM contractor_email_queue
+        WHERE id > ${lastId}
+          ${options.queueId == null ? sql`` : sql`AND id=${options.queueId}`}
+          AND ${LEGACY_QUEUE_PREDICATE}
+        ORDER BY id
+        LIMIT ${batchSize}
+        FOR UPDATE`);
+      const ids: number[] = [];
+      let changed = 0;
+      for (const row of (legacy.rows as any[])) {
+        ids.push(Number(row.id));
+        if (await scrubQueuedRow(tx, row)) changed++;
+      }
+      return { ids, changed };
+    });
+    if (batch.ids.length === 0) break;
+    lastId = batch.ids[batch.ids.length - 1];
+    updated += batch.changed;
+    await options.onBatchCommitted?.({ index, ids: batch.ids, updated: batch.changed });
+  }
+  return updated;
+}
+
+/**
+ * The scrub must also catch credentials an older edited draft carried as bare
+ * text, without their URL. Finding those needs the decrypted payload, so no
+ * SQL predicate can select them. This sweep reads drafts with credentials in
+ * bounded id batches *without locking*, decrypts in memory, and only then
+ * locks and rewrites the rows that actually contain a bare credential.
+ *
+ * A high-water mark (the last id examined) is recorded with each batch, so
+ * every draft is decrypted by this sweep at most once across restarts: the
+ * first boot works through the existing history (resuming after an
+ * interruption), and later boots only read drafts inserted since.
+ */
+const BARE_CREDENTIAL_SWEEP = "contractor_queue_bare_credentials_v1";
+
+export async function sweepPlainTextQueuedCredentials(options: QueueMigrationOptions = {}): Promise<number> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  await db.execute(sql`INSERT INTO runtime_migration_progress (name) VALUES (${BARE_CREDENTIAL_SWEEP})
+    ON CONFLICT (name) DO NOTHING`);
+  const batchSize = options.batchSize ?? QUEUE_MIGRATION_BATCH_SIZE;
+  let updated = 0;
+  for (let index = 0; ; index++) {
+    const [progress] = (await db.execute(sql`SELECT last_id FROM runtime_migration_progress
+      WHERE name=${BARE_CREDENTIAL_SWEEP}`)).rows as any[];
+    const lastId = Number(progress.last_id);
+    const rows = (await db.execute(sql`SELECT id, subject, body_html, body_text, email_preview_json, encrypted_token_payload
       FROM contractor_email_queue
-      WHERE encrypted_token_payload IS NOT NULL
-        ${queueId == null ? sql`` : sql`AND id=${queueId}`}
-      FOR UPDATE`);
-    let updated = 0;
-    for (const row of rows.rows as any[]) {
-      const encoded = String(row.encrypted_token_payload);
-      if (!tokenPayloadNeedsReencryption(encoded)) continue;
-      const replacement = encryptTokenPayload(decryptTokenPayload(encoded));
-      const result = await tx.execute(sql`UPDATE contractor_email_queue
-        SET encrypted_token_payload=${replacement}, updated_at=now()
-        WHERE id=${row.id}
-          AND encrypted_token_payload=${encoded}
-        RETURNING id`);
-      if ((result.rows as any[])[0]) updated++;
+      WHERE id > ${lastId} AND encrypted_token_payload IS NOT NULL
+      ORDER BY id LIMIT ${batchSize}`)).rows as any[];
+    if (rows.length === 0) break;
+    const candidates = rows.filter((row) => {
+      try {
+        const payload = decryptTokenPayload(String(row.encrypted_token_payload));
+        const rendered = [row.subject, row.body_html, row.body_text ?? "", JSON.stringify(row.email_preview_json ?? {})].join("\n");
+        return Object.values(payload).some((token) => typeof token === "string" && token.length > 0 && rendered.includes(token));
+      } catch (err) {
+        if (!isDamagedTokenPayload(err)) throw err;
+        return false; // Damaged drafts are refused at preview and dispatch.
+      }
+    }).map((row) => Number(row.id));
+    const nextId = Number(rows[rows.length - 1].id);
+    const changed = await db.transaction(async (tx) => {
+      let written = 0;
+      if (candidates.length > 0) {
+        const locked = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
+          subject, body_html, body_text, email_preview_json, encrypted_token_payload
+          FROM contractor_email_queue WHERE id IN (${sql.join(candidates.map((id) => sql`${id}`), sql`, `)})
+          ORDER BY id FOR UPDATE`);
+        for (const row of locked.rows as any[]) if (await scrubQueuedRow(tx, row)) written++;
+      }
+      await tx.execute(sql`UPDATE runtime_migration_progress SET last_id=${nextId}, updated_at=now()
+        WHERE name=${BARE_CREDENTIAL_SWEEP}`);
+      return written;
+    });
+    updated += changed;
+    await options.onBatchCommitted?.({ index, ids: candidates, updated: changed });
+  }
+  return updated;
+}
+
+type MigrationTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Scrub one locked queue row. Returns false when there is nothing to move
+ *  (or the draft's credentials are damaged), true when it was rewritten. */
+async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
+  let payload: Record<string, string>;
+  try {
+    payload = row.encrypted_token_payload ? decryptTokenPayload(row.encrypted_token_payload) : {};
+  } catch (err) {
+    // Leave a damaged draft untouched rather than abort every later
+    // migration; preview and dispatch refuse it.
+    if (!isDamagedTokenPayload(err)) throw err;
+    logger.warn({ queueId: row.id, reason: err.reason }, "Skipping damaged contractor email draft credentials");
+    return false;
+  }
+  let subject = String(row.subject ?? "");
+  let html = String(row.body_html ?? "");
+  let text = row.body_text == null ? null : String(row.body_text);
+  let previewText = JSON.stringify(row.email_preview_json ?? {});
+  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/([a-z0-9-]{32,})/ig;
+  const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
+  const candidates = [...all.matchAll(bearerPattern)];
+  // Older edited drafts may contain a known credential as plain text,
+  // without its URL. They still need scrubbing, even with an encrypted
+  // dispatch payload already present.
+  const containsPayloadToken = Object.values(payload).some(token =>
+    typeof token === "string" && token.length > 0 && all.includes(token));
+  if (candidates.length === 0 && row.quote_token == null && !containsPayloadToken) return false;
+  const discovered: Array<[string, string]> = [];
+  const rawQuote = row.quote_token ? String(row.quote_token) : null;
+  if (rawQuote) payload.quote = rawQuote;
+  for (const match of candidates) {
+    const route = match[1].toLowerCase();
+    const token = match[2];
+    if (route === "contractor-quote") {
+      payload.quote ??= token;
+      discovered.push([token, "{{QUOTE_TOKEN}}"]);
+    } else if (route === "contractor-portal") {
+      payload.portal ??= token;
+      discovered.push([token, "{{PORTAL_URL}}"]);
+    } else if (route === "schedule") {
+      // A compliance visit-scheduling link: carried in the `booked` slot,
+      // as current reminders do; the item keeps only its digest.
+      payload.booked ??= token;
+      discovered.push([token, "{{BOOKED_TOKEN}}"]);
     }
-    return updated;
-  });
+    else {
+      const issueId = Number(row.issue_id ?? row.entity_id);
+      if (!Number.isInteger(issueId)) {
+        throw new Error(`Cannot classify legacy action token without an issue id in contractor_email_queue row ${row.id}`);
+      }
+      const action = await tx.execute(sql`SELECT action FROM fix_track_action_tokens
+        WHERE token_hash=${digestBearerToken(token)}
+          AND issue_id=${issueId}
+          AND client_id=${row.client_id} LIMIT 1`);
+      const kind = String((action.rows as any[])[0]?.action ?? "");
+      if (kind === "booked" || kind === "completed") {
+        payload[kind] = token;
+        discovered.push([token, `{{${kind.toUpperCase()}_TOKEN}}`]);
+      }
+      else throw new Error(`Cannot safely classify legacy action token in contractor_email_queue row ${row.id}`);
+    }
+  }
+  const replacements: Array<[string, string]> = [...discovered];
+  if (payload.quote) replacements.push([payload.quote, "{{QUOTE_TOKEN}}"]);
+  if (payload.booked) replacements.push([payload.booked, "{{BOOKED_TOKEN}}"]);
+  if (payload.completed) replacements.push([payload.completed, "{{COMPLETED_TOKEN}}"]);
+  if (payload.portal) replacements.push([payload.portal, "{{PORTAL_URL}}"]);
+  // Full portal URLs must be replaced before their token suffixes or
+  // hydration would duplicate the URL prefix.
+  replacements.sort(([left], [right]) => right.length - left.length);
+  for (const [raw, placeholder] of replacements) {
+    subject = subject.split(raw).join(placeholder);
+    html = html.split(raw).join(placeholder);
+    if (text != null) text = text.split(raw).join(placeholder);
+    previewText = previewText.split(raw).join(placeholder);
+  }
+  const remaining = [subject, html, text ?? "", previewText].join("\n");
+  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i.test(remaining)) {
+    throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
+  }
+  const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
+  const result = await tx.execute(sql`UPDATE contractor_email_queue SET
+    quote_token_hash=COALESCE(quote_token_hash, ${payload.quote ? digestBearerToken(payload.quote) : null}),
+    quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
+    email_preview_json=${previewText}::jsonb,
+    encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
+    WHERE id=${row.id}
+      AND quote_token IS NOT DISTINCT FROM ${row.quote_token}
+      AND encrypted_token_payload IS NOT DISTINCT FROM ${row.encrypted_token_payload}
+    RETURNING id`);
+  return (result.rows as any[]).length > 0;
 }
 
 /**
@@ -276,6 +556,25 @@ export async function runRuntimeMigrations() {
       ) WITH (OIDS=FALSE)
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
+
+    // Password reset and invitation set-up links (lib/db passwordResetTokensTable).
+    // It was only ever created by drizzle push, but forgot-password,
+    // reset-password and the user invite/resend-invite routes all depend on it,
+    // so a runtime-migrated database must have it too. Existing tables are left
+    // as they are; only missing nullable/defaulted columns are added.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+        "id"         serial PRIMARY KEY,
+        "user_id"    integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "token"      text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "used_at"    timestamp,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
 
     // Shared authentication throttles keep sign-in quotas consistent across
     // API processes. Only HMACed IP/namespace keys are persisted.
@@ -583,6 +882,10 @@ export async function runRuntimeMigrations() {
       REFERENCES "departments"("id") ON DELETE SET NULL
     `);
 
+    // Inductions and competency sign-offs were only ever created by drizzle
+    // push; see migrateSafeTrackPushOnlyTables below.
+    await migrateSafeTrackPushOnlyTables();
+
     // ---- FixTrack issues table ----
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "fix_track_issues" (
@@ -769,6 +1072,35 @@ export async function runRuntimeMigrations() {
       ON "contractor_certificates" ("contractor_id")
     `);
 
+    // Legacy item/contractor certificate history (lib/db certificatesTable).
+    // It was only ever created by drizzle push, but the compliance register,
+    // dashboard stats, item certificates and tenant export all read it, so a
+    // runtime-migrated database must have it too. Ownership has no client_id:
+    // a row belongs to the tenant of its compliance item or contractor.
+    // Existing tables are left as they are; only missing nullable columns are
+    // added so a drifted legacy table can still serve these reads.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "certificates" (
+        "id"            serial PRIMARY KEY,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "item_id"       integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+        "name"          text NOT NULL,
+        "file_url"      text,
+        "issue_date"    timestamp,
+        "expiry_date"   timestamp,
+        "notes"         text,
+        "created_at"    timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "file_url" text`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "issue_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "expiry_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "notes" text`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_item" ON "certificates" ("item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_contractor" ON "certificates" ("contractor_id")`);
+
     // Deduplication log for contractor compliance-expiry reminders. One row per
     // (client, contractor, milestone), where milestone encodes the reminder
     // target it was sent for (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
@@ -929,7 +1261,7 @@ export async function runRuntimeMigrations() {
         "mode" text NOT NULL CHECK ("mode" IN ('assign','quote')),
         "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation')),
         "status" text NOT NULL DEFAULT 'pending'
-          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed')),
+          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed','superseded')),
         "to_email" text NOT NULL CHECK (length(trim("to_email")) > 3),
         "subject" text NOT NULL CHECK (length("subject") > 0),
         "body_html" text NOT NULL CHECK (length("body_html") > 0),
@@ -970,89 +1302,13 @@ export async function runRuntimeMigrations() {
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
       CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
+    await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
-    await db.transaction(async (tx) => {
-      const legacy = await tx.execute(sql`SELECT id, client_id, issue_id, entity_id, quote_token, quote_token_hash,
-        subject, body_html, body_text, email_preview_json, encrypted_token_payload
-        FROM contractor_email_queue FOR UPDATE`);
-      for (const row of (legacy.rows as any[])) {
-        const payload: Record<string, string> = row.encrypted_token_payload
-          ? decryptTokenPayload(row.encrypted_token_payload)
-          : {};
-        let subject = String(row.subject ?? "");
-        let html = String(row.body_html ?? "");
-        let text = row.body_text == null ? null : String(row.body_text);
-        let previewText = JSON.stringify(row.email_preview_json ?? {});
-        const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal)\/([a-z0-9-]{32,})/ig;
-        const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
-        const candidates = [...all.matchAll(bearerPattern)];
-        // Older edited drafts may contain a known credential as plain text,
-        // without its URL. They still need scrubbing, even with an encrypted
-        // dispatch payload already present.
-        const containsPayloadToken = Object.values(payload).some(token =>
-          typeof token === "string" && token.length > 0 && all.includes(token));
-        if (candidates.length === 0 && row.quote_token == null && !containsPayloadToken) continue;
-        const discovered: Array<[string, string]> = [];
-        const rawQuote = row.quote_token ? String(row.quote_token) : null;
-        if (rawQuote) payload.quote = rawQuote;
-        for (const match of candidates) {
-          const route = match[1].toLowerCase();
-          const token = match[2];
-          if (route === "contractor-quote") {
-            payload.quote ??= token;
-            discovered.push([token, "{{QUOTE_TOKEN}}"]);
-          } else if (route === "contractor-portal") {
-            payload.portal ??= token;
-            discovered.push([token, "{{PORTAL_URL}}"]);
-          }
-          else {
-            const issueId = Number(row.issue_id ?? row.entity_id);
-            if (!Number.isInteger(issueId)) {
-              throw new Error(`Cannot classify legacy action token without an issue id in contractor_email_queue row ${row.id}`);
-            }
-            const action = await tx.execute(sql`SELECT action FROM fix_track_action_tokens
-              WHERE token_hash=${digestBearerToken(token)}
-                AND issue_id=${issueId}
-                AND client_id=${row.client_id} LIMIT 1`);
-            const kind = String((action.rows as any[])[0]?.action ?? "");
-            if (kind === "booked" || kind === "completed") {
-              payload[kind] = token;
-              discovered.push([token, `{{${kind.toUpperCase()}_TOKEN}}`]);
-            }
-            else throw new Error(`Cannot safely classify legacy action token in contractor_email_queue row ${row.id}`);
-          }
-        }
-        const replacements: Array<[string, string]> = [...discovered];
-        if (payload.quote) replacements.push([payload.quote, "{{QUOTE_TOKEN}}"]);
-        if (payload.booked) replacements.push([payload.booked, "{{BOOKED_TOKEN}}"]);
-        if (payload.completed) replacements.push([payload.completed, "{{COMPLETED_TOKEN}}"]);
-        if (payload.portal) replacements.push([payload.portal, "{{PORTAL_URL}}"]);
-        // Full portal URLs must be replaced before their token suffixes or
-        // hydration would duplicate the URL prefix.
-        replacements.sort(([left], [right]) => right.length - left.length);
-        for (const [raw, placeholder] of replacements) {
-          subject = subject.split(raw).join(placeholder);
-          html = html.split(raw).join(placeholder);
-          if (text != null) text = text.split(raw).join(placeholder);
-          previewText = previewText.split(raw).join(placeholder);
-        }
-        const remaining = [subject, html, text ?? "", previewText].join("\n");
-        if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i.test(remaining)) {
-          throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
-        }
-        const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
-        await tx.execute(sql`UPDATE contractor_email_queue SET
-          quote_token_hash=COALESCE(quote_token_hash, ${payload.quote ? digestBearerToken(payload.quote) : null}),
-          quote_token=NULL, subject=${subject}, body_html=${html}, body_text=${text},
-          email_preview_json=${previewText}::jsonb,
-          encrypted_token_payload=${encrypted ?? row.encrypted_token_payload}
-          WHERE id=${row.id}
-            AND quote_token IS NOT DISTINCT FROM ${row.quote_token}
-            AND encrypted_token_payload IS NOT DISTINCT FROM ${row.encrypted_token_payload}`);
-      }
-    });
+    await ensureQueueMigrationIndexes();
+    await sweepPlainTextQueuedCredentials();
+    await scrubLegacyQueuedCredentials();
     await reencryptQueuedTokenPayloads();
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
@@ -1075,6 +1331,34 @@ export async function runRuntimeMigrations() {
             AND newer.id > q.id
         )
     `);
+    // Reminder-cycle lifecycle (see lib/reminderCycles.ts): a pending
+    // reminder whose compliance check changed becomes 'superseded'. The
+    // status constraint is only replaced when it lacks that state, so
+    // ordinary restarts do not re-validate the whole queue.
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD COLUMN IF NOT EXISTS "reminder_cycle" text,
+      ADD COLUMN IF NOT EXISTS "superseded_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "superseded_reason" text`);
+    await db.execute(sql`DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'contractor_email_queue'::regclass
+          AND conname = 'contractor_email_queue_status_check'
+          AND pg_get_constraintdef(oid) LIKE '%superseded%'
+      ) THEN
+        ALTER TABLE contractor_email_queue DROP CONSTRAINT IF EXISTS contractor_email_queue_status_check;
+        ALTER TABLE contractor_email_queue ADD CONSTRAINT contractor_email_queue_status_check
+          CHECK (status IN ('pending','approved','sending','sent','cancelled','failed','superseded')) NOT VALID;
+        ALTER TABLE contractor_email_queue VALIDATE CONSTRAINT contractor_email_queue_status_check;
+      END IF;
+    END $$`);
+    // Drafts queued by the previous release carry their cycle only in the
+    // idempotency key. Only active drafts matter to the lifecycle, and the
+    // active-draft index keeps this to those rows.
+    await db.execute(sql`UPDATE contractor_email_queue
+      SET reminder_cycle = substring(idempotency_key from '^reminder-[0-9]+-[0-9]+-([0-9]{4}-[0-9]{2}-[0-9]{2})$')
+      WHERE status IN ('pending','sending') AND entity_type='compliance' AND reminder_cycle IS NULL
+        AND idempotency_key ~ '^reminder-[0-9]+-[0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$'`);
     await db.execute(sql`DROP INDEX IF EXISTS "UQ_contractor_email_queue_active_draft"`);
     await db.execute(sql`
       CREATE UNIQUE INDEX IF NOT EXISTS "UQ_contractor_email_queue_active_draft"
@@ -1773,6 +2057,61 @@ async function migrateTrainTrack() {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_train_track_client" ON "train_track_records" ("client_id")`);
+}
+
+// ---- SafeTrack inductions and competency sign-offs ----
+// lib/db safeInductionsTable / safeCompetencySignoffsTable. Both tables existed
+// only via drizzle push, yet the SafeTrack routes, the daily-entry cutoff,
+// photo ownership checks and offboarding all read them, so a runtime-migrated
+// database must create them. Ownership is the tenant's client_id (cascade on
+// client deletion); site and creator links are optional and cleared when the
+// site or user is removed. Existing tables are left as they are: only missing
+// nullable or defaulted columns are added, so a drifted legacy table can still
+// serve these routes.
+async function migrateSafeTrackPushOnlyTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_inductions" (
+      "id"           serial PRIMARY KEY,
+      "client_id"    integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"      integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"   text NOT NULL,
+      "start_date"   date NOT NULL,
+      "completed_at" date,
+      "checklist"    text,
+      "notes"        text,
+      "created_by"   integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"   timestamp NOT NULL DEFAULT now(),
+      "updated_at"   timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "completed_at" date`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "checklist" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_inductions" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "safe_competency_signoffs" (
+      "id"            serial PRIMARY KEY,
+      "client_id"     integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "site_id"       integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "staff_name"    text NOT NULL,
+      "task_name"     text NOT NULL,
+      "signed_off_by" text NOT NULL,
+      "signed_off_at" date NOT NULL,
+      "notes"         text,
+      "created_by"    integer REFERENCES "users"("id") ON DELETE SET NULL,
+      "created_at"    timestamp NOT NULL DEFAULT now(),
+      "updated_at"    timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "notes" text`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+  await db.execute(sql`ALTER TABLE "safe_competency_signoffs" ADD COLUMN IF NOT EXISTS "updated_at" timestamp NOT NULL DEFAULT now()`);
 }
 
 // ---- SafeTrack handbook ----
@@ -4053,4 +4392,25 @@ async function migrateDoctrackSafetrackMerge() {
       `);
     }
   }
+}
+
+/**
+ * Compliance visit-scheduling links: store only the SHA-256 digest of each
+ * token (digestBearerToken's format). Replay-safe: legacy raw tokens are
+ * hashed and cleared in one statement, so links already delivered keep
+ * working and a re-run finds nothing to do. Runs before the queue scrub,
+ * which moves matching raw links out of queued drafts.
+ */
+export async function migrateComplianceScheduleTokens(): Promise<number> {
+  await db.execute(sql`ALTER TABLE "compliance_items"
+    ADD COLUMN IF NOT EXISTS "schedule_token" text,
+    ADD COLUMN IF NOT EXISTS "schedule_token_hash" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_compliance_items_schedule_token_hash"
+    ON "compliance_items" ("schedule_token_hash") WHERE "schedule_token_hash" IS NOT NULL`);
+  const migrated = await db.execute(sql`UPDATE "compliance_items"
+    SET "schedule_token_hash" = encode(sha256(convert_to("schedule_token", 'UTF8')), 'hex'),
+        "schedule_token" = NULL
+    WHERE "schedule_token" IS NOT NULL
+    RETURNING id`);
+  return migrated.rows.length;
 }
