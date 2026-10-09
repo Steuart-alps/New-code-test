@@ -22,6 +22,7 @@ import {
   lockPhotoRequirement,
   STAGED_PHOTO_ENTITY_TYPES,
 } from "../lib/stagedPhotoReceipts";
+import { cancelStagedPhotoReceipt, cleanupStagedPhotoUploads } from "../lib/stagedPhotoCleanup";
 
 const router = Router();
 const storage = new ObjectStorageService();
@@ -233,6 +234,27 @@ router.post(
     }
   },
 );
+
+// Cancel the caller's own unused receipt (dialog closed or photo removed) and
+// remove its object now when possible. Anything left is retried by the
+// scheduled staged-photo cleanup. The id selects only a server-written row
+// owned by this tenant and actor; no client path is ever trusted here.
+router.delete("/staged/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const id = String(req.params.id ?? "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    return res.status(400).json({ error: "Invalid staged photo id" });
+  }
+  const cancelled = await cancelStagedPhotoReceipt(db as any, id, clientId, req.currentUser!.id);
+  if (!cancelled) return res.status(404).json({ error: "Staged photo not found" });
+  try {
+    await cleanupStagedPhotoUploads(storage, { receiptId: id, clientId });
+  } catch (err) {
+    req.log?.warn({ err }, "Immediate staged photo cleanup deferred");
+  }
+  return res.json({ ok: true });
+});
 
 router.post("/request-upload", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);

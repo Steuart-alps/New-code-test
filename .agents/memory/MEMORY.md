@@ -69,6 +69,7 @@
 - [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
 - [Required photo creation](required-photo-creation.md) — stage verified evidence before atomically creating records; creation rules do not retroactively invalidate history.
 - [Mobile staged photo evidence](mobile-staged-photo-evidence.md) — mobile mirrors the web staged-receipt flow; storage PUT never carries the bearer; receipts scoped to user+client+type.
+- [Staged photo cleanup](staged-photo-cleanup.md) — cancelled/expired receipts delete their object first, then the row, under the receipt lock with ACL and reference checks; never prune receipt rows directly.
 - [PAT history provenance](pat-history-provenance.md) — migrated names/locations are best-known, not verified at the inspection date; preserve provenance rather than silently rewriting history.
 - [PAT photo boundary](pat-photo-boundary.md) — pat_test photos and their object downloads follow the test's recorded department/site, not the appliance's current location.
 - [Local calendar-day math](local-calendar-day-math.md) — date-only ages must use local calendar dates, not elapsed milliseconds, to stay correct across DST.

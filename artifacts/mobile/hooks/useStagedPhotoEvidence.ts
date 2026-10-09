@@ -46,6 +46,17 @@ const stagingDeps: StagePhotoDeps = {
 };
 
 /**
+ * Cancel a receipt the user abandoned so the server deletes its unreferenced
+ * object promptly. Best effort: anything missed expires and is cleaned up by
+ * the server's scheduled staged-photo cleanup.
+ */
+function cancelStagedPhotos(photos: StagedPhoto[]) {
+  for (const photo of photos) {
+    void apiFetch(`/api/photos/staged/${encodeURIComponent(photo.id)}`, { method: 'DELETE' }).catch(() => undefined);
+  }
+}
+
+/**
  * Required-photo evidence for a new GreenTrack or SwimTrack record. Receipts
  * are scoped to the signed-in user, their client and the record type, and are
  * discarded whenever that scope changes.
@@ -58,6 +69,8 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
   const [state, setState] = useState<{ scope: string | null; photos: StagedPhoto[] }>({ scope, photos: [] });
   const [busyScope, setBusyScope] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<{ scope: string | null; message: string } | null>(null);
+  // Receipts staged in this form and not yet claimed by a successful create.
+  const pendingRef = useRef<StagedPhoto[]>([]);
 
   const requirementsQuery = useQuery({
     queryKey: ['photo-requirements', user?.id ?? null, user?.clientId ?? null],
@@ -70,16 +83,35 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
   const uploading = scope !== null && busyScope === scope;
   const { required, minimum } = requirementFor(requirementsQuery.data, entityType);
 
+  /** Abandon the evidence (form cancelled): cancels unclaimed receipts. */
   const reset = useCallback(() => {
+    cancelStagedPhotos(pendingRef.current);
+    pendingRef.current = [];
     setState({ scope: scopeRef.current, photos: [] });
     setUploadError(null);
   }, []);
 
-  // Identity or record-type changes drop receipts from the previous scope.
+  /** After a successful create: receipts were claimed, so do not cancel them. */
+  const consume = useCallback(() => {
+    pendingRef.current = [];
+    setState({ scope: scopeRef.current, photos: [] });
+    setUploadError(null);
+  }, []);
+
+  // Identity, record-type or form changes drop (and cancel) receipts from the
+  // previous scope; unmounting the form does the same.
   useEffect(() => {
+    if (pendingRef.current.length) {
+      cancelStagedPhotos(pendingRef.current);
+      pendingRef.current = [];
+    }
     setState((previous) => (previous.scope === scope ? previous : { scope, photos: [] }));
     setUploadError(null);
   }, [scope]);
+  useEffect(() => () => {
+    cancelStagedPhotos(pendingRef.current);
+    pendingRef.current = [];
+  }, []);
 
   async function addPhoto(source: 'camera' | 'library') {
     const currentScope = scope;
@@ -107,7 +139,11 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
     setUploadError(null);
     try {
       const staged = await stageRequiredPhoto(stagingDeps, entityType, result.assets[0]);
-      if (scopeRef.current === currentScope) {
+      if (scopeRef.current !== currentScope) {
+        // The form was abandoned while verifying: cancel instead of orphaning.
+        cancelStagedPhotos([staged]);
+      } else {
+        pendingRef.current = [...pendingRef.current, staged];
         setState((previous) => ({
           scope: currentScope,
           photos: [...(previous.scope === currentScope ? previous.photos : []), staged].slice(0, STAGED_PHOTO_MAX),
@@ -126,6 +162,8 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
   }
 
   function removePhoto(id: string) {
+    cancelStagedPhotos(pendingRef.current.filter((photo) => photo.id === id));
+    pendingRef.current = pendingRef.current.filter((photo) => photo.id !== id);
     setState((previous) => ({
       scope,
       photos: previous.scope === scope ? previous.photos.filter((photo) => photo.id !== id) : [],
@@ -139,6 +177,8 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
   function preparePayload<T extends Record<string, unknown>>(payload: T): (T & { photoUploadIds?: string[] }) | null {
     const { fresh, expired } = splitExpiredPhotos(photos, Date.now());
     if (expired.length) {
+      cancelStagedPhotos(expired);
+      pendingRef.current = pendingRef.current.filter((photo) => !expired.includes(photo));
       setState({ scope, photos: fresh });
       if (required && fresh.length < minimum) {
         Alert.alert(
@@ -154,7 +194,12 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
   /** Map a failed create to a message; keeps the draft and valid photos. */
   function handleCreateError(error: unknown, fallback: string): string {
     const kind = classifyStagedCreateError(error);
-    if (kind === 'receipts-invalid') setState({ scope, photos: [] });
+    if (kind === 'receipts-invalid') {
+      // Unusable now; cancelling releases any that still exist server-side.
+      cancelStagedPhotos(pendingRef.current);
+      pendingRef.current = [];
+      setState({ scope, photos: [] });
+    }
     if (kind === 'requirement' || kind === 'receipts-invalid') void requirementsQuery.refetch();
     const serverMessage = error instanceof Error && error.message ? error.message : fallback;
     return stagedCreateErrorMessage(kind, kind === 'other' || kind === 'requirement' ? serverMessage : fallback);
@@ -183,6 +228,7 @@ export function useStagedPhotoEvidence(entityType: StagedPhotoEntityType, enable
     addPhoto,
     removePhoto,
     reset,
+    consume,
     preparePayload,
     handleCreateError,
   };

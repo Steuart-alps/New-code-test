@@ -402,7 +402,7 @@ export default function GreenTrackScreen() {
       setNotes('');
       setCheckDate(today());
       setOperator(user?.name ?? '');
-      photoEvidence.reset();
+      photoEvidence.consume();
       Alert.alert('Check signed off', 'The pre-use check has been recorded against the machine.');
     },
     onError: (error: Error) => {
