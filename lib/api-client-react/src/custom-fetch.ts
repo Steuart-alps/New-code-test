@@ -69,6 +69,24 @@ export function setPaymentRequiredHandler(handler: (() => void) | null): void {
   _paymentRequiredHandler = handler;
 }
 
+export type ApiMutationObserver = (
+  method: string,
+  url: string,
+) => (() => void) | void;
+
+let _mutationObserver: ApiMutationObserver | null = null;
+
+/**
+ * Register an observer for state-changing requests (POST/PUT/PATCH). It is
+ * called before the request is sent and may return a callback that runs only
+ * after a successful (2xx, parsed) response. Observers must not throw; any
+ * error is swallowed so they can never affect the request. Pass `null` to
+ * clear.
+ */
+export function setMutationObserver(observer: ApiMutationObserver | null): void {
+  _mutationObserver = observer;
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
@@ -411,6 +429,15 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
+  let onMutationSuccess: (() => void) | void = undefined;
+  if (_mutationObserver && (method === "POST" || method === "PUT" || method === "PATCH")) {
+    try {
+      onMutationSuccess = _mutationObserver(method, requestInfo.url);
+    } catch {
+      // observers must never affect the request
+    }
+  }
+
   const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
@@ -432,5 +459,13 @@ export async function customFetch<T = unknown>(
     throw new ApiError(response, errorData, requestInfo);
   }
 
-  return (await parseSuccessBody(response, responseType, requestInfo)) as T;
+  const body = (await parseSuccessBody(response, responseType, requestInfo)) as T;
+  if (onMutationSuccess) {
+    try {
+      onMutationSuccess();
+    } catch {
+      // observers must never affect the response
+    }
+  }
+  return body;
 }
