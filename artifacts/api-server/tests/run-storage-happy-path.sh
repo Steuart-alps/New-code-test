@@ -6,6 +6,8 @@ source tests/api-integration-lock.sh
 
 : "${GCS_STORAGE_TEST_BUCKET:?Set a dedicated non-production GCS_STORAGE_TEST_BUCKET before running required-storage tests}"
 : "${GCS_BUCKET_NAME:?Application bucket must be configured for isolation checks}"
+: "${DATABASE_URL:?Set DATABASE_URL to a development/test database; suites purge and verify only their own fixture rows}"
+: "${SESSION_SECRET:?Set SESSION_SECRET for the test API}"
 if [ "$GCS_STORAGE_TEST_BUCKET" = "$GCS_BUCKET_NAME" ] ||
   [ "$GCS_STORAGE_TEST_BUCKET" = "${GCS_PRIVATE_BUCKET:-}" ] ||
   [ "$GCS_STORAGE_TEST_BUCKET" = "${GCS_PUBLIC_BUCKET:-}" ]; then
@@ -19,6 +21,9 @@ export GCS_PRIVATE_BUCKET="$GCS_STORAGE_TEST_BUCKET"
 export GCS_PUBLIC_BUCKET="$GCS_STORAGE_TEST_BUCKET"
 export GCS_PRIVATE_PREFIX="private/integration-$(node -e 'process.stdout.write(require("crypto").randomBytes(16).toString("hex"))')"
 export STORAGE_TEST_REQUIRE_AVAILABLE=1
+# PRIVATE_OBJECT_DIR / PUBLIC_OBJECT_SEARCH_PATHS override the bucket and prefix
+# above, so an inherited application value must never reach the test API.
+unset PRIVATE_OBJECT_DIR PUBLIC_OBJECT_SEARCH_PATHS
 
 SERVER_PID=""
 cleanup() {
