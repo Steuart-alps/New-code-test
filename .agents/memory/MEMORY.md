@@ -77,6 +77,7 @@
 - [KitchenTrack verification](kitchen-temperature-verification.md) — one manager evidence-backed sign-off; maintenance completion must not bypass it; implicit defaults follow jurisdiction; hold times and per-item rules replace section values.
 - [Shared auth rate limits](shared-auth-rate-limits.md) — production login/register/reset limits share PostgreSQL counters; reset reserves then releases non-failures.
 - [Git metadata cleanup](git-metadata-cleanup.md) — stale packed-refs temp files can block ref packing; verify no active Git process and check age before removal.
+- [API test lock inventory](api-test-lock-inventory.md) — classify every new api-server test:* script in test-api-integration-lock.sh; fresh-schema runs are locked, never pure.
 - [Completed-work adoption analytics](module-work-analytics.md) — first saved record/completed check after activation comes from an allowlisted API-mutation observer; add new endpoints to its rules.
 - [Feedback review revisions](feedback-review-revisions.md) — feedback PATCH needs expectedRevision (409 when stale); append-only trigger-guarded review history written in the same transaction.
 - [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.

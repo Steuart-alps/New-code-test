@@ -14,9 +14,9 @@
  */
 import assert from "node:assert/strict";
 
-// The renderer modules import @workspace/db, which needs a URL at import time.
-// pg's Pool connects lazily, and nothing below runs a query.
-process.env.DATABASE_URL ??= "postgres://unused:unused@127.0.0.1:1/escaping-test-no-connection";
+// Run via tests/run-bundled-unit.sh, which points the database URL at an
+// unresolvable placeholder: the renderers import @workspace/db, whose pool
+// connects lazily, and nothing below runs a query.
 // The bundled logger cannot spawn its pino-pretty worker; use plain JSON logs.
 process.env.NODE_ENV = "production";
 for (const key of ["RESEND_API_KEY", "FIXTRACK_TEST_EMAIL_OUTBOX"]) delete process.env[key];
@@ -136,7 +136,6 @@ function assertPlainText(label: string, text: string, values: string[]) {
 }
 
 async function main() {
-// Imported after DATABASE_URL is defaulted above.
 email = await import("../src/lib/email");
 fixTrack = await import("../src/lib/fixTrackNotifications");
 compliance = await import("../src/lib/contractorComplianceReminders");
