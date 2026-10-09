@@ -670,8 +670,14 @@ async function certificateAccess(clientId: number, id: number, departmentId: num
   return row ? siteAccess(clientId, row.site_id, departmentId) : "missing";
 }
 async function replacementAccess(clientId: number, id: number, departmentId: number | null): Promise<AccessResult> {
-  const row = resultRows(await db.execute(sql`SELECT r.site_id FROM pat_replacements x JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id WHERE x.id=${id} AND x.client_id=${clientId}`))[0] as { site_id: number } | undefined;
-  return row ? siteAccess(clientId, row.site_id, departmentId) : "missing";
+  // Scope by the site recorded with the replacement, not the room's live site.
+  const row = resultRows(await db.execute(sql`
+    SELECT COALESCE(x.site_id_snapshot, r.site_id) AS site_id
+    FROM pat_replacements x JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id
+    WHERE x.id=${id} AND x.client_id=${clientId}
+  `))[0] as { site_id: number } | undefined;
+  const access = row ? await siteAccess(clientId, row.site_id, departmentId) : "missing";
+  return access === "missing" && row ? "forbidden" : access;
 }
 async function failureAccess(clientId: number, id: number, departmentId: number | null): Promise<AccessResult> {
   const row = resultRows(await db.execute(sql`SELECT c.site_id FROM pat_failures f JOIN pat_certificates c ON c.id=f.certificate_id AND c.client_id=f.client_id WHERE f.id=${id} AND f.client_id=${clientId}`))[0] as { site_id: number } | undefined;
@@ -927,9 +933,81 @@ router.put("/certificates/:id", requireAuth, denyViewers, async (req, res) => {
 });
 router.delete("/certificates/:id",requireAuth,denyViewers,async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string);if(!clientId||!Number.isInteger(id))return res.status(400).json({error:"Invalid request"});const access=await certificateAccess(clientId,id,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(404).json({error:"Not found"});return res.status(405).json({error:"Certificates are retained as compliance evidence and cannot be deleted"});});
 
-router.get("/replacements",requireAuth,async(req,res)=>{const clientId=getClientId(req);if(!clientId)return res.status(400).json({error:"No client context"});const departmentId=getActiveDepartmentId(req),siteId=await checkedSiteQuery(req,clientId,departmentId);if(siteId===undefined)return res.status(400).json({error:"Invalid siteId for this client"});if(siteId==="forbidden")return res.status(403).json({error:"Forbidden"});res.json(resultRows(await db.execute(sql`SELECT x.*,r.name AS room_name FROM pat_replacements x JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id JOIN sites s ON s.id=r.site_id AND s.client_id=r.client_id WHERE x.client_id=${clientId} ${departmentId!==null?sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})`:sql``} ${siteId?sql`AND r.site_id=${siteId}`:sql``} ORDER BY x.replaced_on DESC`)));});
-router.post("/replacements",requireAuth,denyViewers,async(req,res)=>{const clientId=getClientId(req),p=replacementSchema.safeParse(req.body);if(!clientId||!p.success)return res.status(400).json({error:"Invalid data"});const d=p.data,access=await roomAccess(clientId,d.roomId,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(400).json({error:"Room not found"});const row=resultRows(await db.execute(sql`INSERT INTO pat_replacements (client_id,room_id,appliance_name,replaced_on,replacement_details,notes) VALUES (${clientId},${d.roomId},${d.applianceName},${d.replacedOn},${d.replacementDetails??null},${d.notes??null}) RETURNING *`))[0];res.status(201).json(row);});
-router.put("/replacements/:id",requireAuth,denyViewers,async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string),p=replacementSchema.safeParse(req.body);if(!clientId||!Number.isInteger(id)||!p.success)return res.status(400).json({error:"Invalid data"});const departmentId=getActiveDepartmentId(req),current=await replacementAccess(clientId,id,departmentId);if(current==="forbidden")return res.status(403).json({error:"Forbidden"});if(current==="missing")return res.status(404).json({error:"Not found"});const d=p.data,room=await roomAccess(clientId,d.roomId,departmentId);if(room==="forbidden")return res.status(403).json({error:"Forbidden"});if(room==="missing")return res.status(400).json({error:"Room not found"});const row=resultRows(await db.execute(sql`UPDATE pat_replacements SET room_id=${d.roomId},appliance_name=${d.applianceName},replaced_on=${d.replacedOn},replacement_details=${d.replacementDetails??null},notes=${d.notes??null},updated_at=now() WHERE id=${id} AND client_id=${clientId} RETURNING *`))[0];res.json(row);});
+function isPatReplacementEvidenceViolation(error: unknown): boolean {
+  const seen = new Set<object>();
+  let candidate = error;
+  while (typeof candidate === "object" && candidate !== null && !seen.has(candidate)) {
+    seen.add(candidate);
+    const postgresError = candidate as { code?: unknown; message?: unknown; cause?: unknown };
+    if (postgresError.code === "23514" && typeof postgresError.message === "string"
+      && postgresError.message.startsWith("PAT replacement")) return true;
+    candidate = postgresError.cause;
+  }
+  return false;
+}
+
+// Replacements show the room and site recorded with them. The live room name
+// is returned separately as current_room_name.
+router.get("/replacements", requireAuth, async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const departmentId = getActiveDepartmentId(req), siteId = await checkedSiteQuery(req, clientId, departmentId);
+  if (siteId === undefined) return res.status(400).json({ error: "Invalid siteId for this client" });
+  if (siteId === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  res.json(resultRows(await db.execute(sql`
+    SELECT x.*, x.room_name_snapshot AS room_name, r.name AS current_room_name,
+      COALESCE(x.site_id_snapshot, r.site_id) AS site_id
+    FROM pat_replacements x
+    JOIN pat_rooms r ON r.id=x.room_id AND r.client_id=x.client_id
+    JOIN sites s ON s.id=COALESCE(x.site_id_snapshot, r.site_id) AND s.client_id=x.client_id
+    WHERE x.client_id=${clientId}
+      ${departmentId !== null ? sql`AND (s.department_id IS NULL OR s.department_id=${departmentId})` : sql``}
+      ${siteId ? sql`AND COALESCE(x.site_id_snapshot, r.site_id)=${siteId}` : sql``}
+    ORDER BY x.replaced_on DESC, x.id DESC
+  `)));
+});
+router.post("/replacements", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req), p = replacementSchema.safeParse(req.body);
+  if (!clientId || !p.success) return res.status(400).json({ error: "Invalid data" });
+  const d = p.data, access = await roomAccess(clientId, d.roomId, getActiveDepartmentId(req));
+  if (access === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (access === "missing") return res.status(400).json({ error: "Room not found" });
+  try {
+    // The trigger captures room and site identity inside the insert.
+    const row = resultRows(await db.execute(sql`
+      INSERT INTO pat_replacements (client_id,room_id,appliance_name,replaced_on,replacement_details,notes)
+      VALUES (${clientId},${d.roomId},${d.applianceName},${d.replacedOn},${d.replacementDetails ?? null},${d.notes ?? null}) RETURNING *
+    `))[0];
+    res.status(201).json(row);
+  } catch (error) {
+    if (isPatReplacementEvidenceViolation(error)) return res.status(400).json({ error: "Room not found" });
+    throw error;
+  }
+});
+router.put("/replacements/:id", requireAuth, denyViewers, async (req, res) => {
+  const clientId = getClientId(req), id = Number(req.params.id as string), p = replacementSchema.safeParse(req.body);
+  if (!clientId || !Number.isInteger(id) || !p.success) return res.status(400).json({ error: "Invalid data" });
+  const departmentId = getActiveDepartmentId(req), current = await replacementAccess(clientId, id, departmentId);
+  if (current === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (current === "missing") return res.status(404).json({ error: "Not found" });
+  const d = p.data, room = await roomAccess(clientId, d.roomId, departmentId);
+  if (room === "forbidden") return res.status(403).json({ error: "Forbidden" });
+  if (room === "missing") return res.status(400).json({ error: "Room not found" });
+  try {
+    const row = resultRows(await db.execute(sql`
+      UPDATE pat_replacements SET room_id=${d.roomId},appliance_name=${d.applianceName},replaced_on=${d.replacedOn},
+        replacement_details=${d.replacementDetails ?? null},notes=${d.notes ?? null},updated_at=now()
+      WHERE id=${id} AND client_id=${clientId} RETURNING *
+    `))[0];
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (error) {
+    if (isPatReplacementEvidenceViolation(error)) {
+      return res.status(409).json({ error: "A replacement can only be corrected to a room at the site where it was recorded", code: "PAT_REPLACEMENT_SITE_LOCKED" });
+    }
+    throw error;
+  }
+});
 router.delete("/replacements/:id",requireAuth,denyViewers,async(req,res)=>{const clientId=getClientId(req),id=Number(req.params.id as string);if(!clientId||!Number.isInteger(id))return res.status(400).json({error:"Invalid request"});const access=await replacementAccess(clientId,id,getActiveDepartmentId(req));if(access==="forbidden")return res.status(403).json({error:"Forbidden"});if(access==="missing")return res.status(404).json({error:"Not found"});return res.status(405).json({error:"Replacement logs are retained as compliance evidence and cannot be deleted"});});
 
 async function validFailureLinks(clientId:number,departmentId:number|null,d:z.infer<typeof failureSchema>):Promise<AccessResult>{const cert=resultRows(await db.execute(sql`SELECT site_id FROM pat_certificates WHERE id=${d.certificateId} AND client_id=${clientId}`))[0];if(!cert)return "missing";const certAccess=await siteAccess(clientId,cert.site_id,departmentId);if(certAccess!=="allowed")return certAccess;if(d.roomId!=null){const roomAccessResult=await roomAccess(clientId,d.roomId,departmentId);if(roomAccessResult!=="allowed")return roomAccessResult;const room=await roomOwned(clientId,d.roomId);if(!room||room.site_id!==cert.site_id)return "missing";}return "allowed";}
