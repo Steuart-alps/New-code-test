@@ -6,6 +6,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source tests/api-integration-lock.sh
+command -v psql >/dev/null || { echo "psql is required to clean up this run's fixtures" >&2; exit 1; }
+: "${DATABASE_URL:?DATABASE_URL is required: the private API and fixture cleanup must share one database}"
 
 # Pick a free ephemeral port if none is set. Falls back to 19091 if python3
 # is unavailable (unlikely in this environment).

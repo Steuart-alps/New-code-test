@@ -6,7 +6,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source tests/api-integration-lock.sh
-command -v psql >/dev/null || { echo "psql is required for the isolated DocTrack document fixture" >&2; exit 1; }
+command -v psql >/dev/null || { echo "psql is required for the DocTrack fixture and per-run cleanup" >&2; exit 1; }
+: "${DATABASE_URL:?DATABASE_URL is required: the private API and fixture cleanup must share one database}"
 
 # Pick a free ephemeral port if none is set. Falls back to 19090 if python3
 # is unavailable (unlikely in this environment).

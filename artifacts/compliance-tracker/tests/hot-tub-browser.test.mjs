@@ -86,10 +86,10 @@ try {
     const url = new URL(route.request().url());
     const { pathname, searchParams } = url;
     const isDocument = route.request().resourceType() === "document";
+    // Only /api paths are the API: the server mounts every route under /api,
+    // so a request to the bare page path would reach the web app, not data.
     const isHotTubApiRequest = !isDocument && [
-      "/hot-tub",
       "/api/hot-tub",
-      "/hot-tub/status",
       "/api/hot-tub/status",
     ].includes(pathname);
 
@@ -116,10 +116,10 @@ try {
         services: ["hottubtrack"],
       });
     }
-    if (pathname === "/sites" || pathname === "/api/sites") {
+    if (pathname === "/api/sites") {
       return jsonResponse(route, [{ id: 11, name: "Main site" }]);
     }
-    if (pathname === "/hot-tub/tubs" || pathname === "/api/hot-tub/tubs") {
+    if (pathname === "/api/hot-tub/tubs") {
       tubRequests.push(url.toString());
       const active = searchParams.get("active");
       const tubs = active === "true"
@@ -132,7 +132,7 @@ try {
     if (isHotTubApiRequest) {
       return jsonResponse(route, []);
     }
-    if (pathname === "/hot-tub/config" || pathname === "/api/hot-tub/config") {
+    if (pathname === "/api/hot-tub/config") {
       return jsonResponse(route, {
         siteId: null,
         operatingRanges: {
