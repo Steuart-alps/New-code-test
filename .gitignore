@@ -53,4 +53,3 @@ artifacts/api-server/tests/.build-*/
 .env
 .env.*
 !.env.example
-artifacts/compliance-tracker/tests/.fix-track-board-*/
