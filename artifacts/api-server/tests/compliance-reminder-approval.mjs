@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
+  decryptTokenPayload,
   db,
   sql,
   pool,
@@ -106,10 +108,15 @@ test("compliance reminder approval is atomic, scoped, and dispatches the edited 
   assert.equal(Number(queueRows.rows[0].department_id), ownerDept,
     "the reminder queue row carries the compliance item's department");
 
-  let itemState = await db.execute(sql`SELECT schedule_token FROM compliance_items WHERE id=${currentItemId}`);
-  const originalToken = itemState.rows[0].schedule_token;
-  assert.ok(originalToken, "the first successful queue claim issues a schedule token");
+  let itemState = await db.execute(sql`SELECT schedule_token, schedule_token_hash FROM compliance_items WHERE id=${currentItemId}`);
+  const originalDigest = itemState.rows[0].schedule_token_hash;
+  assert.match(originalDigest ?? "", /^[0-9a-f]{64}$/, "the first successful queue claim issues a schedule token");
+  assert.equal(itemState.rows[0].schedule_token, null, "the item stores only the token's digest");
   const storedQueue = queueRows.rows[0];
+  // The working token exists only inside the encrypted draft credentials.
+  const originalToken = decryptTokenPayload(storedQueue.encrypted_token_payload).booked;
+  assert.equal(createHash("sha256").update(originalToken).digest("hex"), originalDigest,
+    "the item digest identifies the token carried by the encrypted draft");
   const serializedDraft = [
     storedQueue.subject,
     storedQueue.body_html,
@@ -120,8 +127,8 @@ test("compliance reminder approval is atomic, scoped, and dispatches the edited 
   assert.ok(serializedDraft.includes("{{BOOKED_TOKEN}}"), "queued schedule link uses the encrypted-token placeholder");
 
   await runReminderJob();
-  itemState = await db.execute(sql`SELECT schedule_token FROM compliance_items WHERE id=${currentItemId}`);
-  assert.equal(itemState.rows[0].schedule_token, originalToken,
+  itemState = await db.execute(sql`SELECT schedule_token_hash FROM compliance_items WHERE id=${currentItemId}`);
+  assert.equal(itemState.rows[0].schedule_token_hash, originalDigest,
     "retrying the same due cycle preserves its originally issued token");
   queueRows = await db.execute(sql`
     SELECT id FROM contractor_email_queue
@@ -145,11 +152,11 @@ test("compliance reminder approval is atomic, scoped, and dispatches the edited 
   try {
     const failed = await runReminderJob();
     assert.ok(failed.errors >= 1, "queue insertion error is surfaced in the scheduler result");
-    const state = await db.execute(sql`SELECT schedule_token FROM compliance_items WHERE id=${failQueueItemId}`);
+    const state = await db.execute(sql`SELECT schedule_token_hash FROM compliance_items WHERE id=${failQueueItemId}`);
     const rows = await db.execute(sql`
       SELECT id FROM contractor_email_queue WHERE entity_type='compliance' AND entity_id=${failQueueItemId}
     `);
-    assert.equal(state.rows[0].schedule_token, null, "failed insert preserves the item token state");
+    assert.equal(state.rows[0].schedule_token_hash, null, "failed insert preserves the item token state");
     assert.equal(rows.rows.length, 0, "failed insert leaves no queue row");
   } finally {
     await db.execute(sql`DROP TRIGGER IF EXISTS approval_test_reject_queue_insert ON contractor_email_queue`);
@@ -157,8 +164,8 @@ test("compliance reminder approval is atomic, scoped, and dispatches the edited 
   }
   const queueRetry = await runReminderJob();
   assert.ok(queueRetry.queued >= 1, "queue insertion can be retried successfully");
-  const queueRetryState = await db.execute(sql`SELECT schedule_token FROM compliance_items WHERE id=${failQueueItemId}`);
-  assert.ok(queueRetryState.rows[0].schedule_token, "successful queue retry issues the schedule token");
+  const queueRetryState = await db.execute(sql`SELECT schedule_token_hash FROM compliance_items WHERE id=${failQueueItemId}`);
+  assert.ok(queueRetryState.rows[0].schedule_token_hash, "successful queue retry issues the schedule token");
   await suppressOtherItems(failQueueItemId);
 
   // Conversely, an item update failure rolls the inserted queue row back.
@@ -169,17 +176,17 @@ test("compliance reminder approval is atomic, scoped, and dispatches the edited 
   `);
   await db.execute(sql`
     CREATE TRIGGER approval_test_reject_item_update
-    BEFORE UPDATE OF schedule_token ON compliance_items
+    BEFORE UPDATE OF schedule_token_hash ON compliance_items
     FOR EACH ROW EXECUTE FUNCTION approval_test_reject_item_update()
   `);
   try {
     const failed = await runReminderJob();
     assert.ok(failed.errors >= 1, "item update error is surfaced in the scheduler result");
-    const state = await db.execute(sql`SELECT schedule_token FROM compliance_items WHERE id=${failUpdateItemId}`);
+    const state = await db.execute(sql`SELECT schedule_token_hash FROM compliance_items WHERE id=${failUpdateItemId}`);
     const rows = await db.execute(sql`
       SELECT id FROM contractor_email_queue WHERE entity_type='compliance' AND entity_id=${failUpdateItemId}
     `);
-    assert.equal(state.rows[0].schedule_token, null, "failed item update preserves the prior token state");
+    assert.equal(state.rows[0].schedule_token_hash, null, "failed item update preserves the prior token state");
     assert.equal(rows.rows.length, 0, "failed item update rolls back its queue insert");
   } finally {
     await db.execute(sql`DROP TRIGGER IF EXISTS approval_test_reject_item_update ON compliance_items`);

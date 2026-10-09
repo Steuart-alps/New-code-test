@@ -29,7 +29,11 @@ export const complianceItemsTable = pgTable("compliance_items", {
   notificationSentAt: timestamp("notification_sent_at"),
   completedAt: timestamp("completed_at"),
   notes: text("notes"),
+  /** Legacy raw scheduling token. Always NULL once runtime migrations have
+   *  moved it to scheduleTokenHash; kept so older rows can be migrated. */
   scheduleToken: text("schedule_token"),
+  /** SHA-256 digest of the contractor's single-use visit-scheduling token. */
+  scheduleTokenHash: text("schedule_token_hash"),
   visitScheduledAt: timestamp("visit_scheduled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
