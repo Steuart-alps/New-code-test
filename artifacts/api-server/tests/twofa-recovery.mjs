@@ -657,15 +657,32 @@ async function main() {
     afterDeliveryFailure?.totp_enabled === false
       && afterDeliveryFailure.totp_secret === null
       && afterDeliveryFailure.totp_recovery_hash === null);
-  check("a failed notification is not recorded as sent", resetNotices().length === 1);
+  const resetAlerts = async () => (await pool.query(
+    "SELECT status, attempts, delivery_key FROM two_factor_reset_notifications WHERE user_id = $1 ORDER BY id",
+    [staffId],
+  )).rows;
+  const alertsAfterFailure = await resetAlerts();
+  const failedAlert = alertsAfterFailure[1];
+  check("the delivered reset alert is recorded as sent", alertsAfterFailure[0]?.status === "sent",
+    JSON.stringify(alertsAfterFailure));
+  check("a failed notification stays queued for retry, not recorded as sent",
+    alertsAfterFailure.length === 2 && failedAlert?.status === "pending" && failedAlert.attempts === 1,
+    JSON.stringify(alertsAfterFailure));
+  // The recovery job may legitimately deliver the queued alert later in this
+  // run, so count notices other than that alert's retries.
+  const otherNotices = () => resetNotices()
+    .filter((notice) => !failedAlert || !String(notice.idempotencyKey ?? "").startsWith(failedAlert.delivery_key));
+  check("a failed notification is not recorded as delivered", otherNotices().length === 1);
   const missingReset = await admin("POST", `/users/${staffId + 1000000}/reset-2fa`, {});
   check("reset rejects a nonexistent user", missingReset.status === 404);
-  check("rejected admin reset sends no security notification", resetNotices().length === 1);
+  check("rejected admin reset sends no security notification", otherNotices().length === 1);
+  check("rejected admin reset queues no security notification", (await resetAlerts()).length === 2);
 
   // Staff cannot reset another user's 2FA (route is admin-only).
   const staffReset = await s4("POST", `/users/${staffId}/reset-2fa`, {});
   check("staff blocked from reset-2fa", [401, 403].includes(staffReset.status), `got ${staffReset.status}`);
-  check("permission-denied reset sends no security notification", resetNotices().length === 1);
+  check("permission-denied reset sends no security notification",
+    otherNotices().length === 1 && (await resetAlerts()).length === 2);
   const staffResend = await s4("POST", `/users/${invitedId}/resend-invite`, {});
   check("staff blocked from resending invitations", [401, 403].includes(staffResend.status), `got ${staffResend.status}`);
 

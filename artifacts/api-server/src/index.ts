@@ -24,6 +24,7 @@ import { runTrialReminderJob } from "./lib/trialReminders";
 import { runCheckReminderEmailJob } from "./lib/checkReminderEmails";
 import { runDocAckReminderJob } from "./lib/docAckReminders";
 import { runBikeOverdueJob } from "./lib/bikeOverdueReminders";
+import { runTwoFactorResetAlertRecovery } from "./lib/twoFactorResetAlerts";
 import { runFixTrackOverdueAlertJob } from "./lib/fixTrackOverdueAlerts";
 import { runContractorComplianceReminderJob } from "./lib/contractorComplianceReminders";
 import { runTrainingExpiryReminderJob } from "./lib/trainingExpiryReminders";
@@ -170,7 +171,27 @@ async function runStagedPhotoCleanup() {
   }
 }
 
+let twoFactorResetAlertRecoveryRunning = false;
+async function runTwoFactorResetAlertRecoveryOnce() {
+  if (twoFactorResetAlertRecoveryRunning) return;
+  twoFactorResetAlertRecoveryRunning = true;
+  try {
+    const result = await runTwoFactorResetAlertRecovery();
+    if (result.examined > 0) logger.info({ result }, "Two-factor reset alert recovery complete");
+  } catch (err) {
+    logger.error({ err }, "Two-factor reset alert recovery failed");
+  } finally {
+    twoFactorResetAlertRecoveryRunning = false;
+  }
+}
+
 function startScheduler() {
+  // Deliver queued two-factor reset security alerts that a provider outage or
+  // restart left undelivered: at boot, then every minute (due rows only).
+  void runTwoFactorResetAlertRecoveryOnce();
+  cron.schedule("* * * * *", runTwoFactorResetAlertRecoveryOnce);
+  logger.info("Two-factor reset alert recovery scheduler started (every minute)");
+
   // Remove cancelled or expired unclaimed staged photos (and their objects)
   // at boot and every 10 minutes. Restart-safe: unfinished items are retried.
   void runStagedPhotoCleanup();
