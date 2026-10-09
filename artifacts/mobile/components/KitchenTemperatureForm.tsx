@@ -9,7 +9,7 @@ import {
   View,
   Platform,
 } from 'react-native';
-import { assessKitchenTemperatures, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
+import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -73,6 +73,8 @@ interface CoreTemperatureReading {
   coreTemp: string;
   timeStart: string;
   timeFinish: string;
+  /** Cooking only: seconds held at the core temperature. */
+  holdSeconds?: string;
 }
 
 interface FoodSafetyConfig extends FoodSafetyColdConfig {
@@ -649,7 +651,8 @@ function KitchenTemperatureFields() {
       ) : null}
 
       {config?.food_show_hot_temperature !== 'false' ? (
-        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }} />
+        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }}
+          hold={temperatureAssessment.rules ? kitchenHoldRequirement(temperatureAssessment.rules, 'hotTemperature', cooking.item)?.limit ?? null : null} />
       ) : null}
       {config?.food_show_cooling !== 'false' ? (
         <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
@@ -669,7 +672,7 @@ function KitchenTemperatureFields() {
       {temperatureAssessment.failures.length ? <View style={[styles.notice, { borderColor: colors.destructive }]}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.destructive }}>Outside configured limits — record what you did for each failure. A manager must verify the follow-up evidence.</Text>
-          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {failure.value}{failure.unit}</Text>)}
+          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {kitchenFailureValue(failure)}</Text>)}
         </View>
       </View> : null}
       <TextInput
@@ -714,10 +717,14 @@ function CoreTemperatureCard({
   target,
   value,
   onChange,
+  hold,
 }: {
   title: string;
   icon: React.ComponentProps<typeof Feather>['name'];
   target?: string;
+  /** Cooking: the minimum seconds this item must be held (null = no control,
+   *  but the time can still be recorded); undefined hides the field. */
+  hold?: number | null;
   value: CoreTemperatureReading;
   onChange: React.Dispatch<React.SetStateAction<CoreTemperatureReading>>;
 }) {
@@ -732,6 +739,10 @@ function CoreTemperatureCard({
           <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
           <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
         </View>
+        {hold !== undefined ? (
+          <TextInputField label={hold === null ? 'Held at core temp (seconds)' : `Held at core temp (seconds, at least ${hold})`}
+            value={value.holdSeconds ?? ''} onChange={(holdSeconds) => onChange((row) => ({ ...row, holdSeconds }))} placeholder="e.g. 30" compact numeric />
+        ) : null}
         {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
       </View>
     </>

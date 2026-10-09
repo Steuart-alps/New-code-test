@@ -88,6 +88,11 @@ const updated = formValuesFromEntryBody({ mobileTemperatureLog: {
 assert.equal(updated.coldFood[0].tempAm, '-12');
 assert.equal(updated.hotHolding.coreTemp, '58');
 assert.equal(updated.correctives, '');
+const held = formValuesFromEntryBody({ mobileTemperatureLog: {
+  coldFood: [], expectedColdFood: [], expectedCorrectives: null,
+  hotTemperature: { item: 'Chicken', coreTemp: '80', holdSeconds: 12 },
+} });
+assert.equal(held.cooking.holdSeconds, '12', 'a restored cooking reading keeps its hold time');
 
 // Listing finds only this owner's drafts, including earlier days'.
 await saveKitchenDraft(storage, draft(A, { recordDate: '2026-10-08', siteId: null }));
