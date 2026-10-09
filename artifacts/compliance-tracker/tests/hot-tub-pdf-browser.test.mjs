@@ -185,6 +185,20 @@ const vite = spawn("pnpm", ["exec", "vite", "--config", "vite.config.ts", "--hos
   stdio: ["ignore", "ignore", "ignore"],
 });
 
+// First-party analytics: every POST /api/analytics/events body is captured.
+// `analyticsMode` decides the mocked response so the tests can prove the
+// download never depends on analytics.
+const ANALYTICS_EVENT = "inspection_pdf_download_started";
+const ANALYTICS_DIMENSIONS = {
+  module: ["hottubtrack"],
+  site_scope: ["all_sites", "selected_site"],
+  record_scope: ["empty", "has_records"],
+};
+const analyticsEvents = [];
+const hungAnalyticsRoutes = [];
+let analyticsMode = "ok";
+let expectedAnalyticsEvents = 0;
+
 let browser;
 let context;
 let page;
@@ -248,7 +262,17 @@ async function readPdf(filePath, { fonts = false } = {}) {
   }
 }
 
-async function downloadPdf(label, readOptions) {
+async function waitForAnalyticsCount(count, label) {
+  const deadline = Date.now() + 5000;
+  while (analyticsEvents.length < count && Date.now() < deadline) await page.waitForTimeout(25);
+  assert.equal(analyticsEvents.length, count, `${label}: expected exactly ${count} analytics event(s) so far`);
+}
+
+// Every successful download records exactly one allowlisted event whose
+// scopes match what was exported. `analytics: false` is for the run where the
+// analytics fetch itself throws, so no request can reach the network.
+async function downloadPdf(label, readOptions, { analytics = true } = {}) {
+  const eventsBefore = analyticsEvents.length;
   const downloadPromise = page.waitForEvent("download", { timeout: 20000 });
   await page.getByRole("button", { name: "Download PDF", exact: true }).click();
   const download = await downloadPromise;
@@ -256,7 +280,27 @@ async function downloadPdf(label, readOptions) {
   assert.match(filename, /^[^/\\]+\.pdf$/i, `${label} download should have a .pdf filename`);
   const filePath = join(temporaryDirectory, `${label}.pdf`);
   await download.saveAs(filePath);
-  return { filename, ...await readPdf(filePath, readOptions) };
+  const pdf = { filename, ...await readPdf(filePath, readOptions) };
+  if (!analytics) return pdf;
+
+  expectedAnalyticsEvents += 1;
+  await waitForAnalyticsCount(eventsBefore + 1, label);
+  const event = analyticsEvents[eventsBefore];
+  assert.deepEqual(Object.keys(event).sort(), ["dimensions", "event"], `${label}: analytics body shape`);
+  assert.equal(event.event, ANALYTICS_EVENT, `${label}: analytics event name`);
+  assert.deepEqual(Object.keys(event.dimensions).sort(), Object.keys(ANALYTICS_DIMENSIONS).sort(),
+    `${label}: analytics must send exactly the allowlisted dimensions`);
+  for (const [key, allowed] of Object.entries(ANALYTICS_DIMENSIONS)) {
+    assert.ok(allowed.includes(event.dimensions[key]), `${label}: ${key}=${event.dimensions[key]} must be allowlisted`);
+  }
+  // The scopes must describe the exported report, nothing else.
+  const recordCount = Number(pdf.text.match(/Records: (\d+)/)?.[1]);
+  assert.ok(Number.isInteger(recordCount), `${label}: report should state its record count`);
+  assert.equal(event.dimensions.record_scope, recordCount === 0 ? "empty" : "has_records",
+    `${label}: record_scope must follow the exported row count`);
+  assert.equal(event.dimensions.site_scope, pdf.text.includes("Site: ") ? "selected_site" : "all_sites",
+    `${label}: site_scope must follow the site filter`);
+  return { ...pdf, analytics: event.dimensions };
 }
 
 async function assertExportMembership(label, expectedIds) {
@@ -337,6 +381,21 @@ try {
       return nativeCreateObjectURL(object);
     };
   });
+  // Makes the page's own fetch throw synchronously for an armed analytics
+  // request, simulating a broken fetch inside trackEvent.
+  await page.addInitScript(() => {
+    window.__analyticsFetch = { throwNext: 0, thrown: 0 };
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/api/analytics/events") && window.__analyticsFetch.throwNext > 0) {
+        window.__analyticsFetch.throwNext -= 1;
+        window.__analyticsFetch.thrown += 1;
+        throw new TypeError("Simulated analytics fetch failure");
+      }
+      return nativeFetch(input, init);
+    };
+  });
   temporaryDirectory = await mkdtemp(join(tmpdir(), "hot-tub-pdf-browser-"));
 
   await page.route("**/*", async route => {
@@ -350,6 +409,19 @@ try {
       "/api/hot-tub/status",
     ].includes(pathname);
 
+    if (pathname === "/api/auth/csrf-token") {
+      return jsonResponse(route, { token: "csrf-test-token" });
+    }
+    if (pathname === "/api/analytics/events") {
+      const request = route.request();
+      assert.equal(request.method(), "POST", "analytics events must be POSTed");
+      assert.equal(await request.headerValue("x-csrf-token"), "csrf-test-token", "analytics must use the CSRF token");
+      analyticsEvents.push(JSON.parse(request.postData() ?? "null"));
+      if (analyticsMode === "500") return jsonResponse(route, { error: "Analytics unavailable" }, 500);
+      if (analyticsMode === "abort") return route.abort("failed");
+      if (analyticsMode === "hang") return new Promise(resolve => hungAnalyticsRoutes.push({ route, resolve }));
+      return route.fulfill({ status: 204 });
+    }
     if (pathname === "/api/auth/me") {
       return jsonResponse(route, {
         user: {
@@ -429,13 +501,16 @@ try {
   await page.locator("#hot-tub-filter-from").fill("2024-07-01");
   await page.locator("#hot-tub-filter-to").fill("2024-07-31");
   const inRangeIds = expectedRows.map(row => row.id);
-  await assertExportMembership("dates-only", [...inRangeIds, 128, 129, 130, 131]);
+  const datesOnlyPdf = await assertExportMembership("dates-only", [...inRangeIds, 128, 129, 130, 131]);
+  assert.deepEqual(datesOnlyPdf.analytics, { module: "hottubtrack", site_scope: "all_sites", record_scope: "has_records" });
 
   const filterPanel = page.getByPlaceholder("Search tubs, checks, staff…").locator("xpath=../..");
   const filterComboboxes = filterPanel.getByRole("combobox");
   await filterComboboxes.nth(0).click();
   await page.getByRole("option", { name: "Main site", exact: true }).click();
-  await assertExportMembership("dates-and-site", [...inRangeIds, 129, 130, 131]);
+  const datesAndSitePdf = await assertExportMembership("dates-and-site", [...inRangeIds, 129, 130, 131]);
+  assert.deepEqual(datesAndSitePdf.analytics,
+    { module: "hottubtrack", site_scope: "selected_site", record_scope: "has_records" });
 
   await filterComboboxes.nth(0).click();
   await page.getByRole("option", { name: "All sites", exact: true }).click();
@@ -556,6 +631,15 @@ try {
   );
   assert.equal(emptyPdf.pages.length, 1, "empty export should be a valid single-page PDF");
   assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), []);
+  assert.deepEqual(emptyPdf.analytics, { module: "hottubtrack", site_scope: "selected_site", record_scope: "empty" });
+
+  // The remaining scope combination: all sites, nothing matching.
+  await filterComboboxes.nth(0).click();
+  await page.getByRole("option", { name: "All sites", exact: true }).click();
+  await page.getByText("No records match the current filter.", { exact: true }).waitFor({ state: "visible" });
+  const emptyAllSitesPdf = await downloadPdf("empty-all-sites-log");
+  assert.ok(emptyAllSitesPdf.text.includes("Records: 0"));
+  assert.deepEqual(emptyAllSitesPdf.analytics, { module: "hottubtrack", site_scope: "all_sites", record_scope: "empty" });
 
   // ── Failure recovery in the export controls ─────────────────────────────────
   // Each fault fails exactly one attempt. The failed attempt must show an
@@ -614,6 +698,7 @@ try {
 
   async function assertFailedAttempt(label, expectedMessage) {
     const downloadsBefore = downloadEvents.length;
+    const analyticsBefore = analyticsEvents.length;
     await downloadButton.click();
     await failureToast.waitFor({ state: "visible", timeout: 20000 });
     assert.deepEqual(dialogEvents, [], `${label}: a failed attempt must not show a native dialog`);
@@ -627,6 +712,7 @@ try {
     // Give any late download or fallback a chance to surface before checking.
     await page.waitForTimeout(750);
     assert.equal(downloadEvents.length, downloadsBefore, `${label}: a failed attempt must not download anything`);
+    assert.equal(analyticsEvents.length, analyticsBefore, `${label}: a failed attempt must not record a download event`);
     assert.deepEqual(await page.evaluate(() => window.__pdfForbiddenCalls), [],
       `${label}: a failed attempt must not fall back to print or a popup`);
     assert.equal(popupEvents.length, 0, `${label}: a failed attempt must not open a popup`);
@@ -713,6 +799,41 @@ try {
   await page.reload();
   await applyFilters(chunkRetry);
   await assertRetryMatches("module-retry-after-reload", chunkRetry, chunkFailed);
+
+  // ── Analytics never affects the download ────────────────────────────────────
+  // The endpoint failing, aborting or never answering, or trackEvent's fetch
+  // throwing, must leave the download, its button state and the page intact.
+  await applyFilters({ from: "2024-07-01", to: "2024-07-31", site: 11, type: "all", tub: "all", search: "" });
+  const pageErrorsBefore = pageErrors.length;
+  async function assertAnalyticsIsolated(label, options) {
+    const downloadsBefore = downloadEvents.length;
+    const pdf = await downloadPdf(label, undefined, options);
+    assert.equal(downloadEvents.length, downloadsBefore + 1, `${label}: exactly one download`);
+    assert.ok(pdf.text.includes(`Records: ${expectedRows.length + 3}`), `${label}: the PDF must still be complete`);
+    await downloadButton.waitFor({ state: "visible", timeout: 5000 });
+    assert.equal(await downloadButton.isEnabled(), true, `${label}: Download PDF should be enabled again`);
+    assert.equal(await downloadButton.getAttribute("aria-busy"), "false", `${label}: button should not stay busy`);
+    await page.waitForTimeout(500);
+    assert.equal(await failureToast.count(), 0, `${label}: an analytics problem must not show an error`);
+    assert.equal(pageErrors.length, pageErrorsBefore, `${label}: an analytics problem must not raise page errors`);
+    assert.equal(popupEvents.length, 0);
+    assert.deepEqual(dialogEvents, []);
+  }
+  for (const mode of ["500", "abort", "hang"]) {
+    analyticsMode = mode;
+    await assertAnalyticsIsolated(`analytics-${mode}`);
+  }
+  assert.equal(hungAnalyticsRoutes.length, 1, "the hanging analytics request should still be pending");
+  analyticsMode = "ok";
+  await page.evaluate(() => { window.__analyticsFetch.throwNext = 1; });
+  const analyticsBeforeThrow = analyticsEvents.length;
+  await assertAnalyticsIsolated("analytics-fetch-throws", { analytics: false });
+  assert.equal(await page.evaluate(() => window.__analyticsFetch.thrown), 1, "trackEvent's fetch should have thrown once");
+  assert.equal(analyticsEvents.length, analyticsBeforeThrow, "a throwing fetch sends nothing");
+  for (const { route, resolve } of hungAnalyticsRoutes.splice(0)) {
+    await route.fulfill({ status: 204 }).catch(() => {});
+    resolve();
+  }
 
   // ── Multilingual text preservation ──────────────────────────────────────────
   // The embedded Noto Sans must keep non-Latin staff names, notes, site and tub
@@ -836,7 +957,11 @@ try {
   assert.deepEqual(dialogEvents, []);
   assert.equal(popupEvents.length, 0);
 
-  console.log(`HotTub PDF ${browserName} browser regression passed (${expectedRows.length} filtered rows, ${populatedPdf.pages.length} PDF pages).`);
+  await page.waitForTimeout(500);
+  assert.equal(analyticsEvents.length, expectedAnalyticsEvents,
+    "exactly one analytics event per successful download, and none for failed attempts");
+
+  console.log(`HotTub PDF ${browserName} browser regression passed (${expectedRows.length} filtered rows, ${populatedPdf.pages.length} PDF pages, ${analyticsEvents.length} analytics events).`);
 } catch (error) {
   if (page) {
     console.error("HotTub PDF browser URL at failure:", page.url());

@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { apiFetch as sharedApiFetch } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
+import { trackInspectionPdfDownload } from "@/lib/analytics";
 import { createHotTubLogPdf, HotTubLogPdfError } from "@/lib/hot-tub-log-pdf";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
@@ -344,6 +345,12 @@ export default function HotTubPage() {
       } catch (cause) {
         throw new HotTubLogPdfError("The PDF could not be saved to this device. Please try again.", { cause });
       }
+      // Only after a successful save, and only fixed enum scopes: never site
+      // or tub names/ids, dates, search text or report content.
+      trackInspectionPdfDownload({
+        siteScope: filterSite === "all" ? "all_sites" : "selected_site",
+        recordScope: rows.length === 0 ? "empty" : "has_records",
+      });
     } catch (error) {
       console.error("Hot tub PDF export failed", error);
       dismissPdfError.current = toast({
