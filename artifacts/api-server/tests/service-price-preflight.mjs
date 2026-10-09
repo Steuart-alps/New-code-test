@@ -133,8 +133,15 @@ try {
     "the preflight must remain read-only",
   );
   assert.match(startup, /const preflight = await getServicePricePreflight\(\);/);
-  assert.match(startup, /const readinessBlocker = await initStripe\(\);\s+markApplicationReady\(readinessBlocker\);/);
-  assert.match(app, /status: readinessBlocker \? "degraded" : "starting"/);
+  // Start-up is supervised and bounded; the catalogue verdict still feeds /readyz
+  // (state mapping covered by tests/stripe-startup-readiness.mjs).
+  assert.match(startup, /startStripeInitialization\(\{[\s\S]*runAttempt: initStripe,/);
+  assert.match(startup, /blocker: getServicePriceReadinessBlocker\(\{/);
+  assert.match(app, /computeReadiness\(applicationReady, getBillingReadiness\(\)\)/);
+  assert.match(billingRoute, /if \(!isBillingActivationAllowed\(\)\) \{\s+return res\.status\(503\)/,
+    "checkout must refuse while the catalogue is unverified");
+  assert.match(billingRoute, /if \(action === "add" && !isBillingActivationAllowed\(\)\) \{\s+return res\.status\(503\)/,
+    "add-on activation must refuse while the catalogue is unverified");
   const activation = billingRoute.indexOf('if (action === "add")');
   const activationPreflight = billingRoute.indexOf("const pricePreflight = await getServicePricePreflight();");
   assert.ok(
