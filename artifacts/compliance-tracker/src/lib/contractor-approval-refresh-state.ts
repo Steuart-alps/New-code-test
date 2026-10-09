@@ -113,21 +113,19 @@ export function persistApprovalRefreshState(
     newRequestIds,
   };
   const storage = getLocalStorage(windowLike);
-  let persistedToStorage = false;
   if (storage) {
     try {
       storage.setItem(storageKey, JSON.stringify(state));
-      persistedToStorage = true;
     } catch {
       // Privacy-restricted or quota-limited storage is handled by memory and
       // BroadcastChannel below.
     }
   }
-  if (!persistedToStorage) {
-    publishApprovalRefreshState(windowLike, storageKey, state);
-  } else {
-    approvalRefreshMemory.set(storageKey, state);
-  }
+  // Always broadcast as well: WebKit does not reliably deliver cross-tab
+  // "storage" events (notably in private/ephemeral sessions), and
+  // privacy-restricted storage never fires them. Subscribers treat a repeated
+  // state as idempotent, so receiving it both ways is harmless.
+  publishApprovalRefreshState(windowLike, storageKey, state);
 }
 
 export function subscribeToApprovalRefreshStorage(

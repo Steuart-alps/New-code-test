@@ -1,6 +1,6 @@
 export {
   assessKitchenTemperatures, parseKitchenTemperatureRules, kitchenTemperatureRulesSchema,
-  temperatureRangeLabel, DEFAULT_KITCHEN_TEMPERATURE_RULES,
+  temperatureRangeLabel, kitchenFailureValue, kitchenHoldRequirement, DEFAULT_KITCHEN_TEMPERATURE_RULES,
   type KitchenTemperatureRules, type KitchenTemperatureFailure,
 } from '@workspace/api-zod/kitchen-temperature';
 export * from './generated/api';
