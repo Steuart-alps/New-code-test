@@ -245,3 +245,42 @@ export function tokenPayloadNeedsReencryption(encoded: string): boolean {
   if (envelope !== ENVELOPE_VERSION || !version) return true;
   return version !== currentEncryptionKey().version;
 }
+export interface TokenKeyConfiguration {
+  /** Version new drafts are encrypted with, or null if misconfigured. */
+  currentVersion: string | null;
+  currentSource: "dedicated" | "session" | null;
+  /** Retained previous versions (names only). */
+  retainedVersions: string[];
+  sessionSecretPresent: boolean;
+  /** Configuration errors, phrased without any key material. */
+  problems: string[];
+}
+
+/** Which keys are configured, by version name and presence only. Never
+ *  returns or logs a key value. */
+export function describeTokenKeyConfiguration(): TokenKeyConfiguration {
+  const problems: string[] = [];
+  let currentVersion: string | null = null;
+  let currentSource: TokenKeyConfiguration["currentSource"] = null;
+  let retainedVersions: string[] = [];
+  try {
+    const current = currentEncryptionKey();
+    currentVersion = current.version;
+    currentSource = process.env.CONTRACTOR_TOKEN_ENCRYPTION_KEY ? "dedicated" : "session";
+  } catch (err) {
+    problems.push(err instanceof Error ? err.message : "Current key is not configured");
+  }
+  try {
+    retainedVersions = Object.keys(previousEncryptionKeys()).sort();
+  } catch (err) {
+    problems.push(err instanceof Error ? err.message : "Previous keys are not configured correctly");
+  }
+  if (problems.length === 0) {
+    try {
+      validateTokenEncryptionConfig();
+    } catch (err) {
+      problems.push(err instanceof Error ? err.message : "Key configuration is invalid");
+    }
+  }
+  return { currentVersion, currentSource, retainedVersions, sessionSecretPresent: !!process.env.SESSION_SECRET, problems };
+}
