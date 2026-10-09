@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
+import { useStagedPhotoEvidence } from '@/hooks/useStagedPhotoEvidence';
+import { RequiredPhotoEvidence } from './RequiredPhotoEvidence';
 import { AquaChoiceRow, AquaEmptyState, AquaField, AquaInput, aquaUiStyles as styles } from './aqua-track-ui';
 import {
   isLocalTime,
@@ -46,6 +48,7 @@ export function Sessions({
   const [maxBathers, setMaxBathers] = useState('');
   const [notes, setNotes] = useState('');
   const queryKey = ['swim-sessions', siteId];
+  const photoEvidence = useStagedPhotoEvidence('swim_session', showForm && canUseSite && siteId !== null);
   const siteQuery = aquaTrackSiteQuery(siteId);
   const sessionsQuery = useQuery<SwimSession[]>({
     queryKey,
@@ -58,7 +61,7 @@ export function Sessions({
     enabled: canUseSite && siteId !== null,
   });
 
-  function resetDraft() {
+  function resetDraft(photos: 'consume' | 'cancel') {
     setSessionDate(localDateString());
     setOpenTime(localTimeString());
     setCloseTime('');
@@ -67,6 +70,8 @@ export function Sessions({
     setLifeguardName('');
     setMaxBathers('');
     setNotes('');
+    if (photos === 'consume') photoEvidence.consume();
+    else photoEvidence.reset();
   }
 
   const mutation = useMutation({
@@ -78,12 +83,13 @@ export function Sessions({
       void queryClient.invalidateQueries({ queryKey: ['swim-sessions'] });
       setShowForm(false);
       onFormOpenChange(false);
-      resetDraft();
+      resetDraft('consume');
       Alert.alert('Logged', 'Session recorded successfully.');
     },
     onError: (error: Error) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      Alert.alert('Unable to record session', error.message);
+      // Keep the open draft; only receipts the server reports unusable are dropped.
+      Alert.alert('Unable to record session', photoEvidence.handleCreateError(error, error.message || 'Please try again.'));
     },
   });
 
@@ -113,7 +119,16 @@ export function Sessions({
       Alert.alert('Text is too long', 'Lifeguard name must be 200 characters or fewer and notes must be 2,000 or fewer.');
       return;
     }
-    mutation.mutate({
+    if (!photoEvidence.ready) {
+      Alert.alert(
+        'Photos required',
+        photoEvidence.uploading
+          ? 'Wait for the photo to finish verifying.'
+          : `Attach at least ${photoEvidence.minimum} verified ${photoEvidence.minimum === 1 ? 'photo' : 'photos'} before recording the session.`,
+      );
+      return;
+    }
+    const payload = photoEvidence.preparePayload({
       siteId,
       sessionDate,
       sessionType,
@@ -125,6 +140,7 @@ export function Sessions({
       result: preSessionResult,
       notes: notes.trim() || null,
     });
+    if (payload) mutation.mutate(payload);
   }
 
   function toggleForm() {
@@ -133,7 +149,7 @@ export function Sessions({
     const next = !showForm;
     setShowForm(next);
     onFormOpenChange(next);
-    if (!next) resetDraft();
+    if (!next) resetDraft('cancel');
   }
 
   const todaysSessions = sessionsQuery.data ? sessionsForDate(sessionsQuery.data, localDateString()) : [];
@@ -197,10 +213,11 @@ export function Sessions({
           <AquaField label="Notes">
             <AquaInput value={notes} onChangeText={setNotes} placeholder="Session notes..." multiline colors={colors} disabled={mutation.isPending} />
           </AquaField>
+          <RequiredPhotoEvidence evidence={photoEvidence} disabled={mutation.isPending} testIDPrefix="aqua-session-photo" />
           <TouchableOpacity
-            style={[styles.primaryButton, { backgroundColor: colors.navy }, (mutation.isPending || !canUseSite) && styles.disabled]}
+            style={[styles.primaryButton, { backgroundColor: colors.navy }, (mutation.isPending || !canUseSite || !photoEvidence.ready) && styles.disabled]}
             onPress={submit}
-            disabled={mutation.isPending || !canUseSite}
+            disabled={mutation.isPending || !canUseSite || !photoEvidence.ready}
             testID="aqua-session-submit"
           >
             {mutation.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Feather name="check" size={18} color={colors.primaryForeground} />}
