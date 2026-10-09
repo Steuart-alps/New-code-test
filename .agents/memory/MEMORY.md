@@ -65,6 +65,7 @@
 - [Account erasure review](account-erasure-review.md) — independent approval, 30-day minimum and legal holds must survive every deletion entry point and request race.
 - [Drizzle transaction startup](drizzle-transaction-startup.md) — actor-context setup failures occur before Drizzle cleanup; the pool adapter must own rollback and release.
 - [Shell runtime stalls](shell-runtime-loader-hangs.md) — distinguish injected-loader stalls from memory pressure caused by parallel validation jobs.
+- [Staged validation runner](validation-runner.md) — every validation workflow runs through scripts/validate.mjs: shared flock slots, memory waits, codegen lock, restart reaping, 8080 guard.
 - [Browser fault fixtures](browser-fault-fixtures.md) — hold read outages until explicit retry; test legacy pages without changing production routing.
 - [Orphaned workflow children](workflow-orphaned-children.md) — surviving Vite children can force restarted workflows off the registered preview port.
 - [Track release gates](track-release-gates.md) — GreenTrack's public Coming soon gate remains until an explicit activation request.
