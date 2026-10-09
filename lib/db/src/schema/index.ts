@@ -116,3 +116,4 @@ export * from "./storage-usage"
 export * from "./privacy-governance";
 export * from "./audit-log";
 export * from "./auth-rate-limit-counters";
+export * from "./service-price-audit";

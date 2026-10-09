@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { FeedbackReport } from "@workspace/api-client-react";
+import type { FeedbackReport, FeedbackReportConflict, FeedbackReviewEvent } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Inbox, RefreshCw, X, AlertTriangle, Lock } from "lucide-react";
+import { Inbox, RefreshCw, X, AlertTriangle, Lock, History } from "lucide-react";
 
 type Status = "new" | "reviewing" | "resolved";
 const ALL = "all";
@@ -22,6 +22,13 @@ const STATUS_STYLES: Record<Status, string> = {
   resolved: "bg-muted text-muted-foreground",
 };
 const NOTE_MAX = 5000;
+
+type DraftBase = { revision: number; status: Status; note: string };
+const baseOf = (r: FeedbackReport): DraftBase => ({ revision: r.revision, status: r.status, note: r.internalNote ?? "" });
+
+class SaveConflictError extends Error {
+  constructor(message: string, readonly latest: FeedbackReport) { super(message); }
+}
 
 function fmt(d: string | null) {
   if (!d) return "";
@@ -38,6 +45,11 @@ export default function FeedbackInboxPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draftStatus, setDraftStatus] = useState<Status>("new");
   const [draftNote, setDraftNote] = useState("");
+  // The saved version the draft started from; its revision is sent with the
+  // save so the API rejects (409) a draft another manager has superseded.
+  const [base, setBase] = useState<DraftBase | null>(null);
+  // A newer saved version the user has not yet chosen to keep or discard.
+  const [conflict, setConflict] = useState<FeedbackReport | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const clientRef = useRef(activeClientId);
   clientRef.current = activeClientId;
@@ -63,55 +75,125 @@ export default function FeedbackInboxPage() {
   useEffect(() => {
     setSelectedId(null);
     setDraftNote("");
+    setBase(null);
+    setConflict(null);
     setSaveError(null);
     setCategory(ALL);
     setStatus(ALL);
   }, [activeClientId]);
 
   const selected = data?.find(r => r.id === selectedId) ?? null;
+  const dirty = !!base && (draftStatus !== base.status || draftNote !== base.note);
+  // Keep showing a report with an unsaved draft even if a refresh drops it
+  // from the filtered list (for example another manager changed its status).
+  const lastSeen = useRef<FeedbackReport | null>(null);
+  if (selected) lastSeen.current = selected;
+  const shown = selected
+    ?? (selectedId !== null && dirty && lastSeen.current?.id === selectedId ? (conflict ?? lastSeen.current) : null);
   useEffect(() => {
-    if (selectedId !== null && data && !selected) setSelectedId(null);
-  }, [data, selected, selectedId]);
+    if (selectedId !== null && data && !selected && !dirty) setSelectedId(null);
+  }, [data, selected, selectedId, dirty]);
+
+  // A refresh that brings a newer saved version: adopt it when the draft is
+  // untouched, otherwise keep the draft and offer the saved version alongside.
+  useEffect(() => {
+    if (!selected || !base || selected.revision <= base.revision) return;
+    if (!dirty) {
+      setBase(baseOf(selected));
+      setDraftStatus(selected.status);
+      setDraftNote(selected.internalNote ?? "");
+    } else if (!conflict || conflict.revision < selected.revision) {
+      setConflict(selected);
+    }
+  }, [selected, base, dirty, conflict]);
+
+  const history = useQuery<FeedbackReviewEvent[]>({
+    // Keyed by revision so a newly saved version refetches its history.
+    queryKey: ["feedback-history", activeClientId, selectedId, shown?.revision ?? null],
+    enabled: canAdmin && !!activeClientId && selectedId !== null,
+    staleTime: 30_000,
+    queryFn: async ({ signal }) => {
+      const res = await api(`/feedback/${selectedId}/history`, { signal });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not load review history."));
+      return res.json();
+    },
+  });
 
   function open(r: FeedbackReport) {
     setSelectedId(r.id);
     setDraftStatus(r.status);
     setDraftNote(r.internalNote ?? "");
+    setBase(baseOf(r));
+    setConflict(null);
     setSaveError(null);
   }
-  function close() { setSelectedId(null); setDraftNote(""); setSaveError(null); }
+  function close() { setSelectedId(null); setDraftNote(""); setBase(null); setConflict(null); setSaveError(null); }
+
+  // Keep my draft: rebase it on the latest saved version so the next save
+  // deliberately replaces that version.
+  function keepDraft() {
+    if (!conflict) return;
+    setBase(baseOf(conflict));
+    setConflict(null);
+    setSaveError(null);
+  }
+  function adoptSavedVersion() {
+    if (!conflict) return;
+    setBase(baseOf(conflict));
+    setDraftStatus(conflict.status);
+    setDraftNote(conflict.internalNote ?? "");
+    setConflict(null);
+    setSaveError(null);
+  }
+
+  // Publish a saved report immediately: reopening while the refetch is in
+  // flight must not initialise a new draft from the previous note.
+  function publish(report: FeedbackReport, clientId: string | number | null) {
+    for (const [key, rows] of queryClient.getQueriesData<FeedbackReport[]>({
+      queryKey: ["feedback", clientId],
+    })) {
+      if (!rows) continue;
+      queryClient.setQueryData(key, rows
+        .map(row => row.id === report.id ? report : row)
+        .filter(row => (key[2] === ALL || row.category === key[2])
+          && (key[3] === ALL || row.status === key[3])));
+    }
+  }
 
   const save = useMutation({
-    mutationFn: async (vars: { id: number; clientId: string | number | null; status: Status; internalNote: string }) => {
+    mutationFn: async (vars: {
+      id: number; clientId: string | number | null; expectedRevision: number; status: Status; internalNote: string;
+    }) => {
       const res = await api(`/feedback/${vars.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: vars.status, internalNote: vars.internalNote }),
+        body: JSON.stringify({ expectedRevision: vars.expectedRevision, status: vars.status, internalNote: vars.internalNote }),
       });
+      if (res.status === 409) {
+        const body = await res.clone().json().catch(() => null) as Partial<FeedbackReportConflict> | null;
+        const message = await getApiErrorMessage(res, "Another manager saved this report after you opened it.");
+        if (body?.report && typeof body.report.revision === "number") throw new SaveConflictError(message, body.report);
+        throw new Error(message);
+      }
       if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not save changes."));
       return (await res.json()) as FeedbackReport;
     },
     onSuccess: (report, vars) => {
-      // Publish the saved values immediately: reopening while the refetch is
-      // in flight must not initialise a new draft from the previous note.
-      for (const [key, rows] of queryClient.getQueriesData<FeedbackReport[]>({
-        queryKey: ["feedback", vars.clientId],
-      })) {
-        if (!rows) continue;
-        queryClient.setQueryData(key, rows
-          .map(row => row.id === report.id ? report : row)
-          .filter(row => (key[2] === ALL || row.category === key[2])
-            && (key[3] === ALL || row.status === key[3])));
-      }
+      publish(report, vars.clientId);
       queryClient.invalidateQueries({ queryKey: ["feedback", vars.clientId] });
       if (clientRef.current === vars.clientId) close();
     },
     onError: (e, vars) => {
-      if (clientRef.current === vars.clientId) setSaveError(e instanceof Error ? e.message : "Could not save changes.");
+      if (e instanceof SaveConflictError) {
+        publish(e.latest, vars.clientId);
+        queryClient.invalidateQueries({ queryKey: ["feedback", vars.clientId] });
+      }
+      if (clientRef.current !== vars.clientId) return;
+      // The draft fields are left untouched so the unsaved note survives.
+      if (e instanceof SaveConflictError) setConflict(e.latest);
+      setSaveError(e instanceof Error ? e.message : "Could not save changes.");
     },
   });
-
-  const dirty = !!selected && (draftStatus !== selected.status || draftNote !== (selected.internalNote ?? ""));
 
   if (!canAdmin) {
     return <AppLayout title="Feedback inbox"><p className="text-sm text-muted-foreground">Only administrators can view feedback.</p></AppLayout>;
@@ -182,26 +264,26 @@ export default function FeedbackInboxPage() {
           </div>
 
           <div className="border bg-card min-h-[200px] lg:sticky lg:top-4" data-testid="panel-feedback-detail">
-            {!selected ? (
+            {!shown ? (
               <div className="p-10 text-center text-sm text-muted-foreground">Select a report to read it in full.</div>
             ) : (
-              <div className="p-5 space-y-5 animate-in fade-in duration-200" key={selected.id}>
+              <div className="p-5 space-y-5 animate-in fade-in duration-200" key={shown.id}>
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[selected.category]}</p>
-                    <h2 className="font-display text-2xl break-words" data-testid="text-feedback-summary">{selected.summary}</h2>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{CATEGORY_LABELS[shown.category]}</p>
+                    <h2 className="font-display text-2xl break-words" data-testid="text-feedback-summary">{shown.summary}</h2>
                   </div>
                   <Button variant="ghost" size="icon" onClick={close} disabled={save.isPending} aria-label="Close report" data-testid="button-close-feedback"><X className="w-4 h-4" /></Button>
                 </div>
                 <dl className="grid grid-cols-2 gap-3 text-sm">
-                  <div><dt className="text-xs text-muted-foreground">Submitted by</dt><dd>{selected.submitterName ?? "Unknown"}</dd></div>
-                  <div><dt className="text-xs text-muted-foreground">Received</dt><dd>{fmt(selected.createdAt)}</dd></div>
-                  <div className="col-span-2"><dt className="text-xs text-muted-foreground">Page</dt><dd className="font-mono text-xs break-all" data-testid="text-feedback-path">{selected.pagePath ?? "Not recorded"}</dd></div>
-                  {selected.updatedAt && <div className="col-span-2"><dt className="text-xs text-muted-foreground">Last updated</dt><dd>{fmt(selected.updatedAt)}</dd></div>}
+                  <div><dt className="text-xs text-muted-foreground">Submitted by</dt><dd>{shown.submitterName ?? "Unknown"}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">Received</dt><dd>{fmt(shown.createdAt)}</dd></div>
+                  <div className="col-span-2"><dt className="text-xs text-muted-foreground">Page</dt><dd className="font-mono text-xs break-all" data-testid="text-feedback-path">{shown.pagePath ?? "Not recorded"}</dd></div>
+                  {shown.updatedAt && <div className="col-span-2"><dt className="text-xs text-muted-foreground">Last updated</dt><dd>{fmt(shown.updatedAt)}{shown.updatedByName ? ` by ${shown.updatedByName}` : ""}</dd></div>}
                 </dl>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Details</p>
-                  <p className="text-sm whitespace-pre-wrap break-words bg-muted/50 p-3" data-testid="text-feedback-details">{selected.details}</p>
+                  <p className="text-sm whitespace-pre-wrap break-words bg-muted/50 p-3" data-testid="text-feedback-details">{shown.details}</p>
                 </div>
                 <div className="space-y-3 border-t pt-4">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -227,20 +309,86 @@ export default function FeedbackInboxPage() {
                     />
                     <p className="text-xs text-muted-foreground text-right mt-1">{draftNote.length}/{NOTE_MAX}</p>
                   </div>
-                  {saveError && (
+                  {saveError && !conflict && (
                     <p className="text-sm text-destructive" role="alert" data-testid="error-feedback-save">{saveError}</p>
+                  )}
+                  {conflict && (
+                    <div className="border border-amber-300 bg-amber-50 p-3 space-y-2 text-sm" role="alert" data-testid="panel-feedback-conflict">
+                      <p className="font-medium text-[#162D42]">
+                        {conflict.updatedByName ?? "Another manager"} saved a newer version
+                        {conflict.updatedAt ? ` at ${fmt(conflict.updatedAt)}` : ""}. Your draft above has not been saved.
+                      </p>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Latest saved status</p>
+                        <p data-testid="text-conflict-saved-status">{STATUS_LABELS[conflict.status]}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Latest saved note</p>
+                        <p className="whitespace-pre-wrap break-words bg-white/70 p-2" data-testid="text-conflict-saved-note">
+                          {conflict.internalNote || <span className="text-muted-foreground">No note</span>}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" onClick={keepDraft} data-testid="button-conflict-keep-draft">Keep my draft</Button>
+                        <Button size="sm" variant="outline" onClick={adoptSavedVersion} data-testid="button-conflict-use-saved">Use saved version</Button>
+                      </div>
+                    </div>
                   )}
                   <div className="flex items-center gap-2">
                     <Button
-                      disabled={!dirty || save.isPending}
-                      onClick={() => { setSaveError(null); save.mutate({ id: selected.id, clientId: activeClientId, status: draftStatus, internalNote: draftNote }); }}
+                      disabled={!dirty || save.isPending || !!conflict || !base}
+                      onClick={() => {
+                        if (!base) return;
+                        setSaveError(null);
+                        save.mutate({
+                          id: shown.id, clientId: activeClientId, expectedRevision: base.revision,
+                          status: draftStatus, internalNote: draftNote,
+                        });
+                      }}
                       data-testid="button-save-feedback"
                     >
-                      {save.isPending ? "Saving..." : saveError ? "Retry save" : "Save changes"}
+                      {save.isPending ? "Saving..." : saveError && !conflict ? "Retry save" : "Save changes"}
                     </Button>
                     <Button variant="ghost" onClick={close} disabled={save.isPending}>Cancel</Button>
                     {dirty && !save.isPending && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
                   </div>
+                </div>
+                <div className="space-y-3 border-t pt-4" data-testid="section-feedback-history">
+                  <div className="flex items-center gap-2 text-sm font-medium text-[#162D42]">
+                    <History className="w-4 h-4" /> Review history
+                  </div>
+                  {history.isLoading && <Skeleton className="h-10 w-full" />}
+                  {history.isError && (
+                    <div className="flex items-center gap-2 text-sm text-destructive" data-testid="error-feedback-history">
+                      {history.error instanceof Error ? history.error.message : "Could not load review history."}
+                      <Button variant="outline" size="sm" onClick={() => history.refetch()}>Try again</Button>
+                    </div>
+                  )}
+                  {history.data?.length === 0 && (
+                    <p className="text-sm text-muted-foreground" data-testid="empty-feedback-history">No review changes recorded yet.</p>
+                  )}
+                  {!!history.data?.length && (
+                    <ol className="space-y-3" data-testid="list-feedback-history">
+                      {history.data.map(entry => (
+                        <li key={entry.id} className="border-l-2 border-primary/40 pl-3 text-sm" data-testid={`history-entry-${entry.revision}`}>
+                          <p>
+                            <span className="font-medium" data-testid="text-history-actor">{entry.actorName ?? "Former user"}</span>
+                            <span className="text-xs text-muted-foreground"> · {fmt(entry.createdAt)}</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground" data-testid="text-history-status">
+                            {entry.previousStatus === entry.status
+                              ? `Status: ${STATUS_LABELS[entry.status]}`
+                              : `${STATUS_LABELS[entry.previousStatus]} → ${STATUS_LABELS[entry.status]}`}
+                          </p>
+                          {entry.internalNote !== entry.previousInternalNote && (
+                            entry.internalNote
+                              ? <p className="whitespace-pre-wrap break-words mt-1" data-testid="text-history-note">{entry.internalNote}</p>
+                              : <p className="text-xs italic text-muted-foreground mt-1" data-testid="text-history-note">Note cleared</p>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </div>
               </div>
             )}

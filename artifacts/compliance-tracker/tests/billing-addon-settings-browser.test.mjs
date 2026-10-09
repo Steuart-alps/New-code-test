@@ -32,6 +32,21 @@ const csrfHeaders = [];
 const unexpectedApiRequests = [];
 const failedApiResponses = [];
 let csrfTokenRequests = 0;
+// Per-service queue of mocked add outcomes. An empty queue means the mocked
+// billing boundary activates the service, mirroring the real API's response
+// shape ({ ok: true, entitled: [...service keys] }). Nothing reaches Stripe.
+const serviceBehaviors = new Map();
+// Mirrors the server's add-on price readiness exposed on /billing/config.
+const unavailablePrices = new Set();
+let availabilityChecked = true;
+// When set, service POSTs wait until the test releases them, so the busy state
+// can be observed and double clicks attempted while the request is in flight.
+let serviceGate = null;
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+};
 
 const freePort = async () => {
   const server = createServer();
@@ -102,6 +117,7 @@ const currentBillingConfig = () => ({
     subscribed: true,
     perSiteRate: 1000,
     capPence: 5000,
+    addonAvailability: { checked: availabilityChecked, unavailable: [...unavailablePrices] },
     catalog,
   },
 });
@@ -147,8 +163,16 @@ async function routeApi(route, url) {
     if (body.action !== "add" || !addons.some(addon => addon.key === body.service)) {
       return jsonResponse(route, { error: "Unexpected billing service action" }, 400);
     }
+    const behavior = serviceBehaviors.get(body.service)?.shift();
+    if (serviceGate) await serviceGate.promise;
+    if (behavior?.abort) return route.abort("failed");
+    if (behavior) {
+      if (behavior.activate) activeAddons.add(body.service);
+      behavior.after?.();
+      return jsonResponse(route, behavior.body, behavior.status ?? 200);
+    }
     activeAddons.add(body.service);
-    return jsonResponse(route, { ok: true, entitled: true });
+    return jsonResponse(route, { ok: true, entitled: ["core", ...activeAddons] });
   }
   if (pathname === "/api/billing/refresh-access" && method === "POST") {
     return jsonResponse(route, { billingLocked: false });
@@ -331,6 +355,261 @@ try {
   assert.deepEqual(failedApiResponses, [], `API requests must not fail: ${JSON.stringify(failedApiResponses)}`);
   assert.deepEqual(pageErrors, [], `Settings must not throw browser errors: ${pageErrors.join("; ")}`);
   assert.deepEqual(consoleErrors, [], `Settings must not log browser errors: ${consoleErrors.join("; ")}`);
+
+  // ---------------------------------------------------------------------------
+  // Failed, pending and unconfirmed adds must never make a row look Active.
+  // ---------------------------------------------------------------------------
+  const rowFor = label => servicesCard.getByText(label, { exact: true }).locator("xpath=../..");
+  const addonByKey = key => {
+    const addon = addons.find(candidate => candidate.key === key);
+    assert.ok(addon, `fixture must include ${key}`);
+    return addon;
+  };
+  const postsFor = key => serviceMutationRequests.filter(({ body }) => body.service === key);
+  const expectedFailureStatuses = new Set();
+  const resetObservations = () => {
+    serviceMutationRequests.length = 0;
+    csrfHeaders.length = 0;
+    dialogMessages.length = 0;
+    failedApiResponses.length = 0;
+    consoleErrors.length = 0;
+    pageErrors.length = 0;
+    expectedFailureStatuses.clear();
+  };
+  const reloadSettings = async () => {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await servicesCard.getByText(addons[0].label, { exact: true }).waitFor({ state: "visible" });
+  };
+  const assertNotActive = async (row, key, context) => {
+    assert.equal(await row.getByText("Active", { exact: true }).count(), 0, `${key} must not show Active after ${context}`);
+  };
+  const waitForPosts = async (key, count) => {
+    for (let attempt = 0; attempt < 100 && postsFor(key).length < count; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(postsFor(key).length, count, `${key} should have exactly ${count} service POST(s)`);
+  };
+
+  // Clicks Add with the request held open, double-clicks while busy, then
+  // releases it. Proves the busy control blocks duplicate mutations.
+  const addWhileHeld = async (key) => {
+    const addon = addonByKey(key);
+    const row = rowFor(addon.label);
+    const before = postsFor(key).length;
+    serviceGate = deferred();
+    await row.getByRole("button", { name: "Add", exact: true }).dblclick();
+    await waitForPosts(key, before + 1);
+    const busyButton = row.getByRole("button", { name: "Adding...", exact: true });
+    await busyButton.waitFor({ state: "visible" });
+    assert.equal(await busyButton.isDisabled(), true, `${key} Add must be disabled while its request is in flight`);
+    await busyButton.click({ force: true }).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(postsFor(key).length, before + 1, `${key} busy clicks must not send duplicate mutation requests`);
+    const gate = serviceGate;
+    serviceGate = null;
+    gate.resolve();
+    await row.getByRole("button", { name: "Adding...", exact: true }).waitFor({ state: "detached" });
+    return row;
+  };
+
+  const assertRetryable = async (row, key, notice) => {
+    await row.getByText(notice, { exact: true }).waitFor({ state: "visible" });
+    await assertNotActive(row, key, "an unconfirmed add");
+    const addButton = row.getByRole("button", { name: "Add", exact: true });
+    await addButton.waitFor({ state: "visible" });
+    assert.equal(await addButton.isEnabled(), true, `${key} Add must recover after the request settles`);
+    assert.equal(await row.getByRole("button", { name: "Remove", exact: true }).count(), 0, `${key} must not offer Remove when not on the subscription`);
+  };
+
+  const retrySucceeds = async (row, key) => {
+    const firstBody = JSON.stringify(postsFor(key)[0].body);
+    await addWhileHeld(key);
+    await row.getByText("Active", { exact: true }).waitFor({ state: "visible" });
+    await row.getByRole("button", { name: "Remove", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await row.getByTestId("addon-action-notice").count(), 0, `${key} failure notice should clear after a confirmed retry`);
+    const posts = postsFor(key);
+    assert.equal(posts.length, 2, `${key} should send exactly one POST per attempt`);
+    assert.equal(JSON.stringify(posts[1].body), firstBody, `${key} retry must send the same request so the server reuses its idempotency key`);
+    assert.deepEqual(posts[1].body, { service: key, action: "add" }, `${key} retry must carry no client-generated key that could vary`);
+  };
+
+  activeAddons.clear();
+  resetObservations();
+  await reloadSettings();
+
+  // 1. Declined payment: the existing backend charge_failed semantics (502).
+  {
+    const key = "fixtrack";
+    const declined = "We couldn't complete the charge, so the service wasn't enabled. Please try again.";
+    serviceBehaviors.set(key, [{ status: 502, body: { error: declined } }]);
+    expectedFailureStatuses.add(502);
+    const row = await addWhileHeld(key);
+    await assertRetryable(row, key, declined);
+    assert.equal(await row.getByText("Not enabled", { exact: true }).count(), 1, "declined add stays Not enabled");
+    await retrySucceeds(row, key);
+  }
+
+  // 2a. API failure: server error.
+  {
+    const key = "firetrack";
+    serviceBehaviors.set(key, [{ status: 500, body: { error: "Internal billing error" } }]);
+    expectedFailureStatuses.add(500);
+    const row = await addWhileHeld(key);
+    await assertRetryable(row, key, "Internal billing error");
+    await retrySucceeds(row, key);
+  }
+
+  // 2b. API failure: the request never reaches the server.
+  {
+    const key = "treetrack";
+    serviceBehaviors.set(key, [{ abort: true }]);
+    const row = await addWhileHeld(key);
+    await assertRetryable(
+      row,
+      key,
+      "We couldn't reach the billing service, so we can't confirm whether TreeTrack changed. Refresh to check before trying again.",
+    );
+    await retrySucceeds(row, key);
+  }
+
+  // 3a. paymentPending: the service is not on the subscription yet.
+  {
+    const key = "kitchentrack";
+    serviceBehaviors.set(key, [{ body: { ok: true, entitled: ["core"], paymentPending: true } }]);
+    const row = await addWhileHeld(key);
+    await assertRetryable(row, key, "Payment for KitchenTrack needs attention in the billing portal before it can be used.");
+    await row.getByText("Awaiting confirmation", { exact: true }).waitFor({ state: "visible" });
+    await retrySucceeds(row, key);
+  }
+
+  // 3b. paymentPending while the item already appears on the subscription: the
+  // row must still not claim Active.
+  {
+    const key = "hottubtrack";
+    serviceBehaviors.set(key, [{ activate: true, body: { ok: true, entitled: ["core", key], paymentPending: true } }]);
+    const row = await addWhileHeld(key);
+    await row.getByText("Payment for HotTubTrack needs attention in the billing portal before it can be used.", { exact: true }).waitFor({ state: "visible" });
+    await row.getByText("Awaiting confirmation", { exact: true }).waitFor({ state: "visible" });
+    await assertNotActive(row, key, "a pending payment that is already on the subscription");
+    assert.ok(billingConfigReads.at(-1).services.addons.includes(key), "the mocked config lists the pending item");
+    assert.equal(postsFor(key).length, 1, "pending add sent one mutation");
+  }
+
+  // 4. Unconfirmed entitlement: ok but the returned entitlements omit it.
+  {
+    const key = "legionellatrack";
+    serviceBehaviors.set(key, [{ body: { ok: true, entitled: ["core"] } }]);
+    const row = await addWhileHeld(key);
+    await assertRetryable(row, key, "We couldn't confirm LegionellaTrack is active yet. Refresh in a moment; contact support if it doesn't appear.");
+    await row.getByText("Awaiting confirmation", { exact: true }).waitFor({ state: "visible" });
+    await retrySucceeds(row, key);
+  }
+
+  const isExpectedResourceError = text => /Failed to load resource/.test(text);
+  assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests: ${JSON.stringify(unexpectedApiRequests)}`);
+  assert.deepEqual(
+    failedApiResponses.filter(({ status }) => !expectedFailureStatuses.has(status)),
+    [],
+    `only the mocked failures may fail: ${JSON.stringify(failedApiResponses)}`,
+  );
+  assert.deepEqual(pageErrors, [], `Settings must not throw on failed adds: ${pageErrors.join("; ")}`);
+  assert.deepEqual(consoleErrors.filter(text => !isExpectedResourceError(text)), [], `unexpected console errors: ${consoleErrors.join("; ")}`);
+  assert.ok(csrfHeaders.every(header => header === "billing-settings-test-csrf"), "every attempt carries the session CSRF header");
+  assert.equal(serviceBehaviors.size > 0 && [...serviceBehaviors.values()].every(queue => queue.length === 0), true, "every mocked failure was exercised");
+  console.log("Settings add-on failure, pending, unconfirmed and retry checks passed.");
+
+  // ---------------------------------------------------------------------------
+  // Price availability: explain unavailable add-ons instead of a broken Add.
+  // ---------------------------------------------------------------------------
+  activeAddons.clear();
+  serviceBehaviors.clear();
+  resetObservations();
+  activeAddons.add("firetrack");
+  unavailablePrices.add("pooltrack");
+  unavailablePrices.add("firetrack");
+  await reloadSettings();
+  {
+    const pool = rowFor("PoolTrack");
+    await pool.waitFor({ state: "visible" });
+    await pool.getByText("Temporarily unavailable", { exact: true }).waitFor({ state: "visible" });
+    await pool.getByText(
+      "PoolTrack can't be added online right now because its price is temporarily unavailable. Nothing has been charged — please try again later or contact support.",
+      { exact: true },
+    ).waitFor({ state: "visible" });
+    assert.equal(await pool.getByRole("button", { name: "Add", exact: true }).count(), 0, "unavailable PoolTrack must not offer Add");
+    const unavailableButton = pool.getByRole("button", { name: "PoolTrack unavailable", exact: true });
+    assert.equal(await unavailableButton.isDisabled(), true, "the unavailable control must be inert");
+
+    const paid = rowFor("FireTrack");
+    await paid.getByText("Active", { exact: true }).waitFor({ state: "visible" });
+    await paid.getByRole("button", { name: "Remove", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await paid.getByText("Temporarily unavailable", { exact: true }).count(), 0, "already-paid access is preserved when its price is unavailable");
+
+    const bike = rowFor("BikeTrack");
+    assert.equal(await bike.getByRole("button", { name: "Add", exact: true }).count(), 1, "available add-ons still offer Add");
+  }
+
+  // Price lost between loading Settings and clicking Add: the server's 503
+  // preflight rejection is explained and the row flips to unavailable.
+  {
+    const key = "biketrack";
+    serviceBehaviors.set(key, [{
+      status: 503,
+      body: {
+        error: "Service price is missing or ambiguous",
+        missingServicePrices: [key],
+        duplicateServicePrices: [],
+        servicePriceIssues: [{ key, label: "BikeTrack", reason: "missing" }],
+      },
+      after: () => unavailablePrices.add(key),
+    }]);
+    expectedFailureStatuses.add(503);
+    const row = await addWhileHeld(key);
+    await row.getByText(
+      "BikeTrack can't be added online right now because its price is temporarily unavailable. You have not been charged.",
+      { exact: true },
+    ).waitFor({ state: "visible" });
+    await row.getByText("Temporarily unavailable", { exact: true }).waitFor({ state: "visible" });
+    assert.equal(await row.getByRole("button", { name: "Add", exact: true }).count(), 0, "Add is withdrawn once the price is known to be unavailable");
+    await assertNotActive(row, key, "a price-unavailable rejection");
+  }
+
+  // Availability could not be checked: pause Add everywhere, keep paid access.
+  availabilityChecked = false;
+  await reloadSettings();
+  {
+    const row = rowFor("SwimTrack");
+    await row.getByText(
+      "We couldn't check add-on availability just now, so adding is paused. Nothing has been charged — please refresh or try again shortly.",
+      { exact: true },
+    ).waitFor({ state: "visible" });
+    assert.equal(await servicesCard.getByRole("button", { name: "Add", exact: true }).count(), 0, "no Add is offered while availability is unknown");
+    await rowFor("FireTrack").getByText("Active", { exact: true }).waitFor({ state: "visible" });
+  }
+
+  // Prices recovered: Add returns and works, including legacy PoolTrack.
+  availabilityChecked = true;
+  unavailablePrices.clear();
+  await reloadSettings();
+  {
+    for (const label of ["PoolTrack", "BikeTrack"]) {
+      const row = rowFor(label);
+      await row.getByRole("button", { name: "Add", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await row.getByText("Temporarily unavailable", { exact: true }).count(), 0, `${label} is purchasable again`);
+    }
+    const row = await addWhileHeld("pooltrack");
+    await row.getByText("Active", { exact: true }).waitFor({ state: "visible" });
+  }
+  assert.deepEqual(
+    serviceMutationRequests.map(({ body }) => body),
+    [{ service: "biketrack", action: "add" }, { service: "pooltrack", action: "add" }],
+    "no add is sent for an unavailable add-on",
+  );
+  assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests: ${JSON.stringify(unexpectedApiRequests)}`);
+  assert.deepEqual(failedApiResponses.filter(({ status }) => !expectedFailureStatuses.has(status)), []);
+  assert.deepEqual(pageErrors, [], `Settings must not throw: ${pageErrors.join("; ")}`);
+  assert.deepEqual(consoleErrors.filter(text => !isExpectedResourceError(text)), [], `unexpected console errors: ${consoleErrors.join("; ")}`);
+  console.log("Settings add-on price availability checks passed.");
 
   console.log(`Settings add-on browser checks passed for all ${addons.length} billable add-ons.`);
 } catch (error) {

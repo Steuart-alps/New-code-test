@@ -21,6 +21,7 @@ import {
   SERVICE_CAP_PENCE,
   getEntitledServices,
   getServicePricePreflight,
+  addonPurchaseAvailability,
   invalidateEntitlements,
   type ServiceKey,
 } from "../lib/services";
@@ -36,6 +37,7 @@ import {
   verifyClientDiscountCode,
 } from "../lib/alpsDiscount";
 import { logger } from "../lib/logger";
+import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllowed } from "../lib/stripeStartup";
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
 import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
@@ -132,6 +134,15 @@ router.get("/config", requireAuth, async (req, res) => {
     }
     const monthlyTotal = perSiteRate * billableQuantity;
 
+    // Same read-only price check that add-on activation enforces, so Settings
+    // can explain an unavailable add-on instead of offering an Add that fails.
+    let addonAvailability = addonPurchaseAvailability(null);
+    try {
+      addonAvailability = addonPurchaseAvailability(await getServicePricePreflight());
+    } catch (err) {
+      req.log?.warn?.({ err }, "Could not read add-on price availability");
+    }
+
     // Offboarding fields — expose so the frontend can warn about pending deletion.
     let cancelledAt: string | null = null;
     let dataDeletionScheduledAt: string | null = null;
@@ -173,6 +184,7 @@ router.get("/config", requireAuth, async (req, res) => {
         subscribed,
         perSiteRate,
         capPence: SERVICE_CAP_PENCE,
+        addonAvailability,
         catalog: [
           ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
           { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
@@ -267,6 +279,12 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     if (!discountValid) {
       return res.status(400).json({ error: "That discount code is not valid for this account." });
     }
+  }
+
+  // Never open a checkout against a price catalogue this process has not
+  // verified (Stripe start-up still running, stalled, failing or unconfigured).
+  if (!isBillingActivationAllowed()) {
+    return res.status(503).json({ error: BILLING_UNVERIFIED_ERROR, billingState: getBillingReadiness().phase });
   }
 
   let discountReservation: { code: string; token: string; expiresAt: Date } | null = null;
@@ -452,6 +470,11 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
 
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
   if (!client?.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer for this client" });
+  // Activation needs a catalogue verified by this process's Stripe start-up.
+  // Removal stays available: it grants nothing.
+  if (action === "add" && !isBillingActivationAllowed()) {
+    return res.status(503).json({ error: BILLING_UNVERIFIED_ERROR, billingState: getBillingReadiness().phase });
+  }
 
   try {
     // Read the complete synced catalogue before touching the subscription. This
@@ -529,8 +552,9 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
       }
       return res.json({ ok: true, entitled: activation.entitled });
     } else {
-      const price = await getServicePrice(service);
-      if (!price) return res.status(400).json({ error: "Service price not configured" });
+      // Removal needs only the client's own subscription item, never the
+      // catalogue price: an archived or missing price must not trap a client
+      // in a service they want to stop paying for. No proration, no refund.
       if (!existingItem) return res.status(409).json({ error: "Service not active" });
       await stripe.subscriptionItems.del(existingItem.id, { proration_behavior: "none" });
     }

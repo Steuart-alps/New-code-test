@@ -19,6 +19,21 @@ import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import { dispatchStoredContractorEmail, generateActionTokens, sendContractorAssignmentEmail, sendContractorQuoteEmail } from "../lib/fixTrackNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload, decryptTokenPayload, TokenPayloadError, isDamagedTokenPayload } from "../lib/bearerTokens";
+import { reminderDraftStillCurrent, SUPERSEDED_REMINDER_ERROR } from "../lib/reminderCycles";
+
+/** Claim-transaction result for a reminder withdrawn as out of date. */
+const SUPERSEDED = Symbol("superseded");
+
+/**
+ * Record a delivered compliance email against its item. A reminder marks its
+ * cycle notified only while the item is still on that cycle: a reminder sent
+ * just before a date change must not suppress the reminder for the new date.
+ */
+async function markComplianceNotified(q: any, clientId: number): Promise<void> {
+  await db.execute(sql`UPDATE compliance_items SET notification_sent_at = now()
+    WHERE id=${q.entity_id} AND client_id=${clientId}
+      AND (${q.reminder_cycle ?? null}::text IS NULL OR to_char(due_date, 'YYYY-MM-DD') = ${q.reminder_cycle ?? null}::text)`);
+}
 import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fixTrackAlertSettings";
 
 const router = Router();
@@ -76,7 +91,7 @@ function sendFailureResponse(res: any, err: unknown) {
   }
   return res.status(502).json({ error: "Contractor email could not be sent" });
 }
-const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i;
+const QUEUED_BEARER_URL = /(?:https?:\/\/[^\s"'<>]+)?\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i;
 const CALENDAR_CANCELLATION_NOTICE = "The attached calendar cancellation removes the previously sent assignment.";
 const CALENDAR_CANCELLATION_SUBJECT_PREFIX = "Calendar cancellation:";
 const FIXTRACK_UPLOAD_EXTENSIONS: Record<string, string> = {
@@ -1608,6 +1623,11 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     throw err;
   }
   const q = await db.transaction(async (tx) => {
+    // A reminder whose compliance check changed since drafting is withdrawn
+    // rather than sent (its item is locked before the claim).
+    const pending = (await tx.execute(sql`SELECT id, client_id, entity_type, entity_id, reminder_cycle
+      FROM contractor_email_queue WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope}`)).rows[0] as any;
+    if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const claimed = await tx.execute(sql`UPDATE contractor_email_queue
       SET status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(), sent_by=${(req.session as any).userId ?? null}, updated_at=now()
       WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope} RETURNING *`);
@@ -1618,6 +1638,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
     }
     return row;
   });
+  if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
@@ -1631,8 +1652,7 @@ router.post("/contractor-email-queue/:queueId/approve-and-send", requireAuth, de
         email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.entity_id} AND client_id=${clientId}`);
     } else if (q.entity_type === "compliance" && q.entity_id) {
-      await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
-        WHERE id=${q.entity_id} AND client_id=${clientId}`);
+      await markComplianceNotified(q, clientId);
     }
     res.json({ ok: true, queueId: qid, mode: q.mode, subject: hydrated.subject, bodyHtml: hydrated.html });
   } catch (err) {
@@ -1685,6 +1705,9 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
   const safeHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b"><p>${escapedBody}</p>${quoteLink}</div>`;
   const persisted = placeholderizeQueuedDraft(safeSubject, safeHtml, safeBodyText, payload);
   const q = await db.transaction(async (tx) => {
+    const pending = (await tx.execute(sql`SELECT id, client_id, entity_type, entity_id, reminder_cycle
+      FROM contractor_email_queue WHERE id=${qid} AND client_id=${clientId} AND status='pending'${scope}`)).rows[0] as any;
+    if (pending && !(await reminderDraftStillCurrent(tx, pending))) return SUPERSEDED;
     const rows = await tx.execute(sql`UPDATE contractor_email_queue SET subject=${persisted.subject}, body_html=${persisted.html}, body_text=${persisted.text},
       email_preview_json=${JSON.stringify(persisted.preview)}::jsonb,
       status='sending', approved_by=${(req.session as any).userId ?? null}, approved_at=now(),
@@ -1694,6 +1717,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
     if (row?.entity_type === "fix_track" && row.entity_id) await tx.execute(sql`UPDATE fix_track_issues SET email_request_status='sending',updated_at=now() WHERE id=${row.entity_id} AND client_id=${clientId} AND email_request_status='pending'`);
     return row;
   });
+  if (q === SUPERSEDED) return res.status(409).json({ code: "reminder_superseded", error: SUPERSEDED_REMINDER_ERROR });
   if (!q) return res.status(409).json({ error: "Queue entry is no longer pending" });
   try {
     const hydrated = hydrateQueuedContent(q);
@@ -1715,8 +1739,7 @@ router.post("/contractor-email-queue/:queueId/edit-and-send", requireAuth, denyV
         email_sent_by=${(req.session as any).userId ?? null}, email_sent_at=now(), updated_at=now()
         WHERE id=${q.issue_id} AND client_id=${clientId}`);
     } else if (q.entity_type === "compliance" && q.entity_id) {
-      await db.execute(sql`UPDATE compliance_items SET notification_sent_at=now()
-        WHERE id=${q.entity_id} AND client_id=${clientId}`);
+      await markComplianceNotified(q, clientId);
     }
     res.json({ ok: true, queueId: qid, subject: hydrated.subject, bodyHtml: hydrated.html, bodyText: hydrated.text });
   } catch (err) {
