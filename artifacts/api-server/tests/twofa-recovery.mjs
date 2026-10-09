@@ -278,6 +278,134 @@ async function overlappingRegenerationRegression({ admin, clientId }) {
     `remaining ${meB.data?.user?.recoveryCodesRemaining}`);
 }
 
+// ── Recovery codes are bound to their own account (self-contained) ──────────
+// Account A's genuine, unused recovery code is submitted against account B's
+// valid password-authenticated pending challenge, on the web (/auth/2fa/verify)
+// and mobile (/auth/mobile-login/verify-totp) paths. The code must be refused,
+// leave no session or bearer token, stay unused for A, and then still sign A
+// in on the same path. Codes, secrets and tokens are never printed.
+const bindingEmails = ["bind-a", "bind-b"].map(label => `twofa-${label}-${fixtureId}@test.local`);
+fixtureEmails.push(...bindingEmails);
+async function recoveryCodeAccountBindingRegression({ admin, clientId }) {
+  const password = "password-bind-345";
+  const hashOf = (code) => createHash("sha256")
+    .update(code.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+  let mobileIp = 230;
+
+  async function enrolledUser(label, email) {
+    const created = await admin("POST", "/users", {
+      email, password, name: `Binding ${label}`, role: "client_staff", clientId,
+    });
+    check(`binding: create account ${label}`, created.status === 201 && Number.isInteger(created.data?.id),
+      `got ${created.status}`);
+    if (!Number.isInteger(created.data?.id)) throw new Error(`Binding account ${label} was not created`);
+    const session = makeSession();
+    await session("POST", "/auth/login", { email, password });
+    const setup = await session("GET", "/auth/2fa/setup");
+    if (!setup.data?.secret) throw new Error(`Binding account ${label} could not start 2FA setup`);
+    const enabled = await session("POST", "/auth/2fa/enable", { code: generateToken(setup.data.secret) });
+    const codes = enabled.data?.recoveryCodes ?? [];
+    check(`binding: account ${label} enrols TOTP with 10 recovery codes`,
+      enabled.status === 200 && codes.length === 10, `got ${enabled.status}`);
+    return { id: created.data.id, email, codes };
+  }
+  async function codeRows(userId) {
+    return (await pool.query(
+      "SELECT id, code_hash, used_at::text AS used_at FROM totp_recovery_codes WHERE user_id = $1 ORDER BY id",
+      [userId])).rows;
+  }
+  async function codeState(userId, code) {
+    const rows = (await pool.query(
+      "SELECT used_at::text AS used_at FROM totp_recovery_codes WHERE user_id = $1 AND code_hash = $2",
+      [userId, hashOf(code)])).rows;
+    return rows.length === 1 ? (rows[0].used_at === null ? "unused" : "used") : `rows:${rows.length}`;
+  }
+  const mobileSessions = async (userId) => Number((await pool.query(
+    "SELECT count(*)::int AS n FROM mobile_sessions WHERE user_id = $1", [userId])).rows[0].n);
+  async function mobileChallenge(email) {
+    const ip = mobileIp++;
+    const started = await mobileRequest("POST", "/auth/mobile-login", { email, password }, null, ip);
+    if (started.status !== 200 || typeof started.data?.pendingToken !== "string" || started.data.token !== undefined) {
+      throw new Error(`Binding mobile challenge was not created (status ${started.status})`);
+    }
+    return { pendingToken: started.data.pendingToken, ip };
+  }
+
+  const userA = await enrolledUser("A", bindingEmails[0]);
+  const userB = await enrolledUser("B", bindingEmails[1]);
+  const aHashes = new Set(userA.codes.map(hashOf));
+  check("binding: the two accounts hold distinct recovery-code sets",
+    userB.codes.every(code => !aHashes.has(hashOf(code))));
+  const bRowsBefore = await codeRows(userB.id);
+  check("binding: account B starts with 10 unused stored codes",
+    bRowsBefore.length === 10 && bRowsBefore.every(row => row.used_at === null));
+  const [webCode, mobileCode] = userA.codes;
+
+  // ── Web: A's code against B's pending cookie challenge ──
+  const webB = makeSession();
+  const webBLogin = await webB("POST", "/auth/login", { email: userB.email, password });
+  check("binding web: B's password login leaves a pending 2FA challenge",
+    webBLogin.status === 200 && webBLogin.data?.requires2fa === true, `got ${webBLogin.status}`);
+  check("binding web: A's code starts unused", await codeState(userA.id, webCode) === "unused");
+  const webCross = await webB("POST", "/auth/2fa/verify", { code: webCode });
+  check("binding web: A's recovery code is rejected for B's challenge", webCross.status === 401,
+    `got ${webCross.status}`);
+  check("binding web: the rejection returns no user", webCross.data?.user === undefined);
+  const webBMe = await webB("GET", "/auth/me");
+  check("binding web: B's cookie session does not pass /auth/me", webBMe.status === 401, `got ${webBMe.status}`);
+  check("binding web: PostgreSQL shows A's code still unused", await codeState(userA.id, webCode) === "unused");
+
+  const webA = makeSession();
+  const webALogin = await webA("POST", "/auth/login", { email: userA.email, password });
+  check("binding web: A's password login requires 2fa", webALogin.data?.requires2fa === true);
+  const webOwn = await webA("POST", "/auth/2fa/verify", { code: webCode });
+  check("binding web: A then signs in with that code",
+    webOwn.status === 200 && webOwn.data?.user?.id === userA.id, `got ${webOwn.status}`);
+  const webAMe = await webA("GET", "/auth/me");
+  check("binding web: A's session passes /auth/me as A",
+    webAMe.status === 200 && webAMe.data?.user?.id === userA.id, `got ${webAMe.status}`);
+  check("binding web: A's code is consumed by its owner", await codeState(userA.id, webCode) === "used");
+
+  // ── Mobile: A's code against B's pending bearer challenge ──
+  const bSessionsBefore = await mobileSessions(userB.id);
+  const aSessionsBefore = await mobileSessions(userA.id);
+  const bChallenge = await mobileChallenge(userB.email);
+  check("binding mobile: A's second code starts unused", await codeState(userA.id, mobileCode) === "unused");
+  const mobileCross = await mobileRequest("POST", "/auth/mobile-login/verify-totp",
+    { pendingToken: bChallenge.pendingToken, code: mobileCode }, null, bChallenge.ip);
+  check("binding mobile: A's recovery code is rejected for B's challenge", mobileCross.status === 401,
+    `got ${mobileCross.status}`);
+  check("binding mobile: no bearer token is issued", mobileCross.data?.token === undefined);
+  if (typeof mobileCross.data?.token === "string") {
+    const leaked = await mobileRequest("GET", "/auth/me", undefined, mobileCross.data.token, bChallenge.ip);
+    check("binding mobile: a wrongly issued bearer token is not usable", leaked.status === 401,
+      `got ${leaked.status}`);
+  }
+  check("binding mobile: no bearer session row is created for either account",
+    await mobileSessions(userB.id) === bSessionsBefore && await mobileSessions(userA.id) === aSessionsBefore);
+  check("binding mobile: PostgreSQL shows A's code still unused", await codeState(userA.id, mobileCode) === "unused");
+
+  const aChallenge = await mobileChallenge(userA.email);
+  const mobileOwn = await mobileRequest("POST", "/auth/mobile-login/verify-totp",
+    { pendingToken: aChallenge.pendingToken, code: mobileCode }, null, aChallenge.ip);
+  check("binding mobile: A then exchanges that code for a bearer token",
+    mobileOwn.status === 200 && typeof mobileOwn.data?.token === "string", `got ${mobileOwn.status}`);
+  const bearerMe = typeof mobileOwn.data?.token === "string"
+    ? await mobileRequest("GET", "/auth/me", undefined, mobileOwn.data.token, aChallenge.ip)
+    : { status: 0 };
+  check("binding mobile: A's bearer token passes /auth/me as A",
+    bearerMe.status === 200 && bearerMe.data?.user?.id === userA.id, `got ${bearerMe.status}`);
+  check("binding mobile: A's code is consumed by its owner", await codeState(userA.id, mobileCode) === "used");
+  await pool.query("DELETE FROM mobile_login_challenges WHERE user_id = $1", [userB.id]);
+
+  // B's own codes are untouched by every attempt above, and the rest of A's are unused.
+  check("binding: B's recovery-code rows are unchanged",
+    JSON.stringify(await codeRows(userB.id)) === JSON.stringify(bRowsBefore));
+  const aRows = await codeRows(userA.id);
+  check("binding: A has exactly its two legitimately used codes consumed",
+    aRows.length === 10 && aRows.filter(row => row.used_at !== null).length === 2);
+}
+
 async function main() {
   const ts = fixtureId;
   async function tokenRows(userId) {
@@ -312,6 +440,7 @@ async function main() {
   const clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   check("admin has client context", clientId != null, JSON.stringify(me.data?.user));
   await overlappingRegenerationRegression({ admin, clientId });
+  await recoveryCodeAccountBindingRegression({ admin, clientId });
 
   // ── User with 2FA: staff member created by admin ────────────────────────────
   const staffEmail = `twofa-staff-${ts}@test.local`;
@@ -831,15 +960,32 @@ async function main() {
     afterDeliveryFailure?.totp_enabled === false
       && afterDeliveryFailure.totp_secret === null
       && afterDeliveryFailure.totp_recovery_hash === null);
-  check("a failed notification is not recorded as sent", resetNotices().length === 1);
+  const resetAlerts = async () => (await pool.query(
+    "SELECT status, attempts, delivery_key FROM two_factor_reset_notifications WHERE user_id = $1 ORDER BY id",
+    [staffId],
+  )).rows;
+  const alertsAfterFailure = await resetAlerts();
+  const failedAlert = alertsAfterFailure[1];
+  check("the delivered reset alert is recorded as sent", alertsAfterFailure[0]?.status === "sent",
+    JSON.stringify(alertsAfterFailure));
+  check("a failed notification stays queued for retry, not recorded as sent",
+    alertsAfterFailure.length === 2 && failedAlert?.status === "pending" && failedAlert.attempts === 1,
+    JSON.stringify(alertsAfterFailure));
+  // The recovery job may legitimately deliver the queued alert later in this
+  // run, so count notices other than that alert's retries.
+  const otherNotices = () => resetNotices()
+    .filter((notice) => !failedAlert || !String(notice.idempotencyKey ?? "").startsWith(failedAlert.delivery_key));
+  check("a failed notification is not recorded as delivered", otherNotices().length === 1);
   const missingReset = await admin("POST", `/users/${staffId + 1000000}/reset-2fa`, {});
   check("reset rejects a nonexistent user", missingReset.status === 404);
-  check("rejected admin reset sends no security notification", resetNotices().length === 1);
+  check("rejected admin reset sends no security notification", otherNotices().length === 1);
+  check("rejected admin reset queues no security notification", (await resetAlerts()).length === 2);
 
   // Staff cannot reset another user's 2FA (route is admin-only).
   const staffReset = await s4("POST", `/users/${staffId}/reset-2fa`, {});
   check("staff blocked from reset-2fa", [401, 403].includes(staffReset.status), `got ${staffReset.status}`);
-  check("permission-denied reset sends no security notification", resetNotices().length === 1);
+  check("permission-denied reset sends no security notification",
+    otherNotices().length === 1 && (await resetAlerts()).length === 2);
   const staffResend = await s4("POST", `/users/${invitedId}/resend-invite`, {});
   check("staff blocked from resending invitations", [401, 403].includes(staffResend.status), `got ${staffResend.status}`);
 

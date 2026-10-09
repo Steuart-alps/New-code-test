@@ -161,6 +161,7 @@ export async function sendSystemEmail(opts: {
       subject: opts.subject,
       html: opts.html,
       text: opts.text,
+      ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
     })}\n`);
     return;
   }
@@ -181,14 +182,25 @@ export async function sendSystemEmail(opts: {
   }
 }
 
-/** Notify the affected account only after an administrator's reset is committed. */
-export async function sendTwoFactorResetEmail(opts: {
+export interface TwoFactorResetEmail {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/**
+ * Render the security alert for an administrator's two-factor reset. The
+ * output depends only on the recipient, their name and the reset time, so a
+ * retry renders the identical message. It never includes secrets.
+ */
+export function buildTwoFactorResetEmail(opts: {
   to: string;
   name: string;
   resetAt: Date;
-}): Promise<void> {
+}): TwoFactorResetEmail {
   const when = opts.resetAt.toISOString();
-  await sendSystemEmail({
+  return {
     to: opts.to,
     subject: "Security alert: your two-factor authentication was reset",
     text: [
@@ -207,7 +219,7 @@ export async function sendTwoFactorResetEmail(opts: {
       <p>If you did not expect this reset, <strong>contact your administrator immediately</strong>.</p>
       <p>Sign in and re-enrol your authenticator promptly. You must complete two-factor setup before accessing your account.</p>
     `,
-  });
+  };
 }
 
 function toIcsDate(date: Date): string {

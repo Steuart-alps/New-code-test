@@ -113,6 +113,7 @@ const freshSchema = new Set([
   "test:login-rate-limit-postgres", "test:pat-photo-boundary",
   "test:staged-photo-cleanup", "test:service-price-preflight-db",
   "test:service-price-audit", "test:biketrack-config-cadence", "test:bike-overdue-reminders",
+  "test:two-factor-reset-alerts", // in-process jobs plus restart worker processes on the private cluster
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
@@ -238,7 +239,7 @@ const pureEntrypoints = new Set([
 const helperModules = new Set([
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
-  "fixture-ownership.mjs",
+  "fixture-ownership.mjs", "storage-acl-session.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];
