@@ -61,7 +61,7 @@ export function Sessions({
     enabled: canUseSite && siteId !== null,
   });
 
-  function resetDraft() {
+  function resetDraft(photos: 'consume' | 'cancel') {
     setSessionDate(localDateString());
     setOpenTime(localTimeString());
     setCloseTime('');
@@ -70,7 +70,8 @@ export function Sessions({
     setLifeguardName('');
     setMaxBathers('');
     setNotes('');
-    photoEvidence.reset();
+    if (photos === 'consume') photoEvidence.consume();
+    else photoEvidence.reset();
   }
 
   const mutation = useMutation({
@@ -82,7 +83,7 @@ export function Sessions({
       void queryClient.invalidateQueries({ queryKey: ['swim-sessions'] });
       setShowForm(false);
       onFormOpenChange(false);
-      resetDraft();
+      resetDraft('consume');
       Alert.alert('Logged', 'Session recorded successfully.');
     },
     onError: (error: Error) => {
@@ -148,7 +149,7 @@ export function Sessions({
     const next = !showForm;
     setShowForm(next);
     onFormOpenChange(next);
-    if (!next) resetDraft();
+    if (!next) resetDraft('cancel');
   }
 
   const todaysSessions = sessionsQuery.data ? sessionsForDate(sessionsQuery.data, localDateString()) : [];

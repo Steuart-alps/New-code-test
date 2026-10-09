@@ -25,6 +25,8 @@ import { runMonthlyComplianceSummaryJob } from "./lib/monthlyComplianceSummary";
 import { runContractorInsuranceExpiryReminderJob } from "./lib/contractorInsuranceExpiryReminders";
 import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
+import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
+import { ObjectStorageService } from "./lib/objectStorage";
 
 const rawPort = process.env["PORT"];
 
@@ -125,7 +127,39 @@ async function initStripe(): Promise<string | null> {
   }
 }
 
+let stagedPhotoCleanupRunning = false;
+async function runStagedPhotoCleanup() {
+  if (stagedPhotoCleanupRunning) return;
+  const storage = new ObjectStorageService();
+  try {
+    storage.getPrivateObjectDir();
+  } catch {
+    // Without configured private storage nothing can be deleted; leave the
+    // receipts for a correctly configured instance rather than backing off.
+    return;
+  }
+  stagedPhotoCleanupRunning = true;
+  try {
+    // Bounded per run; a backlog drains over successive runs.
+    const result = await cleanupStagedPhotoUploads(storage, {
+      limit: 200,
+      onError: (err) => logger.warn({ err }, "Staged photo cleanup item failed; will retry with backoff"),
+    });
+    if (result.examined > 0) logger.info({ result }, "Staged photo cleanup complete");
+  } catch (err) {
+    logger.error({ err }, "Staged photo cleanup failed");
+  } finally {
+    stagedPhotoCleanupRunning = false;
+  }
+}
+
 function startScheduler() {
+  // Remove cancelled or expired unclaimed staged photos (and their objects)
+  // at boot and every 10 minutes. Restart-safe: unfinished items are retried.
+  void runStagedPhotoCleanup();
+  cron.schedule("*/10 * * * *", runStagedPhotoCleanup);
+  logger.info("Staged photo cleanup scheduler started (every 10 minutes)");
+
   cron.schedule("35 8 * * *", async () => {
     logger.info("Running operational action reminder job...");
     try {

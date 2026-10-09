@@ -2916,8 +2916,15 @@ async function migrateCheckPhotos() {
     CREATE INDEX IF NOT EXISTS "IDX_staged_photo_receipts_expiry"
     ON "staged_photo_upload_receipts" ("expires_at")
   `);
+  // Cancelled/expired receipts are cleaned up by stagedPhotoCleanup, which
+  // deletes the unreferenced object before removing the row. Do not prune rows
+  // here: deleting a receipt without its object orphans billable bytes.
   await db.execute(sql`
-    DELETE FROM "staged_photo_upload_receipts" WHERE "expires_at" <= now()
+    ALTER TABLE "staged_photo_upload_receipts"
+      ADD COLUMN IF NOT EXISTS "cancelled_at" timestamptz,
+      ADD COLUMN IF NOT EXISTS "cleanup_after" timestamptz,
+      ADD COLUMN IF NOT EXISTS "cleanup_attempts" integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "cleanup_error" text
   `);
 
   // KitchenTrack originally stored diary photos under food_safety_record.

@@ -64,6 +64,7 @@
     "test:private-file-acl": "node tests/private-file-acl.mjs",
     "test:photo-attachments": "bash tests/run-db-workflow.sh tests/photo-attachments.mjs",
     "test:staged-photo-creation": "node tests/staged-photo-creation.mjs",
+    "test:staged-photo-cleanup": "bash tests/run-fresh-schema.sh tests/staged-photo-cleanup.mjs",
     "test:storage-outage-routes": "bash tests/run-storage-outage-routes.sh",
     "test:storage-usage": "node tests/storage-usage.mjs",
     "test:doc-track-object-acl": "bash tests/run-doc-track-object-acl.sh",

@@ -153,4 +153,17 @@ const putBlock = hook.slice(hook.indexOf('putObject:'), hook.indexOf('};', hook.
 assert.match(putBlock, /credentials: 'omit'/);
 assert.doesNotMatch(putBlock, /Authorization|apiFetch|Cookie/i);
 
+// Abandoned receipts are cancelled through the bearer-authenticated API
+// (server deletes the object after tenant ACL and reference checks); a
+// successful create consumes them without cancelling.
+const cancelFn = hook.slice(hook.indexOf('function cancelStagedPhotos'), hook.indexOf('\n}\n', hook.indexOf('function cancelStagedPhotos')));
+assert.match(cancelFn, /apiFetch\(`\/api\/photos\/staged\/\$\{encodeURIComponent\(photo\.id\)\}`, \{ method: 'DELETE' \}\)/);
+const consumeFn = hook.slice(hook.indexOf('const consume = useCallback'), hook.indexOf('}, []);', hook.indexOf('const consume = useCallback')));
+assert.doesNotMatch(consumeFn, /cancelStagedPhotos/, 'consume must not cancel claimed receipts');
+const green = await readFile(new URL('../app/checks/green.tsx', import.meta.url), 'utf8');
+assert.match(green.slice(green.indexOf('onSuccess'), green.indexOf('onError')), /photoEvidence\.consume\(\)/);
+const sessions = await readFile(new URL('../components/Sessions.tsx', import.meta.url), 'utf8');
+assert.match(sessions, /resetDraft\('consume'\)/);
+assert.match(sessions, /if \(!next\) resetDraft\('cancel'\)/);
+
 console.log('staged photo evidence: all assertions passed');
