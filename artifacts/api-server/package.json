@@ -80,6 +80,7 @@
     "test:biketrack-billing": "node tests/biketrack-billing.mjs",
     "test:bike-overdue-reminders": "bash tests/run-fresh-schema.sh tests/bike-overdue-reminders.mjs",
     "test:bike-hire-export": "bash tests/run-bike-hire-export.sh",
+    "test:biketrack-config-cadence": "bash tests/run-fresh-schema.sh tests/biketrack-config-cadence.mjs",
     "test:premises-inspection-date-range": "bash tests/run-premises-inspection-date-range.sh",
     "test:pattrack-billing": "node tests/pattrack-billing.mjs",
     "test:pesttrack-billing": "node tests/pesttrack-billing.mjs",
