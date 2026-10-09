@@ -20,6 +20,7 @@ import {
   Play, MapPin, User, Calendar, FileText, Paperclip, Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FixTrackBoard } from "@/components/fix-track-board";
 import { format } from "date-fns";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -579,116 +580,6 @@ function FixTrackDashboard({ issues }: { issues: Issue[] }) {
   );
 }
 
-// ── Priority board ────────────────────────────────────────────────────────────
-
-const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-const DAY_MS = 86_400_000;
-
-function startOfLocalDay(value: string | Date): Date {
-  const date = typeof value === "string" ? new Date(`${value.slice(0, 10)}T00:00:00`) : new Date(value);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function elapsedDays(from: string, to = new Date()): number {
-  return Math.max(0, Math.floor((startOfLocalDay(to).getTime() - startOfLocalDay(from).getTime()) / DAY_MS));
-}
-
-function FixTrackBoard({ issues, onEdit }: { issues: Issue[]; onEdit: (i: Issue) => void }) {
-  // Open issues only, grouped by trade area (issueType).
-  const open = issues.filter(i => i.status === "reported" || i.status === "in_progress");
-
-  const columns = [...new Set(open.map(i => i.issueType))]
-    .map(key => ({
-      key,
-      meta: issueTypeMeta(key),
-      items: open
-        .filter(i => i.issueType === key)
-        .sort((a, b) => {
-          const pr = (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99);
-          if (pr !== 0) return pr;
-          // Older first (by reported date)
-          return new Date(a.reportedDate).getTime() - new Date(b.reportedDate).getTime();
-        }),
-    }))
-    .filter(c => c.items.length > 0);
-
-  if (columns.length === 0) {
-    return (
-      <div className="py-20 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
-        <CheckCircle2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-        <p className="text-sm font-medium">No open issues — nothing to action right now</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex gap-4 overflow-x-auto pb-4">
-      {columns.map(({ key, meta, items }) => (
-        <div key={key} className="flex-shrink-0 w-72">
-          <div className="flex items-center justify-between mb-2 px-1">
-            <span className={cn("inline-flex items-center text-xs px-2 py-0.5 rounded-md border font-medium", meta.color)}>
-              {meta.label}
-            </span>
-            <span className="text-xs text-muted-foreground font-medium tabular-nums">{items.length}</span>
-          </div>
-          <div className="space-y-2">
-            {items.map(issue => {
-              const priorityMeta = PRIORITIES[issue.priority] ?? PRIORITIES.medium;
-              const statusMeta   = STATUSES[issue.status] ?? STATUSES.reported;
-              const daysOpen = elapsedDays(issue.reportedDate);
-              return (
-                <button
-                  key={issue.id}
-                  onClick={() => onEdit(issue)}
-                  className={cn(
-                    "w-full text-left bg-card border rounded-lg p-3 transition-shadow hover:shadow-md",
-                    issue.priority === "urgent" ? "border-l-4 border-l-rose-500" : "border-border",
-                  )}
-                >
-                  <div className="font-medium text-sm mb-1.5 line-clamp-2">{issue.title}</div>
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", priorityMeta.color)}>{priorityMeta.label}</span>
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-medium", statusMeta.color)}>{statusMeta.label}</span>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    <div className="truncate flex items-center gap-1">
-                      <MapPin className="w-3 h-3 flex-shrink-0" />
-                      <span>{issue.siteName ?? "No site"}</span>
-                    </div>
-                    <div className="truncate flex items-center gap-1">
-                      <User className="w-3 h-3 flex-shrink-0" />
-                      <span>{issue.contractorName ?? "Unassigned"}</span>
-                    </div>
-                    {issue.targetDate && (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 flex-shrink-0" />
-                        <span>Target {format(startOfLocalDay(issue.targetDate), "dd/MM/yyyy")}</span>
-                      </div>
-                    )}
-                    {!issue.targetDate && (
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3 flex-shrink-0" />
-                        <span>No target date</span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <span className="font-medium text-foreground">{daysOpen} {daysOpen === 1 ? "day" : "days"} open</span>
-                      {issue.isOverdue && (
-                        <Badge className="bg-red-600 text-white hover:bg-red-600">Overdue</Badge>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FixTrackPage() {
@@ -1080,7 +971,7 @@ export default function FixTrackPage() {
         {activeTab === "board" && (
           loading
             ? <div className="py-20 text-center text-muted-foreground animate-pulse">Loading…</div>
-            : <FixTrackBoard issues={issues} onEdit={openEdit} />
+            : <FixTrackBoard issues={issues} onEdit={openEdit} issueTypeMeta={issueTypeMeta} priorities={PRIORITIES} statuses={STATUSES} />
         )}
 
         {/* Issues tab — Filters */}
