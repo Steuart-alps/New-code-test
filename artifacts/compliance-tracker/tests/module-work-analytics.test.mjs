@@ -173,8 +173,15 @@ try {
   client.setMutationObserver(null);
 
   // --- Page-local wrappers report through the shared hook ------------------
+  // HotTrack and TreeTrack call the shared apiFetch, which reports through
+  // the same hook (and adds the /api prefix and CSRF token).
+  for (const file of ["src/pages/hot-tub.tsx", "src/pages/tree-track.tsx"]) {
+    const source = await readFile(path.join(root, file), "utf8");
+    assert.match(source, /import \{ apiFetch as sharedApiFetch \} from "@\/lib\/api";/, `${file} must use the shared apiFetch`);
+    assert.match(source, /await sharedApiFetch\(path, opts\)/, `${file} must send requests through the shared apiFetch`);
+  }
   for (const file of [
-    "src/pages/hot-tub.tsx", "src/pages/tree-track.tsx", "src/pages/bike-track.tsx",
+    "src/pages/bike-track.tsx",
     "src/pages/aqua-track.tsx", "src/pages/pool-track.tsx", "src/pages/pat-track.tsx",
     "src/pages/pest-track.tsx", "src/components/pat-track/legacy-register.tsx",
   ]) {
