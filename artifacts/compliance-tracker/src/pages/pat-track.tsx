@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { useCanEdit } from "@/context/auth-context";
 import { AlertTriangle, CheckCircle2, ClipboardList, FileText, Library, Loader2, Pencil, Plus, Trash2, Wrench, Zap } from "lucide-react";
+import { beginApiMutation } from "@/lib/api";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -26,11 +27,13 @@ type Failure = { id: number; certificateId: number; roomId?: number | null; room
 type Overdue = { id?: number; roomId?: number; roomNumber?: string; area?: string; status?: "untested" | "overdue"; lastTestDate?: string | null; nextTestDue?: string | null; daysOverdue?: number };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const mutationSucceeded = beginApiMutation(init?.method, `/pat-track${path}`);
   const response = await fetch(`${baseUrl}/api/pat-track${path}`, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error ?? body?.message ?? `Request failed (${response.status})`);
   }
+  mutationSucceeded();
   return response.json();
 }
 async function rootApi<T>(path: string): Promise<T> {

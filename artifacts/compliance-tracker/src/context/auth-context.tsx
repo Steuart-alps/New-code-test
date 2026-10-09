@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
-import { apiFetch } from "@/lib/api";
-import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler } from "@workspace/api-client-react";
+import { apiFetch, setApiFetchMutationObserver } from "@/lib/api";
+import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, setMutationObserver } from "@workspace/api-client-react";
+import { createCompletedWorkObserver } from "@/lib/analytics";
 
 export type UserRole = "consultant" | "client_admin" | "client_staff" | "client_viewer";
 
@@ -71,6 +72,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setClientIdGetter(() => activeClientIdRef.current);
     return () => setClientIdGetter(null);
+  }, []);
+
+  // Record the first saved compliance record or completed check after a paid
+  // activation (trackModuleWorkCompleted). Route visits stay in
+  // module_first_used; this measures practical adoption.
+  useEffect(() => {
+    const observer = createCompletedWorkObserver(() => activeClientIdRef.current);
+    setMutationObserver(observer);
+    setApiFetchMutationObserver(observer);
+    return () => {
+      setMutationObserver(null);
+      setApiFetchMutationObserver(null);
+    };
   }, []);
 
   // If any API call returns 401 the session has expired: clear auth state so

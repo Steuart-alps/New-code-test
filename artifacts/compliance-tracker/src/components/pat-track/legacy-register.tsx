@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { printHtmlDocument } from "@/lib/download";
+import { beginApiMutation } from "@/lib/api";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["Class I", "Class II", "Class III", "Extension Lead", "IT Equipment", "Portable Tool", "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other"];
@@ -38,11 +39,13 @@ type Site = { id: number; name: string };
 type View = "appliances" | "tests";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const mutationSucceeded = beginApiMutation(init?.method, `/pat-track${path}`);
   const response = await fetch(`${baseUrl}/api/pat-track${path}`, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error ?? body?.message ?? `Request failed (${response.status})`);
   }
+  mutationSucceeded();
   return response.json();
 }
 const today = () => new Date().toISOString().slice(0, 10);

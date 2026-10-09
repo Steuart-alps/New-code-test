@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
+import { beginApiMutation } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,12 +104,14 @@ const SEVERITY_CFG: Record<ActionSeverity, { label: string; badge: string }> = {
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 async function apiFetch(path: string, opts?: RequestInit) {
+  const mutationSucceeded = beginApiMutation(opts?.method, path);
   const res = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
   });
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.error ?? `${res.status}`); }
+  mutationSucceeded();
   if (res.status === 204) return null;
   return res.json();
 }

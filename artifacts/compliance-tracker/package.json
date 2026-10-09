@@ -31,6 +31,7 @@
     "test:training-matrix": "node tests/training-matrix.test.mjs",
     "test:training-matrix-analytics": "node tests/training-matrix-analytics.test.mjs",
     "test:service-action-analytics": "node tests/service-action-analytics.test.mjs",
+    "test:module-work-analytics": "node tests/module-work-analytics.test.mjs",
     "test:training-expiry": "node tests/training-expiry.test.mjs",
     "test:induction-print": "node tests/induction-print.test.mjs",
     "test:daily-track-month-status": "node tests/daily-track-month-status.test.mjs",
