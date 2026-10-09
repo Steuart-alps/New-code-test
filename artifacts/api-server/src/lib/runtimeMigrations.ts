@@ -548,6 +548,25 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_sessions_expire" ON "sessions" ("expire")`);
 
+    // Password reset and invitation set-up links (lib/db passwordResetTokensTable).
+    // It was only ever created by drizzle push, but forgot-password,
+    // reset-password and the user invite/resend-invite routes all depend on it,
+    // so a runtime-migrated database must have it too. Existing tables are left
+    // as they are; only missing nullable/defaulted columns are added.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+        "id"         serial PRIMARY KEY,
+        "user_id"    integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "token"      text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "used_at"    timestamp,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT "password_reset_tokens_token_unique" UNIQUE ("token")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
+    await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+
     // Shared authentication throttles keep sign-in quotas consistent across
     // API processes. Only HMACed IP/namespace keys are persisted.
     await db.execute(sql`
