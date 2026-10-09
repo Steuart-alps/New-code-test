@@ -76,11 +76,12 @@ const directLocked = new Set([
   "test:config", "test:training-expiry", "test:safe-track-ack-reminders",
   "test:discounts", "test:compliance-hub", "test:guidance-register",
   "test:daily-checklist-entitlements", "test:export-attachment-acl",
-  "test:photo-attachments", "test:bike-overdue-reminders",
+  "test:photo-attachments",
   "test:fix-track-overdue-alerts", "test:track-summary-delivery",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
 ]);
 const runnerLocked = new Set([
+  "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
   "test:isolation:ci", "test:modules:ci", "test:dept-isolation:ci",
   "test:dailytrack-locks:ci", "test:config:ci", "test:doc-track-status",
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
@@ -108,6 +109,11 @@ const freshSchema = new Set([
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
   "test:fix-track-contractor-approval", // delegates each suite to run-fresh-schema.sh
+  "test:password-reset-fresh-schema", "test:password-reset-rate-limit-postgres",
+  "test:login-rate-limit-postgres", "test:pat-photo-boundary",
+  "test:staged-photo-cleanup", "test:service-price-preflight-db",
+  "test:service-price-audit", "test:biketrack-config-cadence", "test:bike-overdue-reminders",
+  "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
@@ -128,6 +134,9 @@ const pure = new Set([
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
+  "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
+  "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -172,7 +181,8 @@ for (const [name, command] of scripts) {
     if (!match) fail(`${name} must be \`bash tests/run-db-workflow.sh tests/<file>.mjs\`: ${command}`);
     mjsRefs(match[1]).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (runnerLocked.has(name)) {
-    const runner = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)$/)?.[1];
+    // Plain --flag arguments are allowed; the runner itself must take the lock.
+    const runner = command.match(/^bash (tests\/run-[A-Za-z0-9._-]+\.sh)(?: --[a-z][a-z0-9-]*)*$/)?.[1];
     if (!runner || runner === freshRunner || !sourcesLock(runner)) {
       fail(`${name} runner must source api-integration-lock.sh: ${command}`);
     }
@@ -221,6 +231,7 @@ const pureEntrypoints = new Set([
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
 ]);
 const helperModules = new Set([
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
