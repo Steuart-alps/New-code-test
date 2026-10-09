@@ -11,3 +11,5 @@ Custom events go `trackEvent` -> shared `apiFetch` (CSRF, keepalive) -> `POST /a
 - Rejections use fixed messages (no echo); app.ts also returns a fixed message for malformed JSON bodies app-wide, since body-parser's message quotes the body.
 
 **How to apply:** a new event needs a registry entry in api-server `src/lib/analytics.ts` (every dimension an enum) plus a typed helper in compliance-tracker `src/lib/analytics.ts`. Never add client, site, user, record, date or free-text dimensions.
+
+**HotTubTrack PDF:** `trackInspectionPdfDownload` is called in hot-tub.tsx only after `downloadBlob` returns (failed generation/save/module/font/unsupported-character attempts send nothing); site_scope from the site filter, record_scope from the exported row count. `tests/hot-tub-pdf-browser.test.mjs` captures the POSTs and proves the download survives a 500, abort, hang or throwing fetch.
