@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 const auth = await readFile(new URL("../src/routes/auth.ts", import.meta.url), "utf8");
 const guard = await readFile(new URL("../src/middleware/requireAuth.ts", import.meta.url), "utf8");
 const mandatoryUi = await readFile(new URL("../../compliance-tracker/src/pages/mandatory-two-factor.tsx", import.meta.url), "utf8");
+const settingsUi = await readFile(new URL("../../compliance-tracker/src/pages/settings.tsx", import.meta.url), "utf8");
+const passkeyCard = settingsUi.slice(settingsUi.indexOf("function PasskeyCard()"));
 const loginUi = await readFile(new URL("../../compliance-tracker/src/pages/login.tsx", import.meta.url), "utf8");
 const mobileBlock = auth.slice(auth.indexOf('router.post("/auth/mobile-login"'), auth.indexOf('router.post("/auth/mobile-login/verify-totp"'));
 
@@ -22,8 +24,13 @@ assert.doesNotMatch(registrationBlock, /req\.session\.userId = userId/);
 // report setup for a passkey-only account.
 assert.doesNotMatch(guard, /if \(passkey\)/);
 assert.match(auth, /if \(!user\.totpEnabled\)/);
-assert.match(mandatoryUi, /do not replace/);
-assert.match(mandatoryUi, /Mobile sign-in supports TOTP only/);
+// The mandatory enrolment screen offers the authenticator only; passkeys are
+// added from Settings, whose copy must not promise they replace the code.
+assert.doesNotMatch(mandatoryUi, /passkeys\/registration/);
+assert.match(passkeyCard, /do not replace two-factor authentication/);
+assert.match(passkeyCard, /still enter your authenticator code/);
+assert.match(passkeyCard, /Mobile sign-in supports the authenticator code \(TOTP\) only/);
+assert.doesNotMatch(passkeyCard, /instead of typing a one-time code/);
 assert.match(loginUi, /data\.requires2faSetup/);
 assert.match(mobileBlock, /totpEnabled && result\.user\.totpSecret/);
 assert.match(mobileBlock, /requires2faSetup/);

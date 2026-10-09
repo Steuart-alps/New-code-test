@@ -2776,7 +2776,9 @@ function PasskeyCard() {
           <KeyRound className="w-4 h-4" /> Passkeys
         </CardTitle>
         <CardDescription>
-          Sign in with Face ID, Touch ID, your device PIN, or a security key instead of typing a one-time code.
+          Sign in on the web with Face ID, Touch ID, your device PIN, or a security key instead of your password.
+          Passkeys do not replace two-factor authentication: you will still enter your authenticator code.
+          Mobile sign-in supports the authenticator code (TOTP) only.
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-6 space-y-4">
