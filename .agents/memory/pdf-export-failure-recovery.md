@@ -13,3 +13,6 @@
 - `test:hot-tub-pdf` covers generation, save and chunk-fetch failures once
   each, then retries under changed filters. Playwright routing disables the
   HTTP cache, so the chunk abort works after a reload.
+- The embedded fonts load with the PDF modules; a failed font fetch uses the
+  same reload message but is not cached, so the test retries it in place.
+  See pdf-unicode-font.md.
