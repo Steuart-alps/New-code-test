@@ -88,3 +88,5 @@
 - [Two-factor reset alert outbox](two-factor-reset-alerts.md) — admin 2FA reset alerts are queued in the reset transaction and retried; queue holds no secrets or rendered mail; provider key covers rendered content.
 - [Ordered race-test barriers](race-test-lock-ordering.md) — row-lock overlap barriers should also queue requests in a fixed order and run each ordering; unsafe consumers otherwise fail only by chance.
 - [Replit removed; Render only](replit-removed-render-only.md) — 2026-10-09: all Replit fallbacks/files/packages removed; env vars only; what replaced each fallback; stripe-replit-sync kept.
+- [PDF export failure recovery](pdf-export-failure-recovery.md) — jsPDF output() alerts and returns undefined on error; failed lazy imports need a page reload; show recovery actions, not raw errors.
+- [Recovery-code account binding](recovery-code-account-binding.md) — the user_id filter lives in consumeRecoveryCode and in the mobile verify-totp inline UPDATE; both are covered by cross-account tests.
