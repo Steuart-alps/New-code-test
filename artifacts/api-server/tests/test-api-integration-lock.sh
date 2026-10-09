@@ -114,6 +114,7 @@ const freshSchema = new Set([
   "test:staged-photo-cleanup", "test:service-price-preflight-db",
   "test:service-price-audit", "test:biketrack-config-cadence", "test:bike-overdue-reminders",
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
+  "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources
@@ -236,6 +237,7 @@ const pureEntrypoints = new Set([
 const helperModules = new Set([
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
+  "fixture-ownership.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];
