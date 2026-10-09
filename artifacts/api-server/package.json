@@ -29,6 +29,7 @@
     "test:modules:ci": "bash tests/run-module-routes.sh",
     "test:dept-isolation": "bash tests/run-db-workflow.sh tests/dept-isolation.mjs",
     "test:pat-dept-isolation": "bash tests/run-pat-dept-isolation.sh",
+    "test:pat-photo-boundary": "bash tests/run-fresh-schema.sh tests/pat-photo-boundary.mjs",
     "test:dept-isolation:ci": "bash tests/run-dept-isolation.sh",
     "test:dailytrack-locks": "bash tests/run-db-workflow.sh tests/dailytrack-locks.mjs",
     "test:daily-track-month-history": "bash tests/run-daily-track-month-history.sh",
