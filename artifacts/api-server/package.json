@@ -12,6 +12,7 @@
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
+    "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",
     "test:password-reset-rate-limit-postgres": "bash tests/run-fresh-schema.sh tests/password-reset-rate-limit-postgres.mjs",

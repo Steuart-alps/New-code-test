@@ -4,15 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build, transform } from "esbuild";
+import { assertAnalyticsRequests, bundleDefine, captureAnalytics, flush } from "./analytics-capture.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temp = await mkdtemp(path.join(os.tmpdir(), "service-action-analytics-"));
 const originalWindow = globalThis.window;
+const originalFetch = globalThis.fetch;
 try {
   const bundle = path.join(temp, "analytics.mjs");
   await build({
     entryPoints: [path.join(root, "src/lib/analytics.ts")],
     bundle: true, platform: "node", format: "esm", outfile: bundle, logLevel: "silent",
+    define: bundleDefine,
   });
   const { trackServiceActionOutcome } = await import(pathToFileURL(bundle).href);
   const outcomeBundle = path.join(temp, "outcome.mjs");
@@ -21,6 +24,7 @@ try {
     bundle: true, platform: "node", format: "esm", outfile: outcomeBundle, logLevel: "silent",
   });
   const { classifyServiceActionResponse } = await import(pathToFileURL(outcomeBundle).href);
+  let capture = captureAnalytics();
   delete globalThis.window;
   assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: true }), true);
   // The API returns the entitlement list (or "all"), not a boolean.
@@ -29,14 +33,17 @@ try {
   assert.equal(trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: ["core"] }), false);
   globalThis.window = {};
   assert.equal(trackServiceActionOutcome("fixtrack", "remove", { ok: true }), true);
-  const events = [];
-  globalThis.window = { umami: { track: (...args) => events.push(args) } };
+  await flush();
+  capture = captureAnalytics();
+  const { events } = capture;
   trackServiceActionOutcome("fixtrack", "add", { ok: true, entitled: true, clientId: 999, invoice: "private" });
   trackServiceActionOutcome("doctrack", "remove", { ok: true, entitled: ["core"] });
   for (const result of [
     { ok: false }, { ok: true, entitled: false }, { ok: true },
     { ok: true, entitled: true, paymentPending: true },
   ]) assert.equal(trackServiceActionOutcome("fixtrack", "add", result), false);
+  await flush();
+  assertAnalyticsRequests(capture.requests);
   assert.deepEqual(events, [
     ["service_action_succeeded", { service_key: "fixtrack", action: "add" }],
     ["service_action_succeeded", { service_key: "doctrack", action: "remove" }],
@@ -84,6 +91,7 @@ try {
       refreshAuth: async () => calls.refresh++,
     });
     await execute("fixtrack", action);
+    await flush();
     return calls;
   }
   events.length = 0;
@@ -103,11 +111,13 @@ try {
     assert.deepEqual(events, [], "failed, cancelled, pending or unconfirmed actions must not emit success");
     assert.equal(calls.activations, 0);
   }
-  for (const track of [
+  // Missing endpoint, synchronous fetch error and rejected request.
+  for (const respond of [
+    () => new Response(JSON.stringify({ error: "Not found" }), { status: 404 }),
     () => { throw new Error("tracker failed"); },
     () => Promise.reject(new Error("tracker request failed")),
   ]) {
-    globalThis.window = { umami: { track } };
+    captureAnalytics(respond);
     for (const action of ["add", "remove"]) {
       const calls = await run({ action });
       assert.equal(calls.refresh, 1, "analytics failure must not interrupt access refresh");
@@ -120,5 +130,6 @@ try {
 } finally {
   if (originalWindow === undefined) delete globalThis.window;
   else globalThis.window = originalWindow;
+  globalThis.fetch = originalFetch;
   await rm(temp, { recursive: true, force: true });
 }

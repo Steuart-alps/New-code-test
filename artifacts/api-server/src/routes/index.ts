@@ -56,6 +56,7 @@ import trackActionsRouter from "./track-actions";
 import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
+import analyticsRouter from "./analytics";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
@@ -68,6 +69,8 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+// First-party analytics ingest; does its own session check (before root-level auth routers).
+router.use(analyticsRouter);
 router.use("/billing", billingRouter);
 // Public contractor self-service portal — token-protected, not login-protected.
 // Mount before root-level routers that install requireAuth for all later paths.

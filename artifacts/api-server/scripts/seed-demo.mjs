@@ -2,7 +2,7 @@
  * Bundles and runs src/scripts/seed-demo.ts against the live database.
  * Usage:  node scripts/seed-demo.mjs
  *
- * DATABASE_URL must be set in the environment (it is in Replit dev).
+ * DATABASE_URL must be set in the environment.
  */
 import path from "node:path";
 import os from "node:os";
