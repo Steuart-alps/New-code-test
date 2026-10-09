@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { assertAnalyticsRequests, captureAnalytics, flush } from "./analytics-capture.mjs";
 
 // Checks the activation -> first completed work measure: allowlisted
 // service/activity classification, privacy of the payload, once-per-cycle
 // deduplication, and that both API layers only report successful saves.
-// Everything runs against stubbed fetch/tracker/storage; no server or data.
+// Everything runs against stubbed fetch/storage; no server or data.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = path.resolve(root, "../..");
 const temp = await mkdtemp(path.join(os.tmpdir(), "module-work-analytics-"));
@@ -23,10 +24,9 @@ async function bundle(entry, name) {
   return import(pathToFileURL(outfile).href);
 }
 
-function makeWindow(events, track) {
+function makeWindow() {
   const store = new Map();
   return {
-    umami: { track: track ?? ((...args) => { events.push(args); }) },
     localStorage: {
       getItem: key => (store.has(key) ? store.get(key) : null),
       setItem: (key, value) => { store.set(key, String(value)); },
@@ -72,20 +72,25 @@ try {
   ]) assert.equal(classifyCompletedWork(method, url), null, `${method} ${url} must not count as completed work`);
 
   // --- Journey, privacy and deduplication ---------------------------------
-  const events = [];
-  globalThis.window = makeWindow(events);
+  const capture = captureAnalytics();
+  const { events } = capture;
+  globalThis.window = makeWindow();
   const named = name => events.filter(([event]) => event === name);
 
   trackModuleWorkCompleted(7, "firetrack", "check_completed");
+  await flush();
   assert.deepEqual(events, [], "no completed-work event without a tracked activation");
 
   trackModuleActivation(7, "firetrack");
   trackModuleFirstUse(7, "firetrack");
+  await flush();
   assert.deepEqual(named("module_first_work_completed"), [], "a route visit is not completed work");
 
   trackModuleWorkCompleted(7, "firetrack", "check_completed");
   trackModuleWorkCompleted(7, "firetrack", "record_saved");
   trackModuleWorkCompleted(8, "firetrack", "check_completed");
+  await flush();
+  assertAnalyticsRequests(capture.requests);
   assert.deepEqual(named("module_first_work_completed"), [
     ["module_first_work_completed", { module: "firetrack", activity: "check_completed" }],
   ], "once per client/module cycle, carrying only module and activity");
@@ -97,12 +102,15 @@ try {
   events.length = 0;
   trackModuleActivation(7, "firetrack");
   trackModuleWorkCompleted(7, "firetrack", "check_completed");
+  await flush();
   assert.equal(named("module_first_work_completed").length, 0, "same cycle stays deduplicated");
   clearModuleActivation(7, "firetrack");
   trackModuleWorkCompleted(7, "firetrack", "check_completed");
+  await flush();
   assert.equal(named("module_first_work_completed").length, 0, "no event after removal");
   trackModuleActivation(7, "firetrack");
   trackModuleWorkCompleted(7, "firetrack", "check_completed");
+  await flush();
   assert.equal(named("module_first_work_completed").length, 1, "reactivation starts a new cycle");
 
   // --- Observer: shared APIs, client capture, success only ----------------
@@ -115,8 +123,10 @@ try {
   const done = observer("POST", "/api/pool-track");
   assert.equal(typeof done, "function");
   clientId = 99; // a client switch mid-request must not move attribution
+  await flush();
   assert.deepEqual(named("module_first_work_completed"), [], "nothing is sent before success");
   done();
+  await flush();
   assert.deepEqual(named("module_first_work_completed"), [
     ["module_first_work_completed", { module: "aquatrack", activity: "check_completed" }],
   ], "only the activated service sharing the API is recorded");
@@ -125,14 +135,21 @@ try {
     assert.deepEqual(Object.keys(data).sort(), ["activity", "module"], "no client, site, record or content fields");
   }
 
-  // Tracker or storage failures never escape.
-  globalThis.window = makeWindow([], () => { throw new Error("tracker failed"); });
-  trackModuleActivation(3, "fixtrack");
-  assert.doesNotThrow(() => trackModuleWorkCompleted(3, "fixtrack", "record_saved"));
-  globalThis.window = makeWindow([], () => Promise.reject(new Error("tracker request failed")));
-  trackModuleActivation(3, "fixtrack");
-  assert.doesNotThrow(() => trackModuleWorkCompleted(3, "fixtrack", "record_saved"));
-  globalThis.window = { umami: { track: () => {} }, get localStorage() { throw new Error("blocked"); } };
+  // Missing endpoint, request or storage failures never escape.
+  for (const respond of [
+    () => new Response(JSON.stringify({ error: "Not found" }), { status: 404 }),
+    () => { throw new Error("tracker failed"); },
+    () => Promise.reject(new Error("tracker request failed")),
+  ]) {
+    const failing = captureAnalytics(respond);
+    globalThis.window = makeWindow();
+    trackModuleActivation(3, "fixtrack");
+    assert.doesNotThrow(() => trackModuleWorkCompleted(3, "fixtrack", "record_saved"));
+    await flush();
+    assert.equal(failing.events.length, 2, "activation and completed work were both attempted");
+  }
+  captureAnalytics();
+  globalThis.window = { get localStorage() { throw new Error("blocked"); } };
   assert.doesNotThrow(() => { trackModuleActivation(3, "fixtrack"); trackModuleWorkCompleted(3, "fixtrack", "record_saved"); });
   await new Promise(resolve => setImmediate(resolve));
 

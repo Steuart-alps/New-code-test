@@ -82,6 +82,7 @@
 - [Per-run test fixture cleanup](test-fixture-cleanup.md) — suites purge only their own run-owned tenants via tests/fixture-ownership.mjs; never hand-delete clients (audit ledgers block it).
 - [API test lock inventory](api-test-lock-inventory.md) — classify every new api-server test:* script in test-api-integration-lock.sh; fresh-schema runs are locked, never pure.
 - [Completed-work adoption analytics](module-work-analytics.md) — first saved record/completed check after activation comes from an allowlisted API-mutation observer; add new endpoints to its rules.
+- [First-party analytics](first-party-analytics.md) — events go to our own analytics_events table via an allowlist; no tenant hash, no denyViewers on ingest; token-only summary route and analytics:report CLI.
 - [Feedback review revisions](feedback-review-revisions.md) — feedback PATCH needs expectedRevision (409 when stale); append-only trigger-guarded review history written in the same transaction.
 - [Add-on Settings states](addon-settings-states.md) — Active only for server-confirmed adds (entitled list, not `true`); unpurchasable add-ons explained from the price preflight, never hidden.
 - [Service-price audit alerts](service-price-audit.md) — hourly read-only catalogue audit; persisted incident fingerprint dedupes alerts across restarts; reports change and recovery; never repairs.
