@@ -96,6 +96,7 @@
     "test:fix-track-history": "bash tests/run-fix-track-history.sh",
     "test:contractor-portal": "bash tests/run-contractor-portal.sh",
     "test:login-rate-limit": "bash tests/run-login-rate-limit.sh",
+    "test:login-rate-limit-postgres": "bash tests/run-fresh-schema.sh tests/login-rate-limit-postgres.mjs",
     "test:fix-track-overdue-alerts": "bash tests/run-db-workflow.sh tests/fix-track-overdue-alerts.mjs",
     "test:monthly-compliance-summary": "node tests/monthly-compliance-summary.mjs"
   },

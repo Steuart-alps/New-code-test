@@ -7,7 +7,9 @@
 //   3. registration allows 5 attempts per IP per hour, independently of login
 //   4. reset-password limiter counts 400 (invalid-token guesses) as failures
 //
-// No database is required — the limiter is pure IP/email counting.
+// No database is required — the limiter is pure IP/email counting. The real
+// PostgreSQL shared store is covered by tests/login-rate-limit-postgres.mjs
+// (pnpm run test:login-rate-limit-postgres).
 //
 // The runner (run-login-rate-limit.sh) esbuild-bundles the TS middleware to a
 // temp .mjs and points LIMITER_MODULE at it before invoking this file.
