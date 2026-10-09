@@ -1,3 +1,5 @@
+import { csvCell } from "./csv";
+
 export type MatrixCertificate = {
   /** Record id; only used to break ties between same-day certificates. */
   id?: number;
@@ -155,7 +157,11 @@ export function buildTrainingMatrix(
   return { rows, types, cells, unmatchedCertificates };
 }
 
-/** Serialize the same matrix shown by the download action, quoting every CSV field. */
+/**
+ * Serialize the same matrix shown by the download action. Every field is
+ * quoted and formula-neutralised: staff names and training types are
+ * user-entered, and quoting alone does not stop a spreadsheet evaluating them.
+ */
 export function trainingMatrixToCsv(
   matrix: TrainingMatrix,
   formatExpiryDate: (date: string) => string,
@@ -173,6 +179,6 @@ export function trainingMatrixToCsv(
       }),
     ]),
   ];
-  return rows.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(","))
+  return rows.map(row => row.map(csvCell).join(","))
     .join("\r\n");
 }

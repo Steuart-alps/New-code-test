@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,15 +11,18 @@ const outFile = path.join(outDir, "training-matrix.mjs");
 
 try {
   await build({
-    entryPoints: [path.join(root, "src/lib/training-matrix.ts")],
+    entryPoints: [path.join(root, "src/lib/training-matrix.ts"), path.join(root, "src/lib/csv.ts")],
     bundle: true,
     platform: "node",
     format: "esm",
-    outfile: outFile,
+    outdir: outDir,
+    outExtension: { ".js": ".mjs" },
     logLevel: "silent",
   });
   const { buildTrainingMatrix, certificateStatus, trainingMatrixToCsv, matrixCellKey } =
     await import(new URL(`file://${outFile}`).href);
+  const { csvCell, neutraliseSpreadsheetFormula } =
+    await import(new URL(`file://${path.join(outDir, "csv.mjs")}`).href);
 
   // Look a cell up by the row's CSV label (unique within one matrix).
   const cellOf = (matrix, label, type) => {
@@ -227,6 +230,70 @@ try {
     '"Staff member","Safety, ""Advanced"""',
     '"Smith, ""Jo""","Current"',
   ].join("\r\n"));
+
+  // ── Spreadsheet formula injection (OWASP CSV injection) ─────────────────
+  // Every formula trigger, alone or after whitespace/control characters, is
+  // prefixed with a single quote; tab or CR at the very start always is.
+  const dangerous = [
+    "=SUM(A1:A2)", "+1+1", "-2+3", "@SUM(1)", "=HYPERLINK(\"http://x\",\"y\")",
+    " =1", "   +1", " -1", "　@x", "﻿=1", "​=1",
+    "\n=1", "\r\n=1", "\u0000=1", "\u001F+1", "\u0085@1", "\v-1", "\f=1",
+    "\t", "\tplain", "\t=1", "\r", "\rplain",
+    "＝1+1", "＋1", "－1", "＠x",
+  ];
+  for (const value of dangerous) {
+    assert.equal(neutraliseSpreadsheetFormula(value), `'${value}`, `must neutralise ${JSON.stringify(value)}`);
+    assert.equal(csvCell(value), `"'${value.replace(/"/g, '""')}"`);
+  }
+  // Ordinary labels, commas, quotes, line breaks and inner/trailing triggers
+  // stay exactly as entered.
+  const safe = [
+    "Alex Smith", "O'Neill", "Smith, \"Jo\"", "Line one\nLine two", "Line one\r\nLine two",
+    "First Aid at Work", "Chef - Head", "jo@example.com", "A=B", "Total +1", "", " ", "Current (2025-03-01)",
+    "'=already quoted", "Năm", "2025-01-01",
+  ];
+  for (const value of safe) {
+    assert.equal(neutraliseSpreadsheetFormula(value), value, `must keep ${JSON.stringify(value)}`);
+  }
+  assert.equal(csvCell('Smith, "Jo"\nKitchen'), '"Smith, ""Jo""\nKitchen"');
+
+  // The download serializer applies it to staff labels, training-type
+  // headers and the header row alike. The matrix has no numeric columns; a
+  // negative-looking label such as "-5" is user text and is neutralised.
+  const injected = buildTrainingMatrix([
+    { staff_name: "=cmd|' /C calc'!A0", training_type: "+Fire, \"Safety\"", completed_date: "2025-01-01", expiry_date: null, site_id: 1 },
+    { staff_name: " @Robin", training_type: "-5", completed_date: "2025-01-01", expiry_date: "2025-03-01", site_id: 1 },
+    { staff_name: "\tTab Start", training_type: "Food Hygiene\nLevel 2", completed_date: "2025-01-01", expiry_date: null, site_id: 1 },
+  ], [
+    { id: 51, name: "=cmd|' /C calc'!A0", site_id: 1, active: true },
+    { id: 52, name: " @Robin", site_id: 1, active: true },
+    { id: 53, name: "\tTab Start", site_id: 1, active: true },
+    { id: 54, name: "Plain, \"Name\"", site_id: 1, active: true },
+  ], "1", today);
+  assert.equal(trainingMatrixToCsv(injected, date => date), [
+    '"Staff member","\'-5","\'+Fire, ""Safety""","Food Hygiene\nLevel 2"',
+    '"\'\tTab Start","Missing","Missing","Current"',
+    '"\' @Robin","Current (2025-03-01)","Missing","Missing"',
+    '"\'=cmd|\' /C calc\'!A0","Missing","Current","Missing"',
+    '"Plain, ""Name""","Missing","Missing","Missing"',
+  ].join("\r\n"));
+  // Same-name disambiguation labels start with the user's name, so they are
+  // neutralised too.
+  const injectedPair = buildTrainingMatrix([], [
+    { id: 61, name: "=1+1", site_id: 1, site_name: "Leeds", active: true },
+    { id: 62, name: "=1+1", site_id: 1, site_name: "Leeds", active: true },
+  ], "1", today);
+  injectedPair.types.push("First Aid");
+  assert.ok(trainingMatrixToCsv(injectedPair, date => date).includes('"\'=1+1 (Leeds, roster #61)"'));
+
+  // The page's download action uses this serializer and nothing else.
+  const page = await readFile(path.join(root, "src/pages/train-track.tsx"), "utf8");
+  const download = page.slice(page.indexOf("function handleDownloadMatrix"), page.indexOf("// ── Render helpers"));
+  assert.ok(download.length > 0, "download handler not found");
+  assert.match(page, /import \{[^}]*\btrainingMatrixToCsv\b[^}]*\} from "@\/lib\/training-matrix"/);
+  assert.match(download, /const csv = trainingMatrixToCsv\(matrix, formatDate\);/);
+  assert.match(download, /new Blob\(\[`\\uFEFF\$\{csv\}`\]/);
+  assert.equal((download.match(/new Blob/g) ?? []).length, 1, "the matrix download must have one CSV source");
 
   // The matrix only receives the active client's API responses. A second
   // tenant's records/roster therefore form a separate matrix and cannot leak
