@@ -3,11 +3,12 @@ import { db } from "@workspace/db";
 import { complianceItemsTable, contractorsTable, appSettingsTable, usersTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { sendEmail, sendSystemEmail, parseEmailList } from "../lib/email";
-import { buildReminderEmail, buildCalendarInvite, getPublicAppUrl } from "../lib/email";
+import { buildReminderEmail, buildCalendarInvite, buildVisitConfirmationEmail, getPublicAppUrl } from "../lib/email";
 import { TestEmailBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { requireAuth, requireClientAdmin, getClientId } from "../middleware/requireAuth";
 import { digestBearerToken, encryptTokenPayload } from "../lib/bearerTokens";
+import { lockReminderItem, reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 
 /**
  * Build the full CC list for a reminder email by combining:
@@ -93,7 +94,7 @@ async function sendReminderForItem(opts: {
   // Reminders use the same approval queue as FixTrack contractor mail. The
   // unique key makes scheduler retries harmless; manager/test mail remains
   // outside this helper and is still sent directly.
-  const cycleDate = dueDate.toISOString().slice(0, 10);
+  const cycleDate = reminderCycleOf(dueDate);
   // Store a placeholder in every rendered field and keep the working bearer
   // only in the authenticated queue payload. The approval route hydrates it
   // immediately before manager preview/provider dispatch.
@@ -107,15 +108,26 @@ async function sendReminderForItem(opts: {
   // (or a concurrent runner) that loses the unique-key race leaves the first
   // cycle's token untouched; a failed item update rolls back the queue claim.
   return db.transaction(async (tx) => {
+    // Recheck the item under lock before claiming this cycle: the caller's
+    // snapshot may predate an edit, completion or contractor change.
+    const current = await lockReminderItem(tx, item.clientId, item.id, "update");
+    if (!current || current.status === "completed" || current.cycle !== cycleDate
+      || current.contractorId !== contractor.id) return false;
+    // Retire pending drafts of any other (obsolete) cycle; a draft already
+    // being sent is left alone and blocks this run until it settles.
+    await supersedeStaleReminderCycles(tx, item.clientId, item.id, { exceptCycle: cycleDate });
     const queued = await tx.execute(sql`
       INSERT INTO contractor_email_queue
         (client_id, entity_type, entity_id, issue_id, department_id, contractor_id, email_type, mode,
-         to_email, subject, body_html, body_text, cc_json, email_preview_json, encrypted_token_payload, idempotency_key)
+         to_email, subject, body_html, body_text, cc_json, email_preview_json, encrypted_token_payload, idempotency_key,
+         reminder_cycle)
       VALUES (${item.clientId}, 'compliance', ${item.id}, NULL, ${departmentId}, ${contractor.id},
         'reminder', 'assign', ${contractor.email!}, ${subject}, ${safeHtml}, ${safeText},
         ${JSON.stringify(ccList)}::jsonb, ${JSON.stringify(preview)}::jsonb,
-        ${encryptedTokenPayload}, ${`reminder-${item.clientId}-${item.id}-${cycleDate}`})
-      ON CONFLICT (idempotency_key) DO NOTHING
+        ${encryptedTokenPayload}, ${`reminder-${item.clientId}-${item.id}-${cycleDate}`}, ${cycleDate})
+      -- Nothing is queued when this cycle already has a draft, or another active
+      -- draft (one being sent, or a visit confirmation) holds the item's slot.
+      ON CONFLICT DO NOTHING
       RETURNING id
     `);
 
@@ -411,18 +423,13 @@ notificationsPublicRouter.post("/:token", async (req, res) => {
     notes: item.notes,
   });
 
-  const dateStr = proposed.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const safeTitle = item.title.replace(/[^a-z0-9]/gi, "-").toLowerCase();
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #1e293b;">Visit Confirmed</h2>
-      <p>Thank you ${contractor.name}.</p>
-      <p>Your visit for <strong>${item.title}</strong> is scheduled for <strong>${dateStr}</strong>.</p>
-      <p>Best regards,<br><strong>${companyName}</strong></p>
-    </div>`;
-  const text = `Visit Confirmed\n\nYour visit for ${item.title} is scheduled for ${dateStr}.\n\n${companyName}`;
-
-  const confirmationSubject = `Visit Confirmed: ${item.title} — ${dateStr}`;
+  const { subject: confirmationSubject, html, text, dateStr } = buildVisitConfirmationEmail({
+    contractorName: contractor.name,
+    companyName,
+    itemTitle: item.title,
+    visitDate: proposed,
+  });
   // Consume the link and queue the confirmation atomically. The conditional
   // update on the digest is the one-time claim: of concurrent submissions
   // only one matches, and a rotated or used link matches none.
