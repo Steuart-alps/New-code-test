@@ -40,6 +40,39 @@ const feedbackMutations = [];
 const csrfHeaders = [];
 const unexpectedApiRequests = [];
 const deniedFeedbackRequests = [];
+const historyGets = [];
+// Accepted changes per report id, oldest first (the API returns newest first).
+const reviewHistory = new Map();
+const TEST_USER_NAME = "Feedback Inbox Browser Test";
+
+function recordReview(report, previous, actorId, actorName) {
+  const entries = reviewHistory.get(report.id) ?? [];
+  entries.push({
+    id: 9000 + entries.length + report.id * 10,
+    reportId: report.id,
+    revision: report.revision,
+    actorId,
+    actorName,
+    previousStatus: previous.status,
+    status: report.status,
+    previousInternalNote: previous.internalNote ?? "",
+    internalNote: report.internalNote ?? "",
+    createdAt: report.updatedAt,
+  });
+  reviewHistory.set(report.id, entries);
+}
+
+// Simulates a second manager saving the report outside this browser.
+function otherManagerSaves(report, status, internalNote) {
+  const previous = { status: report.status, internalNote: report.internalNote };
+  report.status = status;
+  report.internalNote = internalNote;
+  report.revision += 1;
+  report.updatedBy = 157;
+  report.updatedByName = "Priya Patel";
+  report.updatedAt = `2026-09-25T09:0${report.revision}:00.000Z`;
+  recordReview(report, previous, 157, "Priya Patel");
+}
 
 function deferred() {
   let resolve;
@@ -60,6 +93,8 @@ const reportForClientA = {
   internalNote: null,
   updatedBy: null,
   updatedAt: null,
+  updatedByName: null,
+  revision: 0,
   submitterName: "Mira Chen",
 };
 const clientAReports = [
@@ -77,6 +112,8 @@ const clientAReports = [
     internalNote: null,
     updatedBy: null,
     updatedAt: null,
+    updatedByName: null,
+    revision: 0,
     submitterName: "Sam Rivera",
   },
 ];
@@ -93,6 +130,8 @@ const clientBReports = [{
   internalNote: null,
   updatedBy: null,
   updatedAt: null,
+  updatedByName: null,
+  revision: 0,
   submitterName: "Alex Green",
 }];
 
@@ -121,7 +160,7 @@ function authFixture() {
     user: {
       id: 156,
       email: "feedback-inbox@example.test",
-      name: "Feedback Inbox Browser Test",
+      name: TEST_USER_NAME,
       role: currentRole,
       clientId: currentRole === "consultant" ? null : CLIENT_A,
       departmentId: null,
@@ -207,6 +246,19 @@ async function routeApi(route, url) {
       (!category || report.category === category) && (!status || report.status === status),
     ));
   }
+  const historyMatch = pathname.match(/^\/api\/feedback\/(\d+)\/history$/);
+  if (historyMatch && method === "GET") {
+    const clientId = searchParams.get("clientId");
+    historyGets.push({ clientId, id: historyMatch[1], role: currentRole });
+    if (!["consultant", "client_admin"].includes(currentRole)) {
+      deniedFeedbackRequests.push({ method, url: url.toString(), role: currentRole });
+      return jsonResponse(route, { error: "Administrators only" }, 403);
+    }
+    const reports = clientId === String(CLIENT_B) ? clientBReports : clientAReports;
+    const report = reports.find(item => String(item.id) === historyMatch[1]);
+    if (!report) return jsonResponse(route, { error: "Feedback report not found." }, 404);
+    return jsonResponse(route, [...(reviewHistory.get(report.id) ?? [])].reverse());
+  }
   if (pathname.startsWith("/api/feedback/") && method === "PATCH") {
     const clientId = searchParams.get("clientId");
     const headers = request.headers();
@@ -226,10 +278,20 @@ async function routeApi(route, url) {
     const reports = clientId === String(CLIENT_B) ? clientBReports : clientAReports;
     const report = reports.find(item => String(item.id) === pathname.split("/").at(-1));
     if (!report) return jsonResponse(route, { error: "Feedback report not found." }, 404);
+    if (body.expectedRevision !== report.revision) {
+      return jsonResponse(route, {
+        error: "Another manager saved this report after you opened it. Your draft has not been saved.",
+        report,
+      }, 409);
+    }
+    const previous = { status: report.status, internalNote: report.internalNote };
     report.status = body.status;
     report.internalNote = body.internalNote;
     report.updatedBy = 156;
-    report.updatedAt = "2026-09-24T12:30:00.000Z";
+    report.updatedByName = TEST_USER_NAME;
+    report.revision += 1;
+    report.updatedAt = `2026-09-24T12:3${report.revision}:00.000Z`;
+    recordReview(report, previous, 156, TEST_USER_NAME);
     return jsonResponse(route, report);
   }
 
@@ -263,6 +325,8 @@ try {
       if (
         message.type() === "error"
         && message.text() !== "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+        // The browser's own network log for the deliberate stale-draft 409.
+        && message.text() !== "Failed to load resource: the server responded with a status of 409 (Conflict)"
       ) consoleErrors.push(message.text());
     });
     page.on("pageerror", error => pageErrors.push(error.message));
@@ -335,7 +399,7 @@ try {
     );
     heldList.resume.resolve();
     await firstRefresh;
-    assert.deepEqual(feedbackMutations.at(-1).body, { status: "reviewing", internalNote: savedNote });
+    assert.deepEqual(feedbackMutations.at(-1).body, { expectedRevision: 0, status: "reviewing", internalNote: savedNote });
     assert.equal(feedbackMutations.at(-1).clientId, String(CLIENT_A));
     await page.getByTestId("button-close-feedback").click();
     await page.getByText("Select a report to read it in full.").waitFor();
@@ -363,7 +427,7 @@ try {
     await page.getByTestId("button-save-feedback").click();
     assert.equal((await resolvePatch).status(), 200);
     await resolveRefresh;
-    assert.deepEqual(feedbackMutations.at(-1).body, { status: "resolved", internalNote: "" });
+    assert.deepEqual(feedbackMutations.at(-1).body, { expectedRevision: 1, status: "resolved", internalNote: "" });
     assert.equal(reportForClientA.status, "resolved");
     assert.equal(reportForClientA.internalNote, "");
     await page.getByText("Select a report to read it in full.").waitFor();
@@ -393,7 +457,94 @@ try {
     await page.getByRole("button", { name: "Retry save", exact: true }).click();
     assert.equal((await retriedPatch).status(), 200);
     await retryRefresh;
-    assert.deepEqual(feedbackMutations.at(-1).body, { status: "reviewing", internalNote: retryNote });
+    assert.deepEqual(feedbackMutations.at(-1).body, { expectedRevision: 2, status: "reviewing", internalNote: retryNote });
+    await page.getByText("Select a report to read it in full.").waitFor();
+
+    assert.deepEqual(
+      feedbackMutations.slice(-2).map(mutation => mutation.body),
+      [
+        { expectedRevision: 2, status: "reviewing", internalNote: retryNote },
+        { expectedRevision: 2, status: "reviewing", internalNote: retryNote },
+      ],
+      "the failed save and its retry send the same draft and revision",
+    );
+
+    // Review history: the detail panel lists each accepted change, newest first, with its actor.
+    await page.getByTestId(`row-feedback-${REPORT_ID}`).click();
+    await page.getByTestId("history-entry-3").waitFor({ state: "visible" });
+    assert.deepEqual(
+      await page.getByTestId("list-feedback-history").locator("li").evaluateAll(items => items.map(item => item.dataset.testid)),
+      ["history-entry-3", "history-entry-2", "history-entry-1"],
+    );
+    assert.equal(await page.getByTestId("history-entry-3").getByTestId("text-history-actor").innerText(), TEST_USER_NAME);
+    assert.equal(await page.getByTestId("history-entry-3").getByTestId("text-history-status").innerText(), "Resolved → Reviewing");
+    assert.equal(await page.getByTestId("history-entry-3").getByTestId("text-history-note").innerText(), retryNote);
+    assert.equal(await page.getByTestId("history-entry-2").getByTestId("text-history-note").innerText(), "Note cleared");
+    assert.equal(await page.getByTestId("history-entry-1").getByTestId("text-history-note").innerText(), savedNote);
+    assert.ok(historyGets.every(get => get.clientId === String(CLIENT_A)), "history reads use the active client");
+
+    // A background refresh that brings another manager's save keeps the dirty
+    // draft and offers the saved version; "Use saved version" adopts it.
+    const refreshDraft = "Draft that a refresh must not erase.";
+    await page.getByTestId("input-feedback-note").fill(refreshDraft);
+    otherManagerSaves(reportForClientA, "resolved", "Priya: fixed in the September release.");
+    const manualRefresh = page.waitForResponse(getFeedbackResponse(params =>
+      params.get("clientId") === String(CLIENT_A) && params.get("category") === "bug",
+    ));
+    await page.getByTestId("button-refresh-feedback").click();
+    await manualRefresh;
+    await page.getByTestId("panel-feedback-conflict").waitFor({ state: "visible" });
+    assert.equal(await page.getByTestId("input-feedback-note").inputValue(), refreshDraft, "refresh keeps the unsaved note");
+    assert.equal(await page.getByTestId("select-feedback-status").innerText(), "Reviewing");
+    assert.equal(await page.getByTestId("text-conflict-saved-note").innerText(), "Priya: fixed in the September release.");
+    assert.equal(await page.getByTestId("text-conflict-saved-status").innerText(), "Resolved");
+    assert.match(await page.getByTestId("panel-feedback-conflict").innerText(), /Priya Patel saved a newer version/);
+    assert.equal(await page.getByTestId("button-save-feedback").isDisabled(), true, "a superseded draft cannot be saved blindly");
+    await page.getByTestId("history-entry-4").getByText("Priya Patel", { exact: true }).waitFor();
+    await page.getByTestId("button-conflict-use-saved").click();
+    assert.equal(await page.getByTestId("panel-feedback-conflict").count(), 0);
+    assert.equal(await page.getByTestId("input-feedback-note").inputValue(), "Priya: fixed in the September release.");
+    assert.equal(await page.getByTestId("select-feedback-status").innerText(), "Resolved");
+    assert.equal(await page.getByTestId("button-save-feedback").isDisabled(), true, "the adopted version is not a change");
+
+    // Interleaved saves: this manager's draft is based on revision 4 while the
+    // other manager saves revision 5. The save gets 409, the draft survives,
+    // and keeping it re-saves deliberately against the latest revision.
+    const conflictDraft = "Reopening: the customer still sees the issue on mobile.";
+    await page.getByTestId("select-feedback-status").click();
+    await page.getByRole("option", { name: "Reviewing", exact: true }).click();
+    await page.getByTestId("input-feedback-note").fill(conflictDraft);
+    otherManagerSaves(reportForClientA, "resolved", "Priya: confirmed fixed with the customer.");
+    const mutationsBeforeConflict = feedbackMutations.length;
+    const conflictPatch = page.waitForResponse(response =>
+      response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/feedback/${REPORT_ID}`,
+    );
+    await page.getByTestId("button-save-feedback").click();
+    assert.equal((await conflictPatch).status(), 409);
+    assert.deepEqual(feedbackMutations.at(-1).body, { expectedRevision: 4, status: "reviewing", internalNote: conflictDraft });
+    await page.getByTestId("panel-feedback-conflict").waitFor({ state: "visible" });
+    assert.equal(await page.getByTestId("input-feedback-note").inputValue(), conflictDraft, "the unsaved note is preserved after 409");
+    assert.equal(await page.getByTestId("select-feedback-status").innerText(), "Reviewing");
+    assert.equal(await page.getByTestId("text-conflict-saved-note").innerText(), "Priya: confirmed fixed with the customer.");
+    assert.equal(reportForClientA.internalNote, "Priya: confirmed fixed with the customer.", "the other manager's save was not overwritten");
+    assert.equal(await page.getByTestId("button-save-feedback").isDisabled(), true);
+    await page.getByTestId("button-conflict-keep-draft").click();
+    assert.equal(await page.getByTestId("panel-feedback-conflict").count(), 0);
+    assert.equal(await page.getByTestId("input-feedback-note").inputValue(), conflictDraft);
+    const keptPatch = page.waitForResponse(response =>
+      response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/feedback/${REPORT_ID}`,
+    );
+    await page.getByTestId("button-save-feedback").click();
+    assert.equal((await keptPatch).status(), 200);
+    assert.deepEqual(feedbackMutations.at(-1).body, { expectedRevision: 5, status: "reviewing", internalNote: conflictDraft });
+    assert.equal(feedbackMutations.length, mutationsBeforeConflict + 2);
+    await page.getByText("Select a report to read it in full.").waitFor();
+    await page.getByTestId(`row-feedback-${REPORT_ID}`).click();
+    await page.getByTestId("history-entry-6").waitFor({ state: "visible" });
+    assert.equal(await page.getByTestId("history-entry-6").getByTestId("text-history-actor").innerText(), TEST_USER_NAME);
+    assert.equal(await page.getByTestId("history-entry-5").getByTestId("text-history-actor").innerText(), "Priya Patel");
+    assert.equal(await page.getByTestId("input-feedback-note").inputValue(), conflictDraft);
+    await page.getByTestId("button-close-feedback").click();
     await page.getByText("Select a report to read it in full.").waitFor();
 
     // A real filter with no matches renders the empty-state feedback.
@@ -485,7 +636,8 @@ try {
     assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests must fail this browser test: ${JSON.stringify(unexpectedApiRequests)}`);
     assert.deepEqual(pageErrors, [], `the real app must not throw frontend exceptions: ${pageErrors.join("; ")}`);
     assert.deepEqual(consoleErrors, [], `the real app must not report frontend console errors: ${consoleErrors.join("; ")}`);
-    console.log("Feedback inbox browser regression checks passed: admin access, filtering, persisted edits, retry/error/empty states, tenant switching, and staff/viewer denial.");
+    assert.ok(historyGets.every(get => ["consultant", "client_admin"].includes(get.role)), "only administrators read review history");
+    console.log("Feedback inbox browser regression checks passed: admin access, filtering, persisted edits, retry/error/empty states, stale-draft conflicts, review history, tenant switching, and staff/viewer denial.");
   } finally {
     await browser.close();
   }

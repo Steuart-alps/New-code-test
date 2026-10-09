@@ -25,5 +25,9 @@ export interface FeedbackReport {
   /** @nullable */
   updatedBy: number | null;
   /** @nullable */
+  updatedByName: string | null;
+  /** @minimum 0 */
+  revision: number;
+  /** @nullable */
   submitterName: string | null;
 }

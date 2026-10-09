@@ -45,7 +45,9 @@ import type {
   DashboardStats,
   ErrorResponse,
   FeedbackReport,
+  FeedbackReportConflict,
   FeedbackReportUpdate,
+  FeedbackReviewEvent,
   FireSafetyCheck,
   FireSafetyConfig,
   FireSafetyStatus,
@@ -79,6 +81,7 @@ import type {
   LegionellaStatus,
   ListAuditLogParams,
   ListComplianceItemsParams,
+  ListFeedbackReportHistoryParams,
   ListFeedbackReportsParams,
   ListFireSafetyChecksParams,
   ListFoodSafetyRecordsParams,
@@ -280,7 +283,7 @@ export const updateFeedbackReport = async (id: number,
 
 
 
-export const getUpdateFeedbackReportMutationOptions = <TError = ErrorType<void>,
+export const getUpdateFeedbackReportMutationOptions = <TError = ErrorType<void | FeedbackReportConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext> => {
 
@@ -309,12 +312,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateFeedbackReportMutationResult = NonNullable<Awaited<ReturnType<typeof updateFeedbackReport>>>
     export type UpdateFeedbackReportMutationBody = BodyType<FeedbackReportUpdate>
-    export type UpdateFeedbackReportMutationError = ErrorType<void>
+    export type UpdateFeedbackReportMutationError = ErrorType<void | FeedbackReportConflict>
 
     /**
  * @summary Update the status or internal response for a report in the selected client
  */
-export const useUpdateFeedbackReport = <TError = ErrorType<void>,
+export const useUpdateFeedbackReport = <TError = ErrorType<void | FeedbackReportConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFeedbackReport>>, TError,{id: number;data: BodyType<FeedbackReportUpdate>;params?: UpdateFeedbackReportParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateFeedbackReport>>,
@@ -324,6 +327,95 @@ export const useUpdateFeedbackReport = <TError = ErrorType<void>,
       > => {
       return useMutation(getUpdateFeedbackReportMutationOptions(options));
     }
+
+export const getListFeedbackReportHistoryUrl = (id: number,
+    params?: ListFeedbackReportHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/feedback/${id}/history?${stringifiedParams}` : `/api/feedback/${id}/history`
+}
+
+/**
+ * @summary Review history for a report in the selected client, newest first (administrators only)
+ */
+export const listFeedbackReportHistory = async (id: number,
+    params?: ListFeedbackReportHistoryParams, options?: RequestInit): Promise<FeedbackReviewEvent[]> => {
+
+  return customFetch<FeedbackReviewEvent[]>(getListFeedbackReportHistoryUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFeedbackReportHistoryQueryKey = (id: number,
+    params?: ListFeedbackReportHistoryParams,) => {
+    return [
+    `/api/feedback/${id}/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFeedbackReportHistoryQueryOptions = <TData = Awaited<ReturnType<typeof listFeedbackReportHistory>>, TError = ErrorType<void>>(id: number,
+    params?: ListFeedbackReportHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReportHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFeedbackReportHistoryQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFeedbackReportHistory>>> = ({ signal }) => listFeedbackReportHistory(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReportHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFeedbackReportHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof listFeedbackReportHistory>>>
+export type ListFeedbackReportHistoryQueryError = ErrorType<void>
+
+
+/**
+ * @summary Review history for a report in the selected client, newest first (administrators only)
+ */
+
+export function useListFeedbackReportHistory<TData = Awaited<ReturnType<typeof listFeedbackReportHistory>>, TError = ErrorType<void>>(
+ id: number,
+    params?: ListFeedbackReportHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFeedbackReportHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFeedbackReportHistoryQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 
