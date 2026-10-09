@@ -77,3 +77,19 @@ domain, URLs fall back to Render's `RENDER_EXTERNAL_URL`.
   `denyViewers` so `client_viewer` stays read-only.
 - Billing: no proration; per-site charges go through the outbox. See
   `.agents/memory/billing-*.md` before touching billing.
+
+## Analytics
+
+First-party, cookie-free: the web app's `trackEvent` (compliance-tracker
+`src/lib/analytics.ts`) posts to `POST /api/analytics/events`, which stores
+only allowlisted event names and enum dimensions in `analytics_events` (no
+user, client, session, IP or user agent; purged after 13 months). New events
+must be registered in api-server `src/lib/analytics.ts`. Days are UTC.
+
+- HTTP (production): set `ANALYTICS_READ_TOKEN` (32+ chars; unset = 404), then
+  `curl -fsS -H "Authorization: Bearer $ANALYTICS_READ_TOKEN" "$APP_URL/api/internal/analytics/summary?from=2026-10-01&to=2026-10-31&event=module_first_work_completed&groupBy=module"`
+  (`event` and `groupBy` optional; the response lists registered events).
+- CLI (any DB you can reach, e.g. local or a Render shell; the Render database
+  has no public access): `pnpm --filter @workspace/scripts run analytics:report -- --from 2026-10-01 --to 2026-10-31 [--event NAME] [--group-by DIMENSION] [--json]`
+- Tests: `pnpm --filter @workspace/api-server run test:analytics`. See
+  `.agents/memory/first-party-analytics.md`.

@@ -35,6 +35,7 @@ import { runTrackActionReminderJob } from "./lib/trackActionReminders";
 import { registerSafeTrackAckReminderSchedule } from "./lib/safeTrackAckReminderSchedule";
 import { runScheduledServicePriceAudit, SERVICE_PRICE_AUDIT_CRON } from "./lib/servicePriceAudit";
 import { cleanupStagedPhotoUploads } from "./lib/stagedPhotoCleanup";
+import { purgeExpiredAnalyticsEvents } from "./lib/analytics";
 import { ObjectStorageService } from "./lib/objectStorage";
 
 const rawPort = process.env["PORT"];
@@ -171,6 +172,20 @@ async function runStagedPhotoCleanup() {
   }
 }
 
+let analyticsPurgeRunning = false;
+async function runAnalyticsRetentionPurge() {
+  if (analyticsPurgeRunning) return;
+  analyticsPurgeRunning = true;
+  try {
+    const deleted = await purgeExpiredAnalyticsEvents();
+    if (deleted > 0) logger.info({ deleted }, "Analytics retention purge complete");
+  } catch (err) {
+    logger.error({ err }, "Analytics retention purge failed");
+  } finally {
+    analyticsPurgeRunning = false;
+  }
+}
+
 let twoFactorResetAlertRecoveryRunning = false;
 async function runTwoFactorResetAlertRecoveryOnce() {
   if (twoFactorResetAlertRecoveryRunning) return;
@@ -197,6 +212,12 @@ function startScheduler() {
   void runStagedPhotoCleanup();
   cron.schedule("*/10 * * * *", runStagedPhotoCleanup);
   logger.info("Staged photo cleanup scheduler started (every 10 minutes)");
+
+  // Delete first-party analytics events older than 13 months: at boot, then
+  // daily at 03:20. Bounded batches; a backlog drains over successive runs.
+  void runAnalyticsRetentionPurge();
+  cron.schedule("20 3 * * *", runAnalyticsRetentionPurge);
+  logger.info("Analytics retention purge scheduler started (daily at 03:20)");
 
   cron.schedule("35 8 * * *", async () => {
     logger.info("Running operational action reminder job...");
