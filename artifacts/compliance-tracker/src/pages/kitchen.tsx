@@ -1,5 +1,5 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
-import { assessKitchenTemperatures, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
+import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { AppLayout } from "@/components/layout";
@@ -78,6 +78,7 @@ type CookingRow = {
   timeStart: string;          // Time started cooking
   timeFinish: string;         // Time finished cooking
   coreTemp: string;           // Core temp at end (°C)
+  holdSeconds?: string;       // Seconds held at the core temperature
 };
 type CoolingRow = {
   item: string;
@@ -103,6 +104,7 @@ type SousVideRow = {
   timeStarted: string;        // Cooking start time
   timeFinished: string;       // Cooking finish time
   coreTemp: string;           // Core probe temp at end (°C)
+  holdMinutes?: string;       // Minutes held at the core temperature
   result: string;             // "pass"|"fail"|""
   notes: string;
 };
@@ -899,6 +901,11 @@ function DailyDiaryTab() {
     }
   })();
   const missingCorrective = temperatureAssessment.failures.some(failure => !failure.actionTaken);
+  const holdRules = temperatureAssessment.rules;
+  const holdPlaceholder = (section: "hotTemperature" | "sousVide", item: string) => {
+    const hold = holdRules ? kitchenHoldRequirement(holdRules, section, item) : null;
+    return hold ? `≥ ${hold.limit}` : "Optional";
+  };
   const validateTemperatures = () => {
     if (temperatureAssessment.error || missingCorrective) {
       toast({ title: "Temperature follow-up required", description: temperatureAssessment.error || "Record the corrective action taken for every failed reading, using the row's action field or new corrective-action notes.", variant: "destructive" });
@@ -990,7 +997,7 @@ function DailyDiaryTab() {
       {temperatureAssessment.error && <p role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">{temperatureAssessment.error}</p>}
       {temperatureAssessment.failures.length > 0 && <div role="alert" className="rounded border border-destructive p-3 text-sm">
         <p className="font-medium">Outside configured limits — record the action taken. Each new failed observation opens a manager-verified follow-up.</p>
-        {temperatureAssessment.failures.map((failure, index) => <p key={index}>{failure.label} · {failure.field}: {failure.value}{failure.unit}{!failure.actionTaken ? " — corrective action required" : " — action recorded"}</p>)}
+        {temperatureAssessment.failures.map((failure, index) => <p key={index}>{failure.label} · {failure.field}: {kitchenFailureValue(failure)}{!failure.actionTaken ? " — corrective action required" : " — action recorded"}</p>)}
       </div>}
       {/* Date Picker */}
       <Card>
@@ -1246,12 +1253,13 @@ function DailyDiaryTab() {
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time started</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Time finished</th>
                     <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Core temp (°C)</th>
+                    <th className="text-left px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">Held (seconds)</th>
                     {!isSubmitted && <th className="w-8" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {cooking.length === 0
-                    ? <tr><td colSpan={5} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooking records yet.</td></tr>
+                    ? <tr><td colSpan={6} className="px-4 py-5 text-center text-muted-foreground italic text-sm">No cooking records yet.</td></tr>
                     : cooking.map((row, i) => {
                       const upd = (f: keyof CookingRow, v: string) => { const n = [...cooking]; n[i] = { ...n[i], [f]: v }; setCooking(n); };
                       return (
@@ -1260,6 +1268,7 @@ function DailyDiaryTab() {
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeStart} disabled={isSubmitted} onChange={e => upd("timeStart", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input type="time" value={row.timeFinish} disabled={isSubmitted} onChange={e => upd("timeFinish", e.target.value)} className="h-7 text-xs rounded-sm w-24" /></td>
                           <td className="px-2 py-1.5"><Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder="°C" /></td>
+                          <td className="px-2 py-1.5"><Input inputMode="numeric" aria-label={`${row.item || `Cooking row ${i + 1}`} seconds held at core temperature`} value={row.holdSeconds ?? ""} disabled={isSubmitted} onChange={e => upd("holdSeconds", e.target.value)} className="h-7 text-xs rounded-sm w-20" placeholder={holdPlaceholder("hotTemperature", row.item)} /></td>
                           {!isSubmitted && <td className="px-2 py-1.5"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setCooking(cooking.filter((_, x) => x !== i))}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>}
                         </tr>
                       );
@@ -1459,6 +1468,7 @@ function DailyDiaryTab() {
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Time in</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Time out</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Core temp (°C)</th>
+                      <th className="text-left px-2 py-2 font-medium text-muted-foreground">Held (minutes)</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Result</th>
                       <th className="text-left px-2 py-2 font-medium text-muted-foreground">Notes</th>
                       {!isSubmitted && <th className="w-8" />}
@@ -1466,7 +1476,7 @@ function DailyDiaryTab() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {sousVide.length === 0 ? (
-                      <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No sous vide records yet.</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground italic text-sm">No sous vide records yet.</td></tr>
                     ) : sousVide.map((row, i) => {
                       const upd = (f: keyof SousVideRow, v: string) => { const n = [...sousVide]; n[i] = { ...n[i], [f]: v }; setSousVide(n); };
                       return (
@@ -1494,6 +1504,10 @@ function DailyDiaryTab() {
                           <td className="px-2 py-1.5">
                             <Input value={row.coreTemp} disabled={isSubmitted} onChange={e => upd("coreTemp", e.target.value)}
                               className="h-7 text-xs rounded-sm w-16" placeholder="°C" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Input inputMode="numeric" aria-label={`${row.item || `Sous vide row ${i + 1}`} minutes held at core temperature`} value={row.holdMinutes ?? ""} disabled={isSubmitted} onChange={e => upd("holdMinutes", e.target.value)}
+                              className="h-7 text-xs rounded-sm w-16" placeholder={holdPlaceholder("sousVide", row.item)} />
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="flex gap-1">

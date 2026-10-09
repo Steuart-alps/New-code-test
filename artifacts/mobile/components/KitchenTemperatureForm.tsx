@@ -9,7 +9,7 @@ import {
   View,
   Platform,
 } from 'react-native';
-import { assessKitchenTemperatures, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
+import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, temperatureRangeLabel, type KitchenTemperatureFailure } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -17,7 +17,19 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { apiFetch } from '@/lib/api';
-import { kitchenOutbox, newKitchenEntryId, useKitchenOutbox } from '@/lib/kitchenOutbox';
+import { kitchenDraftStorage, kitchenOutbox, newKitchenEntryId, useKitchenOutbox } from '@/lib/kitchenOutbox';
+import {
+  diaryFingerprint,
+  discardKitchenDraft,
+  kitchenFormDraftKey,
+  listKitchenDrafts,
+  loadKitchenDraft,
+  mergeColdReadings,
+  onKitchenDraftChanged,
+  reviewKitchenDraft,
+  saveKitchenDraft,
+  type KitchenFormDraft,
+} from './kitchen-form-drafts';
 import { KitchenQueueStatus } from './KitchenQueueStatus';
 import { DEFAULT_DIARY_SITE, kitchenDiaryScope } from './kitchen-diary-scope';
 import {
@@ -61,6 +73,8 @@ interface CoreTemperatureReading {
   coreTemp: string;
   timeStart: string;
   timeFinish: string;
+  /** Cooking only: seconds held at the core temperature. */
+  holdSeconds?: string;
 }
 
 interface FoodSafetyConfig extends FoodSafetyColdConfig {
@@ -142,6 +156,15 @@ function KitchenTemperatureFields() {
   const [loadedRecordId, setLoadedRecordId] = useState<number | null | undefined>(undefined);
   const [isDirty, setIsDirty] = useState(false);
   const dirtyRef = useRef(false);
+  const owner = outbox.owner;
+  // Fingerprint of the diary as loaded; a draft entered against a different
+  // fingerprint is restored on top of the latest diary and flagged for review.
+  const [loadedFingerprint, setLoadedFingerprint] = useState<string | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [draftCheck, setDraftCheck] = useState(0);
+  const draftOrigin = useRef<KitchenFormDraft['origin']>('form');
+  const promptedDraft = useRef<string | null>(null);
+  const [otherDayDrafts, setOtherDayDrafts] = useState<KitchenFormDraft[]>([]);
 
   const markDirty = () => {
     submissionId.current = null;
@@ -199,8 +222,94 @@ function KitchenTemperatureFields() {
     setCorrectives(existingRecord?.correctives ?? '');
     setInitialCorrectives(existingRecord?.correctives ?? null);
     setLoadedRecordId(existingRecord?.id ?? null);
+    setLoadedFingerprint(diaryFingerprint(existingRecord ?? null));
     clearDirty();
   }, [config, existingRecord, units]);
+
+  // Offer this account's unfinished form for this diary, if any.
+  useEffect(() => {
+    if (!owner || loadedRecordId === undefined || loadedFingerprint === null || dirtyRef.current) return;
+    let cancelled = false;
+    void loadKitchenDraft(kitchenDraftStorage, owner, siteId, date).then(draft => {
+      if (cancelled || !draft || dirtyRef.current) return;
+      const promptKey = `${kitchenFormDraftKey(owner, siteId, date)}@${draft.savedAt}`;
+      if (promptedDraft.current === promptKey) return;
+      promptedDraft.current = promptKey;
+      const review = reviewKitchenDraft(draft, loadedFingerprint, date);
+      if (review.kind === 'other-date') return;
+      const restore = () => {
+        setColdFood(current => mergeColdReadings(current, draft.values.coldFood));
+        setDelivery({ ...EMPTY_DELIVERY, ...draft.values.delivery });
+        setHotHolding({ ...EMPTY_HOT_HOLDING, ...draft.values.hotHolding });
+        setCooking({ ...EMPTY_CORE_READING, ...draft.values.cooking });
+        setCooling({ ...EMPTY_CORE_READING, ...draft.values.cooling });
+        setReheating({ ...EMPTY_CORE_READING, ...draft.values.reheating });
+        setCorrectives(draft.values.correctives);
+        draftOrigin.current = draft.origin;
+        markDirty();
+        setDraftNotice(review.kind === 'review'
+          ? draft.origin === 'restored'
+            ? 'Restored from a rejected device entry and re-checked against the latest diary and temperature controls. Review every reading before saving; it will be sent as a new entry.'
+            : 'This diary changed after these readings were entered. They are shown on top of the latest diary — review them before saving.'
+          : 'Unsaved readings restored. Review and save when ready.');
+      };
+      const discard = () => Alert.alert(
+        'Discard unsaved readings?',
+        'The readings kept on this device for this diary will be deleted. This cannot be undone.',
+        [
+          { text: 'Keep them', style: 'cancel', onPress: () => { promptedDraft.current = null; setDraftCheck(n => n + 1); } },
+          { text: 'Discard', style: 'destructive', onPress: () => {
+            void discardKitchenDraft(kitchenDraftStorage, owner, siteId, date);
+          } },
+        ],
+      );
+      Alert.alert(
+        draft.origin === 'restored' ? 'Edit restored readings?' : 'Restore unsaved readings?',
+        review.kind === 'review'
+          ? 'Readings for this diary were kept on this device, but the diary or its controls may have changed since. They will be shown on top of the latest diary for you to review.'
+          : 'Readings for this diary were kept on this device and have not been saved yet.',
+        [
+          { text: 'Discard', style: 'destructive', onPress: discard },
+          { text: 'Restore', onPress: restore },
+        ],
+      );
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [owner, siteId, date, loadedRecordId, loadedFingerprint, draftCheck]);
+
+  // A rejected entry restored from the delivery panel writes a draft.
+  useEffect(() => onKitchenDraftChanged(key => {
+    if (owner && key === kitchenFormDraftKey(owner, siteId, date)) {
+      promptedDraft.current = null;
+      setDraftCheck(n => n + 1);
+    } else {
+      Alert.alert('Readings restored as a draft',
+        'They belong to another diary. Choose that diary’s site to review and save them.');
+    }
+  }), [owner, siteId, date]);
+
+  // Earlier days' drafts cannot be opened here (the form edits today's diary,
+  // and older diaries may be locked); list them so they can be reviewed.
+  useEffect(() => {
+    if (!owner) return;
+    void listKitchenDrafts(kitchenDraftStorage as never, owner)
+      .then(drafts => setOtherDayDrafts(drafts.filter(draft => draft.recordDate !== date)))
+      .catch(() => {});
+  }, [owner, date, draftCheck]);
+
+  // Keep dirty values on the device until they are saved or discarded.
+  useEffect(() => {
+    if (!owner || !dirtyRef.current || loadedRecordId === undefined) return;
+    const timer = setTimeout(() => {
+      void saveKitchenDraft(kitchenDraftStorage, {
+        version: 1, owner, siteId, recordDate: date,
+        values: { coldFood, delivery: { ...delivery }, hotHolding: { ...hotHolding }, cooking: { ...cooking },
+          cooling: { ...cooling }, reheating: { ...reheating }, correctives },
+        baseline: loadedFingerprint, origin: draftOrigin.current, savedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [owner, siteId, date, loadedRecordId, loadedFingerprint, isDirty, coldFood, delivery, hotHolding, cooking, cooling, reheating, correctives]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -251,6 +360,9 @@ function KitchenTemperatureFields() {
     onSuccess: async (entry) => {
       clearDirty();
       submissionId.current = null;
+      draftOrigin.current = 'form';
+      setDraftNotice(null);
+      if (owner) await discardKitchenDraft(kitchenDraftStorage, owner, siteId, date).catch(() => {});
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(entry.state === 'sent' ? 'Sent' : 'Saved on this device',
         entry.state === 'sent' ? 'The server has confirmed these readings.'
@@ -322,7 +434,12 @@ function KitchenTemperatureFields() {
         {
           text: 'Discard changes',
           style: 'destructive',
-          onPress: () => switchSite(decision.siteId),
+          onPress: () => {
+            if (owner) void discardKitchenDraft(kitchenDraftStorage, owner, siteId, date);
+            setDraftNotice(null);
+            draftOrigin.current = 'form';
+            switchSite(decision.siteId);
+          },
         },
       ],
     );
@@ -415,6 +532,40 @@ function KitchenTemperatureFields() {
         </View>
       ) : null}
 
+      {draftNotice ? (
+        <View testID="kitchen-draft-notice" style={[styles.notice, { borderColor: colors.primary, backgroundColor: colors.primary + '12' }]}>
+          <Feather name="rotate-ccw" size={18} color={colors.primary} />
+          <Text style={[styles.helper, { color: colors.foreground, flex: 1 }]}>{draftNotice}</Text>
+        </View>
+      ) : null}
+
+      {otherDayDrafts.map(draft => (
+        <View key={`${draft.siteId}:${draft.recordDate}`} style={[styles.notice, { borderColor: colors.warning, backgroundColor: colors.warning + '12' }]}>
+          <Feather name="clock" size={18} color={colors.warning} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={[styles.helper, { color: colors.foreground }]}>
+              Unsaved readings from {draft.recordDate} are still on this device. This form records today’s diary; if that day’s diary is still open for edits, enter them there.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 16 }}>
+              <TouchableOpacity onPress={() => Alert.alert(`Unsaved readings · ${draft.recordDate}`,
+                JSON.stringify(draft.values, null, 2))}>
+                <Text style={{ color: colors.primary }}>View</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => Alert.alert('Discard these readings?', 'They will be deleted from this device.', [
+                { text: 'Keep', style: 'cancel' },
+                { text: 'Discard', style: 'destructive', onPress: () => {
+                  if (!owner) return;
+                  void discardKitchenDraft(kitchenDraftStorage, owner, draft.siteId, draft.recordDate)
+                    .then(() => setDraftCheck(n => n + 1));
+                } },
+              ])}>
+                <Text style={{ color: colors.destructive }}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ))}
+
       {existingRecord?.submittedAt ? (
         <View style={[styles.notice, { borderColor: colors.warning, backgroundColor: colors.warning + '12' }]}>
           <Feather name="alert-circle" size={18} color={colors.warning} />
@@ -500,7 +651,8 @@ function KitchenTemperatureFields() {
       ) : null}
 
       {config?.food_show_hot_temperature !== 'false' ? (
-        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }} />
+        <CoreTemperatureCard title="Cooking" icon="thermometer" value={cooking} onChange={(value) => { markDirty(); setCooking(value); }}
+          hold={temperatureAssessment.rules ? kitchenHoldRequirement(temperatureAssessment.rules, 'hotTemperature', cooking.item)?.limit ?? null : null} />
       ) : null}
       {config?.food_show_cooling !== 'false' ? (
         <CoreTemperatureCard title="Cooling" icon="wind" value={cooling} onChange={(value) => { markDirty(); setCooling(value); }} />
@@ -520,7 +672,7 @@ function KitchenTemperatureFields() {
       {temperatureAssessment.failures.length ? <View style={[styles.notice, { borderColor: colors.destructive }]}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.destructive }}>Outside configured limits — record what you did for each failure. A manager must verify the follow-up evidence.</Text>
-          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {failure.value}{failure.unit}</Text>)}
+          {temperatureAssessment.failures.map((failure, index) => <Text key={index} style={{ color: colors.foreground }}>{failure.label} · {failure.field}: {kitchenFailureValue(failure)}</Text>)}
         </View>
       </View> : null}
       <TextInput
@@ -565,10 +717,14 @@ function CoreTemperatureCard({
   target,
   value,
   onChange,
+  hold,
 }: {
   title: string;
   icon: React.ComponentProps<typeof Feather>['name'];
   target?: string;
+  /** Cooking: the minimum seconds this item must be held (null = no control,
+   *  but the time can still be recorded); undefined hides the field. */
+  hold?: number | null;
   value: CoreTemperatureReading;
   onChange: React.Dispatch<React.SetStateAction<CoreTemperatureReading>>;
 }) {
@@ -583,6 +739,10 @@ function CoreTemperatureCard({
           <TextInputField label="Start time" value={value.timeStart} onChange={(timeStart) => onChange((row) => ({ ...row, timeStart }))} placeholder="HH:mm" compact />
           <TextInputField label="Finish time" value={value.timeFinish} onChange={(timeFinish) => onChange((row) => ({ ...row, timeFinish }))} placeholder="HH:mm" compact />
         </View>
+        {hold !== undefined ? (
+          <TextInputField label={hold === null ? 'Held at core temp (seconds)' : `Held at core temp (seconds, at least ${hold})`}
+            value={value.holdSeconds ?? ''} onChange={(holdSeconds) => onChange((row) => ({ ...row, holdSeconds }))} placeholder="e.g. 30" compact numeric />
+        ) : null}
         {target ? <Text style={[styles.helper, { color: colors.mutedForeground }]}>{target}</Text> : null}
       </View>
     </>
