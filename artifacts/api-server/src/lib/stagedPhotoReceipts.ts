@@ -125,12 +125,14 @@ export async function createWithStagedPhotoReceipts<T extends { id: number | str
       object_path: string;
       unexpired: boolean;
       claimed: boolean;
+      cancelled?: boolean;
     }> = [];
     if (photoIds.length) {
       const idList = sql.join(photoIds.map((id) => sql`${id}::uuid`), sql`, `);
       const result = await tx.execute(sql`
         SELECT id, client_id, entity_type, actor_id, object_path,
-          expires_at > clock_timestamp() AS unexpired, claimed
+          expires_at > clock_timestamp() AS unexpired, claimed,
+          cancelled_at IS NOT NULL AS cancelled
         FROM staged_photo_upload_receipts
         WHERE id IN (${idList})
         ORDER BY id
@@ -153,7 +155,8 @@ export async function createWithStagedPhotoReceipts<T extends { id: number | str
         if (receipt.entity_type !== options.entityType) {
           throw new StagedPhotoReceiptError(400, "Photo upload receipt is for a different record type");
         }
-        if (receipt.claimed || !receipt.unexpired) {
+        // A cancelled receipt is queued for object cleanup and is never reusable.
+        if (receipt.claimed || !receipt.unexpired || receipt.cancelled) {
           throw new StagedPhotoReceiptError(400, "Photo upload receipt is expired or already claimed");
         }
       }
@@ -161,7 +164,7 @@ export async function createWithStagedPhotoReceipts<T extends { id: number | str
       const claimResult = await tx.execute(sql`
         UPDATE staged_photo_upload_receipts
         SET claimed = true
-        WHERE id IN (${idList}) AND claimed = false
+        WHERE id IN (${idList}) AND claimed = false AND cancelled_at IS NULL
         RETURNING id
       `);
       if ((claimResult.rows ?? []).length !== photoIds.length) {

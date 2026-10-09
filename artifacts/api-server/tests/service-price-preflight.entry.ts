@@ -4,4 +4,6 @@ export {
   SERVICE_PRICE_CATALOGUE,
   evaluateServicePricePreflight,
   getServicePriceReadinessBlocker,
+  addonPurchaseAvailability,
+  ADDON_KEYS,
 } from "../src/lib/services";

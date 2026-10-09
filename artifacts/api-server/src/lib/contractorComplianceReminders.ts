@@ -23,7 +23,7 @@ import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, escapeHtml } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
 import { sendPushToUsers } from "./pushNotifications";
 import { digestBearerToken, newBearerToken, encryptTokenPayload } from "./bearerTokens";
@@ -71,8 +71,10 @@ async function getClientContractorComplianceLeadDays(clientId: number): Promise<
   return parseContractorComplianceLeadDays(setting?.value) ?? DEFAULT_CONTRACTOR_COMPLIANCE_LEAD_DAYS;
 }
 
+// Same escaping as every other email renderer: quotes are escaped too, so a
+// value can never close an attribute even if a template later moves it into one.
 function esc(s: string | null | undefined): string {
-  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return escapeHtml(s ?? "");
 }
 
 function fmtDate(d: Date): string {
@@ -233,7 +235,7 @@ function kindLabel(kind: ContractorComplianceAlert["kind"]): string {
 }
 
 /** Manager-facing digest: lists all contractor compliance alerts for a client. */
-function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): string {
+export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: string): string {
   const rows = alerts
     .map(
       (a) => `
@@ -281,7 +283,7 @@ function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUrl: stri
 }
 
 /** Contractor-facing email: includes their expiring items + a link to the self-service portal. */
-function buildContractorEmailHtml(
+export function buildContractorEmailHtml(
   contractorName: string,
   alerts: ContractorComplianceAlert[],
   clientName: string,
