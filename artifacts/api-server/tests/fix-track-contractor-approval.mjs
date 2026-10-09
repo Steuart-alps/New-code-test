@@ -502,7 +502,7 @@ async function main() {
   check("concurrent dispatches may claim only one pending queue row",
     route.includes("WHERE status='pending' AND id=(SELECT id FROM contractor_email_queue"));
   check("edited quote requests preserve the submission link",
-    route.includes("decryptTokenPayload(existingDraft.encrypted_token_payload).quote") &&
+    route.includes("existingDraft.quote_token ?? payload.quote") &&
     route.includes("/contractor-quote/{{QUOTE_TOKEN}}"));
   check("action token lookup binds issue and client",
     publicRoute.includes("fi.id = t.issue_id AND fi.client_id = t.client_id"));
