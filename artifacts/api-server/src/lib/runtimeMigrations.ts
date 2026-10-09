@@ -40,10 +40,10 @@ export interface QueueMigrationOptions {
  */
 const LEGACY_QUEUE_PREDICATE = sql.raw(`(
   quote_token IS NOT NULL
-  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
-  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal)/[a-z0-9-]{32,}'
+  OR subject ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR body_html ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR coalesce(body_text, '') ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
+  OR email_preview_json::text ~* '/(api/fix-track/action|contractor-quote|contractor-portal|schedule)/[a-z0-9-]{32,}'
 )`);
 /** "<format>.<key label>" of an envelope; legacy 3-part payloads yield "<iv>.<tag>". */
 const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) || '.' || split_part(encrypted_token_payload, '.', 2))`);
@@ -55,7 +55,11 @@ const ENVELOPE_KEY_SQL = sql.raw(`(split_part(encrypted_token_payload, '.', 1) |
  * estimate half the history as candidates and scan every row.
  */
 export async function ensureQueueMigrationIndexes(): Promise<void> {
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials"
+  // The partial index must match LEGACY_QUEUE_PREDICATE exactly; v2 adds the
+  // compliance /schedule/ route. Drop the earlier definition so the planner
+  // and the scrub agree on which rows are candidates.
+  await db.execute(sql`DROP INDEX IF EXISTS "IDX_contractor_email_queue_legacy_credentials"`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_legacy_credentials_v2"
     ON contractor_email_queue (id) WHERE ${LEGACY_QUEUE_PREDICATE}`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_envelope_key"
     ON contractor_email_queue (${ENVELOPE_KEY_SQL}, id)`);
@@ -242,7 +246,7 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
   let html = String(row.body_html ?? "");
   let text = row.body_text == null ? null : String(row.body_text);
   let previewText = JSON.stringify(row.email_preview_json ?? {});
-  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal)\/([a-z0-9-]{32,})/ig;
+  const bearerPattern = /\/(api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/([a-z0-9-]{32,})/ig;
   const all = [subject, html, text ?? "", previewText, String(row.quote_token ?? "")].join("\n");
   const candidates = [...all.matchAll(bearerPattern)];
   // Older edited drafts may contain a known credential as plain text,
@@ -263,6 +267,11 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
     } else if (route === "contractor-portal") {
       payload.portal ??= token;
       discovered.push([token, "{{PORTAL_URL}}"]);
+    } else if (route === "schedule") {
+      // A compliance visit-scheduling link: carried in the `booked` slot,
+      // as current reminders do; the item keeps only its digest.
+      payload.booked ??= token;
+      discovered.push([token, "{{BOOKED_TOKEN}}"]);
     }
     else {
       const issueId = Number(row.issue_id ?? row.entity_id);
@@ -296,7 +305,7 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
     previewText = previewText.split(raw).join(placeholder);
   }
   const remaining = [subject, html, text ?? "", previewText].join("\n");
-  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal)\/[a-z0-9-]{32,}/i.test(remaining)) {
+  if (/\/(?:api\/fix-track\/action|contractor-quote|contractor-portal|schedule)\/[a-z0-9-]{32,}/i.test(remaining)) {
     throw new Error(`Could not scrub every bearer URL from contractor_email_queue row ${row.id}`);
   }
   const encrypted = Object.keys(payload).length ? encryptTokenPayload(payload) : null;
@@ -1059,6 +1068,35 @@ export async function runRuntimeMigrations() {
       ON "contractor_certificates" ("contractor_id")
     `);
 
+    // Legacy item/contractor certificate history (lib/db certificatesTable).
+    // It was only ever created by drizzle push, but the compliance register,
+    // dashboard stats, item certificates and tenant export all read it, so a
+    // runtime-migrated database must have it too. Ownership has no client_id:
+    // a row belongs to the tenant of its compliance item or contractor.
+    // Existing tables are left as they are; only missing nullable columns are
+    // added so a drifted legacy table can still serve these reads.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "certificates" (
+        "id"            serial PRIMARY KEY,
+        "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE,
+        "item_id"       integer REFERENCES "compliance_items"("id") ON DELETE CASCADE,
+        "name"          text NOT NULL,
+        "file_url"      text,
+        "issue_date"    timestamp,
+        "expiry_date"   timestamp,
+        "notes"         text,
+        "created_at"    timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "contractor_id" integer REFERENCES "contractors"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "item_id" integer REFERENCES "compliance_items"("id") ON DELETE CASCADE`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "file_url" text`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "issue_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "expiry_date" timestamp`);
+    await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "notes" text`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_item" ON "certificates" ("item_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificates_contractor" ON "certificates" ("contractor_id")`);
+
     // Deduplication log for contractor compliance-expiry reminders. One row per
     // (client, contractor, milestone), where milestone encodes the reminder
     // target it was sent for (e.g. "insurance:2025-03-01" or "dbs:2022-01-01"),
@@ -1219,7 +1257,7 @@ export async function runRuntimeMigrations() {
         "mode" text NOT NULL CHECK ("mode" IN ('assign','quote')),
         "email_type" text NOT NULL DEFAULT 'assignment' CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation')),
         "status" text NOT NULL DEFAULT 'pending'
-          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed')),
+          CHECK ("status" IN ('pending','approved','sending','sent','cancelled','failed','superseded')),
         "to_email" text NOT NULL CHECK (length(trim("to_email")) > 3),
         "subject" text NOT NULL CHECK (length("subject") > 0),
         "body_html" text NOT NULL CHECK (length("body_html") > 0),
@@ -1260,6 +1298,7 @@ export async function runRuntimeMigrations() {
       ADD CONSTRAINT "contractor_email_queue_email_type_check"
       CHECK ("email_type" IN ('assignment','reminder','quote_request','cancellation'))`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue" ALTER COLUMN "quote_token" DROP NOT NULL`);
+    await migrateComplianceScheduleTokens();
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
@@ -1288,6 +1327,34 @@ export async function runRuntimeMigrations() {
             AND newer.id > q.id
         )
     `);
+    // Reminder-cycle lifecycle (see lib/reminderCycles.ts): a pending
+    // reminder whose compliance check changed becomes 'superseded'. The
+    // status constraint is only replaced when it lacks that state, so
+    // ordinary restarts do not re-validate the whole queue.
+    await db.execute(sql`ALTER TABLE "contractor_email_queue"
+      ADD COLUMN IF NOT EXISTS "reminder_cycle" text,
+      ADD COLUMN IF NOT EXISTS "superseded_at" timestamp,
+      ADD COLUMN IF NOT EXISTS "superseded_reason" text`);
+    await db.execute(sql`DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'contractor_email_queue'::regclass
+          AND conname = 'contractor_email_queue_status_check'
+          AND pg_get_constraintdef(oid) LIKE '%superseded%'
+      ) THEN
+        ALTER TABLE contractor_email_queue DROP CONSTRAINT IF EXISTS contractor_email_queue_status_check;
+        ALTER TABLE contractor_email_queue ADD CONSTRAINT contractor_email_queue_status_check
+          CHECK (status IN ('pending','approved','sending','sent','cancelled','failed','superseded')) NOT VALID;
+        ALTER TABLE contractor_email_queue VALIDATE CONSTRAINT contractor_email_queue_status_check;
+      END IF;
+    END $$`);
+    // Drafts queued by the previous release carry their cycle only in the
+    // idempotency key. Only active drafts matter to the lifecycle, and the
+    // active-draft index keeps this to those rows.
+    await db.execute(sql`UPDATE contractor_email_queue
+      SET reminder_cycle = substring(idempotency_key from '^reminder-[0-9]+-[0-9]+-([0-9]{4}-[0-9]{2}-[0-9]{2})$')
+      WHERE status IN ('pending','sending') AND entity_type='compliance' AND reminder_cycle IS NULL
+        AND idempotency_key ~ '^reminder-[0-9]+-[0-9]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$'`);
     await db.execute(sql`DROP INDEX IF EXISTS "UQ_contractor_email_queue_active_draft"`);
     await db.execute(sql`
       CREATE UNIQUE INDEX IF NOT EXISTS "UQ_contractor_email_queue_active_draft"
@@ -4266,4 +4333,25 @@ async function migrateDoctrackSafetrackMerge() {
       `);
     }
   }
+}
+
+/**
+ * Compliance visit-scheduling links: store only the SHA-256 digest of each
+ * token (digestBearerToken's format). Replay-safe: legacy raw tokens are
+ * hashed and cleared in one statement, so links already delivered keep
+ * working and a re-run finds nothing to do. Runs before the queue scrub,
+ * which moves matching raw links out of queued drafts.
+ */
+export async function migrateComplianceScheduleTokens(): Promise<number> {
+  await db.execute(sql`ALTER TABLE "compliance_items"
+    ADD COLUMN IF NOT EXISTS "schedule_token" text,
+    ADD COLUMN IF NOT EXISTS "schedule_token_hash" text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_compliance_items_schedule_token_hash"
+    ON "compliance_items" ("schedule_token_hash") WHERE "schedule_token_hash" IS NOT NULL`);
+  const migrated = await db.execute(sql`UPDATE "compliance_items"
+    SET "schedule_token_hash" = encode(sha256(convert_to("schedule_token", 'UTF8')), 'hex'),
+        "schedule_token" = NULL
+    WHERE "schedule_token" IS NOT NULL
+    RETURNING id`);
+  return migrated.rows.length;
 }

@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
+import { reminderCycleOf, supersedeStaleReminderCycles } from "../lib/reminderCycles";
 import { certificatesTable, contractorsTable, complianceItemsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import {
@@ -54,10 +55,19 @@ async function syncItemDueDateFromCertificates(itemId: number) {
   if (expiries.length === 0) return;
   // Use the latest expiry across all certificates as the item's next due date
   const latest = new Date(Math.max(...expiries.map((d) => d.getTime())));
-  await db
-    .update(complianceItemsTable)
-    .set({ dueDate: latest, updatedAt: new Date() })
-    .where(eq(complianceItemsTable.id, itemId));
+  await db.transaction(async (tx) => {
+    // Lock the item first (the reminder-cycle lock order), then move the due
+    // date and retire pending reminders drafted for the old one.
+    const [item] = await tx.select({ clientId: complianceItemsTable.clientId, dueDate: complianceItemsTable.dueDate })
+      .from(complianceItemsTable).where(eq(complianceItemsTable.id, itemId)).for("update");
+    if (!item) return;
+    const cycleChanged = !item.dueDate || reminderCycleOf(new Date(item.dueDate)) !== reminderCycleOf(latest);
+    await tx
+      .update(complianceItemsTable)
+      .set({ dueDate: latest, updatedAt: new Date(), ...(cycleChanged ? { notificationSentAt: null } : {}) })
+      .where(eq(complianceItemsTable.id, itemId));
+    await supersedeStaleReminderCycles(tx, item.clientId, itemId);
+  });
 }
 
 router.post("/items/:itemId/certificates", requireAuth, requireClientAdmin, async (req, res) => {

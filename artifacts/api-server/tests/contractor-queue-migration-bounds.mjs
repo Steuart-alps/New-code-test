@@ -196,7 +196,7 @@ async function main() {
 
     const [legacyIndex] = await rows(sql`SELECT pg_get_expr(i.indpred, i.indrelid) AS predicate
       FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
-      WHERE c.relname = 'IDX_contractor_email_queue_legacy_credentials'`);
+      WHERE c.relname = 'IDX_contractor_email_queue_legacy_credentials_v2'`);
     check("index: legacy-credential partial index exists", Boolean(legacyIndex?.predicate));
 
     // ── Hold row locks on every secured current-version draft ───────────────
@@ -345,7 +345,7 @@ async function main() {
     const explain = async (query) => (await rows(query)).map((row) => row["QUERY PLAN"]).join("\n");
     const scrubPlan = await explain(sql`EXPLAIN SELECT id FROM contractor_email_queue
       WHERE id > 0 AND ${sql.raw(legacyIndex.predicate)} ORDER BY id LIMIT 25 FOR UPDATE`);
-    check("index: scrub candidates come from the partial index", scrubPlan.includes("IDX_contractor_email_queue_legacy_credentials"), scrubPlan);
+    check("index: scrub candidates come from the partial index", scrubPlan.includes("IDX_contractor_email_queue_legacy_credentials_v2"), scrubPlan);
     const keyExpr = sql.raw(`(split_part(encrypted_token_payload, '.', 1) || '.' || split_part(encrypted_token_payload, '.', 2))`);
     const reencryptPlan = await explain(sql`EXPLAIN SELECT id FROM contractor_email_queue
       WHERE id > 0 AND encrypted_token_payload IS NOT NULL
