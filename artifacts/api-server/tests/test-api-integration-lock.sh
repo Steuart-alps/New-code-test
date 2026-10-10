@@ -82,6 +82,7 @@ const directLocked = new Set([
 ]);
 const runnerLocked = new Set([
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
+  "test:fixtrack-video-roundtrip", "test:fixtrack-video-roundtrip:fake", // same runner as the photo round trip
   "test:isolation:ci", "test:modules:ci", "test:dept-isolation:ci",
   "test:dailytrack-locks:ci", "test:config:ci", "test:doc-track-status",
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
@@ -139,6 +140,7 @@ const pure = new Set([
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent

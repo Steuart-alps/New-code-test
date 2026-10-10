@@ -11,10 +11,10 @@
 // Storage is the dedicated test bucket, or — only with --in-process-fake — an
 // in-process fake of the storage client, which is NOT the real round trip.
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { crc32, deflateSync } from "node:zlib";
 import { chromium } from "@playwright/test";
 import { createBucketInspector } from "../../api-server/tests/photo-roundtrip-bucket.mjs";
+import { api, signUpTenant } from "./storage-roundtrip-session.mjs";
 
 const appUrl = process.env.PHOTO_ROUNDTRIP_APP_URL;
 assert.ok(appUrl, "Run through the api-server test:photo-storage-roundtrip script");
@@ -53,62 +53,15 @@ function realPng(width, height) {
 const pngBytes = realPng(4, 4);
 const spoofedPng = Buffer.from("<html><script>alert('not an image')</script></html>");
 
-function currentTotp(secret) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = "";
-  for (const char of secret.toUpperCase().replace(/=+$/, "")) {
-    bits += alphabet.indexOf(char).toString(2).padStart(5, "0");
-  }
-  const bytes = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
-  const message = Buffer.alloc(8);
-  message.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
-  const digest = createHmac("sha1", Buffer.from(bytes)).update(message).digest();
-  const offset = digest[digest.length - 1] & 15;
-  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
-}
-
-/** Same-origin fetch from inside the signed-in page, with the session's CSRF token unless disabled. */
-async function api(page, method, path, body, { csrf = true } = {}) {
-  return page.evaluate(async ({ method, path, body, csrf }) => {
-    const headers = { "Content-Type": "application/json" };
-    if (csrf && method !== "GET") {
-      const tokenResponse = await fetch("/api/auth/csrf-token", { credentials: "same-origin" });
-      headers["x-csrf-token"] = (await tokenResponse.json()).token;
-    }
-    const response = await fetch(`/api${path}`, {
-      method, headers, credentials: "same-origin",
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch { /* non-JSON */ }
-    return { status: response.status, data, text: text.slice(0, 500), contentType: response.headers.get("content-type") };
-  }, { method, path, body, csrf });
-}
-
-/** Register an isolated tenant through the real auth flow, including mandatory 2FA enrolment. */
+/** Register an isolated tenant (real auth flow + mandatory 2FA) with one incident to attach photos to. */
 async function createTenant(context, label) {
-  const page = await context.newPage();
-  page.setDefaultTimeout(20_000);
-  const landing = await page.goto(`${appUrl}/login`);
-  assert.ok(landing?.ok(), `${label}: web app served by the API (${landing?.status()})`);
-  const email = `photo-roundtrip-${label}-${suffix}@test.local`;
-  const password = `pw-${suffix}-${label}`;
-  const registered = await api(page, "POST", "/auth/register", { name: `Photo ${label} admin`, email, password }, { csrf: false });
-  assert.equal(registered.status, 200, `${label} registration: ${registered.text}`);
-  const verified = await api(page, "GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`);
-  assert.equal(verified.status, 200, `${label} email verification: ${verified.text}`);
-  const login = await api(page, "POST", "/auth/login", { email, password }, { csrf: false });
-  assert.equal(login.data?.requires2faSetup, true, `${label} login must hold the session for mandatory 2FA: ${login.text}`);
-  assert.equal((await api(page, "GET", "/incidents")).status, 401, `${label}: app routes stay closed until 2FA is enrolled`);
-  const setup = await api(page, "GET", "/auth/2fa/setup");
-  assert.equal(setup.status, 200, `${label} 2FA setup: ${setup.text}`);
-  const enabled = await api(page, "POST", "/auth/2fa/enable", { code: currentTotp(setup.data.secret) });
-  assert.equal(enabled.status, 200, `${label} 2FA enrolment: ${enabled.text}`);
-  const me = await api(page, "GET", "/auth/me");
-  const clientId = me.data?.user?.clientId;
-  assert.ok(Number.isInteger(clientId), `${label} needs its own client`);
+  const { page, clientId } = await signUpTenant(context, {
+    appUrl, label,
+    email: `photo-roundtrip-${label}-${suffix}@test.local`,
+    password: `pw-${suffix}-${label}`,
+    name: `Photo ${label} admin`,
+  });
+  assert.equal((await api(page, "GET", "/incidents")).status, 200, `${label}: incidents open after 2FA enrolment`);
   const involvedName = `Photo ${label} person ${suffix}`;
   const incident = await api(page, "POST", "/incidents", {
     incidentDate: new Date().toISOString().slice(0, 10),

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Real browser round trip for staff photo uploads: real API session + CSRF +
+# Real browser round trips for staff media uploads: real API session + CSRF +
 # mandatory 2FA, real presigned upload from the browser, content validation,
-# ACL finalization, reload visibility, tenant boundaries and deletion.
+# ACL finalization, reload visibility and tenant boundaries.
 #
 #   bash tests/run-photo-storage-roundtrip.sh                    # dedicated GCS test bucket
 #   bash tests/run-photo-storage-roundtrip.sh --in-process-fake  # NOT the real round trip
+#   ... --fixtrack-video   # FixTrack MP4/MOV/WebM suite instead of incident photos
+#
+# The default suite covers incident photos (attach, reload, delete). The
+# FixTrack video suite covers attach, gallery play and seek before and after a
+# reload, byte ranges, tenant boundaries and viewer refusal.
 #
 # Storage comes only from the PHOTO_ROUNDTRIP_* variables (see
 # photo-roundtrip-config.mjs). Without them the real mode skips with a message
@@ -19,11 +24,14 @@ web_dir="$(cd ../compliance-tracker && pwd)"
 db_dir="$(cd ../../lib/db && pwd)"
 
 mode="gcs"
-case "${1:-}" in
-  "") ;;
-  --in-process-fake) mode="in-process-fake" ;;
-  *) echo "Usage: $0 [--in-process-fake]" >&2; exit 2 ;;
-esac
+browser_test="photo-storage-roundtrip-browser.test.mjs"
+for arg in "$@"; do
+  case "$arg" in
+    --in-process-fake) mode="in-process-fake" ;;
+    --fixtrack-video) browser_test="fixtrack-video-roundtrip-browser.test.mjs" ;;
+    *) echo "Usage: $0 [--in-process-fake] [--fixtrack-video]" >&2; exit 2 ;;
+  esac
+done
 
 set +e
 node tests/photo-roundtrip-config.mjs check "$mode"
@@ -149,9 +157,9 @@ for _ in $(seq 1 120); do
   kill -0 "$server_pid" 2>/dev/null || break
   sleep 1
 done
-[ "$ready" = "1" ] || { echo "Photo round-trip API did not become ready" >&2; exit 1; }
+[ "$ready" = "1" ] || { echo "Storage round-trip API did not become ready" >&2; exit 1; }
 
 browser_env=(PATH="$PATH" HOME="$HOME" PHOTO_ROUNDTRIP_APP_URL="$origin" "${inspector_env[@]}")
 [ -n "${CHROMIUM_PATH:-}" ] && browser_env+=(CHROMIUM_PATH="$CHROMIUM_PATH")
 [ "$mode" = "gcs" ] || browser_env+=(PHOTO_ROUNDTRIP_FAKE_UPLOAD_PORT="$upload_port")
-(cd "$web_dir" && env -i "${browser_env[@]}" node tests/photo-storage-roundtrip-browser.test.mjs)
+(cd "$web_dir" && env -i "${browser_env[@]}" node "tests/$browser_test")
