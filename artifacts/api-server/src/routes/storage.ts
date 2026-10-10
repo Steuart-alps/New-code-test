@@ -6,7 +6,7 @@ import {
   GetStorageUsageResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
 import { appSettingsTable, clientsTable } from "@workspace/db/schema";
@@ -18,6 +18,10 @@ import { findLiveSubscription } from "../lib/billing";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
 const router: IRouter = Router();
+// Signed download links are bearer URLs opened by people without a session
+// (public sign-off and contractor portal), so they are mounted before any
+// router that installs root-level requireAuth.
+export const storageDownloadRouter: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
@@ -39,10 +43,11 @@ function requestRange(raw: string | undefined, size: number): { start: number; e
   return { start, end };
 }
 
-router.get("/storage/download/:token", async (req: Request, res: Response) => {
+storageDownloadRouter.get("/storage/download/:token", async (req: Request, res: Response) => {
+  let resolved: Awaited<ReturnType<typeof resolveDownloadToken>> = null;
   try {
     const rawToken = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
-    const resolved = await resolveDownloadToken(rawToken);
+    resolved = await resolveDownloadToken(rawToken);
     if (!resolved) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
     const file = await objectStorageService.getObjectEntityFile(resolved.objectPath);
     const acl = await objectStorageService.canAccessObjectEntity({ userId: String(resolved.clientId), objectFile: file, requestedPermission: ObjectPermission.READ });
@@ -63,6 +68,10 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
     stream.pipe(res);
   } catch (error) {
     if (error instanceof ObjectNotFoundError) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
+    if (resolved) {
+      respondObjectStorageDownloadUnavailable(req, res, error, "Signed token download", { clientId: resolved.clientId });
+      return;
+    }
     req.log.error({ err: error }, "Error serving token download");
     if (!res.headersSent) res.status(500).json({ error: "Failed to serve download" });
   }

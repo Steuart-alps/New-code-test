@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
-import { downloadFile, printHtmlDocument } from "@/lib/download";
+import { downloadFile, getDownloadErrorMessage, printHtmlDocument } from "@/lib/download";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -503,7 +503,7 @@ export default function SafeTrackPage() {
   async function handleDownload(sub: string, id: number) {
     try {
       const res = await apiFetch(`${base}/${sub}/${id}/download-url`);
-      if (!res.ok) throw new Error("Could not get download link");
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Could not get download link"));
       const { downloadUrl, fileName } = await res.json();
       await downloadFile(downloadUrl, fileName ?? "document");
     } catch (err: any) {
