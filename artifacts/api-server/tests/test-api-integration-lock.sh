@@ -239,9 +239,10 @@ const pureEntrypoints = new Set([
   "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
 ]);
 const helperModules = new Set([
+  "pdf-text.mjs",
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
-  "fixture-ownership.mjs", "storage-acl-session.mjs", "pdf-text.mjs",
+  "fixture-ownership.mjs", "storage-acl-session.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];
