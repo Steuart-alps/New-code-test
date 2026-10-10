@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
+import { respondObjectStorageDownloadUnavailable } from "../lib/objectStorageUnavailable";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const router = Router();
@@ -273,7 +274,18 @@ router.get("/:token/documents/:docId/download", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Not found" });
     if (!row.object_path) return res.status(404).json({ error: "No file attached" });
 
-    const downloadUrl = await storage.getSignedDownloadURL(row.object_path, 900, undefined, client.id);
+    let downloadUrl: string;
+    try {
+      downloadUrl = await storage.getSignedDownloadURL(row.object_path, 900, undefined, client.id);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError || err instanceof ObjectOwnershipError) {
+        req.log.warn({ err, clientId: client.id, documentType: parsedType.data, documentId: docId }, "Public sign-off document file unavailable");
+        return res.status(404).json({ error: "Document file not found" });
+      }
+      return respondObjectStorageDownloadUnavailable(req, res, err, "Public sign-off document download", {
+        clientId: client.id, documentType: parsedType.data, documentId: docId,
+      });
+    }
     res.json({ downloadUrl, fileName: row.file_name });
   } catch (err: any) {
     req.log?.error({ err }, "Public sign-off download URL generation failed");

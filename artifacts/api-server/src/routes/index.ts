@@ -10,7 +10,7 @@ import contractorsRouter from "./contractors";
 import certificatesRouter from "./certificates";
 import settingsRouter from "./settings";
 import notificationsRouter, { notificationsPublicRouter } from "./notifications";
-import storageRouter from "./storage";
+import storageRouter, { storageDownloadRouter } from "./storage";
 import billingRouter from "./billing";
 import adminRouter from "./admin";
 import emailDomainRouter from "./emailDomain";
@@ -72,6 +72,8 @@ router.use(authRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
 router.use("/billing", billingRouter);
+// Signed file download links (bearer tokens; opened without a session).
+router.use(storageDownloadRouter);
 // Public contractor self-service portal — token-protected, not login-protected.
 // Mount before root-level routers that install requireAuth for all later paths.
 router.use("/contractor-portal", publicLinkRateLimit, publicLinkTokenRateLimit, contractorPortalRouter);
@@ -80,6 +82,8 @@ router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, f
 router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
 // Contractor visit-scheduling links (token-protected).
 router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
+// Staff document sign-off link (token-protected).
+router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter);
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -106,7 +110,6 @@ router.use("/fix-track", requireAuth, (req, res, next) => {
   return requireService("fixtrack")(req, res, next);
 }, fixTrackRouter);
 router.use(staffRosterRouter);
-router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter); // public — no auth
 // safetrack and doctrack are now the same module; either key grants access.
 router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);

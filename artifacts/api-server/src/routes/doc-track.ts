@@ -3,8 +3,8 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
   createAcknowledgementRegisterPdf,
@@ -887,8 +887,12 @@ router.get("/documents/:id/download-url", requireAuth, async (req, res) => {
   try {
     const downloadUrl = await storage.getSignedDownloadURL(row.object_path);
     res.json({ downloadUrl, fileName: row.file_name });
-  } catch (err: any) {
-    res.status(500).json({ error: "Could not generate download URL", detail: err?.message });
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Document object not found" });
+    if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: "Object does not belong to this account" });
+    return respondObjectStorageDownloadUnavailable(req, res, err, "DocTrack document download", {
+      documentId: id, clientId,
+    });
   }
 });
 

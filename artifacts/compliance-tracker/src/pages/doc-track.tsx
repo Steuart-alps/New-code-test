@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
-import { downloadFile } from "@/lib/download";
+import { downloadFile, getDownloadErrorMessage } from "@/lib/download";
 import { useAuth } from "@/context/auth-context";
 import { AuditLog } from "@/components/audit-log";
 import { Button } from "@/components/ui/button";
@@ -406,11 +406,11 @@ function DocCard({
     setDownloading(true);
     try {
       const res = await apiFetch(`/doc-track/documents/${doc.id}/download-url`);
-      if (!res.ok) throw new Error("Failed to get download URL");
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Please try again."));
       const { downloadUrl } = await res.json();
       await downloadFile(downloadUrl, doc.file_name);
-    } catch {
-      toast({ title: "Download failed", description: "Please try again.", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Download failed", description: err instanceof Error ? err.message : "Please try again.", variant: "destructive" });
     } finally {
       setDownloading(false);
     }

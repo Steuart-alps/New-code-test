@@ -9,7 +9,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError, ObjectContentError, ObjectGenerationError, type AllowedUploadType } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getNotificationEmails } from "../lib/getNotificationEmails";
 import { sendEmail } from "../lib/email";
 import { digestBearerToken } from "../lib/bearerTokens";
@@ -272,6 +272,7 @@ router.post("/:token/certificates", async (req, res) => {
 // Object paths are never accepted from the requester: resolve the path through
 // the already tenant- and contractor-scoped certificate row first.
 router.get("/:token/certificates/:certId/download", async (req, res) => {
+  let signing: { clientId: number; contractorId: number; certId: number } | null = null;
   try {
     const row = await validateToken(req.params.token, req);
     if (!row) return res.status(404).json({ error: "Link expired or invalid" });
@@ -284,6 +285,7 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     `);
     const objectPath = (certs.rows?.[0] as { object_path?: string } | undefined)?.object_path;
     if (!objectPath) return res.status(404).json({ error: "Certificate file not found" });
+    signing = { clientId: row.client_id, contractorId: row.contractor_id, certId };
     const downloadUrl = await objectStorageService.getSignedDownloadURL(
       objectPath, 900, ALLOWED_CERTIFICATE_TYPES, row.client_id,
     );
@@ -292,6 +294,9 @@ router.get("/:token/certificates/:certId/download", async (req, res) => {
     if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Certificate file not found" });
     if (err instanceof ObjectContentError) return res.status(400).json({ error: err.message });
     if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: err.message });
+    if (signing) {
+      return respondObjectStorageDownloadUnavailable(req, res, err, "Contractor portal certificate download", signing);
+    }
     req.log?.error({ err }, "contractor-portal certificate download error");
     return res.status(500).json({ error: "Could not prepare certificate download" });
   }

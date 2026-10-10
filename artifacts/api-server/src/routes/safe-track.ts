@@ -14,7 +14,7 @@ import {
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
-import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
+import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 
 const router = Router();
 
@@ -162,8 +162,12 @@ function downloadUrlRoute(table: any) {
       const storage = new ObjectStorageService();
       const downloadUrl = await storage.getSignedDownloadURL(row.objectPath);
       res.json({ downloadUrl, fileName: row.fileName });
-    } catch (err: any) {
-      res.status(500).json({ error: "Could not generate download URL", detail: err?.message });
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) return res.status(404).json({ error: "Document file not found" });
+      if (err instanceof ObjectOwnershipError) return res.status(403).json({ error: "Document file is not available for this account" });
+      return respondObjectStorageDownloadUnavailable(req, res, err, "SafeTrack document download", {
+        route: req.route?.path, recordId: id, clientId,
+      });
     }
   };
 }
