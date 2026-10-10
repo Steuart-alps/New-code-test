@@ -16,6 +16,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const BASE = process.env.API_BASE;
@@ -74,9 +75,15 @@ function expectStatus(label, response, status) {
   return response.data;
 }
 
-const stamp = `${Date.now()}-${process.pid}`;
+// The runner restarts the API between the two phases on one database, so the
+// second phase reuses the first phase's stamp (and so its accounts).
+const STATE_FILE = process.env.SIGN_OFF_STATE_FILE;
+const phase = process.argv[2] ?? "main";
+if (!["main", "after-restart"].includes(phase)) throw new Error(`Unknown phase ${phase}`);
+const savedState = phase === "after-restart" ? JSON.parse(await readFile(STATE_FILE, "utf8")) : null;
+const stamp = savedState?.stamp ?? `${Date.now()}-${process.pid}`;
 
-async function registerTenant(label) {
+async function openTenant(label, { register = true } = {}) {
   let cookie = "";
   const as = async (method, path, body) => {
     const response = await send(method, path, { body, cookie });
@@ -85,10 +92,12 @@ async function registerTenant(label) {
   };
   const email = `sign-off-${label.toLowerCase()}-${stamp}@test.local`;
   const password = "password-123";
-  const registered = expectStatus(`${label} register`, await as("POST", "/auth/register", {
-    name: `Sign-off ${label}`, email, password,
-  }), 200);
-  expectStatus(`${label} verify`, await as("GET", `/auth/verify-email?token=${encodeURIComponent(registered.verificationToken)}`), 200);
+  if (register) {
+    const registered = expectStatus(`${label} register`, await as("POST", "/auth/register", {
+      name: `Sign-off ${label}`, email, password,
+    }), 200);
+    expectStatus(`${label} verify`, await as("GET", `/auth/verify-email?token=${encodeURIComponent(registered.verificationToken)}`), 200);
+  }
   expectStatus(`${label} login`, await as("POST", "/auth/login", { email, password }), 200);
   const me = expectStatus(`${label} me`, await as("GET", "/auth/me"), 200);
   const clientId = (me.user ?? me).clientId;
@@ -180,10 +189,41 @@ async function expectRefused(label, tenant, staffId, doc, { listStatus = 200 } =
     trainBefore.length, `${label}: no TrainTrack sign-off record`);
 }
 
+// ── After a restart: SafeTrack → DocTrack copies keep their scope ────────────
+
+// Every API start copies SafeTrack documents not yet copied into DocTrack
+// (migrateDoctrackSafetrackMerge). A copy must carry its source's effective
+// department, or a department-scoped document becomes visible to every staff
+// member as a global DocTrack document.
+if (phase === "after-restart") {
+  const alpha = await openTenant("Alpha", { register: false });
+  const { staff, safeDocs } = savedState;
+  const copies = new Map();
+  for (const doc of safeDocs) {
+    const table = { ra: "safe_risk_assessments", sop: "safe_sops", handbook: "safe_handbook" }[doc.type];
+    const [copy] = await query(`SELECT c.id, c.department, c.title, c.requires_acknowledgement FROM ${table} s
+      JOIN doc_track_documents c ON c.id = s.migrated_doc_id AND c.client_id = s.client_id
+      WHERE s.id = ${lit(doc.id)} AND s.client_id = ${lit(alpha.clientId)}`);
+    assert.ok(copy, `${doc.type}:${doc.id} was copied into DocTrack on restart`);
+    assert.equal(copy.title, doc.title, `${doc.type}:${doc.id} copy title`);
+    assert.equal(copy.department, doc.department, `${doc.type}:${doc.id} (${doc.title}) copy keeps department ${doc.department}`);
+    copies.set(copy.id, doc);
+  }
+  for (const [name, staffId] of Object.entries(staff)) {
+    const listed = await listFor(alpha, staffId);
+    for (const [copyId, source] of copies) {
+      assert.equal(listed.has(`doc:${copyId}`), listed.has(`${source.type}:${source.id}`),
+        `${name}: DocTrack copy of ${source.title} is listed exactly when the source is`);
+    }
+  }
+  console.log("sign-off access tests passed (after restart)");
+  process.exit(0);
+}
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const alpha = await registerTenant("Alpha");
-const bravo = await registerTenant("Bravo");
+const alpha = await openTenant("Alpha");
+const bravo = await openTenant("Bravo");
 assert.notEqual(alpha.clientId, bravo.clientId);
 
 const department = async (tenant, name) => insertRow("departments", { client_id: tenant.clientId, name });
@@ -393,6 +433,19 @@ for (const doc of [docs.raGlobal, docs.sopGlobal, docs.handbookGlobalFileless, d
   expectStatus(`${key(doc)}: repeat`, await acknowledge(alpha, kim, doc), 200);
   assert.equal((await ackRows(alpha.clientId, doc, kim)).length, 1, `${key(doc)}: still one row after repeat`);
 }
+// A double tap on a DocTrack document records one acknowledgement and one
+// TrainTrack sign-off.
+{
+  const burst = 8;
+  await alpha.reserve(burst);
+  const responses = await Promise.all(Array.from({ length: burst }, () => acknowledge(alpha, kim, docs.docGlobal)));
+  const statuses = responses.map((response) => response.status).sort((a, b) => a - b);
+  assert.deepEqual(statuses, [...Array(burst - 1).fill(200), 201], `doc:${docs.docGlobal.id}: one created (${statuses})`);
+  assert.equal((await ackRows(alpha.clientId, docs.docGlobal, kim)).length, 1, "one DocTrack acknowledgement row");
+  const train = await query(`SELECT id FROM train_track_records WHERE client_id = ${lit(alpha.clientId)}
+    AND staff_name = 'Kim Kitchen' AND document_title = ${lit(docs.docGlobal.title)}`);
+  assert.equal(train.length, 1, "one TrainTrack sign-off record");
+}
 // Concurrent acknowledgements by different staff each create their own row.
 {
   await alpha.reserve(2);
@@ -442,5 +495,17 @@ expectStatus("acknowledge without a signature", await alpha.pub("POST", "/acknow
   documentType: "ra", documentId: docs.raGlobal.id, staffRosterId: hal, typedName: "  ",
 }), 400);
 expectStatus("unknown link", await send("GET", "/sign-off/not-a-real-sign-off-token/info"), 404);
+
+// Hand the SafeTrack fixtures and their effective departments to the
+// after-restart phase.
+if (STATE_FILE) {
+  const departmentOf = {
+    raDirectKitchen: "Kitchen", raSiteHousekeeping: "Housekeeping", raDirectOverSite: "Kitchen", raGlobal: null,
+    sopSiteKitchenFileless: "Kitchen", sopDirectHousekeeping: "Housekeeping", sopGlobal: null, sopRouteKitchenFileless: "Kitchen",
+    handbookSiteHousekeeping: "Housekeeping", handbookSiteKitchen: "Kitchen", handbookGlobalFileless: null, handbookNoFileName: null,
+  };
+  const safeDocs = Object.entries(departmentOf).map(([name, department]) => ({ ...docs[name], department }));
+  await writeFile(STATE_FILE, JSON.stringify({ stamp, staff: { kim, hal, nia }, safeDocs }));
+}
 
 console.log("sign-off access tests passed");

@@ -29,15 +29,28 @@ node -e '
   }).catch(() => process.exit(1));
 ' "$build"
 port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
-# The suite signs managers in with a password only; this suite is about the
-# public link, not two-factor enrolment.
-NODE_ENV=test SIGN_OFF_ACCESS_TEST=1 ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$port" node --enable-source-maps "$build/server.mjs" >"$log" 2>&1 &
-server_pid=$!
-ready=0
-for _ in $(seq 1 90); do
-  if curl -sf -m 2 "http://127.0.0.1:$port/readyz" >/dev/null; then ready=1; break; fi
-  kill -0 "$server_pid" 2>/dev/null || break
-  sleep 1
-done
-[ "$ready" = "1" ] || { echo "Sign-off test API did not become ready" >&2; exit 1; }
-NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/sign-off-access.mjs
+start_server() {
+  # The suite signs managers in with a password only; this suite is about the
+  # public link, not two-factor enrolment.
+  NODE_ENV=test SIGN_OFF_ACCESS_TEST=1 ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$port" \
+    node --enable-source-maps "$build/server.mjs" >>"$log" 2>&1 &
+  server_pid=$!
+  ready=0
+  for _ in $(seq 1 90); do
+    if curl -sf -m 2 "http://127.0.0.1:$port/readyz" >/dev/null; then ready=1; break; fi
+    kill -0 "$server_pid" 2>/dev/null || break
+    sleep 1
+  done
+  [ "$ready" = "1" ] || { echo "Sign-off test API did not become ready" >&2; exit 1; }
+}
+suite() {
+  NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" SIGN_OFF_STATE_FILE="$build/state.json" \
+    node tests/sign-off-access.mjs "$@"
+}
+start_server
+suite main
+# Restart: boot-time runtime migrations copy the new SafeTrack documents into
+# DocTrack, and the second phase checks the copies keep their scope.
+kill "$server_pid"; wait "$server_pid" 2>/dev/null || true; server_pid=""
+start_server
+suite after-restart

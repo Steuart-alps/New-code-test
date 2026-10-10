@@ -4437,7 +4437,10 @@ async function migrateTrackControlProfiles() {
 // Copies existing safe_risk_assessments, safe_sops, and safe_handbook rows into
 // doc_track_documents (which already has the matching categories).  Uses a
 // migrated_doc_id tracking column on each source table so the migration is
-// fully idempotent and can be re-run safely.
+// fully idempotent and can be re-run safely.  Each copy keeps its source's
+// effective department (its own department, else its site's) so a
+// department-scoped SafeTrack document never becomes visible to every staff
+// member on the public sign-off link.
 async function migrateDoctrackSafetrackMerge() {
   // 1. Add tracking columns to source tables.
   await db.execute(sql`ALTER TABLE safe_risk_assessments ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
@@ -4446,7 +4449,14 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 2. Migrate risk assessments.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_risk_assessments WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_risk_assessments d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const ra of (rows.rows ?? []) as any[]) {
       const desc = [
         ra.hazard           ? `Hazard: ${ra.hazard}` : null,
@@ -4458,12 +4468,12 @@ async function migrateDoctrackSafetrackMerge() {
 
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${ra.client_id}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
+          (${ra.client_id}, ${ra.effective_department ?? null}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
            ${ra.object_path ?? null}, ${ra.file_name ?? null}, ${ra.file_size ?? null}, ${ra.mime_type ?? null},
            ${ra.requires_acknowledgement ?? false}, ${ra.reviewed_by ?? null}, ${ra.review_date ?? null},
            ${ra.next_review_date ?? null}, ${ra.status ?? "active"}, ${ra.created_at ?? sql`now()`}, ${ra.updated_at ?? sql`now()`})
@@ -4478,17 +4488,24 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 3. Migrate SOPs.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_sops WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_sops d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const sop of (rows.rows ?? []) as any[]) {
       const desc = [sop.content || null, sop.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${sop.client_id}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
+          (${sop.client_id}, ${sop.effective_department ?? null}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
            ${sop.object_path ?? null}, ${sop.file_name ?? null}, ${sop.file_size ?? null}, ${sop.mime_type ?? null},
            ${sop.requires_acknowledgement ?? false}, ${sop.reviewed_by ?? null}, ${sop.review_date ?? null},
            ${sop.next_review_date ?? null}, ${sop.status ?? "active"}, ${sop.created_at ?? sql`now()`}, ${sop.updated_at ?? sql`now()`})
@@ -4503,17 +4520,23 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 4. Migrate handbook entries.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_handbook WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, site_dep.name AS effective_department
+      FROM safe_handbook d
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const hb of (rows.rows ?? []) as any[]) {
       const desc = [hb.content || null, hb.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${hb.client_id}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
+          (${hb.client_id}, ${hb.effective_department ?? null}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
            ${hb.object_path ?? null}, ${hb.file_name ?? null}, ${hb.file_size ?? null}, ${hb.mime_type ?? null},
            ${hb.requires_acknowledgement ?? false}, ${hb.reviewed_by ?? null}, ${hb.review_date ?? null},
            ${hb.next_review_date ?? null}, ${hb.status ?? "active"}, ${hb.created_at ?? sql`now()`}, ${hb.updated_at ?? sql`now()`})
