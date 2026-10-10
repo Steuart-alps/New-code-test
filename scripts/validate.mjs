@@ -87,6 +87,8 @@ const DEFAULT_CHECKS = {
   "kitchen-mobile-replay": { stage: "integration", class: "api", cmd: api("test:kitchen-mobile-replay") },
   "kitchen-temperature-actions": { stage: "integration", class: "api", cmd: api("test:kitchen-temperature-actions") },
   "kitchen-inspection-register-export": { stage: "integration", class: "api", cmd: api("test:kitchen-inspection-export") },
+  // Boots its own API with a test-only signing fault; every upload route must answer the safe 503.
+  "storage-outage-routes": { stage: "integration", class: "api", cmd: api("test:storage-outage-routes") },
 
   "hot-tub-pdf-export": { stage: "integration", class: "browser", cmd: web("test:hot-tub-pdf") },
   "recovery-code-browser": { stage: "integration", class: "browser", cmd: web("test:recovery-code-browser") },
