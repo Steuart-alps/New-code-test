@@ -80,6 +80,7 @@ router.use("/fix-track/action", publicLinkRateLimit, publicLinkTokenRateLimit, f
 router.use("/fix-track/quotes/public", publicLinkRateLimit, publicLinkTokenRateLimit, fixTrackQuoteRouter);
 // Contractor visit-scheduling links (token-protected).
 router.use("/notifications/public/schedule", publicLinkRateLimit, publicLinkTokenRateLimit, notificationsPublicRouter);
+router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter); // public — no auth
 router.use(adminRouter);
 router.use(emailDomainRouter);
 router.use(sitesRouter);
@@ -106,7 +107,6 @@ router.use("/fix-track", requireAuth, (req, res, next) => {
   return requireService("fixtrack")(req, res, next);
 }, fixTrackRouter);
 router.use(staffRosterRouter);
-router.use("/sign-off", publicLinkRateLimit, publicLinkTokenRateLimit, signOffRouter); // public — no auth
 // safetrack and doctrack are now the same module; either key grants access.
 router.use("/doc-track", requireAuth, requireAnyService("doctrack", "safetrack"), docTrackRouter);
 router.use("/train-track", requireAuth, requireService("traintrack"), trainTrackRouter);
