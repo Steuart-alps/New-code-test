@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
 
 const BASE = process.env.API_BASE;
 if (!BASE) throw new Error("API_BASE is required; use run-storage-outage-routes.sh");
@@ -13,7 +15,14 @@ const EXPECTED = {
 };
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = await mkdtemp(path.join(dir, ".build-storage-outage-"));
+const runId = resolveRunId();
+const fixtures = createFixtureOwnership({ runId, suite: "storage-outage-routes" });
 let db, pool, sql, clientId;
+
+// Generic provider vocabulary must never reach a response body; the fault's own
+// message (objectStorage.ts) must not appear in the body or any header.
+const FORBIDDEN_BODY_WORDS = ["detail", "stack", "credential", "bucket", "TEST_ONLY_PROVIDER"];
+const FAULT_FRAGMENTS = ["TEST_ONLY_PROVIDER", "CREDENTIAL_SECRET", "bucket-internal-name"];
 
 function session() {
   let cookie = "";
@@ -25,7 +34,7 @@ function session() {
     });
     const setCookie = response.headers.get("set-cookie");
     if (setCookie) cookie = setCookie.split(";")[0];
-    return { status: response.status, data: await response.json().catch(() => null) };
+    return readResponse(response);
   };
 }
 
@@ -35,16 +44,27 @@ async function publicRequest(method, route, body) {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: response.status, data: await response.json().catch(() => null) };
+  return readResponse(response);
 }
 
-function assertSafeOutage(name, response) {
-  assert.equal(response.status, 503, `${name}: status`);
-  assert.deepEqual(response.data, EXPECTED, `${name}: exact safe response`);
-  const serialized = JSON.stringify(response.data);
-  for (const forbidden of ["detail", "stack", "credential", "bucket", "TEST_ONLY_PROVIDER"]) {
-    assert.equal(serialized.toLowerCase().includes(forbidden.toLowerCase()), false, `${name}: hides ${forbidden}`);
-  }
+async function readResponse(response) {
+  const text = await response.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+  return { status: response.status, data, text, headers: [...response.headers].map(([k, v]) => `${k}: ${v}`).join("\n") };
+}
+
+/** Every way `response` breaks the safe outage contract; empty when it holds. */
+function outageProblems(response) {
+  const problems = [];
+  const body = response.text.toLowerCase();
+  const leakedWords = FORBIDDEN_BODY_WORDS.filter((word) => body.includes(word.toLowerCase()));
+  if (leakedWords.length) problems.push(`LEAK: body mentions ${leakedWords.join(", ")}`);
+  const leakedFault = FAULT_FRAGMENTS.filter((f) => response.headers.toLowerCase().includes(f.toLowerCase()));
+  if (leakedFault.length) problems.push(`LEAK: headers carry the provider error (${leakedFault.join(", ")})`);
+  if (response.status !== 503) problems.push(`CONTRACT: status ${response.status}, expected 503`);
+  if (!isDeepStrictEqual(response.data, EXPECTED)) problems.push("CONTRACT: body is not exactly the stable outage response");
+  return problems;
 }
 
 try {
@@ -62,16 +82,18 @@ try {
   ({ db, pool, sql } = await import(outfile));
 
   const request = session();
-  const email = `storage-outage-${Date.now()}@test.local`;
+  const email = `storage-outage-${runId}@test.local`;
   const registered = await request("POST", "/auth/register", {
     name: "Storage outage test", email, password: "password-123",
   });
   assert.ok([200, 201].includes(registered.status), "register");
+  fixtures.trackRegisteredUser();
   assert.equal((await request("GET", `/auth/verify-email?token=${encodeURIComponent(registered.data.verificationToken)}`)).status, 200, "verify");
   assert.equal((await request("POST", "/auth/login", { email, password: "password-123" })).status, 200, "login");
   const me = await request("GET", "/auth/me");
   clientId = me.data?.user?.clientId ?? me.data?.client?.id;
   assert.ok(Number.isInteger(clientId), "client context");
+  fixtures.trackClient(clientId);
 
   const site = await request("POST", "/sites", { name: "Storage outage site", seedStarterChecks: false });
   assert.equal(site.status, 201, "create site");
@@ -117,22 +139,52 @@ try {
       contentType: "application/pdf",
     })],
   ];
-  for (const [name, call] of routes) assertSafeOutage(name, await call());
+  const failures = [];
+  for (const [name, call] of routes) {
+    const response = await call();
+    const problems = outageProblems(response);
+    if (problems.length) failures.push({ name, problems, response });
+  }
 
-  assert.equal((await publicRequest("POST", "/storage/uploads/request-url", {
-    name: "a.pdf", size: 1, contentType: "application/pdf",
-  })).status, 401, "authentication still precedes signing");
-  assert.equal((await publicRequest("POST", `/contractor-portal/${portal.data.token}/upload-url`, {
-    contentType: "text/html",
-  })).status, 400, "request validation still precedes signing");
-  assert.equal((await request("POST", "/photos/request-upload", {
-    entityType: "safe_risk_assessment", entityId: 2147483647, name: "a.png", contentType: "image/png",
-  })).status, 404, "resource ownership still precedes signing");
-  assert.equal((await publicRequest("POST", "/fix-track/action/not-a-valid-token/upload-url", {})).status, 400, "invalid public token still fails normally");
+  // Signing must stay behind authentication, validation and ownership checks.
+  const guards = [
+    ["authentication still precedes signing", 401, () => publicRequest("POST", "/storage/uploads/request-url", {
+      name: "a.pdf", size: 1, contentType: "application/pdf",
+    })],
+    ["request validation still precedes signing", 400, () => publicRequest("POST", `/contractor-portal/${portal.data.token}/upload-url`, {
+      contentType: "text/html",
+    })],
+    ["resource ownership still precedes signing", 404, () => request("POST", "/photos/request-upload", {
+      entityType: "safe_risk_assessment", entityId: 2147483647, name: "a.png", contentType: "image/png",
+    })],
+    ["invalid public token still fails normally", 400, () => publicRequest("POST", "/fix-track/action/not-a-valid-token/upload-url", {})],
+  ];
+  const guardFailures = [];
+  for (const [name, expectedStatus, call] of guards) {
+    const { status, text } = await call();
+    if (status !== expectedStatus) guardFailures.push(`  - ${name}: status ${status}, expected ${expectedStatus}; received ${text.slice(0, 200)}`);
+  }
 
-  console.log(`${routes.length} upload routes returned the exact safe storage outage contract`);
+  if (failures.length || guardFailures.length) {
+    const report = failures.map(({ name, problems, response }) =>
+      `  - ${name}:\n${problems.map((p) => `      ${p}`).join("\n")}\n      received: ${response.status} ${response.text.slice(0, 500)}`);
+    console.error([
+      `STORAGE OUTAGE CONTRACT FAILED: ${failures.length} of ${routes.length} upload routes unsafe, ${guardFailures.length} of ${guards.length} pre-signing checks changed.`,
+      ...report,
+      ...(failures.length ? [`  expected: 503 ${JSON.stringify(EXPECTED)}`] : []),
+      ...guardFailures,
+      "Answer signing failures with respondObjectStorageUnavailable (src/lib/objectStorageUnavailable.ts); never forward provider error text.",
+    ].join("\n"));
+    process.exitCode = 1;
+  } else {
+    console.log(`${routes.length} upload routes returned the exact safe storage outage contract`);
+  }
 } finally {
-  if (db && clientId) await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`).catch(() => {});
+  // Removes this run's tenant and everything referencing it, audit rows included.
+  await fixtures.cleanup().catch((error) => {
+    console.error(`storage-outage-routes: fixture cleanup failed: ${error?.message ?? error}`);
+    process.exitCode = 1;
+  });
   await pool?.end().catch(() => {});
   await rm(outDir, { recursive: true, force: true });
 }
