@@ -32,13 +32,13 @@ try {
   );
   assert.match(
     dashboardSource,
-    /track\.trackId === "kitchen" \? <KitchenTrackStatusPill \/>/,
+    /track\.trackId === "kitchen" \? <KitchenTrackStatusPill siteId=\{siteId\} \/>/,
     "KitchenTrack status pill must be mounted on the actual kitchen dashboard row",
   );
   assert.match(
     dashboardSource,
-    /apiFetch\("\/food-safety\/status"\)/,
-    "KitchenTrack status pill must fetch the food-safety status endpoint",
+    /apiFetch\(`\/food-safety\/status\$\{siteId !== "all" \? `\?siteId=\$\{siteId\}` : ""\}`\)/,
+    "KitchenTrack status pill must fetch the food-safety status endpoint for the selected site",
   );
 
   console.log("Kitchen dashboard status tests passed");

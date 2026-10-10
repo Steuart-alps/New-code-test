@@ -425,14 +425,15 @@ type KitchenCheckStatus = {
   status: KitchenCheckState;
 };
 
-function KitchenTrackStatusPill() {
+function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
   const [statuses, setStatuses] = useState<KitchenCheckStatus[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setStatuses(null);
     (async () => {
       try {
-        const res = await apiFetch("/food-safety/status");
+        const res = await apiFetch(`/food-safety/status${siteId !== "all" ? `?siteId=${siteId}` : ""}`);
         if (!cancelled && res.ok) {
           const json: unknown = await res.json();
           setStatuses(Array.isArray(json) ? json as KitchenCheckStatus[] : []);
@@ -440,7 +441,7 @@ function KitchenTrackStatusPill() {
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [siteId]);
 
   if (!statuses?.length) return null;
 
@@ -657,7 +658,7 @@ export default function Dashboard() {
               <TrackRow
                 key={track.trackId}
                 track={track}
-                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill /> : null}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill siteId={siteId} /> : null}
               />
             ))}
           </div>
