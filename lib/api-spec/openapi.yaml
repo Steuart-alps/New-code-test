@@ -1091,6 +1091,7 @@ paths:
       parameters:
         - in: query
           name: siteId
+          description: Use the site's checks and its risk-assessed frequencies.
           schema:
             type: integer
       responses:
@@ -1102,6 +1103,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FireSafetyStatus"
+        "400":
+          description: The site is not one of this client's sites
+        "403":
+          description: The site belongs to a department the caller cannot see
 
   /fire-safety/{id}:
     put:
@@ -3624,7 +3629,7 @@ components:
 
     FireCheckType:
       type: string
-      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill]
+      enum: [alarm, emergency_lights, extinguishers, fire_doors, fire_drill, fire_walk, alarm_panel]
 
     FireSafetyCheck:
       type: object

@@ -1902,7 +1902,7 @@ export const RequestUploadUrlResponse = zod.object({
  * @summary List fire safety logbook entries
  */
 export const ListFireSafetyChecksQueryParams = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']).optional(),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']).optional(),
   "siteId": zod.coerce.number().optional()
 })
 
@@ -1910,7 +1910,7 @@ export const ListFireSafetyChecksResponseItem = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -1926,7 +1926,7 @@ export const ListFireSafetyChecksResponse = zod.array(ListFireSafetyChecksRespon
  * @summary Record a fire safety check
  */
 export const CreateFireSafetyCheckBody = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "siteId": zod.number().nullish(),
@@ -1939,7 +1939,7 @@ export const CreateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
@@ -1954,11 +1954,11 @@ export const CreateFireSafetyCheckResponse = zod.object({
  * @summary Per-check-type due status (last done, next due, overdue flags)
  */
 export const GetFireSafetyStatusQueryParams = zod.object({
-  "siteId": zod.coerce.number().optional()
+  "siteId": zod.coerce.number().optional().describe('Use the site\'s checks and its risk-assessed frequencies.')
 })
 
 export const GetFireSafetyStatusResponseItem = zod.object({
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
   "frequencyDays": zod.number(),
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
@@ -1988,7 +1988,7 @@ export const UpdateFireSafetyCheckResponse = zod.object({
   "id": zod.number(),
   "clientId": zod.number(),
   "siteId": zod.number().nullish(),
-  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill']),
+  "checkType": zod.enum(['alarm', 'emergency_lights', 'extinguishers', 'fire_doors', 'fire_drill', 'fire_walk', 'alarm_panel']),
   "checkDate": zod.string(),
   "result": zod.enum(['pass', 'fail']),
   "location": zod.string().nullish(),
