@@ -41,6 +41,9 @@ try {
   await pool.query('UPDATE users SET department_id = $1 WHERE id = $2', [department.id, staff.userId]);
   const manager = await createUser(owner, { role: 'client_staff', departmentId: department.id, isDepartmentManager: true });
   const wrongDepartmentManager = await createUser(owner, { role: 'client_staff', departmentId: otherDepartment.id, isDepartmentManager: true });
+  // Intentionally historical: a past export window and its excluded neighbours
+  // are the subject. Rows are inserted directly or created by the owner (exempt
+  // from the record lock) and only exported, so keep these dates fixed.
   const from = '2026-09-01', to = '2026-09-02';
   for (const [client, sid, date, marker] of [
     [owner.clientId, site.id, from, 'included'],

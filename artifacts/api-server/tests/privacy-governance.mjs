@@ -189,6 +189,9 @@ async function main() {
   });
   expectStatus("subprocessor requires appointing processor", invalidSubprocessor, 400);
 
+  // Intentionally historical: 2024-01-31 (a leap year) pins the one-calendar-
+  // month deadline clamp to 2024-02-29, and the breach below pins the 72-hour
+  // timer. Do not make these dates relative to today.
   const requestBody = {
     kind: "rights_request",
     requestType: "access",

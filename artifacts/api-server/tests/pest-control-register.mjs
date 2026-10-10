@@ -53,8 +53,11 @@ async function createManager() {
 }
 
 const { request, stamp } = await createManager();
+// Visits that this suite deletes use today's date so they stay inside the
+// 24-hour correction window however far the calendar moves on.
+const today = new Date().toISOString().slice(0, 10);
 const ownVisit = await request("POST", "/pest-track/visits", {
-  visitDate: "2026-08-01",
+  visitDate: today,
   contractorName: "Wrong Tenant Contractor",
   areasInspected: "Wrong tenant area",
 });
@@ -72,7 +75,7 @@ assert.ok([200, 201].includes(client.status));
 const selectedClientId = client.data.id;
 
 const foreignVisit = await request("POST", `/pest-track/visits?clientId=${selectedClientId}`, {
-  visitDate: "2026-08-02",
+  visitDate: today,
   contractorName: "Selected Tenant Contractor",
 });
 assert.equal(foreignVisit.status, 201);
@@ -87,6 +90,9 @@ assert.equal(emptyPdf.status, 200);
 assert.equal(emptyPdf.contentType, "application/pdf");
 assert.match(extractPdfText(emptyPdf.data), /Contractor visits \(0\)/);
 
+// Intentionally fixed dates: these register rows are only created and then
+// read back from the PDF, whose text is asserted below (e.g. "Next visit").
+// Keep them fixed so the expected output stays exact.
 for (let index = 0; index < 26; index += 1) {
   const visit = await request("POST", `/pest-track/visits?clientId=${selectedClientId}`, {
     visitDate: `2026-08-${String((index % 26) + 1).padStart(2, "0")}`,
