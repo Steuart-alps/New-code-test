@@ -44,11 +44,16 @@ async function createVerifier(admin) {
   return verifier;
 }
 
+// Actions and profiles are edited after creation. Keep their due/review dates
+// in the future relative to today: dueDate is a track-lock date field, so a
+// fixed day would eventually age into a locked or overdue record.
+const daysFromToday = (days) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
 const profile = (name, nation) => ({
   nation, operationType: "Hospitality venue with commercial kitchen", responsiblePersonName: name,
   responsiblePersonRole: "Premises manager", responsiblePersonEmail: `${name.toLowerCase().replaceAll(" ", ".")}@test.local`,
   competentAppointments: [{ area: "Legionella", person: "Competent water contractor", evidence: "Appointment record" }],
-  reviewCadence: "Annual and after material change", nextReviewDate: "2027-01-01", haccpSystemReviewed: true,
+  reviewCadence: "Annual and after material change", nextReviewDate: daysFromToday(90), haccpSystemReviewed: true,
 });
 
 async function run() {
@@ -87,7 +92,7 @@ async function run() {
 
   const created = await tenantA("POST", "/compliance-hub/actions", {
     sourceTrack: "FireTrack", sourceRecordId: "check-99", title: "Clear obstructed escape route", severity: "high",
-    ownerName: "A Manager", dueDate: "2026-12-01", interimControl: "Area isolated and staff briefed",
+    ownerName: "A Manager", dueDate: daysFromToday(30), interimControl: "Area isolated and staff briefed",
     correctiveAction: "Remove storage and verify route remains clear",
   });
   expect("actions: create tenant A action", created);
@@ -104,7 +109,7 @@ async function run() {
 
   const concurrent = await tenantA("POST", "/compliance-hub/actions", {
     sourceTrack: "FireTrack", sourceRecordId: "concurrency-1", title: "Protect verified closure from concurrent update", severity: "high",
-    ownerName: "A Manager", dueDate: "2026-12-02", interimControl: "Area isolated while review completes",
+    ownerName: "A Manager", dueDate: daysFromToday(31), interimControl: "Area isolated while review completes",
     correctiveAction: "Confirm the closure evidence before releasing the action",
   });
   expect("actions: create concurrency guard action", concurrent);
@@ -124,7 +129,7 @@ async function run() {
 
   const evidenceRace = await tenantA("POST", "/compliance-hub/actions", {
     sourceTrack: "FireTrack", sourceRecordId: "concurrency-2", title: "Protect verified closure from blank evidence", severity: "high",
-    ownerName: "A Manager", dueDate: "2026-12-03", interimControl: "Area isolated while evidence is reviewed",
+    ownerName: "A Manager", dueDate: daysFromToday(32), interimControl: "Area isolated while evidence is reviewed",
     correctiveAction: "Retain the evidence reference until independent closure",
   });
   expect("actions: create evidence concurrency action", evidenceRace);

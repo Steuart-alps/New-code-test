@@ -60,6 +60,9 @@ async function createHire(request, suffix, hireDate, values = {}) {
 const managerA = await createTenant("a");
 const managerB = await createTenant("b");
 
+// Intentionally historical: inclusive from/to boundaries of a past export
+// range are the subject here. Hires are created by tenant owners (exempt from
+// the record lock) and only read back, so keep these dates fixed.
 await createHire(managerA, "before", "2026-07-31");
 await createHire(managerA, "from", "2026-08-01", {
   guestName: "=HYPERLINK(\"https://example.invalid\",\"click\")",

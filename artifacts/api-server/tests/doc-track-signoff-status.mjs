@@ -207,6 +207,8 @@ async function checkLargeRegisterPagination() {
      RETURNING id`,
   ]);
   const [firstDocumentId] = documents.stdout.trim().split("\n").map(Number);
+  // Intentionally historical: the export's "05 Jan 2026 to 15 Mar 2026" range
+  // label is asserted below. These rows are inserted directly and never edited.
   const signed = [[staff[4], "2026-01-05 12:00"], [staff[16], "2026-02-10 12:00"], [staff[28], "2026-03-15 12:00"]];
   await execFile("psql", [
     process.env.DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-c",
