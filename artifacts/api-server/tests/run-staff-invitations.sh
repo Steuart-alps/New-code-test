@@ -23,7 +23,7 @@ cleanup() {
 trap cleanup EXIT
 
 pnpm run build
-NODE_ENV=test TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" PORT="$TEST_PORT" \
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs &
 SERVER_PID=$!
 

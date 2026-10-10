@@ -24,8 +24,9 @@ if (!/[?&]host=\//.test(process.env.DATABASE_URL)) {
   throw new Error("Refusing to run: DATABASE_URL is not the harness's private Unix-socket database");
 }
 
-// Synthetic, test-only secrets.
+// Synthetic, test-only secrets. Fixtures sign in with a password alone.
 process.env.SESSION_SECRET = "analytics-test-session-secret-not-a-real-secret";
+process.env.ALLOW_PASSWORD_ONLY_TEST_LOGIN = "1";
 const READ_TOKEN = "a".repeat(32) + "0123456789abcdef0123456789abcdef";
 delete process.env.ANALYTICS_READ_TOKEN;
 delete process.env.ENFORCE_CSRF;

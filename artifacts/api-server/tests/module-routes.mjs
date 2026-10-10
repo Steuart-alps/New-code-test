@@ -8,6 +8,9 @@
 //   - KitchenTrack (food-safety): config read/write, daily record
 //     create/update/list/by-date, duplicate-date 409 guard.
 //
+// Every account enrols a TOTP authenticator through tests/two-factor-fixture.mjs,
+// as mandatory 2FA requires.
+//
 // Usage: API_BASE=... DATABASE_URL=... node tests/module-routes.mjs
 // (normally via `pnpm run test:modules:ci`, which boots a private API).
 // Exits 0 when all checks pass, 1 otherwise. Every client and user this run
@@ -15,6 +18,7 @@
 // tests/fixture-ownership.mjs.
 import { testDocTrainFlows } from "./doc-train-flows.mjs";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { signIn } from "./two-factor-fixture.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "module-routes" });
@@ -813,10 +817,8 @@ async function runSuite() {
     if (verifyRes.status !== 200) {
       throw new Error(`FATAL: email verification failed (${verifyRes.status})`);
     }
-    const loginRes = await req("POST", "/auth/login", { email, password: "password-123" });
-    if (loginRes.status !== 200) {
-      throw new Error(`FATAL: login after verification failed (${loginRes.status})`);
-    }
+    // Mandatory 2FA: enrol a deterministic TOTP authenticator before app access.
+    await signIn(req, { email, password: "password-123", label: "module test manager" });
   }
   const me = await req("GET", "/auth/me");
   const clientId = (me.data?.user ?? me.data)?.clientId;

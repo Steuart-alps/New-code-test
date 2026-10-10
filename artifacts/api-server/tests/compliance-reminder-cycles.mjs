@@ -57,7 +57,7 @@ async function bundle() {
 let server = null;
 async function startServer() {
   server = spawn("node", ["--enable-source-maps", "dist/index.mjs"], {
-    cwd: serverDir, env: { ...process.env, NODE_ENV: "test", PORT }, stdio: ["ignore", "ignore", "inherit"],
+    cwd: serverDir, env: { ...process.env, NODE_ENV: "test", ALLOW_PASSWORD_ONLY_TEST_LOGIN: "1", PORT }, stdio: ["ignore", "ignore", "inherit"],
   });
   const exited = new Promise((_, reject) => server.once("exit", (code) => reject(new Error(`API exited (${code}) during startup`))));
   const ready = (async () => {

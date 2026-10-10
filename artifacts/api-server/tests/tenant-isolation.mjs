@@ -8,11 +8,32 @@
 // clients, users, settings, billing) and service module routes (fire-safety,
 // food-safety, legionella).
 //
+// Every account enrols TOTP through tests/two-factor-fixture.mjs, as mandatory
+// 2FA requires; the protected routes below must refuse the setup-only session
+// and answer once enrolment is complete.
+//
 // Usage: node tests/tenant-isolation.mjs   (API must be running; default base
 // http://localhost:8080/api, override with API_BASE env var)
 // Exits 0 when every check passes, 1 otherwise.
+import { signIn } from "./two-factor-fixture.mjs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
+
+// Core and module routes every tenant admin can read.
+const PROTECTED_PATHS = [
+  "/sites",
+  "/compliance-items",
+  "/users",
+  "/settings",
+  "/clients",
+  "/billing/invoices",
+  "/fire-safety",
+  "/fire-safety/status",
+  "/legionella",
+  "/legionella/status",
+  "/food-safety",
+  "/food-safety/config",
+];
 
 let passed = 0;
 const failures = [];
@@ -83,8 +104,9 @@ async function setupTenant(label) {
   }
   const verified = await req("GET", `/auth/verify-email?token=${encodeURIComponent(verificationToken)}`);
   expectOk(`${label}: verify email`, verified.status);
-  const login = await req("POST", "/auth/login", { email, password: "password-123" });
-  expectOk(`${label}: login after verification`, login.status);
+  // Throws unless every protected route refuses the setup-only session and
+  // answers once the authenticator is enrolled.
+  await signIn(req, { email, password: "password-123", label, probePaths: PROTECTED_PATHS });
 
   const me = await req("GET", "/auth/me");
   expectOk(`${label}: /auth/me`, me.status);
@@ -403,20 +425,7 @@ async function attack(attacker, victim) {
 async function main() {
   // Unauthenticated requests must be rejected outright.
   const anon = makeSession();
-  for (const path of [
-    "/sites",
-    "/compliance-items",
-    "/users",
-    "/settings",
-    "/clients",
-    "/billing/invoices",
-    "/fire-safety",
-    "/fire-safety/status",
-    "/legionella",
-    "/legionella/status",
-    "/food-safety",
-    "/food-safety/config",
-  ]) {
+  for (const path of PROTECTED_PATHS) {
     const { status } = await anon("GET", path);
     check(`anon: GET ${path}`, status === 401, `expected 401, got ${status}`);
   }

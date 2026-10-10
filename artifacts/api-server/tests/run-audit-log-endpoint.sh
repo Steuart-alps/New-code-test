@@ -13,7 +13,7 @@ cleanup() {
 }
 trap cleanup EXIT
 pnpm run build
-NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
 SERVER_PID=$!
 for _ in $(seq 1 60); do
   curl -sf -m 2 "${API_BASE%/api}/readyz" >/dev/null && break
