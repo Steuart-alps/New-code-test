@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { Readable } from "stream";
+import { Readable, pipeline } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
@@ -58,9 +58,7 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
     const stream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
     const meter = createDownloadMeter(resolved.clientId);
     stream.on("data", (chunk) => meter.add(chunk));
-    const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
-    stream.once("end", commit); stream.once("close", commit);
-    stream.pipe(res);
+    streamMetered(req, stream, res, meter);
   } catch (error) {
     if (error instanceof ObjectNotFoundError) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
     req.log.error({ err: error }, "Error serving token download");
@@ -71,7 +69,7 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
 async function estimateStorageCost(clientId: number, usedBytes: number, monthlyDownloadBytes: number) {
   const rawRate = process.env.STORAGE_PROVIDER_USD_PER_GIB_MONTH?.trim();
   const providerRate = rawRate ? Number(rawRate) : DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH;
-  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT;
+  const rawMarkup = process.env.STORAGE_ALPS_MARKUP_PERCENT?.trim();
   const markupPercent = rawMarkup ? Number(rawMarkup) : DEFAULT_ALPS_STORAGE_MARKUP_PERCENT;
   if (!Number.isFinite(providerRate) || providerRate < 0 || !Number.isFinite(markupPercent) || markupPercent < 0) return null;
   const rawAllowances = process.env.STORAGE_INCLUDED_GIB_BY_SERVICE;
@@ -220,7 +218,9 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
-      nodeStream.pipe(res);
+      pipeline(nodeStream, res, (error) => {
+        if (error && error.code !== "ERR_STREAM_PREMATURE_CLOSE") req.log.warn({ err: error }, "Public object stream ended early");
+      });
     } else {
       res.end();
     }
@@ -281,10 +281,7 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
       const nodeStream = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
       const meter = createDownloadMeter(clientId!);
       nodeStream.on("data", (chunk) => meter.add(chunk));
-      const commit = () => { void meter.commit().catch((error) => req.log.error({ err: error }, "Could not record download usage")); };
-      nodeStream.once("end", commit);
-      nodeStream.once("close", commit);
-      nodeStream.pipe(res);
+      streamMetered(req, nodeStream, res, meter);
     } else {
       res.end();
     }
@@ -298,5 +295,18 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     res.status(500).json({ error: "Failed to serve object" });
   }
 });
+
+/**
+ * Streams a download and records the bytes it actually sent. pipeline() stops
+ * the provider read when the client disconnects and turns a provider stream
+ * error into a closed response (instead of an unhandled 'error' event), and its
+ * callback runs once in every case, so partial downloads are still metered.
+ */
+function streamMetered(req: Request, stream: Readable, res: Response, meter: ReturnType<typeof createDownloadMeter>): void {
+  pipeline(stream, res, (error) => {
+    if (error && error.code !== "ERR_STREAM_PREMATURE_CLOSE") req.log.warn({ err: error }, "Download stream ended early");
+    void meter.commit().catch((commitError) => req.log.error({ err: commitError }, "Could not record download usage"));
+  });
+}
 
 export default router;
