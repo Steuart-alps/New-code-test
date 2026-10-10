@@ -84,11 +84,13 @@ function mediaContentType(file: File): string {
   return MEDIA_TYPE_BY_EXTENSION[extension] ?? "";
 }
 
-function privateObjectUrl(objectPath: string): string {
+// Media elements cannot send the active-client query that clientApiFetch adds,
+// so a consultant's tenant goes in the URL, as check-photo-uploader does.
+function privateObjectUrl(objectPath: string, clientId: number | null | undefined): string {
   const normalizedPath = objectPath.startsWith("/objects/")
     ? objectPath
     : `/objects/${objectPath.replace(/^\/+/, "")}`;
-  return `${API_BASE}/storage${normalizedPath}`;
+  return `${API_BASE}/storage${normalizedPath}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`;
 }
 
 function putFileWithProgress(
@@ -218,7 +220,7 @@ function StatusTimeline({ issue }: { issue: Issue }) {
 
 // ── Media Viewer Component ────────────────────────────────────────────────────
 
-function MediaGallery({ urls }: { urls: string[] }) {
+function MediaGallery({ urls, clientId }: { urls: string[]; clientId: number | null | undefined }) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [initialIndex, setInitialIndex] = useState(0);
 
@@ -229,7 +231,7 @@ function MediaGallery({ urls }: { urls: string[] }) {
       <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
         {urls.map((url, idx) => {
           const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-          const src = privateObjectUrl(url);
+          const src = privateObjectUrl(url, clientId);
           
           return (
             <button
@@ -264,7 +266,7 @@ function MediaGallery({ urls }: { urls: string[] }) {
           <div className="flex-1 flex overflow-x-auto snap-x snap-mandatory pt-16">
             {urls.map((url, idx) => {
               const isVideo = /\.(mp4|mov|webm|avi|m4v|3gp|ogv|mkv|mpeg|mpg|ts)$/i.test(url);
-              const src = privateObjectUrl(url);
+              const src = privateObjectUrl(url, clientId);
               
               return (
                 <div 
@@ -273,7 +275,7 @@ function MediaGallery({ urls }: { urls: string[] }) {
                   ref={el => { if (el && idx === initialIndex) el.scrollIntoView(); }}
                 >
                   {isVideo ? (
-                    <video src={src} controls className="max-w-full max-h-full rounded-lg" autoPlay={idx === initialIndex} />
+                    <video src={src} controls playsInline preload="metadata" className="max-w-full max-h-full rounded-lg" autoPlay={idx === initialIndex} />
                   ) : (
                     <img src={src} alt="Full view" className="max-w-full max-h-full object-contain rounded-lg shadow-xl" />
                   )}
@@ -622,7 +624,7 @@ export default function FixTrackDetailPage() {
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <Camera className="w-4 h-4 text-muted-foreground" /> Attachments
               </h3>
-              {issue.mediaUrls && issue.mediaUrls.length > 0 && <MediaGallery urls={issue.mediaUrls} />}
+              {issue.mediaUrls && issue.mediaUrls.length > 0 && <MediaGallery urls={issue.mediaUrls} clientId={activeClientId} />}
               {canEdit && (
                 <div className="space-y-3">
                   <input
@@ -699,7 +701,7 @@ export default function FixTrackDetailPage() {
               )}
               {issue.completionDocumentPath && (
                 <a
-                  href={privateObjectUrl(issue.completionDocumentPath)}
+                  href={privateObjectUrl(issue.completionDocumentPath, activeClientId)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 mt-2 px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg hover:underline transition-all hover:bg-blue-100"

@@ -199,6 +199,8 @@ export class ObjectStorageService {
     const headers: Record<string, string> = {
       "Content-Type": (metadata.contentType as string) || "application/octet-stream",
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
+      // Lets video players seek with byte ranges from the first response.
+      "Accept-Ranges": "bytes",
     };
     if (metadata.size) {
       const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);

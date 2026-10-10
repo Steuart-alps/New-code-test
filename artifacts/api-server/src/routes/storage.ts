@@ -15,6 +15,7 @@ import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDep
 import { objectPathTenantMismatch, patPhotoObjectAccess } from "../lib/patLegacyHistoryScope";
 import { listTenantAttachmentObjectPaths } from "../lib/attachmentReferences";
 import { findLiveSubscription } from "../lib/billing";
+import { parseByteRange } from "../lib/byteRange";
 import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownloadToken } from "../lib/downloadUsage";
 
 const router: IRouter = Router();
@@ -28,17 +29,6 @@ const DEFAULT_STORAGE_INCLUDED_GIB_BY_SERVICE: Record<string, number> = {
   bundle: 1,
 };
 
-function requestRange(raw: string | undefined, size: number): { start: number; end: number } | "invalid" | undefined {
-  if (!raw) return undefined;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(raw.trim());
-  if (!match || (!match[1] && !match[2])) return "invalid";
-  let start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-  let end = match[2] ? Number(match[2]) : size - 1;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) return "invalid";
-  end = Math.min(end, size - 1);
-  return { start, end };
-}
-
 router.get("/storage/download/:token", async (req: Request, res: Response) => {
   try {
     const rawToken = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
@@ -49,7 +39,7 @@ router.get("/storage/download/:token", async (req: Request, res: Response) => {
     if (!acl) { res.status(404).json({ error: "Download link expired or invalid" }); return; }
     const [metadata] = await file.getMetadata();
     const size = Number(metadata.size);
-    const range = requestRange(req.header("range"), size);
+    const range = parseByteRange(req.header("range"), size);
     if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${size}`).end(); return; }
     const response = await objectStorageService.downloadObject(file, 0, range);
     res.status(response.status);
@@ -270,7 +260,7 @@ router.get("/storage/objects/*path", requireAuth, async (req: Request, res: Resp
     }
 
     const [metadata] = await objectFile.getMetadata();
-    const range = requestRange(req.header("range"), Number(metadata.size));
+    const range = parseByteRange(req.header("range"), Number(metadata.size));
     if (range === "invalid") { res.status(416).setHeader("Content-Range", `bytes */${metadata.size}`).end(); return; }
     const response = await objectStorageService.downloadObject(objectFile, 3600, range);
 
