@@ -9,6 +9,7 @@
     "generate-seo": "node scripts/generate-seo.mjs",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "test:signup-plan": "node tests/signup-plan.test.mjs",
+    "test:signup-pesttrack-browser": "node tests/signup-pesttrack-browser.test.mjs",
     "test:nav-groups": "node tests/nav-groups.test.mjs",
     "test:pat-legacy-register-browser": "node tests/pat-legacy-register-browser.test.mjs",
     "test:pat-failure-location": "node tests/pat-failure-location.test.mjs",
