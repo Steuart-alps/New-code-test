@@ -396,7 +396,7 @@ router.post("/auth/passkeys/registration/verify", async (req, res) => {
     }
     res.json({ ok: true });
   } catch (error: any) {
-    if (error?.code === "23505") {
+    if ((error?.code ?? error?.cause?.code) === "23505") {
       res.status(409).json({ error: "That passkey is already registered" });
       return;
     }
