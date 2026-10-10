@@ -67,6 +67,15 @@ services:
       # Generate with `openssl rand -hex 32`.
       - key: ANALYTICS_READ_TOKEN
         sync: false
+      # Mobile app passkeys (domain association files; 404 while unset).
+      - key: MOBILE_IOS_TEAM_ID
+        sync: false
+      - key: MOBILE_IOS_BUNDLE_ID
+        sync: false
+      - key: MOBILE_ANDROID_PACKAGE
+        sync: false
+      - key: MOBILE_ANDROID_CERT_SHA256
+        sync: false
 
 databases:
   - name: complytrack-db

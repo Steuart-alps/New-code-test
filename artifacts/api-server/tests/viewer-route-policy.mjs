@@ -20,6 +20,7 @@ const routeFiles = execFileSync(
 function routeException(file, method, path) {
   const name = basename(file);
   if (name === "auth.ts") return "auth/session self-service";
+  if (name === "mobilePasskeys.ts") return "mobile passkey sign-in/self-service";
   if (name === "fix-track-public.ts" || name === "contractor-portal.ts" || name === "sign-off.ts") {
     return "public token portal";
   }

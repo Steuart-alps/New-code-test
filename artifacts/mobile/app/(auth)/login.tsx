@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,11 +17,18 @@ import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { isInvalidMobileLoginChallenge } from '@/lib/api';
+import {
+  defaultWebPasskeySetupUrl,
+  nativePasskeysAvailable,
+  PasskeyFlowError,
+} from '@/lib/passkeys';
+import { passkeyFailureNeedsSetup } from '@/lib/passkeyErrors';
 
 export default function LoginScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { login } = useAuth();
+  const { login, loginWithPasskey } = useAuth();
+  const passkeysAvailable = useMemo(() => nativePasskeysAvailable(), []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -31,13 +38,28 @@ export default function LoginScreen() {
   const [code, setCode] = useState('');
   const [usingRecoveryCode, setUsingRecoveryCode] = useState(false);
   const [setupUrl, setSetupUrl] = useState<string | null>(null);
+  // Which first factor produced pendingToken. After a passkey there is no
+  // email or password on screen, only the authenticator-code step.
+  const [pendingVia, setPendingVia] = useState<'password' | 'passkey' | null>(null);
+  // Shown when the phone had no passkey to offer: how to add one.
+  const [passkeyHelp, setPasskeyHelp] = useState<{ webSetupUrl: string | null } | null>(null);
   const passwordRef = useRef<TextInput>(null);
   const codeRef = useRef<TextInput>(null);
 
+  const viaPasskey = pendingVia === 'passkey';
+
+  function restartLogin() {
+    setPendingToken(null);
+    setPendingVia(null);
+    setCode('');
+    setUsingRecoveryCode(false);
+  }
+
   async function handleLogin() {
-    if (!email.trim() || !password) return;
+    if (!viaPasskey && (!email.trim() || !password)) return;
     if (pendingToken && !code.trim()) return;
     setError('');
+    setPasskeyHelp(null);
     setLoading(true);
     try {
       const result = await login(
@@ -48,6 +70,7 @@ export default function LoginScreen() {
       );
       if (result.pendingToken) {
         setPendingToken(result.pendingToken);
+        setPendingVia('password');
         setLoading(false);
         setTimeout(() => codeRef.current?.focus(), 100);
         return;
@@ -62,8 +85,7 @@ export default function LoginScreen() {
       const message =
         err instanceof Error ? err.message : 'Sign-in failed. Please try again.';
       if (isInvalidMobileLoginChallenge(err)) {
-        setPendingToken(null);
-        setCode('');
+        restartLogin();
       }
       setError(
         message,
@@ -74,8 +96,43 @@ export default function LoginScreen() {
     }
   }
 
+  async function handlePasskey() {
+    setError('');
+    setPasskeyHelp(null);
+    setLoading(true);
+    try {
+      const result = await loginWithPasskey();
+      if (result.pendingToken) {
+        setPendingToken(result.pendingToken);
+        setPendingVia('passkey');
+        setCode('');
+        setUsingRecoveryCode(false);
+        setTimeout(() => codeRef.current?.focus(), 100);
+        return;
+      }
+      if (result.requires2faSetup) {
+        setSetupUrl(result.setupUrl ?? null);
+      }
+    } catch (err: unknown) {
+      if (err instanceof PasskeyFlowError) {
+        if (passkeyFailureNeedsSetup(err.reason)) {
+          setPasskeyHelp({ webSetupUrl: err.webSetupUrl ?? defaultWebPasskeySetupUrl() });
+          if (err.reason !== 'cancelled') setError(err.message);
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'Passkey sign-in failed. Please try again.');
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const disabled =
-    !email.trim() || !password || loading || (pendingToken !== null && !code.trim());
+    loading
+    || (pendingToken !== null ? !code.trim() : !email.trim() || !password);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.navy }]}>
@@ -143,7 +200,16 @@ export default function LoginScreen() {
                </TouchableOpacity>
              )}
 
-             {!setupUrl && <>{/* Email */}
+             {!setupUrl && <>
+            {viaPasskey && (
+              <View style={styles.passkeyConfirmed} testID="passkey-confirmed">
+                <Feather name="check-circle" size={16} color={colors.primary} />
+                <Text style={[styles.passkeyConfirmedText, { color: colors.foreground }]}>
+                  Passkey accepted. Enter your authenticator code to finish signing in.
+                </Text>
+              </View>
+            )}
+            {!viaPasskey && <>{/* Email */}
             <Text style={[styles.label, { color: colors.foreground }]}>
               Email address
             </Text>
@@ -210,6 +276,7 @@ export default function LoginScreen() {
                 />
               </TouchableOpacity>
             </View>
+            </>}
 
              {/* 2FA code */}
              {pendingToken && (
@@ -217,7 +284,7 @@ export default function LoginScreen() {
                 <Text
                   style={[
                     styles.label,
-                    { color: colors.foreground, marginTop: 16 },
+                    { color: colors.foreground, marginTop: viaPasskey ? 0 : 16 },
                   ]}
                 >
                   {usingRecoveryCode ? 'Recovery code' : 'Verification code'}
@@ -269,11 +336,10 @@ export default function LoginScreen() {
                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => {
-                      setPendingToken(null);
-                      setCode('');
-                      setUsingRecoveryCode(false);
+                      const focusPassword = !viaPasskey;
+                      restartLogin();
                       setError('');
-                      setTimeout(() => passwordRef.current?.focus(), 50);
+                      if (focusPassword) setTimeout(() => passwordRef.current?.focus(), 50);
                     }}
                     style={{ marginTop: 10 }}
                     testID="restart-login-btn"
@@ -318,6 +384,52 @@ export default function LoginScreen() {
                 <Text style={styles.btnText}>Sign in</Text>
               )}
             </TouchableOpacity>
+
+            {passkeysAvailable && !pendingToken && (
+              <TouchableOpacity
+                style={[
+                  styles.passkeyBtn,
+                  { borderColor: colors.navy },
+                  loading && styles.btnDisabled,
+                ]}
+                onPress={handlePasskey}
+                disabled={loading}
+                testID="passkey-sign-in-btn"
+              >
+                <Feather name="key" size={18} color={colors.navy} />
+                <Text style={[styles.passkeyBtnText, { color: colors.navy }]}>
+                  Sign in with a passkey
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {passkeyHelp && !pendingToken && (
+              <View
+                style={[styles.helpBox, { borderColor: colors.border }]}
+                testID="passkey-help"
+              >
+                <Text style={[styles.helpTitle, { color: colors.foreground }]}>
+                  No passkey on this phone?
+                </Text>
+                <Text style={[styles.helpText, { color: colors.mutedForeground }]}>
+                  Sign in with your email and password, then add a passkey from the Profile
+                  tab. Or open ComplyTrack Settings in this phone&apos;s browser and add one
+                  there: it is saved to your phone&apos;s password manager and works in this
+                  app too. You will still enter your authenticator code each time.
+                </Text>
+                {passkeyHelp.webSetupUrl && (
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(passkeyHelp.webSetupUrl!).catch(() => undefined)}
+                    style={{ marginTop: 10 }}
+                    testID="passkey-web-setup-btn"
+                  >
+                    <Text style={{ color: colors.primary, fontWeight: '600' }}>
+                      Add a passkey on the web
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             <Text
               style={[styles.footer, { color: colors.mutedForeground }]}
@@ -431,6 +543,47 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   btnDisabled: { opacity: 0.55 },
+  passkeyBtn: {
+    height: 52,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  passkeyBtnText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  passkeyConfirmed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  passkeyConfirmedText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+  helpBox: {
+    borderWidth: 1,
+    borderRadius: 4,
+    padding: 14,
+    marginTop: 16,
+  },
+  helpTitle: {
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+    marginBottom: 6,
+  },
+  helpText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: 'Inter_400Regular',
+  },
   btnText: {
     color: '#ffffff',
     fontSize: 16,

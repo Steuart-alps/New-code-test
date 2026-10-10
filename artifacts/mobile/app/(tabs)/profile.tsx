@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -10,11 +12,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import {
+  addPasskeyOnThisPhone,
+  defaultWebPasskeySetupUrl,
+  listPasskeys,
+  nativePasskeysAvailable,
+  PasskeyFlowError,
+} from '@/lib/passkeys';
 
 interface Site {
   id: number;
@@ -68,6 +77,36 @@ export default function ProfileScreen() {
     queryKey: ['sites'],
     queryFn: () => apiFetch('/api/sites'),
   });
+
+  const queryClient = useQueryClient();
+  const passkeysAvailable = useMemo(() => nativePasskeysAvailable(), []);
+  const webSetupUrl = defaultWebPasskeySetupUrl();
+  const [addingPasskey, setAddingPasskey] = useState(false);
+  const { data: passkeys } = useQuery({
+    queryKey: ['auth', 'passkeys'],
+    queryFn: listPasskeys,
+  });
+
+  async function addPasskey() {
+    setAddingPasskey(true);
+    try {
+      await addPasskeyOnThisPhone();
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'passkeys'] });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Passkey added',
+        'Next time, tap "Sign in with a passkey". You will still enter your authenticator code.',
+      );
+    } catch (err: unknown) {
+      if (err instanceof PasskeyFlowError && err.reason === 'cancelled') return;
+      Alert.alert(
+        'Passkey not added',
+        err instanceof Error ? err.message : 'Please try again.',
+      );
+    } finally {
+      setAddingPasskey(false);
+    }
+  }
 
   const initials = user?.name
     ?.split(' ')
@@ -150,6 +189,61 @@ export default function ProfileScreen() {
               }
             />
           )}
+        </View>
+      </View>
+
+      {/* Passkeys */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
+          Passkeys
+        </Text>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border, padding: 14 },
+          ]}
+        >
+          <Text style={[styles.passkeyText, { color: colors.foreground }]}>
+            {passkeys === undefined
+              ? 'Sign in with Face ID, your fingerprint or screen lock instead of your password.'
+              : passkeys.length === 0
+                ? 'No passkeys on your account yet.'
+                : `${passkeys.length} passkey${passkeys.length === 1 ? '' : 's'} on your account.`}
+          </Text>
+          <Text style={[styles.passkeyHint, { color: colors.mutedForeground }]}>
+            {passkeysAvailable
+              ? 'A passkey replaces your password when you sign in. You will still enter your authenticator code.'
+              : 'Passkeys need the installed ComplyTrack app on iOS 16 or Android 9 or later. You can add one from Settings on the web instead.'}
+          </Text>
+          {passkeysAvailable ? (
+            <TouchableOpacity
+              style={[styles.passkeyBtn, { borderColor: colors.navy }]}
+              onPress={addPasskey}
+              disabled={addingPasskey}
+              testID="add-passkey-btn"
+            >
+              {addingPasskey ? (
+                <ActivityIndicator color={colors.navy} />
+              ) : (
+                <>
+                  <Feather name="key" size={16} color={colors.navy} />
+                  <Text style={[styles.passkeyBtnText, { color: colors.navy }]}>
+                    Add a passkey on this phone
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : webSetupUrl ? (
+            <TouchableOpacity
+              onPress={() => Linking.openURL(webSetupUrl).catch(() => undefined)}
+              style={{ marginTop: 12 }}
+              testID="passkey-web-setup-btn"
+            >
+              <Text style={{ color: colors.primary, fontFamily: 'Inter_600SemiBold' }}>
+                Open passkey settings on the web
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -276,4 +370,22 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   signOutText: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  passkeyText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  passkeyHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 4,
+  },
+  passkeyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  passkeyBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
 });

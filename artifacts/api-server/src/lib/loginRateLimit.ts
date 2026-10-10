@@ -207,6 +207,20 @@ export const registrationRateLimit = makeLoginRateLimit({
 });
 
 /**
+ * Thirty mobile passkey sign-in challenges per source IP in each shared
+ * 15-minute window in production. Issuing a challenge checks no credential, so
+ * it has its own quota; the passkey assertion itself uses loginRateLimit.
+ */
+export const passkeyChallengeRateLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  namespace: "passkey-challenge",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/**
  * Ten failed reset-link attempts (invalid/expired token or bad request) per
  * source IP in each 15-minute window. Production shares the counter across API
  * instances; successful resets do not count. Development stays in-memory.
