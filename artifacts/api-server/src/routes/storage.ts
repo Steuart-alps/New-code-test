@@ -5,7 +5,14 @@ import {
   RequestUploadUrlResponse,
   GetStorageUsageResponse,
 } from "@workspace/api-zod";
-import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, setStorageUsageRecorder, sumStorageUsageEntries } from "../lib/objectStorage";
+import {
+  readStorageUsageSnapshot,
+  reconcileStorageUsage,
+  refreshStorageUsageInBackground,
+  storageUsageLedger,
+  storageUsageSnapshotIsStale,
+} from "../lib/storageUsageSnapshot";
 import { respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { ObjectPermission } from "../lib/objectAcl";
 import { db } from "@workspace/db";
@@ -19,6 +26,9 @@ import { createDownloadMeter, getMonthlyDownloadBytes, utcMonth, resolveDownload
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+// Every ObjectStorageService instance reports tenant uploads and deletions to
+// the usage ledger once this router is loaded.
+setStorageUsageRecorder(storageUsageLedger);
 const DEFAULT_STORAGE_WARNING_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 const GIB = 1024 ** 3;
 const DEFAULT_PROVIDER_STORAGE_USD_PER_GIB_MONTH = 0.015;
@@ -122,16 +132,36 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
   }
 
   try {
-    const [referencedPaths, thresholdSetting] = await Promise.all([
-      listTenantAttachmentObjectPaths(db, clientId),
-      db.query.appSettingsTable.findFirst({
-        where: and(
-          eq(appSettingsTable.clientId, clientId),
-          eq(appSettingsTable.key, "storageWarningThresholdBytes"),
-        ),
-      }),
-    ]);
-    const { usedBytes, objectCount } = await objectStorageService.getTenantStorageUsage(clientId, referencedPaths);
+    const thresholdSetting = await db.query.appSettingsTable.findFirst({
+      where: and(
+        eq(appSettingsTable.clientId, clientId),
+        eq(appSettingsTable.key, "storageWarningThresholdBytes"),
+      ),
+    });
+    // Authoritative listing: the tenant's provider prefixes plus its bounded
+    // set of legacy references, filtered by ACL ownership.
+    const listObjects = async () => objectStorageService.listTenantStorageObjects(
+      clientId,
+      await listTenantAttachmentObjectPaths(db, clientId),
+    );
+    let snapshot = await readStorageUsageSnapshot(clientId);
+    let usedBytes = snapshot.usedBytes;
+    let objectCount = snapshot.objectCount;
+    if (snapshot.reconciledAt === null) {
+      // First view for this account: reconcile now so the totals are complete.
+      const reconciled = await reconcileStorageUsage(clientId, listObjects);
+      if (reconciled) {
+        snapshot = await readStorageUsageSnapshot(clientId);
+        ({ usedBytes, objectCount } = snapshot);
+      } else {
+        // Another request holds the first reconciliation; answer live meanwhile.
+        ({ usedBytes, objectCount } = sumStorageUsageEntries(await listObjects()));
+        snapshot = { ...snapshot, refreshing: true };
+      }
+    } else if (storageUsageSnapshotIsStale(snapshot)) {
+      refreshStorageUsageInBackground(clientId, listObjects);
+      snapshot = { ...snapshot, refreshing: true };
+    }
     const month = utcMonth();
     const monthlyDownloadBytes = await getMonthlyDownloadBytes(clientId, month);
     const estimatedCost = await estimateStorageCost(clientId, usedBytes, monthlyDownloadBytes);
@@ -149,6 +179,9 @@ router.get("/storage/usage", requireAuth, requireClientAdmin, async (req: Reques
       monthlyDownloadTrackingAvailable: true,
       month,
       estimatedCost,
+      usageCheckedAt: snapshot.reconciledAt,
+      usageAgeSeconds: snapshot.ageSeconds,
+      usageRefreshing: snapshot.refreshing,
     }));
   } catch (error) {
     req.log.error({ err: error, operation: "account storage usage" }, "Object storage usage unavailable");
