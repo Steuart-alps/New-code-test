@@ -56,6 +56,7 @@
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
 - [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from the provider rate (STORAGE_PROVIDER_USD_PER_GIB_MONTH, default set from Replit's rate) plus a 20% ALPS margin.
+- [Storage usage snapshot](storage-usage-snapshot.md) — Settings totals come from a per-object ledger (upsert/tombstone, never deltas) reconciled with provider ACL listings; lifecycle writes beat stale listings.
 - [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
 - [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
 - [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.

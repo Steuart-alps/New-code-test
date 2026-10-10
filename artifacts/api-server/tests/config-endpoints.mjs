@@ -1182,6 +1182,12 @@ async function testStorageUsage(admin, viewer, staff, clientAId, clientBId) {
   for (const [name, response] of [["A", usageA], ["B", usageB]]) {
     check(`storage usage: client ${name} bytes are non-negative`, Number.isSafeInteger(response.data?.usedBytes) && response.data.usedBytes >= 0);
     check(`storage usage: client ${name} object count is non-negative`, Number.isSafeInteger(response.data?.objectCount) && response.data.objectCount >= 0);
+    check(
+      `storage usage: client ${name} shows when its snapshot was checked`,
+      typeof response.data?.usageCheckedAt === "string" && Number.isSafeInteger(response.data?.usageAgeSeconds)
+        && response.data.usageAgeSeconds >= 0 && typeof response.data?.usageRefreshing === "boolean",
+      `got ${JSON.stringify({ at: response.data?.usageCheckedAt, age: response.data?.usageAgeSeconds, refreshing: response.data?.usageRefreshing })}`,
+    );
      check(`storage usage: client ${name} download traffic is measured`, Number.isSafeInteger(response.data?.monthlyDownloadBytes) && response.data.monthlyDownloadBytes >= 0 && response.data?.monthlyDownloadTrackingAvailable === true);
   }
 
