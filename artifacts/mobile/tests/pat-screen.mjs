@@ -20,7 +20,7 @@ const bundled = await build({
     name: 'native-test-io',
     setup(builder) {
       builder.onResolve({
-        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
+        filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|expo-camera|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
       }, () => ({ path: nativePath }));
       // Optional negative controls prove the assertions detect regressions.
       // They alter only the in-memory bundle, never production files.

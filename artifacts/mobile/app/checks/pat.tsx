@@ -1,6 +1,7 @@
 /**
  * PATtrack Screen
- * Lists appliances for the selected site, allows logging a test, and shows recent tests.
+ * Lists appliances for the selected site, allows logging a test (picked from the
+ * list or by scanning its asset tag), and shows recent tests.
  * Gated behind hasService("pattrack").
  */
 import React, { useState } from 'react';
@@ -25,6 +26,7 @@ import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { PatTagScanner } from '@/components/PatTagScanner';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -100,6 +102,7 @@ export default function PatScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const [showForm, setShowForm] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Form state
@@ -256,8 +259,18 @@ export default function PatScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Appliances</Text>
         <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
-          Tap an appliance to log its latest test.
+          Scan an asset tag or tap an appliance to log its latest test.
         </Text>
+        {!appliancesLoading && activeAppliances.length > 0 ? (
+          <TouchableOpacity
+            testID="pat-scan-tag"
+            style={[styles.addBtn, { backgroundColor: colors.navy }]}
+            onPress={() => setShowScanner(true)}
+          >
+            <Feather name="maximize" size={18} color="#ffffff" />
+            <Text style={styles.addBtnText}>Scan asset tag</Text>
+          </TouchableOpacity>
+        ) : null}
         {appliancesLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
         ) : activeAppliances.length === 0 ? (
@@ -300,6 +313,13 @@ export default function PatScreen() {
           })
         )}
       </View>
+
+      <PatTagScanner
+        visible={showScanner}
+        appliances={appliances}
+        onClose={() => setShowScanner(false)}
+        onSelect={openLogForm}
+      />
 
       {/* Form */}
       <Modal
