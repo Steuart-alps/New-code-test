@@ -19,6 +19,7 @@ import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
 import { internalAnalyticsRouter } from "./routes/analytics";
+import mobileAppLinksRouter from "./routes/mobileAppLinks";
 
 const app: Express = express();
 let applicationReady = false;
@@ -104,6 +105,10 @@ app.use(
     contentSecurityPolicy: false, // API-only server — no HTML is served here.
   }),
 );
+
+// Mobile app domain association files (passkeys). Mounted before the web
+// build, whose index.html fallback would otherwise answer these paths.
+app.use(mobileAppLinksRouter);
 
 // Production: serve the compliance-tracker build from this process, with an
 // index.html fallback for client-side routes. Mounted before the session and

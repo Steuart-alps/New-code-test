@@ -37,7 +37,7 @@ const bundled = await build({
     name: 'native-test-io',
     setup(builder) {
       builder.onResolve({ filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|expo-secure-store)$/ }, () => ({ path: nativePath }));
-      builder.onResolve({ filter: /^\.\/(kitchenOutbox|fixTrackRecovery|push)$/ }, args =>
+      builder.onResolve({ filter: /^\.\/(kitchenOutbox|fixTrackRecovery|push|passkeys)$/ }, args =>
         args.importer.endsWith('/lib/auth.tsx') ? { path: nativePath } : undefined);
       // Optional negative controls prove these are behavior tests, not merely
       // assertions over the mocked native I/O. Never modify production files.

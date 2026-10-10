@@ -2778,7 +2778,8 @@ function PasskeyCard() {
         <CardDescription>
           Sign in on the web with Face ID, Touch ID, your device PIN, or a security key instead of your password.
           Passkeys do not replace two-factor authentication: you will still enter your authenticator code.
-          Mobile sign-in supports the authenticator code (TOTP) only.
+          In the ComplyTrack mobile app, a passkey saved on your phone can replace your password, and you still enter your authenticator code.
+          Add it from this page in your phone&apos;s browser, or from Profile in the app.
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-6 space-y-4">

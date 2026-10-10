@@ -29,10 +29,18 @@ assert.match(auth, /if \(!user\.totpEnabled\)/);
 assert.doesNotMatch(mandatoryUi, /passkeys\/registration/);
 assert.match(passkeyCard, /do not replace two-factor authentication/);
 assert.match(passkeyCard, /still enter your authenticator code/);
-assert.match(passkeyCard, /Mobile sign-in supports the authenticator code \(TOTP\) only/);
+assert.match(passkeyCard, /mobile app, a passkey saved on your phone can replace your password, and you still enter your authenticator code/);
 assert.doesNotMatch(passkeyCard, /instead of typing a one-time code/);
 assert.match(loginUi, /data\.requires2faSetup/);
 assert.match(mobileBlock, /totpEnabled && result\.user\.totpSecret/);
 assert.match(mobileBlock, /requires2faSetup/);
+
+// Native mobile passkeys replace the password only: they hand over to the
+// TOTP challenge or web setup and never create a bearer session themselves.
+const mobilePasskeys = await readFile(new URL("../src/routes/mobilePasskeys.ts", import.meta.url), "utf8");
+assert.match(mobilePasskeys, /INSERT INTO mobile_login_challenges/);
+assert.match(mobilePasskeys, /requires2faSetup: true/);
+assert.doesNotMatch(mobilePasskeys, /mobile_sessions/);
+assert.doesNotMatch(mobilePasskeys, /issueMobileSession/);
 
 console.log("passkey mandatory-2FA regression checks passed");

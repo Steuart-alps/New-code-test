@@ -17,6 +17,7 @@ import {
   clearPendingIssueUploadRecovery,
 } from './fixTrackRecovery';
 import { registerForPushNotifications, unregisterPushToken } from './push';
+import { signInWithPasskey } from './passkeys';
 
 const TOKEN_KEY = 'complytrack_mobile_token';
 const TOKEN_EXPIRY_KEY = 'complytrack_mobile_token_expiry';
@@ -53,6 +54,12 @@ interface AuthContextType {
     pendingToken?: string,
     code?: string,
   ) => Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }>;
+  /**
+   * Native passkey in place of email and password. Resolves to the same next
+   * step as a password: a pendingToken for login()'s authenticator-code step,
+   * or the web two-factor setup link. Never signs in by itself.
+   */
+  loginWithPasskey: () => Promise<{ pendingToken?: string; requires2faSetup?: boolean; setupUrl?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -300,6 +307,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyToken],
   );
 
+  const loginWithPasskey = useCallback(async () => {
+    authGeneration.current += 1;
+    kitchenOutbox.suspend();
+    const res = await signInWithPasskey();
+    if ('pendingToken' in res) return { pendingToken: res.pendingToken };
+    return { requires2faSetup: true, setupUrl: res.setupUrl };
+  }, []);
+
   const logout = useCallback(async () => {
     // Cancel any detached restore/refresh before the first asynchronous step.
     authGeneration.current += 1;
@@ -325,7 +340,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isAuthenticated: !!user, services, hasService, login, logout }}
+      value={{
+        user, isLoading, isAuthenticated: !!user, services, hasService, login, loginWithPasskey, logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

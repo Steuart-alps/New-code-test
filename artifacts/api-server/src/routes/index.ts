@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import authRouter from "./auth";
+import mobilePasskeysRouter from "./mobilePasskeys";
 import clientsRouter from "./clients";
 import usersRouter from "./users";
 import departmentsRouter from "./departments";
@@ -69,6 +70,7 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+router.use(mobilePasskeysRouter);
 // First-party analytics ingest; does its own session check (before root-level auth routers).
 router.use(analyticsRouter);
 router.use("/billing", billingRouter);

@@ -35,3 +35,4 @@ export const clearPendingIssueUploadRecovery = async () => {};
 export const clearOtherPendingIssueUploadRecovery = async () => {};
 export const registerForPushNotifications = async () => {};
 export const unregisterPushToken = async () => {};
+export const signInWithPasskey = async () => { throw new Error('Passkeys are not exercised by this fixture'); };
