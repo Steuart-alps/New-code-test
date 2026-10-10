@@ -1,7 +1,7 @@
 // Deterministic TOTP sign-in for API integration fixtures.
 //
-// Every account that can sign in must enrol an authenticator before it can use
-// the app (.agents/memory/mandatory-two-factor.md). These helpers drive the same
+// By default an account must enrol an authenticator before it can use the app
+// (.agents/memory/mandatory-two-factor.md). These helpers drive the same
 // endpoints as the web app: password login, GET /auth/2fa/setup for the secret,
 // POST /auth/2fa/enable with a code computed here (RFC 6238: SHA-1, 6 digits,
 // 30-second steps), and POST /auth/2fa/verify on later sign-ins. The secret is
@@ -55,35 +55,49 @@ async function expectProbes(request, label, probePaths, enrolled) {
 }
 
 /**
- * Complete a password sign-in under mandatory 2FA. `login` is the response to
- * POST /auth/login on the same session.
+ * Enrol a new TOTP authenticator on a setup-only or signed-in session (the
+ * latter is voluntary enrolment where an organisation does not require 2FA).
+ * Resolves to `{ secret, recoveryCodes }`.
+ */
+export async function enrolTotp(request, { label = "fixture user" } = {}) {
+  const setup = await request("GET", "/auth/2fa/setup");
+  if (setup.status !== 200 || typeof setup.data?.secret !== "string") throw fail(label, "2FA setup", setup);
+  const enabled = await request("POST", "/auth/2fa/enable", { code: totpCode(setup.data.secret) });
+  if (enabled.status !== 200) throw fail(label, "2FA enrolment", enabled);
+  return { secret: setup.data.secret, recoveryCodes: enabled.data?.recoveryCodes ?? [] };
+}
+
+/**
+ * Complete a password sign-in. `login` is the response to POST /auth/login on
+ * the same session.
  *
  * - `requires2faSetup`: checks the probe routes are blocked, enrols a new
  *   authenticator, then checks they are usable.
  * - `requires2fa`: answers the challenge with the `secret` from enrolment.
- * - neither: the API allowed a password-only session, which only happens when
- *   it runs with ALLOW_PASSWORD_ONLY_TEST_LOGIN=1. Rejected unless
- *   `allowPasswordOnly`, which defaults to that same variable in this process.
+ * - neither: the API issued a password-only session. That is an error unless
+ *   `allowPasswordOnly` is set: pass it where the scenario expects no second
+ *   factor (e.g. an organisation that has turned the requirement off). It
+ *   defaults to ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 in this process, the legacy
+ *   runner opt-in. With `enrol: true` the password-only session enrols a new
+ *   authenticator anyway, as a user choosing 2FA would.
  *
  * Resolves to `{ secret, recoveryCodes, enrolled }`; `secret` is null for a
- * password-only session.
+ * password-only session that did not enrol.
  */
 export async function completeTwoFactor(request, login, {
   label = "fixture user",
   secret = null,
   probePaths = DEFAULT_PROBE_PATHS,
   allowPasswordOnly = process.env.ALLOW_PASSWORD_ONLY_TEST_LOGIN === "1",
+  enrol = false,
 } = {}) {
   if (login?.status !== 200) throw fail(label, "password login failed", login);
 
   if (login.data?.requires2faSetup) {
     await expectProbes(request, label, probePaths, false);
-    const setup = await request("GET", "/auth/2fa/setup");
-    if (setup.status !== 200 || typeof setup.data?.secret !== "string") throw fail(label, "2FA setup", setup);
-    const enabled = await request("POST", "/auth/2fa/enable", { code: totpCode(setup.data.secret) });
-    if (enabled.status !== 200) throw fail(label, "2FA enrolment", enabled);
+    const enrolment = await enrolTotp(request, { label });
     await expectProbes(request, label, probePaths, true);
-    return { secret: setup.data.secret, recoveryCodes: enabled.data?.recoveryCodes ?? [], enrolled: true };
+    return { ...enrolment, enrolled: true };
   }
 
   if (login.data?.requires2fa) {
@@ -94,8 +108,9 @@ export async function completeTwoFactor(request, login, {
   }
 
   if (!allowPasswordOnly) {
-    throw fail(label, "login granted a session without a second factor; mandatory 2FA is not enforced by this API", login);
+    throw fail(label, "login granted a session without a second factor, but this scenario requires 2FA", login);
   }
+  if (enrol) return { ...(await enrolTotp(request, { label })), enrolled: true };
   return { secret: null, recoveryCodes: [], enrolled: false };
 }
 
