@@ -9,7 +9,7 @@ const host = (tag) => ({ children, onPress, testID, disabled }) => React.createE
   { ...testProps(testID), ...(onPress ? { onClick: onPress } : {}), ...(tag === 'button' ? { disabled: !!disabled, type: 'button' } : {}) },
   children,
 );
-export const View = host('div'), Text = host('span'), TouchableOpacity = host('button');
+export const View = host('div'), Text = host('span'), TouchableOpacity = host('button'), ScrollView = host('div');
 export const ActivityIndicator = () => React.createElement('span', null, 'Loading');
 export const RefreshControl = () => null;
 export const TextInput = ({ value, onChangeText, placeholder, testID }) => React.createElement('input', {
@@ -23,13 +23,19 @@ export const StyleSheet = { create: (styles) => styles };
 export const alerts = [];
 export const Alert = { alert(title, message) { alerts.push({ title, message }); } };
 export const useSafeAreaInsets = () => ({ top: 0, bottom: 0, left: 0, right: 0 });
-export const useRouter = () => ({ back() {}, push() {}, replace() {} });
+export const routerCalls = [];
+export const useRouter = () => ({
+  back() { routerCalls.push({ method: 'back' }); },
+  push(href) { routerCalls.push({ method: 'push', href }); },
+  replace(href) { routerCalls.push({ method: 'replace', href }); },
+});
 export const NotificationFeedbackType = { Success: 'success', Error: 'error' };
 export const notificationAsync = async () => {};
 export const useColors = () => new Proxy({}, { get: () => '#123456' });
 export const useAuth = () => ({
   user: { id: 5, clientId: 23, name: 'Mobile Tester', role: 'client_staff' },
-  hasService: (service) => service === 'pattrack',
+  // Entries may set window.patServices to model a client without PATtrack.
+  hasService: (service) => (globalThis.patServices ?? ['pattrack']).includes(service),
 });
 export async function apiFetch(path, options = {}) {
   const response = await fetch(`https://pat-mobile.test${path}`, {
