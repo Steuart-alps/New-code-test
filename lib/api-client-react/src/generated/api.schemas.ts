@@ -936,6 +936,8 @@ export const FireCheckType = {
   extinguishers: 'extinguishers',
   fire_doors: 'fire_doors',
   fire_drill: 'fire_drill',
+  fire_walk: 'fire_walk',
+  alarm_panel: 'alarm_panel',
 } as const;
 
 export type FireSafetyCheckResult = typeof FireSafetyCheckResult[keyof typeof FireSafetyCheckResult];
@@ -1923,6 +1925,9 @@ siteId?: number;
 };
 
 export type GetFireSafetyStatusParams = {
+/**
+ * Use the site's checks and its risk-assessed frequencies.
+ */
 siteId?: number;
 };
 

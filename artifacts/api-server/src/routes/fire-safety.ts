@@ -142,10 +142,16 @@ router.get("/status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const { siteId } = req.query as { siteId?: string };
+  const selectedSiteId = parseSiteId(req.query.siteId);
+  if (selectedSiteId === undefined) return res.status(400).json({ error: "Invalid site" });
+  // The site's control profile sets the cadence, so the caller must be able to
+  // see that site before any of it is returned.
+  const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
-  if (siteId && !isNaN(parseInt(siteId))) {
-    conditions.push(eq(fireSafetyChecksTable.siteId, parseInt(siteId)));
+  if (selectedSiteId != null) {
+    conditions.push(eq(fireSafetyChecksTable.siteId, selectedSiteId));
   }
 
   // Department scoping: status should only reflect checks visible to this user.
@@ -178,17 +184,7 @@ router.get("/status", requireAuth, async (req, res) => {
   const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
     .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
   const frequencySetting = settings.find(row => row.key === "fire_frequency_days")?.value;
-  let siteProfile: unknown = null;
-  if (siteId && !isNaN(parseInt(siteId))) {
-    const [profile] = await db.select({ profile: trackControlProfilesTable.profile })
-      .from(trackControlProfilesTable)
-      .where(and(
-        eq(trackControlProfilesTable.clientId, clientId),
-        eq(trackControlProfilesTable.siteId, parseInt(siteId)),
-        eq(trackControlProfilesTable.module, FIRE_PROFILE_MODULE),
-      )).limit(1);
-    siteProfile = profile?.profile ?? null;
-  }
+  const siteProfile = selectedSiteId == null ? null : await getFireProfile(clientId, selectedSiteId);
   const frequencies = effectiveFireFrequencies(frequencySetting, siteProfile);
   const statuses = CHECK_TYPES.map((checkType) => {
     const frequencyDays = frequencies[checkType];

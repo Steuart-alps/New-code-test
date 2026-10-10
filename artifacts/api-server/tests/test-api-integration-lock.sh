@@ -79,6 +79,7 @@ const directLocked = new Set([
   "test:photo-attachments",
   "test:fix-track-overdue-alerts", "test:track-summary-delivery",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
+  "test:track-controls-mobile",
 ]);
 const runnerLocked = new Set([
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate

@@ -165,6 +165,7 @@ export default function CheckFormScreen() {
       qc.invalidateQueries({ queryKey: ['fire-status'] });
       qc.invalidateQueries({ queryKey: ['water-status'] });
       qc.invalidateQueries({ queryKey: ['hot-tub-status'] });
+      qc.invalidateQueries({ queryKey: ['track-controls'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
       Alert.alert('Logged', `Server outcome: ${response?.result ?? (isFire ? fireResult : isHotTub ? hotResult : waterResult)}.`, [
         { text: 'Done', onPress: () => router.back() },
@@ -266,6 +267,19 @@ export default function CheckFormScreen() {
           {moduleTitle}
         </Text>
       </View>
+      {(isFire || isWater) && (
+        <TouchableOpacity
+          style={[styles.controlsLink, { borderColor: colors.border, backgroundColor: colors.card }]}
+          onPress={() => router.push(`/controls/${type}${siteId ? `?siteId=${siteId}` : ''}` as any)}
+          testID="check-form-site-controls"
+        >
+          <Feather name="book-open" size={16} color={colors.primary} />
+          <Text style={[styles.controlsLinkText, { color: colors.foreground }]}>
+            Site controls, frequencies and history
+          </Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      )}
 
       {/* Check type */}
       <View style={styles.field}>
@@ -573,6 +587,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   moduleBadgeText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  controlsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: -4,
+    marginBottom: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderRadius: 6,
+  },
+  controlsLinkText: { flex: 1, fontSize: 14, fontFamily: 'Inter_500Medium' },
   field: { paddingHorizontal: 16, marginBottom: 20 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 8 },
   input: {

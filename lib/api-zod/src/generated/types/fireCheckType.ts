@@ -15,4 +15,6 @@ export const FireCheckType = {
   extinguishers: 'extinguishers',
   fire_doors: 'fire_doors',
   fire_drill: 'fire_drill',
+  fire_walk: 'fire_walk',
+  alarm_panel: 'alarm_panel',
 } as const;
