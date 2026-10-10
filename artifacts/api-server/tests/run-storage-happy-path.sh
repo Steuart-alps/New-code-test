@@ -42,7 +42,7 @@ node tests/storage-happy-path-fixture.mjs preflight
 pnpm run build
 TEST_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 export API_BASE="http://127.0.0.1:${TEST_PORT}/api"
-NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
 SERVER_PID=$!
 for _ in $(seq 1 45); do
   if curl -sf -m 2 "http://127.0.0.1:${TEST_PORT}/readyz" >/dev/null 2>&1; then break; fi

@@ -42,7 +42,7 @@ trap cleanup EXIT
 psql "$ADMIN_URL" -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$DB_NAME\"" >/dev/null
 node ../../lib/db/bootstrap.mjs >/dev/null
 pnpm run build >/dev/null
-NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs > "${TMPDIR:-/tmp}/${DB_NAME}.log" 2>&1 &
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs > "${TMPDIR:-/tmp}/${DB_NAME}.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 90); do
   if curl -s -m 2 "${API_BASE%/api}/readyz" 2>/dev/null | grep -qv '"starting"'; then break; fi

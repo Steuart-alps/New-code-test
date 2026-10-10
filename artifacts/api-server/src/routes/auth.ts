@@ -6,7 +6,7 @@ import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp"
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
-import { requireAuth } from "../middleware/requireAuth";
+import { passwordOnlyTestLoginAllowed, requireAuth } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
   loginRateLimit,
@@ -192,10 +192,9 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  // Existing integration tests create password-only fixtures for unrelated
-  // modules. Production and the dedicated mandatory-2FA suite use the policy;
-  // legacy test fixtures retain their original login contract.
-  if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
+  // Legacy integration suites that still use password-only fixtures opt in
+  // explicitly (see passwordOnlyTestLoginAllowed); everything else enrols.
+  if (passwordOnlyTestLoginAllowed()) {
     req.session.userId = result.user.id;
     const { passwordHash: _, totpSecret: __, totpRecoveryHash: ___, ...safeUser } = result.user;
     res.json({ user: safeUser, client: result.client, billingLocked: false, services: "all" });
@@ -1040,7 +1039,7 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")) {
+  if (!passwordOnlyTestLoginAllowed()) {
     res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings` });
     return;
   }

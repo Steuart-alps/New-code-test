@@ -16,4 +16,6 @@ if ! ready; then
   for _ in $(seq 1 45); do ready && break; kill -0 "$SERVER_PID" 2>/dev/null || exit 1; sleep 1; done
   ready || { echo "API server did not become ready" >&2; exit 1; }
 fi
-node tests/mandatory-2fa.mjs
+# Mandatory 2FA is enforced: fixtures enrol TOTP and must never accept a
+# password-only session.
+env -u ALLOW_PASSWORD_ONLY_TEST_LOGIN node tests/mandatory-2fa.mjs

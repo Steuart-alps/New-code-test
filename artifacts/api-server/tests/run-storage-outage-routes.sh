@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT
 
 pnpm run build
-NODE_ENV=test OBJECT_STORAGE_TEST_SIGNING_FAILURE=1 PORT="$TEST_PORT" \
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 OBJECT_STORAGE_TEST_SIGNING_FAILURE=1 PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs &
 SERVER_PID=$!
 for _ in $(seq 1 45); do

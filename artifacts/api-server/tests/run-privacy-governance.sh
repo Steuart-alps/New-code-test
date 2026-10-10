@@ -27,7 +27,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No ready API server at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=test OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 90); do
     if healthy; then break; fi

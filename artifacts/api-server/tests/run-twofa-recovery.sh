@@ -47,7 +47,7 @@ if curl -sf -m 2 "$READY_URL" >/dev/null 2>&1; then
 fi
 
 pnpm run build
-NODE_ENV=test ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success \
+NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 ENFORCE_CSRF=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_FILE" TEST_EMAIL_BEHAVIOR=success \
   TEST_EMAIL_REJECT_SUBJECT="Security alert: your two-factor authentication was reset" \
   TEST_EMAIL_REJECT_SUBJECT_OCCURRENCE=2 PORT="$TEST_PORT" \
   node --enable-source-maps ./dist/index.mjs >"$SERVER_LOG" 2>&1 &

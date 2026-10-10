@@ -34,11 +34,13 @@ count="$(psql "$url" -Atc "SELECT count(*) FROM information_schema.tables WHERE 
 test_token_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 node tests/build-fresh-schema.mjs "$build"
 port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+# Fresh-schema suites still sign in with password-only fixtures, so the API
+# opts in to that test-only login (tests/two-factor-fixture.mjs enrols instead).
 # Opt-in production browser policy for real-browser suites: CSRF and mandatory
 # two-factor enrolment stay enforced instead of using the legacy test bypasses.
 # The API's own origin is its public app URL, as in production where it also
 # serves the web build, so same-origin browser requests pass CORS and CSRF.
-server_policy=()
+server_policy=(ALLOW_PASSWORD_ONLY_TEST_LOGIN=1)
 suite_browser=()
 if [ "${FRESH_SCHEMA_BROWSER_POLICY:-}" = "1" ]; then
   server_policy=(ENFORCE_CSRF=1 ENFORCE_MANDATORY_2FA=1 PUBLIC_APP_URL="http://127.0.0.1:$port")
@@ -75,7 +77,7 @@ if [ "$#" -gt 0 ]; then
   done
 else
   NODE_ENV=test API_BASE="http://127.0.0.1:$port/api" node tests/fresh-schema-routes.mjs
-  DATABASE_URL="$url" API_BASE="http://127.0.0.1:$port/api" node tests/module-routes.mjs
+  DATABASE_URL="$url" API_BASE="http://127.0.0.1:$port/api" ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 node tests/module-routes.mjs
 fi
 if grep -Eq '42P01|42703|relation .* does not exist|column .* does not exist|Runtime migrations failed' "$temp/server.log"; then
   echo "Missing database table/column detected in API logs" >&2

@@ -120,6 +120,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 /**
+ * Test-only escape from mandatory 2FA for legacy integration suites whose
+ * fixtures still sign in with a password alone. Their runners opt in with
+ * ALLOW_PASSWORD_ONLY_TEST_LOGIN=1; every other API, including a NODE_ENV=test
+ * one without the opt-in, enforces the policy. ENFORCE_MANDATORY_2FA=1 always
+ * wins. New suites enrol through tests/two-factor-fixture.mjs instead.
+ */
+export function passwordOnlyTestLoginAllowed(): boolean {
+  return process.env.NODE_ENV === "test"
+    && process.env.ALLOW_PASSWORD_ONLY_TEST_LOGIN === "1"
+    && process.env.ENFORCE_MANDATORY_2FA !== "1";
+}
+
+/**
  * Every account that can authenticate must have an enrolled second factor.
  * Staff-roster people are not users and never reach this guard. The setup
  * endpoints and logout remain available so an unenrolled account can finish
@@ -127,7 +140,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
  */
 export async function enforceTwoFactorEnrollment(req: Request, res: Response, next: NextFunction) {
   const user = req.currentUser;
-  if (process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1") {
+  if (passwordOnlyTestLoginAllowed()) {
     next();
     return;
   }

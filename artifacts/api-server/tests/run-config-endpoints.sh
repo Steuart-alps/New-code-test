@@ -39,7 +39,7 @@ fi
 {
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=test TEST_EMAIL_CAPTURE_PATH="$CAPTURE_DIR/emails.jsonl" OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test ENFORCE_MANDATORY_2FA=1 TEST_EMAIL_CAPTURE_PATH="$CAPTURE_DIR/emails.jsonl" OBJECT_STORAGE_TEST_FAKE_USAGE=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 "${API_TEST_READY_TIMEOUT:-180}"); do
     if healthy; then break; fi
@@ -55,4 +55,6 @@ fi
   fi
 }
 
-node tests/config-endpoints.mjs
+# Mandatory 2FA is enforced: fixtures enrol TOTP and must never accept a
+# password-only session.
+env -u ALLOW_PASSWORD_ONLY_TEST_LOGIN node tests/config-endpoints.mjs

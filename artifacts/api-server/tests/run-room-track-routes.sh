@@ -15,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 if ! healthy; then
   pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 30); do healthy && break; sleep 1; done
   healthy || { echo "API did not become ready at $READY_URL" >&2; exit 1; }
