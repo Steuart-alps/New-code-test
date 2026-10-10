@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Settings2, Mail, Send, Bell, CheckCircle2, Globe, RefreshCw, Trash2, Copy, AlertCircle, ExternalLink, CreditCard, Building2, FileText, Download, Users, Plus, X, ChevronDown, ChevronRight, Pencil, ShieldCheck, ShieldOff, KeyRound, Camera, AlertTriangle, Route, ClipboardCheck, Package, HardDrive } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -2439,6 +2440,7 @@ export default function SettingsPage() {
         </form>
 
         {/* Two-Factor Authentication */}
+        {canAdmin && <TwoFactorPolicyCard />}
         <TwoFactorCard key={user?.id ?? "signed-out"} />
         <PasskeyCard />
       </div>
@@ -2446,13 +2448,99 @@ export default function SettingsPage() {
   );
 }
 
+// ── Organisation two-factor requirement (managers only) ─────────────────────
+function TwoFactorPolicyCard() {
+  const { activeClientId, refresh } = useAuth();
+  const { toast } = useToast();
+  const clientApi = useActiveClientApi();
+  const [required, setRequired] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRequired(null);
+    clientApi("/settings")
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+        if (!cancelled) setRequired(data?.requireTwoFactor !== "false");
+      })
+      .catch((err: Error) => {
+        if (!cancelled) toast({ title: "Couldn't load the two-factor setting", description: err.message, variant: "destructive" });
+      });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
+  async function change(next: boolean) {
+    setSaving(true);
+    try {
+      const res = await clientApi("/settings", {
+        method: "PUT",
+        body: JSON.stringify({ requireTwoFactor: next ? "true" : "false" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+      setRequired(data?.requireTwoFactor !== "false");
+      toast({
+        title: next ? "Two-factor authentication is now required" : "Two-factor authentication is now optional",
+        description: next
+          ? "Anyone without an authenticator app will be asked to set one up before they can continue."
+          : "People can sign in with just their password, and can still turn two-factor on for their own account.",
+      });
+      // The signed-in manager may now need to enrol, or may no longer need to.
+      await refresh();
+    } catch (err: any) {
+      toast({ title: "Couldn't change the two-factor setting", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="shadow-lg border-border/50 bg-card mb-6" data-testid="card-two-factor-policy">
+      <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4" /> Two-factor requirement
+        </CardTitle>
+        <CardDescription>
+          Choose whether everyone who signs in to this business must use an authenticator app.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="require-two-factor">Require two-factor authentication</Label>
+            <p className="text-xs text-muted-foreground">
+              {required === false
+                ? "Off: staff can sign in with just their password. Anyone can still turn it on for their own account."
+                : "On: every account must set up an authenticator app before using ComplyTrack."}
+            </p>
+          </div>
+          <Switch
+            id="require-two-factor"
+            checked={required ?? true}
+            disabled={required === null || saving}
+            onCheckedChange={(checked) => void change(checked)}
+            data-testid="switch-require-two-factor"
+          />
+        </div>
+        {required === false && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">
+            Turning this off makes accounts easier to break into if a password is guessed or leaked. We recommend leaving it on.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Two-Factor Authentication card ───────────────────────────────────────────
 export function TwoFactorCard() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, twoFactorRequired } = useAuth();
   const { toast } = useToast();
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
-  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating";
+  type SetupStep = "idle" | "loading-qr" | "scanning" | "verifying" | "regenerating" | "disabling";
   const [step, setStep] = useState<SetupStep>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -2488,7 +2576,7 @@ export function TwoFactorCard() {
   });
 
   useEffect(() => {
-    if (step === "regenerating") passwordInputRef.current?.focus();
+    if (step === "regenerating" || step === "disabling") passwordInputRef.current?.focus();
   }, [step]);
 
   async function startSetup() {
@@ -2549,6 +2637,30 @@ export function TwoFactorCard() {
       await recoveryCodesQuery.refetch();
     } catch (e: any) {
       setError(e.message ?? "Failed to regenerate recovery codes");
+    } finally {
+      setRegenerationPending(false);
+    }
+  }
+
+  async function handleDisable(e: React.FormEvent) {
+    e.preventDefault();
+    if (regenerationPending) return;
+    setError("");
+    setRegenerationPending(true);
+    try {
+      const response = await authenticatedApiFetch("/auth/2fa/disable", {
+        method: "POST",
+        body: JSON.stringify({ password: regeneratePassword }),
+      });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? `Request failed (${response.status})`);
+      setRegeneratePassword("");
+      setRecoveryCodes([]);
+      setStep("idle");
+      toast({ title: "Two-factor authentication turned off" });
+      await refresh();
+    } catch (e: any) {
+      setError(e.message ?? "Failed to turn off two-factor authentication");
     } finally {
       setRegenerationPending(false);
     }
@@ -2641,8 +2753,30 @@ export function TwoFactorCard() {
                 <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("regenerating"); }} data-testid="button-view-regenerate-recovery-codes">
                   <KeyRound className="w-4 h-4" /> View / regenerate recovery codes
                 </Button>
-                <p className="text-xs text-muted-foreground">Two-factor authentication is required for all ComplyTrack user accounts. Contact an administrator if you lose access to your authenticator.</p>
+                {!twoFactorRequired && (
+                  <Button variant="outline" className="rounded-sm gap-2" onClick={() => { setError(""); setStep("disabling"); }} data-testid="button-disable-two-factor">
+                    <ShieldOff className="w-4 h-4" /> Turn off two-factor authentication
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {twoFactorRequired
+                    ? "Your organisation requires two-factor authentication. Contact an administrator if you lose access to your authenticator."
+                    : "Your organisation has made two-factor authentication optional, but we recommend keeping it on."}
+                </p>
               </div>
+            )}
+            {step === "disabling" && (
+              <form onSubmit={handleDisable} className="space-y-3 max-w-sm">
+                <p className="text-sm text-muted-foreground">Enter your password to turn off two-factor authentication. Your recovery codes will stop working.</p>
+                <Input ref={passwordInputRef} type="password" placeholder="Your password" value={regeneratePassword} onChange={e => setRegeneratePassword(e.target.value)} autoFocus disabled={regenerationPending} className="rounded-sm" data-testid="input-disable-two-factor-password" />
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <div className="flex gap-2">
+                  <Button type="submit" variant="destructive" className="rounded-sm" disabled={!regeneratePassword || regenerationPending} data-testid="button-submit-disable-two-factor">
+                    {regenerationPending ? "Turning off…" : "Turn off"}
+                  </Button>
+                  <Button type="button" variant="outline" className="rounded-sm" disabled={regenerationPending} onClick={() => { setStep("idle"); setError(""); setRegeneratePassword(""); }}>Cancel</Button>
+                </div>
+              </form>
             )}
             {step === "regenerating" && (
               <form onSubmit={handleRegenerate} className="space-y-3 max-w-sm">
@@ -2662,7 +2796,11 @@ export function TwoFactorCard() {
           <div className="space-y-4">
             <div className="flex items-center gap-3 px-4 py-3 rounded-sm bg-amber-50 border border-amber-200 text-amber-800 text-sm">
               <ShieldOff className="w-4 h-4 flex-shrink-0" />
-              <span>Two-factor authentication setup is required before using the application.</span>
+              <span>
+                {twoFactorRequired
+                  ? "Two-factor authentication setup is required before using the application."
+                  : "Two-factor authentication is off for your account. It's optional for your organisation, but we recommend turning it on."}
+              </span>
             </div>
 
             {step === "idle" && (

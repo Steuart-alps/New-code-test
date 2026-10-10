@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { auditContext, db } from "@workspace/db";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
+import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
 
 declare global {
@@ -120,7 +121,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 /**
- * Every account that can authenticate must have an enrolled second factor.
+ * Accounts must have an enrolled second factor unless every client they
+ * belong to has turned the requirement off (see lib/twoFactorPolicy).
  * Staff-roster people are not users and never reach this guard. The setup
  * endpoints and logout remain available so an unenrolled account can finish
  * enrollment or leave the session.
@@ -135,7 +137,7 @@ export async function enforceTwoFactorEnrollment(req: Request, res: Response, ne
     next();
     return;
   }
-  if (user.totpEnabled) {
+  if (user.totpEnabled || !(await isTwoFactorRequired(user))) {
     next();
     return;
   }

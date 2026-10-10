@@ -48,6 +48,7 @@
     "test:staff-pin": "bash tests/run-staff-pin.sh",
     "test:staff-attribution": "bash tests/run-staff-attribution.sh",
     "test:mandatory-2fa": "bash tests/run-mandatory-2fa.sh",
+    "test:two-factor-policy": "bash tests/run-two-factor-policy.sh",
     "test:passkey-mandatory-2fa": "node tests/passkey-mandatory-2fa.mjs",
     "test:safe-track-ack-reminders": "bash tests/run-db-workflow.sh tests/safe-track-ack-reminders.mjs",
     "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",

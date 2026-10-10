@@ -37,6 +37,7 @@ import {
 } from "../lib/passkeys";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { getCsrfToken } from "../middleware/csrf";
+import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
 
 const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
@@ -202,6 +203,13 @@ router.post("/auth/login", loginRateLimit, async (req, res) => {
     return;
   }
 
+  // A manager may have made the authenticator optional for their business.
+  if (!(await isTwoFactorRequired(result.user))) {
+    req.session.userId = result.user.id;
+    res.json(await signedInResponse(result.user, result.client));
+    return;
+  }
+
   // New and legacy users receive a setup-only session. They cannot access app
   // routes until the setup endpoint verifies a code from their new authenticator.
   (req.session as any).pending2faSetupUserId = result.user.id;
@@ -269,6 +277,12 @@ router.post("/auth/passkeys/authenticate", loginRateLimit, async (req, res) => {
     if (user.totpEnabled && user.totpSecret) {
       (req.session as any).pending2faUserId = user.id;
       res.json({ requires2fa: true, user: safeUser });
+    } else if (!(await isTwoFactorRequired(user))) {
+      // Password plus passkey is enough where the business has made the
+      // authenticator optional.
+      delete (req.session as any).pending2faUserId;
+      req.session.userId = user.id;
+      res.json({ user: safeUser });
     } else {
       delete (req.session as any).pending2faUserId;
       (req.session as any).pending2faSetupUserId = user.id;
@@ -336,6 +350,23 @@ function getTwoFactorSetupUserId(req: any): number | undefined {
 
 function getPasskeySetupUserId(req: any): number | undefined {
   return req.currentUser?.id ?? req.session?.pending2faSetupUserId;
+}
+
+// Body returned when password login completes without a second factor.
+async function signedInResponse(
+  user: typeof usersTable.$inferSelect,
+  client: unknown,
+) {
+  const { passwordHash: _p, totpSecret: _t, totpRecoveryHash: _r, ...safeUser } = user;
+  let billingLocked = false;
+  let services: "all" | string[] = "all";
+  if (user.clientId != null) {
+    try {
+      billingLocked = await isClientBillingLocked(user.clientId);
+      services = await getEntitledServices(user.clientId);
+    } catch {}
+  }
+  return { user: safeUser, client: client ?? null, billingLocked, services, twoFactorRequired: false };
 }
 
 router.post("/auth/passkeys/registration/options", async (req, res) => {
@@ -423,7 +454,8 @@ router.delete("/auth/passkeys/:id", requireAuth, async (req, res) => {
   const [credential] = await db.select().from(passkeysTable)
     .where(and(eq(passkeysTable.id, passkeyId), eq(passkeysTable.userId, req.currentUser!.id))).limit(1);
   if (!credential) { res.status(404).json({ error: "Passkey not found" }); return; }
-  if (!req.currentUser!.totpEnabled && (await getUserPasskeys(req.currentUser!.id)).length <= 1) {
+  if (!req.currentUser!.totpEnabled && (await getUserPasskeys(req.currentUser!.id)).length <= 1
+    && await isTwoFactorRequired(req.currentUser!)) {
     res.status(400).json({ error: "Add another security method before removing your only passkey" });
     return;
   }
@@ -524,14 +556,39 @@ router.post("/auth/2fa/recover", loginRateLimit, async (req, res) => {
     .where(eq(usersTable.id, result.user.id));
   await db.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${result.user.id}`);
   delete (req.session as any).userId;
+  if (!(await isTwoFactorRequired(result.user))) {
+    // The business has made the authenticator optional, so sign in now; the
+    // user can enrol a new authenticator from Settings whenever they like.
+    req.session.userId = result.user.id;
+    res.json({ ok: true });
+    return;
+  }
   (req.session as any).pending2faSetupUserId = result.user.id;
   res.json({ requires2faSetup: true });
 });
 
-// POST /auth/2fa/disable — verify the user's password then clear TOTP
+// POST /auth/2fa/disable — verify the user's password then clear TOTP. Only
+// allowed where the user's business has made two-factor authentication optional.
 router.post("/auth/2fa/disable", requireAuth, async (req, res) => {
-  res.status(403).json({ error: "Two-factor authentication is required for all user accounts" });
-  return;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.currentUser!.id)).limit(1);
+  if (!user) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (await isTwoFactorRequired(user)) {
+    res.status(403).json({ error: "Your organisation requires two-factor authentication" });
+    return;
+  }
+  if (!user.totpEnabled) { res.status(400).json({ error: "Two-factor authentication is not enabled" }); return; }
+  const { password } = req.body as { password?: string };
+  if (!password) { res.status(400).json({ error: "Password required" }); return; }
+  if (!await verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Incorrect password" }); return;
+  }
+  await db.transaction(async (tx) => {
+    await tx.update(usersTable)
+      .set({ totpSecret: null, totpEnabled: false, totpRecoveryHash: null, updatedAt: new Date() })
+      .where(eq(usersTable.id, user.id));
+    await tx.execute(sql`DELETE FROM totp_recovery_codes WHERE user_id = ${user.id}`);
+  });
+  res.json({ ok: true });
 });
 
 router.post("/auth/logout", (req, res) => {
@@ -577,8 +634,16 @@ router.get("/auth/me", async (req, res) => {
 
   const { totpSecret: _s, ...safeUser } = user;
   const passkeys = await getUserPasskeys(user.id);
+  const twoFactorRequired = await isTwoFactorRequired(user);
   if (!user.totpEnabled) {
-    res.json({ requires2faSetup: true, user: safeUser });
+    if (twoFactorRequired) {
+      res.json({ requires2faSetup: true, user: safeUser });
+      return;
+    }
+    res.json({
+      user: { ...safeUser, recoveryCodesRemaining: 0 },
+      client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
+    });
     return;
   }
   const recoveryCount = await db.execute(sql`
@@ -592,7 +657,7 @@ router.get("/auth/me", async (req, res) => {
   }
   res.json({
     user: { ...safeUser, recoveryCodesRemaining },
-    client, billingLocked, services, passkeyCount: passkeys.length,
+    client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
   });
 });
 
@@ -1040,7 +1105,8 @@ router.post("/auth/mobile-login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")) {
+  if (!(process.env.NODE_ENV === "test" && process.env.ENFORCE_MANDATORY_2FA !== "1")
+    && await isTwoFactorRequired(result.user)) {
     res.json({ requires2faSetup: true, setupUrl: `${getPublicAppUrl().replace(/\/$/, "")}/settings` });
     return;
   }

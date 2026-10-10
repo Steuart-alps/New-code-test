@@ -18,7 +18,7 @@
 - [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
-- [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP before app access; passkeys are optional web sign-in; roster-only people are not auth accounts.
+- [Mandatory account 2FA](mandatory-two-factor.md) — login accounts need TOTP unless every business they belong to set `requireTwoFactor` to false; use isTwoFactorRequired; passkeys are optional web sign-in.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Push-only Drizzle tables](push-only-tables.md) — every pgTable needs runtime CREATE TABLE; Oct 2026 audit found 5 (certificates, password_reset_tokens, two SafeTrack, unused green_machine_reconciliations).
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
