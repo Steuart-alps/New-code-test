@@ -66,6 +66,7 @@
     "test:guidance-register": "bash tests/run-db-workflow.sh tests/guidance-register.mjs",
     "test:daily-checklist-entitlements": "bash tests/run-db-workflow.sh tests/daily-checklist-entitlements.mjs",
     "test:export-attachment-acl": "bash tests/run-db-workflow.sh tests/export-attachment-acl.mjs",
+    "test:export-module-isolation": "node tests/export-module-isolation.mjs",
     "test:pat-export-attachments": "bash tests/run-pat-export-attachments.sh",
     "test:storage-happy-path": "bash tests/run-storage-happy-path.sh",
     "test:private-file-acl": "node tests/private-file-acl.mjs",

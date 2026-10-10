@@ -1709,7 +1709,8 @@ function DataExportCard() {
   async function handleExport() {
     setBusy(true);
     try {
-      const res = await apiFetch("/export");
+      // The ZIP needs the raw response; the JSON helper above would return null.
+      const res = await authenticatedApiFetch("/export");
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as any).error ?? `Export failed (${res.status})`);
@@ -1719,11 +1720,20 @@ function DataExportCard() {
       const a = document.createElement("a");
       a.href = url;
       const date = new Date().toISOString().slice(0, 10);
-      a.download = `complytrack-export-${date}.zip`;
+      const incomplete = res.headers.get("X-Export-Status") === "incomplete";
+      a.download = `complytrack-export-${date}${incomplete ? "-INCOMPLETE" : ""}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      if (incomplete) {
+        const omitted = Number(res.headers.get("X-Export-Omitted-Datasets")) || 0;
+        toast({
+          title: "Export incomplete",
+          description: `${omitted || "Some"} dataset${omitted === 1 ? "" : "s"} could not be exported. The ZIP's export-errors.csv lists what is missing and why; try again later or contact support.`,
+          variant: "destructive",
+        });
+      }
     } catch (err: any) {
       toast({ title: "Export failed", description: err.message, variant: "destructive" });
     } finally {
