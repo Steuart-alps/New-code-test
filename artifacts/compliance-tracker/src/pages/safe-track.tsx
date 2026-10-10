@@ -22,6 +22,7 @@ import {
 import { SignaturePad } from "@/components/signature-pad";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { useToast } from "@/hooks/use-toast";
+import { useLiveAcknowledgements } from "@/hooks/use-live-acknowledgements";
 import { cn } from "@/lib/utils";
 import { compareTrainingExpiry, getTrainingExpiry } from "@/lib/training-expiry";
 import { INDUCTION_SECTIONS, parseChecklist, renderInductionHtml, type InductionChecklist, type SectionKey, type ChecklistItem } from "@/lib/induction-print";
@@ -106,6 +107,9 @@ function AcknowledgementsDialog({
     }).finally(() => setLoading(false));
   }, [open, docId, sub]);
 
+  // Pick up signatures staff record on their own devices while this is open.
+  useLiveAcknowledgements(open && !loading ? `/safe-track/${sub}/${docId}/acknowledgements` : null, acks, setAcks);
+
   const ackedIds = new Set(acks.map(a => a.staff_roster_id));
   const ackedMap = Object.fromEntries(acks.map(a => [a.staff_roster_id, a]));
 
@@ -114,7 +118,8 @@ function AcknowledgementsDialog({
   const unacked = visibleStaff.filter(s => !ackedIds.has(s.id));
   const acked   = visibleStaff.filter(s =>  ackedIds.has(s.id));
   const totalAcked = staff.filter(s => ackedIds.has(s.id)).length;
-  const anyChecked = Object.values(checked).some(Boolean);
+  // Someone ticked here may have since signed on their own device.
+  const anyChecked = staff.some(s => checked[s.id] && !ackedIds.has(s.id));
 
   function toggleAll() {
     if (unacked.every(s => checked[s.id])) {
@@ -258,7 +263,9 @@ function AcknowledgementsDialog({
                             {(s.job_title || s.department) && (
                               <p className="text-xs text-muted-foreground">{[s.job_title, s.department].filter(Boolean).join(" · ")}</p>
                             )}
-                            {a?.signature && <p className="text-xs text-muted-foreground italic">Signed: {a.signature}</p>}
+                            {a?.signature && (a.signature.startsWith("data:image/")
+                              ? <img src={a.signature} alt={`Signature of ${s.name}`} className="h-8 mt-1 bg-white rounded border" />
+                              : <p className="text-xs text-muted-foreground italic">Signed: {a.signature}</p>)}
                           </div>
                           <span className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1">
                             <Clock className="w-3 h-3" />

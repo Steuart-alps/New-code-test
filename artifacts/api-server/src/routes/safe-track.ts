@@ -187,10 +187,22 @@ function ackListRoute(table: any, docType: string) {
     const [doc] = await db.select({ id: table.id }).from(table)
       .where(and(eq(table.id, id), eq(table.clientId, clientId))).limit(1);
     if (!doc) return res.status(404).json({ error: "Not found" });
+    // ?sinceId=<ack id> lets an open dialog poll for new rows without
+    // re-downloading every drawn signature. The two-minute overlap covers rows
+    // whose transaction started earlier but committed later; callers dedupe by
+    // id. An unknown id falls back to the full list.
+    const sinceId = parseInt(String(req.query.sinceId ?? ""));
+    const since = Number.isInteger(sinceId) && sinceId > 0
+      ? sql`AND acknowledged_at >= COALESCE((
+          SELECT acknowledged_at - interval '2 minutes' FROM safe_track_acknowledgements
+          WHERE id = ${sinceId} AND client_id = ${clientId}
+        ), '-infinity'::timestamp)`
+      : sql``;
     const result = await db.execute(sql`
       SELECT id, staff_roster_id, staff_name, signature, acknowledged_at
       FROM safe_track_acknowledgements
       WHERE document_id = ${id} AND document_type = ${docType} AND client_id = ${clientId}
+      ${since}
       ORDER BY acknowledged_at ASC
     `);
     res.json(result.rows);

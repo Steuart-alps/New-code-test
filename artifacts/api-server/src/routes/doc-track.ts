@@ -266,6 +266,17 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
   // Verify document belongs to this client
   if (!await canAccessDocument(clientId, docId, getActiveDepartmentId(req))) return res.status(404).json({ error: "Not found" });
 
+  // ?sinceId=<ack id> lets an open dialog poll for new or renewed rows without
+  // re-downloading every drawn signature. The two-minute overlap covers rows
+  // whose transaction started earlier but committed later; callers merge by
+  // id. An unknown id falls back to the full list.
+  const sinceId = parseInt(String(req.query.sinceId ?? ""));
+  const since = Number.isInteger(sinceId) && sinceId > 0
+    ? sql`AND a.acknowledged_at >= COALESCE((
+        SELECT acknowledged_at - interval '2 minutes' FROM doc_acknowledgements
+        WHERE id = ${sinceId} AND client_id = ${clientId}
+      ), '-infinity'::timestamp)`
+    : sql``;
   const result = await db.execute(sql`
     SELECT a.id, a.document_id, a.staff_roster_id, a.staff_name, a.signature,
            a.acknowledged_at, a.train_track_record_id, tr.expiry_date,
@@ -280,6 +291,7 @@ router.get("/documents/:id/acknowledgements", requireAuth, async (req, res) => {
     LEFT JOIN train_track_records tr
       ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
     WHERE a.document_id = ${docId} AND a.client_id = ${clientId}
+    ${since}
     ORDER BY a.staff_name ASC
   `);
 
