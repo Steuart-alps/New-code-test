@@ -10,6 +10,7 @@
     "test:kitchen-temperature-actions": "bash tests/run-fresh-schema.sh tests/kitchen-temperature-actions.mjs",
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
+    "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
