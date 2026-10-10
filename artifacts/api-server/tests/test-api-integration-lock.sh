@@ -105,7 +105,7 @@ const runnerLocked = new Set([
 const freshSchema = new Set([
   "test:schema:fresh", "test:kitchen-mobile-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
-  "test:kitchen-inspection-export", "test:content-filter",
+  "test:kitchen-inspection-export", "test:kitchen-cleaning-export", "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
   "test:fix-track-contractor-approval", // delegates each suite to run-fresh-schema.sh
@@ -241,7 +241,7 @@ const pureEntrypoints = new Set([
 const helperModules = new Set([
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
-  "fixture-ownership.mjs", "storage-acl-session.mjs",
+  "fixture-ownership.mjs", "storage-acl-session.mjs", "pdf-text.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];
