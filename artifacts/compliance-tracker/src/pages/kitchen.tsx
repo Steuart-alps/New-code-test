@@ -2071,7 +2071,7 @@ export default function KitchenPage() {
             </div>
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          <div className="flex flex-wrap items-center gap-3"><Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>{activeTab === "diary" && canAdmin && <ConfigDialog />}</div>
         </div>
 
         {/* Check status cards */}

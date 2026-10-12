@@ -742,7 +742,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "kitchen", label: "KitchenTrack" },
   { key: "fire", label: "FireTrack" },
   { key: "legionella", label: "LegionellaTrack" },
-  { key: "pool", label: "AquaTrack" },
+  { key: "pool", label: "AquaTrack (water tests)" },
   { key: "pat", label: "PATtrack" },
   { key: "pest", label: "PestTrack" },
   { key: "fix", label: "FixTrack" },
@@ -755,7 +755,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "tree", label: "TreeTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
-  { key: "swim", label: "SwimTrack" },
+  { key: "swim", label: "AquaTrack (sessions & safety)" },
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
@@ -1868,7 +1868,7 @@ function InvoicesCard() {
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
-  pool_check:        "PoolTrack — pool water tests",
+  pool_check:        "AquaTrack — pool water tests",
   hot_tub_check:     "TubTrack — hot tub checks",
   legionella_check:  "LegionellaTrack — water safety checks",
   tree_inspection:   "TreeTrack — tree inspections",
@@ -1882,10 +1882,10 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
   green_pre_use_check:       "GreenTrack — pre-use checks",
   green_service:             "GreenTrack — service records",
   green_defect:              "GreenTrack — defect reports",
-  swim_session:              "SwimTrack — pool sessions",
-  swim_surveillance_check:   "SwimTrack — surveillance checks",
-  swim_first_aid_check:      "SwimTrack — first-aid checks",
-  swim_incident:             "SwimTrack — incident records",
+  swim_session:              "AquaTrack — pool sessions",
+  swim_surveillance_check:   "AquaTrack — surveillance checks",
+  swim_first_aid_check:      "AquaTrack — first-aid checks",
+  swim_incident:             "AquaTrack — incident records",
 };
 
 function PhotoRequirementsCard() {
