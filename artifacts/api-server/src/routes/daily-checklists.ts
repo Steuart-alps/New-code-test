@@ -5,6 +5,7 @@ import { dailyChecklistSubmissionsTable, sitesTable } from "@workspace/db/schema
 import { eq, and, or, isNull, inArray, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, isEntitled, requireAnyEntitlement, SERVICES } from "../lib/services";
+import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
@@ -100,8 +101,8 @@ router.get("/daily-checklists/history", requireAuth, async (req, res) => {
     return;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const from = (req.query.from as string) || (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); })();
+  const today = await getAccountToday(clientId);
+  const from = (req.query.from as string) || addCalendarDays(today, -30);
   const to = (req.query.to as string) || today;
   const siteId = req.query.siteId ? Number(req.query.siteId) : null;
   const type = req.query.type as "am" | "pm" | undefined;
@@ -178,7 +179,7 @@ router.get("/daily-checklists/overview", requireAuth, async (req, res) => {
     return;
   }
 
-  const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
+  const date = (req.query.date as string) || await getAccountToday(clientId);
   if (!validateDate(date)) {
     res.status(400).json({ error: "Invalid date format, expected YYYY-MM-DD" });
     return;
