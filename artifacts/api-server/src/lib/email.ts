@@ -4,10 +4,36 @@ import { appSettingsTable } from "@workspace/db/schema";
 import { randomUUID } from "crypto";
 import { appendFile } from "node:fs/promises";
 
+/** Upper bound for one email provider request (a hung connection fails the send). */
+const RESEND_REQUEST_TIMEOUT_MS = 15_000;
+
 function getResend(apiKeyOverride?: string | null) {
   const apiKey = apiKeyOverride?.trim() || process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
-  return new Resend(apiKey);
+  const resend = new Resend(apiKey);
+  // The SDK sends every request through fetchRequest(path, init) without a
+  // timeout. Give each one an abort deadline; the SDK reports the abort as an
+  // error result, which the senders below turn into a failed send.
+  const client = resend as unknown as { fetchRequest?: (path: string, init?: RequestInit) => Promise<unknown> };
+  const fetchRequest = client.fetchRequest?.bind(resend);
+  if (fetchRequest) {
+    client.fetchRequest = (path, init = {}) =>
+      fetchRequest(path, { ...init, signal: init.signal ?? AbortSignal.timeout(RESEND_REQUEST_TIMEOUT_MS) });
+  }
+  return resend;
+}
+
+/**
+ * Configuration problems that stop system email reaching customers. Fixed,
+ * non-secret strings: reported at start-up and in /readyz details.
+ */
+export function describeEmailConfigurationIssues(): string[] {
+  const issues: string[] = [];
+  if (!process.env.RESEND_API_KEY?.trim()) issues.push("RESEND_API_KEY is not set: emails cannot be sent");
+  if (!process.env.RESEND_FROM_EMAIL?.trim()) {
+    issues.push("RESEND_FROM_EMAIL is not set: mail is sent from onboarding@resend.dev, which only delivers to the Resend account owner");
+  }
+  return issues;
 }
 
 export async function getEmailSettings(clientId?: number | null): Promise<Record<string, string>> {
