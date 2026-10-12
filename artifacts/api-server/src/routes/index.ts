@@ -57,6 +57,7 @@ import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
 import analyticsRouter from "./analytics";
+import registersRouter from "./registers";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
@@ -136,6 +137,8 @@ router.use("/pat-track",  requireAuth, requireService("pattrack"),  patTrackRout
 router.use("/pest-track", requireAuth, requireService("pesttrack"), pestTrackRouter);
 router.use("/premises-track", requireAuth, requireService("premisestrack"), premisesTrackRouter);
 router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
+// Allergen (KitchenTrack-gated inside), COSHH and asbestos registers.
+router.use("/registers", requireAuth, registersRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);
