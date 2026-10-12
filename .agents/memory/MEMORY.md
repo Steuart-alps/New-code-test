@@ -18,7 +18,7 @@
 - [Artifact API request rules](artifact-api-request-rules.md) — hand-written artifact fetches need the `/api` base prefix; use Drizzle `inArray` rather than interpolated arrays in SQL `ANY`.
 - [Subagent delegation pitfalls](subagent-delegation-pitfalls.md) — subagents skip getClientId/dept-scoping/shared apiFetch; spell out tenant rules in tasks, then architect-review.
 - [Mobile 2FA login](mobile-2fa.md) — stateless: /auth/mobile-login takes optional code; client re-submits email+password+code; recovery code disables 2FA.
-- [Mandatory account 2FA](mandatory-two-factor.md) — every login account needs TOTP before app access; passkeys are optional web sign-in; roster-only people are not auth accounts.
+- [Mandatory account 2FA](mandatory-two-factor.md) — login accounts need TOTP unless every business they belong to set `requireTwoFactor` to false; use isTwoFactorRequired; passkeys are optional web sign-in.
 - [Schema drift](schema-drift.md) — live tables can differ from runtimeMigrations CREATE TABLE text (IF NOT EXISTS won't fix drift); check real columns or route code first.
 - [Push-only Drizzle tables](push-only-tables.md) — every pgTable needs runtime CREATE TABLE; Oct 2026 audit found 5 (certificates, password_reset_tokens, two SafeTrack, unused green_machine_reconciliations).
 - [Task queue lags codebase](task-queue-lag.md) — most queued tasks already built; verify in code before implementing, brief subagents to audit first.
@@ -56,6 +56,7 @@
 - [Contractor calendar semantics](contractor-calendar.md) — date-only targets are all-day events; revised invitations retain identity and resends still require approval.
 - [Contractor warning windows](contractor-warning-windows.md) — contractor expiry reminders use a separate client setting; absent or blank means 30 days, while legacy DBS age stays fixed.
 - [Storage overage pricing](storage-overage-pricing.md) — include 1 GiB per base subscription; price excess from the provider rate (STORAGE_PROVIDER_USD_PER_GIB_MONTH, default set from Replit's rate) plus a 20% ALPS margin.
+- [Storage usage snapshot](storage-usage-snapshot.md) — Settings totals come from a per-object ledger (upsert/tombstone, never deltas) reconciled with provider ACL listings; lifecycle writes beat stale listings.
 - [Postgres row locking](postgres-row-locking.md) — joined route transactions must scope FOR UPDATE to the base table when nullable joins are present.
 - [Approval refresh storage fallback](approval-refresh-storage.md) — scope approval state by user/client; use localStorage, then scoped BroadcastChannel, then in-memory same-tab continuity.
 - [Cross-module action authorization](linked-action-integrity.md) — generic action endpoints must honor the linked record's access boundary, not just their own tenant checks.

@@ -360,6 +360,7 @@ export default function PatScreen() {
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>Test date</Text>
             <TextInput
+              testID="pat-test-date"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={testDate}
               onChangeText={setTestDate}
@@ -374,6 +375,7 @@ export default function PatScreen() {
               Next due date
             </Text>
             <TextInput
+              testID="pat-next-test-date"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={nextTestDate}
               onChangeText={setNextTestDate}
@@ -388,6 +390,7 @@ export default function PatScreen() {
               Tested by
             </Text>
             <TextInput
+              testID="pat-tested-by"
               style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={testedBy}
               onChangeText={setTestedBy}
@@ -402,6 +405,7 @@ export default function PatScreen() {
               Notes <Text style={{ color: colors.mutedForeground }}>(optional)</Text>
             </Text>
             <TextInput
+              testID="pat-notes"
               style={[styles.input, styles.textArea, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card }]}
               value={notes}
               onChangeText={setNotes}

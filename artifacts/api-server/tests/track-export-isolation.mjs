@@ -55,8 +55,19 @@ function zipCsv(path, filename) {
 async function exportZip(request, path) {
   const response = await fetch(`${BASE}/export`, { headers: { cookie: request.cookie() } });
   check("download tenant export", response.status === 200, `got ${response.status}`);
+  check("export reports itself complete", response.headers.get("x-export-status") === "complete",
+    `got ${response.headers.get("x-export-status")}`);
   await writeFile(path, Buffer.from(await response.arrayBuffer()));
-  return execFileSync("unzip", ["-Z1", path], { encoding: "utf8" }).split("\n");
+  const entries = execFileSync("unzip", ["-Z1", path], { encoding: "utf8" }).split("\n");
+  // Every module, including those after FireTrack and LegionellaTrack, is
+  // written and none is listed as omitted.
+  for (const file of ["staff-roster/staff.csv", "privacy-governance.json", "export-errors.csv", "README.txt"]) {
+    check(`export contains ${file}`, entries.includes(file));
+  }
+  const errors = zipCsv(path, "export-errors.csv");
+  check("export-errors.csv lists no omitted datasets", errors === "dataset,reason\n", errors);
+  check("README marks the export complete", zipCsv(path, "README.txt").includes("Status: complete"));
+  return entries;
 }
 
 async function main() {

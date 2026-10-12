@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
+import { respondObjectStorageDownloadUnavailable } from "../lib/objectStorageUnavailable";
 import { recordPublicLinkAccess } from "../lib/publicLinkEvidence";
 
 const router = Router();
@@ -273,7 +274,18 @@ router.get("/:token/documents/:docId/download", async (req, res) => {
     if (!row) return res.status(404).json({ error: "Not found" });
     if (!row.object_path) return res.status(404).json({ error: "No file attached" });
 
-    const downloadUrl = await storage.getSignedDownloadURL(row.object_path, 900, undefined, client.id);
+    let downloadUrl: string;
+    try {
+      downloadUrl = await storage.getSignedDownloadURL(row.object_path, 900, undefined, client.id);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError || err instanceof ObjectOwnershipError) {
+        req.log.warn({ err, clientId: client.id, documentType: parsedType.data, documentId: docId }, "Public sign-off document file unavailable");
+        return res.status(404).json({ error: "Document file not found" });
+      }
+      return respondObjectStorageDownloadUnavailable(req, res, err, "Public sign-off document download", {
+        clientId: client.id, documentType: parsedType.data, documentId: docId,
+      });
+    }
     res.json({ downloadUrl, fileName: row.file_name });
   } catch (err: any) {
     req.log?.error({ err }, "Public sign-off download URL generation failed");
@@ -329,65 +341,72 @@ router.post("/:token/acknowledge", async (req, res) => {
     if (!doc) return res.status(404).json({ error: "Document not found" });
 
     // Current acknowledgements are idempotent. Expired annual acknowledgements
-    // can be signed again and will replace the stale TrainTrack link.
-    const existing = await db.execute(sql`
-      SELECT a.id,
-             CASE
-               WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
-               WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
-               ELSE true
-             END AS is_current
-      FROM doc_acknowledgements a
-      LEFT JOIN train_track_records tr
-        ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
-      WHERE a.document_id = ${documentId}
-        AND a.client_id = ${client.id}
-        AND a.staff_roster_id = ${staffRosterId}
-      LIMIT 1
-    `);
-    const existingAck = (existing.rows ?? [])[0] as any;
-    if (existingAck?.is_current) {
-      return res.status(200).json({ alreadySigned: true });
-    }
+    // can be signed again and will replace the stale TrainTrack link. Locking
+    // the staff row serializes concurrent submissions for that staff member,
+    // so a double tap records one acknowledgement and one TrainTrack record.
+    const created = await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        SELECT id FROM staff_roster WHERE id = ${staffRosterId} AND client_id = ${client.id} FOR UPDATE
+      `);
+      const existing = await tx.execute(sql`
+        SELECT a.id,
+               CASE
+                 WHEN a.train_track_record_id IS NOT NULL AND tr.id IS NULL THEN false
+                 WHEN tr.expiry_date IS NOT NULL AND tr.expiry_date < CURRENT_DATE THEN false
+                 ELSE true
+               END AS is_current
+        FROM doc_acknowledgements a
+        LEFT JOIN train_track_records tr
+          ON tr.id = a.train_track_record_id AND tr.client_id = a.client_id
+        WHERE a.document_id = ${documentId}
+          AND a.client_id = ${client.id}
+          AND a.staff_roster_id = ${staffRosterId}
+        LIMIT 1
+      `);
+      const existingAck = (existing.rows ?? [])[0] as any;
+      if (existingAck?.is_current) return null;
 
-    const today = new Date().toISOString().split("T")[0];
-    const signatureValue = signature ?? typedName ?? null;
+      const today = new Date().toISOString().split("T")[0];
+      const signatureValue = signature ?? typedName ?? null;
 
-    // Create TrainTrack signoff record
-    const trainResult = await db.execute(sql`
-      INSERT INTO train_track_records
-        (client_id, site_id, record_type, staff_name, document_title,
-         document_type, completed_date, expiry_date, notes, signature)
-      VALUES
-        (${client.id}, ${doc.site_id ?? null}, 'signoff', ${staffName},
-         ${doc.title}, ${doc.category}, ${today}::date,
-          ${doc.annual_acknowledgement ? sql`(${today}::date + interval '1 year')::date` : sql`NULL::date`},
-         ${"Document acknowledgement (staff self-sign)"},
-         ${signatureValue})
-      RETURNING id
-    `);
-    const trainId = ((trainResult.rows ?? [])[0] as any)?.id ?? null;
+      // Create TrainTrack signoff record
+      const trainResult = await tx.execute(sql`
+        INSERT INTO train_track_records
+          (client_id, site_id, record_type, staff_name, document_title,
+           document_type, completed_date, expiry_date, notes, signature)
+        VALUES
+          (${client.id}, ${doc.site_id ?? null}, 'signoff', ${staffName},
+           ${doc.title}, ${doc.category}, ${today}::date,
+            ${doc.annual_acknowledgement ? sql`(${today}::date + interval '1 year')::date` : sql`NULL::date`},
+           ${"Document acknowledgement (staff self-sign)"},
+           ${signatureValue})
+        RETURNING id
+      `);
+      const trainId = ((trainResult.rows ?? [])[0] as any)?.id ?? null;
 
-    const ackResult = existingAck
-      ? await db.execute(sql`
-          UPDATE doc_acknowledgements
-          SET staff_name = ${staffName},
-              signature = ${signatureValue},
-              train_track_record_id = ${trainId},
-              acknowledged_at = now()
-          WHERE id = ${existingAck.id} AND client_id = ${client.id}
-          RETURNING id, acknowledged_at
-        `)
-      : await db.execute(sql`
-          INSERT INTO doc_acknowledgements
-            (document_id, client_id, staff_roster_id, staff_name, signature, train_track_record_id)
-          VALUES
-            (${documentId}, ${client.id}, ${staffRosterId}, ${staffName},
-             ${signatureValue}, ${trainId})
-          RETURNING id, acknowledged_at
-        `);
+      const ackResult = existingAck
+        ? await tx.execute(sql`
+            UPDATE doc_acknowledgements
+            SET staff_name = ${staffName},
+                signature = ${signatureValue},
+                train_track_record_id = ${trainId},
+                acknowledged_at = now()
+            WHERE id = ${existingAck.id} AND client_id = ${client.id}
+            RETURNING id, acknowledged_at
+          `)
+        : await tx.execute(sql`
+            INSERT INTO doc_acknowledgements
+              (document_id, client_id, staff_roster_id, staff_name, signature, train_track_record_id)
+            VALUES
+              (${documentId}, ${client.id}, ${staffRosterId}, ${staffName},
+               ${signatureValue}, ${trainId})
+            RETURNING id, acknowledged_at
+          `);
+      return (ackResult.rows ?? [])[0];
+    });
 
-    res.status(201).json((ackResult.rows ?? [])[0]);
+    if (!created) return res.status(200).json({ alreadySigned: true });
+    res.status(201).json(created);
   } catch (err: any) {
     req.log?.error({ err }, "Public sign-off acknowledgement failed");
     res.status(500).json({ error: "Server error" });

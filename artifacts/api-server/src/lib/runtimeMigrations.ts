@@ -648,6 +648,42 @@ export async function runRuntimeMigrations() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_tokens_expiry" ON "storage_download_tokens" ("expires_at")`);
+    // Retained-storage usage ledger and per-tenant reconciliation snapshots
+    // (lib/storageUsageSnapshot.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_objects" (
+        "object_path" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "size_bytes" bigint NOT NULL,
+        "present" boolean NOT NULL,
+        "changed_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_usage_objects_size_nonnegative" CHECK ("size_bytes" >= 0)
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_objects_tenant" ON "storage_usage_objects" ("client_id", "present")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_pending" (
+        "id" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "started_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_pending_tenant" ON "storage_usage_pending" ("client_id", "started_at")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_snapshots" (
+        "client_id" integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+        "reconciled_at" timestamptz,
+        "used_bytes" bigint NOT NULL DEFAULT 0,
+        "object_count" integer NOT NULL DEFAULT 0,
+        "drift_bytes" bigint NOT NULL DEFAULT 0,
+        "drift_objects" integer NOT NULL DEFAULT 0,
+        "last_drift_at" timestamptz,
+        "last_failed_at" timestamptz,
+        "refresh_lease_token" text,
+        "refresh_lease_until" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);
@@ -1262,6 +1298,7 @@ export async function runRuntimeMigrations() {
       )
     `);
     await migrateDoctrackSafetrackMerge();
+    await restoreDoctrackSafetrackCopyDepartments();
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
     await migrateTrackActions();
@@ -4437,7 +4474,10 @@ async function migrateTrackControlProfiles() {
 // Copies existing safe_risk_assessments, safe_sops, and safe_handbook rows into
 // doc_track_documents (which already has the matching categories).  Uses a
 // migrated_doc_id tracking column on each source table so the migration is
-// fully idempotent and can be re-run safely.
+// fully idempotent and can be re-run safely.  Each copy keeps its source's
+// effective department (its own department, else its site's) so a
+// department-scoped SafeTrack document never becomes visible to every staff
+// member on the public sign-off link.
 async function migrateDoctrackSafetrackMerge() {
   // 1. Add tracking columns to source tables.
   await db.execute(sql`ALTER TABLE safe_risk_assessments ADD COLUMN IF NOT EXISTS migrated_doc_id integer`);
@@ -4446,7 +4486,14 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 2. Migrate risk assessments.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_risk_assessments WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_risk_assessments d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const ra of (rows.rows ?? []) as any[]) {
       const desc = [
         ra.hazard           ? `Hazard: ${ra.hazard}` : null,
@@ -4458,12 +4505,12 @@ async function migrateDoctrackSafetrackMerge() {
 
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${ra.client_id}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
+          (${ra.client_id}, ${ra.effective_department ?? null}, ${ra.site_id}, ${ra.title ?? "Untitled"}, 'risk_assessment', ${desc},
            ${ra.object_path ?? null}, ${ra.file_name ?? null}, ${ra.file_size ?? null}, ${ra.mime_type ?? null},
            ${ra.requires_acknowledgement ?? false}, ${ra.reviewed_by ?? null}, ${ra.review_date ?? null},
            ${ra.next_review_date ?? null}, ${ra.status ?? "active"}, ${ra.created_at ?? sql`now()`}, ${ra.updated_at ?? sql`now()`})
@@ -4478,17 +4525,24 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 3. Migrate SOPs.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_sops WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, COALESCE(dep.name, site_dep.name) AS effective_department
+      FROM safe_sops d
+      LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const sop of (rows.rows ?? []) as any[]) {
       const desc = [sop.content || null, sop.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${sop.client_id}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
+          (${sop.client_id}, ${sop.effective_department ?? null}, ${sop.site_id ?? null}, ${sop.title ?? "Untitled"}, 'sop', ${desc},
            ${sop.object_path ?? null}, ${sop.file_name ?? null}, ${sop.file_size ?? null}, ${sop.mime_type ?? null},
            ${sop.requires_acknowledgement ?? false}, ${sop.reviewed_by ?? null}, ${sop.review_date ?? null},
            ${sop.next_review_date ?? null}, ${sop.status ?? "active"}, ${sop.created_at ?? sql`now()`}, ${sop.updated_at ?? sql`now()`})
@@ -4503,17 +4557,23 @@ async function migrateDoctrackSafetrackMerge() {
 
   // 4. Migrate handbook entries.
   {
-    const rows = await db.execute(sql`SELECT * FROM safe_handbook WHERE migrated_doc_id IS NULL`);
+    const rows = await db.execute(sql`
+      SELECT d.*, site_dep.name AS effective_department
+      FROM safe_handbook d
+      LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+      LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+      WHERE d.migrated_doc_id IS NULL
+    `);
     for (const hb of (rows.rows ?? []) as any[]) {
       const desc = [hb.content || null, hb.notes || null].filter(Boolean).join("\n") || null;
       const ins = await db.execute(sql`
         INSERT INTO doc_track_documents
-          (client_id, site_id, title, category, description,
+          (client_id, department, site_id, title, category, description,
            object_path, file_name, file_size, mime_type,
            requires_acknowledgement, reviewed_by, review_date,
            next_review_date, status, created_at, updated_at)
         VALUES
-          (${hb.client_id}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
+          (${hb.client_id}, ${hb.effective_department ?? null}, ${hb.site_id ?? null}, ${hb.title ?? "Untitled"}, 'handbook', ${desc},
            ${hb.object_path ?? null}, ${hb.file_name ?? null}, ${hb.file_size ?? null}, ${hb.mime_type ?? null},
            ${hb.requires_acknowledgement ?? false}, ${hb.reviewed_by ?? null}, ${hb.review_date ?? null},
            ${hb.next_review_date ?? null}, ${hb.status ?? "active"}, ${hb.created_at ?? sql`now()`}, ${hb.updated_at ?? sql`now()`})
@@ -4591,6 +4651,67 @@ async function migrateDoctrackSafetrackMerge() {
       `);
     }
   }
+}
+
+/**
+ * One-off repair: DocTrack copies made by migrateDoctrackSafetrackMerge before
+ * it carried departments have department NULL, which the public sign-off link
+ * treats as "everyone". Give each such copy its source's current effective
+ * department (its own, else its site's). Only that column of copies still NULL
+ * is written; nothing is deleted, and copies whose source is global stay
+ * global. Runs once, recorded in runtime_migration_progress, so a manager who
+ * later makes a copy global on purpose is not overridden on the next boot.
+ * Returns the number of copies restored, or null when it had already run.
+ */
+const SAFETRACK_COPY_DEPARTMENTS = "doctrack_safetrack_copy_departments_v1";
+
+export async function restoreDoctrackSafetrackCopyDepartments(): Promise<number | null> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  const restored = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`INSERT INTO runtime_migration_progress (name)
+      VALUES (${SAFETRACK_COPY_DEPARTMENTS}) ON CONFLICT (name) DO NOTHING RETURNING name`);
+    if (claimed.rows.length === 0) return null;
+    const updated = await tx.execute(sql`
+      WITH sources AS (
+        SELECT d.migrated_doc_id AS copy_id, d.client_id, 'risk_assessment'::text AS category,
+               COALESCE(dep.name, site_dep.name) AS department
+        FROM safe_risk_assessments d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'sop'::text, COALESCE(dep.name, site_dep.name)
+        FROM safe_sops d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'handbook'::text, site_dep.name
+        FROM safe_handbook d
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+      )
+      UPDATE doc_track_documents c
+      SET department = sources.department
+      FROM sources
+      WHERE c.id = sources.copy_id
+        AND c.client_id = sources.client_id
+        AND c.category = sources.category
+        AND c.department IS NULL
+        AND sources.department IS NOT NULL
+      RETURNING c.id
+    `);
+    return updated.rows.length;
+  });
+  if (restored !== null) logger.info({ restored }, "Restored departments on SafeTrack copies in DocTrack");
+  return restored;
 }
 
 /**

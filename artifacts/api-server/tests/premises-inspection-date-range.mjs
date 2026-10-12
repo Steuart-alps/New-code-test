@@ -37,6 +37,9 @@ async function inspection(request, date, area) {
 
 const firstTenant = await tenant("first");
 const otherTenant = await tenant("other");
+// Intentionally historical: inclusive range boundaries (and the non-leap
+// 2026-02-29 rejection below) are the subject. Owners create these rows and
+// only read them back, so keep the dates fixed rather than relative to today.
 await inspection(firstTenant, "2026-01-31", "before range");
 await inspection(firstTenant, "2026-02-01", "inclusive first day");
 await inspection(firstTenant, "2026-02-28", "inclusive last day");

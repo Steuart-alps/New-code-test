@@ -7,5 +7,8 @@
  */
 
 export type GetFireSafetyStatusParams = {
+/**
+ * Use the site's checks and its risk-assessed frequencies.
+ */
 siteId?: number;
 };

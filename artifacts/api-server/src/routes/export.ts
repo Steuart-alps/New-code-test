@@ -8,6 +8,10 @@
  * Attachments stored by supported modules are bundled when they can be safely
  * read from configured private object storage. A manifest records omissions
  * so one stale upload never prevents a client receiving its export.
+ *
+ * Each dataset is queried on its own. One that fails is left out and named in
+ * export-errors.csv, and the README, file name and X-Export-Status header mark
+ * the archive incomplete, so it never cuts short the modules after it.
  */
 import { Router } from "express";
 import kitchenInspectionExport from "./kitchen-inspection-export";
@@ -133,16 +137,6 @@ function escapeCell(v: unknown): string {
   return s;
 }
 
-function rowsToCsv(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
-  const lines = [headers.join(",")];
-  for (const row of rows) {
-    lines.push(headers.map((h) => escapeCell(rewriteExportReference(row[h], exportContext.getStore()))).join(","));
-  }
-  return lines.join("\n") + "\n";
-}
-
 export function rawToCsv(rows: unknown[], paths = exportContext.getStore()): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0] as object);
@@ -166,10 +160,59 @@ function rewriteExportReference(value: unknown, exportPaths?: Map<string, string
   return value;
 }
 
+// ── Per-dataset isolation ──────────────────────────────────────────────────────
+
+export type ExportErrorRow = { dataset: string; reason: string };
+
+/** Stable, client-facing wording for a dataset that could not be exported.
+ * Database errors keep their Postgres code and message (e.g. a missing
+ * column) but never the SQL text or parameters Drizzle wraps around them. */
+export function describeExportError(error: unknown): string {
+  const pgError = [error, (error as { cause?: unknown } | null)?.cause]
+    .find((candidate): candidate is { code: string; message: string } =>
+      typeof (candidate as { code?: unknown } | null)?.code === "string"
+      && /^[0-9A-Z]{5}$/.test((candidate as { code: string }).code));
+  return pgError ? `database query failed: ${pgError.message} (${pgError.code})` : "unexpected export error";
+}
+
+export function exportErrorsToCsv(rows: ExportErrorRow[]): string {
+  return `dataset,reason\n${rows.map((row) => `${escapeCell(row.dataset)},${escapeCell(row.reason)}\n`).join("")}`;
+}
+
+/** Writes each dataset on its own, so one failing query records an
+ * export-errors.csv row instead of cutting short every later module. */
+export function createExportWriter(archive: Pick<ZipArchive, "append">) {
+  const errors: ExportErrorRow[] = [];
+  const omit = (dataset: string, reason: string) => { errors.push({ dataset, reason }); };
+  const fail = (dataset: string, error: unknown) => {
+    console.error(`Export dataset failed: ${dataset}`, error);
+    omit(dataset, describeExportError(error));
+  };
+  return {
+    errors,
+    omit,
+    fail,
+    /** Returns the rows written, or undefined when the dataset was omitted. */
+    async csv<T>(dataset: string, load: () => Promise<T[]>): Promise<T[] | undefined> {
+      try {
+        const rows = await load();
+        archive.append(rawToCsv(rows), { name: dataset });
+        return rows;
+      } catch (error) {
+        fail(dataset, error);
+        return undefined;
+      }
+    },
+  };
+}
+
+export type ExportWriter = ReturnType<typeof createExportWriter>;
+
 const README = `ComplyTrack Data Export
 ========================
 Generated: {DATE}
 Client ID: {CLIENT_ID}
+Status: {STATUS}
 
 Contents
 --------
@@ -255,6 +298,8 @@ staff-roster/
 
 files/                           — available private-object attachments (up to {CAP} bytes total)
 attachment-manifest.csv          — included and unavailable attachment records
+export-errors.csv                — datasets that could not be exported, and why
+                                   (header only when the export is complete)
 
 Note: only attachments held in configured private object storage can be
 bundled. External URLs remain in their relevant CSVs. Unavailable or omitted
@@ -262,6 +307,39 @@ private files have an empty reference in the CSV and their original path and
 reason appear in attachment-manifest.csv.
 {WARNING}
 `;
+
+/** Built after every dataset has been attempted, so the status is accurate. */
+export function buildExportReadme(options: {
+  now: Date; clientId: number; maxBytes: number; usedBytes: number;
+  omittedForCap: number; errors: ExportErrorRow[];
+}): string {
+  const { now, clientId, maxBytes, usedBytes, omittedForCap, errors } = options;
+  const warnings = [
+    errors.length
+      ? `WARNING: THIS EXPORT IS INCOMPLETE. ${errors.length} dataset(s) could not be exported and are missing from this archive: ${errors.map((e) => e.dataset).join(", ")}. See export-errors.csv for the reasons, and request a new export once the problem is fixed.`
+      : "",
+    omittedForCap
+      ? `WARNING: ${omittedForCap} attachment(s) omitted because the ${maxBytes}-byte cap was reached. ${usedBytes} bytes included. See attachment-manifest.csv.`
+      : "",
+  ].filter(Boolean).join("\n");
+  return README.replace("{DATE}", now.toISOString())
+    .replace("{CLIENT_ID}", String(clientId))
+    .replace("{STATUS}", errors.length ? `INCOMPLETE — ${errors.length} dataset(s) missing, see export-errors.csv` : "complete")
+    .replace("{CAP}", String(maxBytes))
+    .replace("{WARNING}", warnings);
+}
+
+/** Appends the export-errors manifest and README last, once the outcome of
+ * every dataset is known. Returns whether the archive is incomplete. */
+export function appendExportSummary(
+  archive: Pick<ZipArchive, "append">,
+  writer: ExportWriter,
+  readme: Omit<Parameters<typeof buildExportReadme>[0], "errors">,
+): boolean {
+  archive.append(exportErrorsToCsv(writer.errors), { name: "export-errors.csv" });
+  archive.append(buildExportReadme({ ...readme, errors: writer.errors }), { name: "README.txt" });
+  return writer.errors.length > 0;
+}
 
 export function attachmentCap(): number {
   const raw = process.env.EXPORT_ATTACHMENT_MAX_BYTES;
@@ -271,29 +349,38 @@ export function attachmentCap(): number {
   return value;
 }
 
-async function bundleAttachments(cid: number, archive: ZipArchive, maxBytes: number) {
+async function bundleAttachments(cid: number, archive: ZipArchive, maxBytes: number, writer: ExportWriter) {
   // Query each source separately: an absent optional legacy table should not
-  // suppress the other files in a cancellation export.
-  const attachmentSources = await Promise.all([
-    db.execute(sql`SELECT 'doc-track' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM doc_track_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'safe-track/risk-assessments' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_risk_assessments WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'safe-track/sops' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_sops WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'safe-track/handbook' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_handbook WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'site-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM site_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT 'client-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM client_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT 'contractors/certificates' AS module, id::text AS record_id, certificate_name AS label, certificate_name AS file_name, NULL::bigint AS file_size, object_path FROM contractor_certificates WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'contractors/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN contractors c ON c.id = cert.contractor_id WHERE c.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`),
-    db.execute(sql`SELECT CASE WHEN entity_type LIKE 'green%' THEN 'green-track/photos' WHEN entity_type LIKE 'swim%' THEN 'swim-track/photos' ELSE 'check-photos' END AS module, id::text AS record_id, COALESCE(caption, entity_type || '-' || entity_id::text) AS label, NULL::text AS file_name, NULL::bigint AS file_size, object_path FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`),
-    db.execute(sql`SELECT 'fix-track/media' AS module, fi.id::text || '-' || media.ordinality::text AS record_id, fi.title AS label, NULL::text AS file_name, NULL::bigint AS file_size, media.object_path FROM fix_track_issues fi CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(fi.media_urls, '[]'::jsonb)) WITH ORDINALITY AS media(object_path, ordinality) WHERE fi.client_id = ${cid} AND media.object_path LIKE '/objects/%'`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT 'fix-track/completion-documents' AS module, id::text AS record_id, title AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${cid} AND completion_document_path IS NOT NULL AND completion_document_path != ''`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT 'fix-track/action-completions' AS module, id::text AS record_id, id::text AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${cid} AND completion_object_path IS NOT NULL AND completion_object_path != ''`).catch(() => ({ rows: [] })),
-  ]);
+  // suppress the other files in a cancellation export, and any other failed
+  // source is named in export-errors.csv rather than failing the export.
+  const sources: Array<{ files: string; optional?: boolean; load: () => Promise<{ rows: unknown[] }> }> = [
+    { files: "files/doc-track", load: () => db.execute(sql`SELECT 'doc-track' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM doc_track_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/safe-track/risk-assessments", load: () => db.execute(sql`SELECT 'safe-track/risk-assessments' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_risk_assessments WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/safe-track/sops", load: () => db.execute(sql`SELECT 'safe-track/sops' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_sops WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/safe-track/handbook", load: () => db.execute(sql`SELECT 'safe-track/handbook' AS module, id::text AS record_id, title AS label, file_name, file_size::bigint AS file_size, object_path FROM safe_handbook WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/site-documents", optional: true, load: () => db.execute(sql`SELECT 'site-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM site_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/client-documents", optional: true, load: () => db.execute(sql`SELECT 'client-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM client_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/contractors/certificates (uploaded)", load: () => db.execute(sql`SELECT 'contractors/certificates' AS module, id::text AS record_id, certificate_name AS label, certificate_name AS file_name, NULL::bigint AS file_size, object_path FROM contractor_certificates WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/contractors/certificates (register)", load: () => db.execute(sql`SELECT 'contractors/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN contractors c ON c.id = cert.contractor_id WHERE c.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`) },
+    { files: "files/check-photos", load: () => db.execute(sql`SELECT CASE WHEN entity_type LIKE 'green%' THEN 'green-track/photos' WHEN entity_type LIKE 'swim%' THEN 'swim-track/photos' ELSE 'check-photos' END AS module, id::text AS record_id, COALESCE(caption, entity_type || '-' || entity_id::text) AS label, NULL::text AS file_name, NULL::bigint AS file_size, object_path FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
+    { files: "files/fix-track/media", optional: true, load: () => db.execute(sql`SELECT 'fix-track/media' AS module, fi.id::text || '-' || media.ordinality::text AS record_id, fi.title AS label, NULL::text AS file_name, NULL::bigint AS file_size, media.object_path FROM fix_track_issues fi CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(fi.media_urls, '[]'::jsonb)) WITH ORDINALITY AS media(object_path, ordinality) WHERE fi.client_id = ${cid} AND media.object_path LIKE '/objects/%'`) },
+    { files: "files/fix-track/completion-documents", optional: true, load: () => db.execute(sql`SELECT 'fix-track/completion-documents' AS module, id::text AS record_id, title AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${cid} AND completion_document_path IS NOT NULL AND completion_document_path != ''`) },
+    { files: "files/fix-track/action-completions", optional: true, load: () => db.execute(sql`SELECT 'fix-track/action-completions' AS module, id::text AS record_id, id::text AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_object_path AS object_path FROM fix_track_action_tokens WHERE client_id = ${cid} AND completion_object_path IS NOT NULL AND completion_object_path != ''`) },
+  ];
+  const attachmentSources = await Promise.all(sources.map(async (source) => {
+    try {
+      return (await source.load()).rows;
+    } catch (error) {
+      if (!source.optional) writer.fail(`${source.files} (attachment list)`, error);
+      return [];
+    }
+  }));
   const manifest: AttachmentManifestRow[] = [];
   const usedNames = new Set<string>();
   const included = new Map<string, string>();
   const storage = new ObjectStorageService();
   let usedBytes = 0;
-  for (const row of attachmentSources.flatMap((source) => source.rows) as ExportAttachmentRow[]) {
+  for (const row of attachmentSources.flat() as ExportAttachmentRow[]) {
     const prior = included.get(row.object_path);
     const zipPath = prior ?? getAttachmentZipPath(row, usedNames);
     if (prior) {
@@ -341,313 +428,247 @@ router.get(
 
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
-    const filename = `complytrack-export-${dateStr}.zip`;
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
     // ZipArchive types don't expose zlib in its constructor signature but the
     // underlying Zip plugin accepts it; cast to silence the check.
     const archive = new ZipArchive({ zlib: { level: 6 } } as any);
+    let failed = false;
     archive.on("error", (err: Error) => {
+      // Appends after an abort re-emit errors; answer the request only once.
+      if (failed) return;
+      failed = true;
       console.error("Export archive error", err);
-      if (!res.headersSent) {
-        res.removeHeader("Content-Disposition");
-        res.status(500).json({ error: "Export failed" });
-      }
+      if (!res.headersSent) res.status(500).json({ error: "Export failed" });
       else res.destroy(err);
     });
-    archive.pipe(res);
 
+    // Every dataset is queried before the archive is piped, so the response
+    // headers can say whether anything had to be left out. The archive's own
+    // buffer applies backpressure to queued attachment streams meanwhile.
+    const out = createExportWriter(archive);
+    let incomplete: boolean;
     try {
       const cid = clientId; // alias for SQL template tags
-      const { manifest, included, usedBytes } = await bundleAttachments(cid, archive, maxBytes);
+      const { manifest, included, usedBytes } = await bundleAttachments(cid, archive, maxBytes, out);
       // This map is private to the current async request, even if multiple
       // clients start exports at the same time.
       const paths = exportContext.getStore()!;
       for (const [objectPath, zipPath] of included) paths.set(objectPath, zipPath);
       archive.append(manifestToCsv(manifest), { name: "attachment-manifest.csv" });
       const omittedForCap = manifest.filter((entry) => entry.reason === "attachment size cap").length;
-      archive.append(
-        README.replace("{DATE}", now.toISOString())
-          .replace("{CLIENT_ID}", String(cid))
-          .replace("{CAP}", String(maxBytes))
-          .replace("{WARNING}", omittedForCap
-            ? `WARNING: ${omittedForCap} attachment(s) omitted because the ${maxBytes}-byte cap was reached. ${usedBytes} bytes included. See attachment-manifest.csv.`
-            : ""),
-        { name: "README.txt" },
-      );
 
       // ── Core ────────────────────────────────────────────────────────────────
-      const sites = await db.select().from(sitesTable).where(eq(sitesTable.clientId, cid));
-      archive.append(rowsToCsv(sites), { name: "sites.csv" });
+      await out.csv("sites.csv", () => db.select().from(sitesTable).where(eq(sitesTable.clientId, cid)));
 
-      const depts = await db.select().from(departmentsTable).where(eq(departmentsTable.clientId, cid));
-      archive.append(rowsToCsv(depts), { name: "departments.csv" });
+      await out.csv("departments.csv", () => db.select().from(departmentsTable).where(eq(departmentsTable.clientId, cid)));
 
-      const users = await db
+      await out.csv("users.csv", () => db
         .select({
           id: usersTable.id, email: usersTable.email, name: usersTable.name,
           role: usersTable.role, departmentId: usersTable.departmentId,
           active: usersTable.active, createdAt: usersTable.createdAt,
         })
         .from(usersTable)
-        .where(eq(usersTable.clientId, cid));
-      archive.append(rowsToCsv(users), { name: "users.csv" });
+        .where(eq(usersTable.clientId, cid)));
 
       // ── Contractors ────────────────────────────────────────────────────────
-      const contractors = await db.select().from(contractorsTable).where(eq(contractorsTable.clientId, cid));
-      archive.append(rowsToCsv(contractors), { name: "contractors/contractors.csv" });
+      const contractors = await out.csv("contractors/contractors.csv", () => db.select().from(contractorsTable).where(eq(contractorsTable.clientId, cid)));
 
-      const contractorIds = contractors.map((c) => c.id);
-      let certs: any[] = [];
-      if (contractorIds.length > 0) {
-        certs = await db.select().from(certificatesTable)
-          .where(sql`${certificatesTable.contractorId} = ANY(${sql.raw(`ARRAY[${contractorIds.join(",")}]::int[]`)})`);
+      if (contractors) {
+        const contractorIds = contractors.map((c) => c.id);
+        await out.csv("contractors/certificates.csv", async () => contractorIds.length === 0 ? [] : db.select().from(certificatesTable)
+          .where(sql`${certificatesTable.contractorId} = ANY(${sql.raw(`ARRAY[${contractorIds.join(",")}]::int[]`)})`));
+      } else {
+        out.omit("contractors/certificates.csv", "not exported because contractors/contractors.csv failed");
       }
-      archive.append(rowsToCsv(certs), { name: "contractors/certificates.csv" });
-      const uploadedCerts = await db.execute(sql`SELECT * FROM contractor_certificates WHERE client_id = ${cid}`);
-      archive.append(rawToCsv(uploadedCerts.rows), { name: "contractors/uploaded-certificates.csv" });
+      await out.csv("contractors/uploaded-certificates.csv", async () => (await db.execute(sql`SELECT * FROM contractor_certificates WHERE client_id = ${cid}`)).rows);
 
       // ── Compliance items ───────────────────────────────────────────────────
-      const compItems = (await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.clientId, cid)))
-        .map(({ scheduleToken: _token, scheduleTokenHash: _digest, ...item }) => item);
-      archive.append(rowsToCsv(compItems), { name: "compliance/items.csv" });
+      await out.csv("compliance/items.csv", async () => (await db.select().from(complianceItemsTable).where(eq(complianceItemsTable.clientId, cid)))
+        .map(({ scheduleToken: _token, scheduleTokenHash: _digest, ...item }) => item));
 
       // ── Food safety ────────────────────────────────────────────────────────
-      const foodRecs = await db.select().from(foodSafetyRecordsTable).where(eq(foodSafetyRecordsTable.clientId, cid));
-      archive.append(rowsToCsv(foodRecs), { name: "food-safety/records.csv" });
+      await out.csv("food-safety/records.csv", () => db.select().from(foodSafetyRecordsTable).where(eq(foodSafetyRecordsTable.clientId, cid)));
 
       // ── Fire safety ────────────────────────────────────────────────────────
-      const fireChecks = await db.select().from(fireSafetyChecksTable).where(eq(fireSafetyChecksTable.clientId, cid));
-      archive.append(rowsToCsv(fireChecks), { name: "fire-safety/checks.csv" });
-      const fireProfiles = await db.select().from(trackControlProfilesTable).where(and(
+      await out.csv("fire-safety/checks.csv", () => db.select().from(fireSafetyChecksTable).where(eq(fireSafetyChecksTable.clientId, cid)));
+      await out.csv("fire-safety/control-profiles.csv", () => db.select().from(trackControlProfilesTable).where(and(
         eq(trackControlProfilesTable.clientId, cid),
         eq(trackControlProfilesTable.module, "fire"),
-      ));
-      archive.append(rowsToCsv(fireProfiles), { name: "fire-safety/control-profiles.csv" });
-      const fireRequirements = await db.select().from(trackEvidenceRequirementsTable).where(and(
+      )));
+      await out.csv("fire-safety/evidence-requirements.csv", () => db.select().from(trackEvidenceRequirementsTable).where(and(
         eq(trackEvidenceRequirementsTable.clientId, cid),
         eq(trackEvidenceRequirementsTable.module, "fire"),
-      ));
-      archive.append(rowsToCsv(fireRequirements), { name: "fire-safety/evidence-requirements.csv" });
-      const fireEvidence = await db.select().from(trackEvidenceTable).where(and(
+      )));
+      await out.csv("fire-safety/evidence.csv", () => db.select().from(trackEvidenceTable).where(and(
         eq(trackEvidenceTable.clientId, cid),
         eq(trackEvidenceTable.module, "fire"),
-      ));
-      archive.append(rowsToCsv(fireEvidence), { name: "fire-safety/evidence.csv" });
-      const fireActions = await db.select().from(trackActionsTable).where(and(
+      )));
+      await out.csv("fire-safety/actions.csv", () => db.select().from(trackActionsTable).where(and(
         eq(trackActionsTable.clientId, cid),
         eq(trackActionsTable.module, "fire"),
-      ));
-      archive.append(rowsToCsv(fireActions), { name: "fire-safety/actions.csv" });
+      )));
 
       // ── Legionella ────────────────────────────────────────────────────────
-      const legChecks = await db.select().from(legionellaChecksTable).where(eq(legionellaChecksTable.clientId, cid));
-      archive.append(rowsToCsv(legChecks), { name: "legionella/checks.csv" });
-      const legionellaProfiles = await db.select().from(trackControlProfilesTable).where(and(
+      await out.csv("legionella/checks.csv", () => db.select().from(legionellaChecksTable).where(eq(legionellaChecksTable.clientId, cid)));
+      await out.csv("legionella/control-profiles.csv", () => db.select().from(trackControlProfilesTable).where(and(
         eq(trackControlProfilesTable.clientId, cid),
         eq(trackControlProfilesTable.module, "legionella"),
-      ));
-      archive.append(rowsToCsv(legionellaProfiles), { name: "legionella/control-profiles.csv" });
-      const legionellaRequirements = await db.select().from(trackEvidenceRequirementsTable).where(and(
+      )));
+      await out.csv("legionella/evidence-requirements.csv", () => db.select().from(trackEvidenceRequirementsTable).where(and(
         eq(trackEvidenceRequirementsTable.clientId, cid),
         eq(trackEvidenceRequirementsTable.module, "legionella"),
-      ));
-      archive.append(rowsToCsv(legionellaRequirements), { name: "legionella/evidence-requirements.csv" });
-      const legionellaEvidence = await db.select().from(trackEvidenceTable).where(and(
+      )));
+      await out.csv("legionella/evidence.csv", () => db.select().from(trackEvidenceTable).where(and(
         eq(trackEvidenceTable.clientId, cid),
         eq(trackEvidenceTable.module, "legionella"),
-      ));
-      archive.append(rowsToCsv(legionellaEvidence), { name: "legionella/evidence.csv" });
-      const legionellaActions = await db.select().from(trackActionsTable).where(and(
+      )));
+      await out.csv("legionella/actions.csv", () => db.select().from(trackActionsTable).where(and(
         eq(trackActionsTable.clientId, cid),
         eq(trackActionsTable.module, "legionella"),
-      ));
-      archive.append(rowsToCsv(legionellaActions), { name: "legionella/actions.csv" });
+      )));
 
       // ── Kitchen ───────────────────────────────────────────────────────────
-      const dailyChecklists = await db.select().from(dailyChecklistsTable).where(eq(dailyChecklistsTable.clientId, cid));
-      archive.append(rowsToCsv(dailyChecklists), { name: "kitchen/daily-checklists.csv" });
+      await out.csv("kitchen/daily-checklists.csv", () => db.select().from(dailyChecklistsTable).where(eq(dailyChecklistsTable.clientId, cid)));
 
-      const mgSignoffs = await db.select().from(dailyManagerSignoffsTable).where(eq(dailyManagerSignoffsTable.clientId, cid));
-      archive.append(rowsToCsv(mgSignoffs), { name: "kitchen/manager-signoffs.csv" });
+      await out.csv("kitchen/manager-signoffs.csv", () => db.select().from(dailyManagerSignoffsTable).where(eq(dailyManagerSignoffsTable.clientId, cid)));
 
-      const kwRows = await db.execute(sql`SELECT * FROM kitchen_weekly_records WHERE client_id = ${cid} ORDER BY week_commencing DESC`);
-      archive.append(rawToCsv(kwRows.rows), { name: "kitchen/weekly-reviews.csv" });
+      await out.csv("kitchen/weekly-reviews.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_weekly_records WHERE client_id = ${cid} ORDER BY week_commencing DESC`)).rows);
 
-      const kpRows = await db.execute(sql`SELECT * FROM kitchen_probe_checks WHERE client_id = ${cid} ORDER BY check_date DESC`);
-      archive.append(rawToCsv(kpRows.rows), { name: "kitchen/probe-checks.csv" });
+      await out.csv("kitchen/probe-checks.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_probe_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
 
       // ── FixTrack ──────────────────────────────────────────────────────────
-      const fixIssues = await db.select().from(fixTrackIssuesTable).where(eq(fixTrackIssuesTable.clientId, cid));
-      archive.append(rowsToCsv(fixIssues), { name: "fix-track/issues.csv" });
+      await out.csv("fix-track/issues.csv", () => db.select().from(fixTrackIssuesTable).where(eq(fixTrackIssuesTable.clientId, cid)));
 
       // ── DocTrack ──────────────────────────────────────────────────────────
-      const docRows = await db.execute(sql`SELECT * FROM doc_track_documents WHERE client_id = ${cid} ORDER BY created_at DESC`);
-      archive.append(rawToCsv(docRows.rows), { name: "doc-track/documents.csv" });
+      await out.csv("doc-track/documents.csv", async () => (await db.execute(sql`SELECT * FROM doc_track_documents WHERE client_id = ${cid} ORDER BY created_at DESC`)).rows);
 
-      const ackRows = await db.execute(sql`SELECT * FROM doc_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at DESC`);
-      archive.append(rawToCsv(ackRows.rows), { name: "doc-track/acknowledgements.csv" });
-      const siteDocs = await db.execute(sql`SELECT * FROM site_documents WHERE client_id = ${cid}`);
-      archive.append(rawToCsv(siteDocs.rows), { name: "site-documents/documents.csv" });
-      const clientDocs = await db.execute(sql`SELECT * FROM client_documents WHERE client_id = ${cid}`);
-      archive.append(rawToCsv(clientDocs.rows), { name: "client-documents/documents.csv" });
-      const photos = await db.execute(sql`SELECT * FROM check_photos WHERE client_id = ${cid}`);
-      archive.append(rawToCsv(photos.rows), { name: "check-photos/photos.csv" });
+      await out.csv("doc-track/acknowledgements.csv", async () => (await db.execute(sql`SELECT * FROM doc_acknowledgements WHERE client_id = ${cid} ORDER BY acknowledged_at DESC`)).rows);
+      await out.csv("site-documents/documents.csv", async () => (await db.execute(sql`SELECT * FROM site_documents WHERE client_id = ${cid}`)).rows);
+      await out.csv("client-documents/documents.csv", async () => (await db.execute(sql`SELECT * FROM client_documents WHERE client_id = ${cid}`)).rows);
+      await out.csv("check-photos/photos.csv", async () => (await db.execute(sql`SELECT * FROM check_photos WHERE client_id = ${cid}`)).rows);
 
       // ── TrainTrack ────────────────────────────────────────────────────────
-      const ttRows = await db.execute(sql`SELECT * FROM train_track_records WHERE client_id = ${cid} ORDER BY completed_date DESC`);
-      archive.append(rawToCsv(ttRows.rows), { name: "train-track/records.csv" });
+      await out.csv("train-track/records.csv", async () => (await db.execute(sql`SELECT * FROM train_track_records WHERE client_id = ${cid} ORDER BY completed_date DESC`)).rows);
 
       // ── SafeTrack ─────────────────────────────────────────────────────────
-      const ras = await db.select().from(safeRiskAssessmentsTable).where(eq(safeRiskAssessmentsTable.clientId, cid));
-      archive.append(rowsToCsv(ras), { name: "safe-track/risk-assessments.csv" });
+      await out.csv("safe-track/risk-assessments.csv", () => db.select().from(safeRiskAssessmentsTable).where(eq(safeRiskAssessmentsTable.clientId, cid)));
 
-      const sops = await db.select().from(safeSopsTable).where(eq(safeSopsTable.clientId, cid));
-      archive.append(rowsToCsv(sops), { name: "safe-track/sops.csv" });
+      await out.csv("safe-track/sops.csv", () => db.select().from(safeSopsTable).where(eq(safeSopsTable.clientId, cid)));
 
-      const handbooks = await db.select().from(safeHandbookTable).where(eq(safeHandbookTable.clientId, cid));
-      archive.append(rowsToCsv(handbooks), { name: "safe-track/handbooks.csv" });
+      await out.csv("safe-track/handbooks.csv", () => db.select().from(safeHandbookTable).where(eq(safeHandbookTable.clientId, cid)));
 
-      const safeTraining = await db.select().from(safeTrainingRecordsTable).where(eq(safeTrainingRecordsTable.clientId, cid));
-      archive.append(rowsToCsv(safeTraining), { name: "safe-track/training.csv" });
+      await out.csv("safe-track/training.csv", () => db.select().from(safeTrainingRecordsTable).where(eq(safeTrainingRecordsTable.clientId, cid)));
 
-      const inductions = await db.select().from(safeInductionsTable).where(eq(safeInductionsTable.clientId, cid));
-      archive.append(rowsToCsv(inductions), { name: "safe-track/inductions.csv" });
+      await out.csv("safe-track/inductions.csv", () => db.select().from(safeInductionsTable).where(eq(safeInductionsTable.clientId, cid)));
 
-      const competency = await db.select().from(safeCompetencySignoffsTable).where(eq(safeCompetencySignoffsTable.clientId, cid));
-      archive.append(rowsToCsv(competency), { name: "safe-track/competency-signoffs.csv" });
+      await out.csv("safe-track/competency-signoffs.csv", () => db.select().from(safeCompetencySignoffsTable).where(eq(safeCompetencySignoffsTable.clientId, cid)));
 
-      const safeIncidents = await db.execute(sql`SELECT * FROM safe_incidents WHERE client_id = ${cid} ORDER BY incident_date DESC`).catch(() => ({ rows: [] }));
-      archive.append(rawToCsv(safeIncidents.rows), { name: "safe-track/incidents.csv" });
+      await out.csv("safe-track/incidents.csv", async () => (await db.execute(sql`SELECT * FROM safe_incidents WHERE client_id = ${cid} ORDER BY incident_date DESC`).catch(() => ({ rows: [] }))).rows);
 
       // ── Hot tub ───────────────────────────────────────────────────────────
-      const tubs = await db.select().from(hotTubsTable).where(eq(hotTubsTable.clientId, cid));
-      archive.append(rowsToCsv(tubs), { name: "hot-tub/tubs.csv" });
+      await out.csv("hot-tub/tubs.csv", () => db.select().from(hotTubsTable).where(eq(hotTubsTable.clientId, cid)));
 
-      const tubChecks = await db.select().from(hotTubChecksTable).where(eq(hotTubChecksTable.clientId, cid));
-      archive.append(rowsToCsv(tubChecks), { name: "hot-tub/checks.csv" });
+      await out.csv("hot-tub/checks.csv", () => db.select().from(hotTubChecksTable).where(eq(hotTubChecksTable.clientId, cid)));
 
       // ── PoolTrack ─────────────────────────────────────────────────────────
-      const poolRows = await db.execute(sql`SELECT * FROM pool_checks WHERE client_id = ${cid} ORDER BY check_date DESC`);
-      archive.append(rawToCsv(poolRows.rows), { name: "pool-track/checks.csv" });
+      await out.csv("pool-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM pool_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
 
       // ── SwimTrack ─────────────────────────────────────────────────────────
-      const swimSessions = await db.execute(sql`SELECT * FROM swim_sessions WHERE client_id = ${cid} ORDER BY session_date DESC`);
-      archive.append(rawToCsv(swimSessions.rows), { name: "swim-track/sessions.csv" });
+      await out.csv("swim-track/sessions.csv", async () => (await db.execute(sql`SELECT * FROM swim_sessions WHERE client_id = ${cid} ORDER BY session_date DESC`)).rows);
 
-      const swimChecks = await db.execute(sql`SELECT * FROM swim_surveillance_checks WHERE client_id = ${cid} ORDER BY check_time DESC`);
-      archive.append(rawToCsv(swimChecks.rows), { name: "swim-track/surveillance-checks.csv" });
+      await out.csv("swim-track/surveillance-checks.csv", async () => (await db.execute(sql`SELECT * FROM swim_surveillance_checks WHERE client_id = ${cid} ORDER BY check_time DESC`)).rows);
 
-      const swimIncidents = await db.execute(sql`SELECT * FROM swim_incidents WHERE client_id = ${cid} ORDER BY incident_date DESC`).catch(() => ({ rows: [] }));
-      archive.append(rawToCsv(swimIncidents.rows), { name: "swim-track/incidents.csv" });
+      await out.csv("swim-track/incidents.csv", async () => (await db.execute(sql`SELECT * FROM swim_incidents WHERE client_id = ${cid} ORDER BY incident_date DESC`).catch(() => ({ rows: [] }))).rows);
 
       // ── GreenTrack ────────────────────────────────────────────────────────
-      const greenMachines = await db.execute(sql`SELECT * FROM green_machines WHERE client_id = ${cid} ORDER BY created_at DESC`);
-      archive.append(rawToCsv(greenMachines.rows), { name: "green-track/machines.csv" });
+      await out.csv("green-track/machines.csv", async () => (await db.execute(sql`SELECT * FROM green_machines WHERE client_id = ${cid} ORDER BY created_at DESC`)).rows);
 
-      const greenChecks = await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE client_id = ${cid} ORDER BY check_date DESC`);
-      archive.append(rawToCsv(greenChecks.rows), { name: "green-track/pre-use-checks.csv" });
+      await out.csv("green-track/pre-use-checks.csv", async () => (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
 
       // ── TreeTrack ─────────────────────────────────────────────────────────
-      const treeInspections = await db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid));
-      archive.append(rowsToCsv(treeInspections), { name: "tree-track/inspections.csv" });
+      await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));
 
       // ── BikeTrack ─────────────────────────────────────────────────────────
-      const bikes = await db.select().from(bikesTable).where(eq(bikesTable.clientId, cid));
-      archive.append(rowsToCsv(bikes), { name: "bike-track/bikes.csv" });
+      await out.csv("bike-track/bikes.csv", () => db.select().from(bikesTable).where(eq(bikesTable.clientId, cid)));
 
-      const hireRecords = await db.select().from(bikeHireRecordsTable).where(eq(bikeHireRecordsTable.clientId, cid));
-      archive.append(rowsToCsv(hireRecords), { name: "bike-track/hire-records.csv" });
+      await out.csv("bike-track/hire-records.csv", () => db.select().from(bikeHireRecordsTable).where(eq(bikeHireRecordsTable.clientId, cid)));
 
-      const bikeChecks = await db.select().from(bikeChecksTable).where(eq(bikeChecksTable.clientId, cid));
-      archive.append(rowsToCsv(bikeChecks), { name: "bike-track/checks.csv" });
+      await out.csv("bike-track/checks.csv", () => db.select().from(bikeChecksTable).where(eq(bikeChecksTable.clientId, cid)));
 
       // ── PATtrack ──────────────────────────────────────────────────────────
-      const appliances = await db.select().from(patAppliancesTable).where(eq(patAppliancesTable.clientId, cid));
-      archive.append(rowsToCsv(appliances), { name: "pat-track/appliances.csv" });
+      await out.csv("pat-track/appliances.csv", () => db.select().from(patAppliancesTable).where(eq(patAppliancesTable.clientId, cid)));
 
-      const patTests = await db.select().from(patTestsTable).where(eq(patTestsTable.clientId, cid));
-      archive.append(rowsToCsv(patTests), { name: "pat-track/tests.csv" });
+      await out.csv("pat-track/tests.csv", () => db.select().from(patTestsTable).where(eq(patTestsTable.clientId, cid)));
 
       // Certificate-led PAT register. Keep the linking and evidence tables in
       // the tenant export as well as the legacy appliance register above.
-      const patTemplates = await db.execute(sql`SELECT * FROM pat_equipment_templates WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patTemplates.rows), { name: "pat-track/equipment-templates.csv" });
-      const patTemplateItems = await db.execute(sql`SELECT * FROM pat_equipment_template_items WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patTemplateItems.rows), { name: "pat-track/equipment-template-items.csv" });
-      const patRooms = await db.execute(sql`SELECT * FROM pat_rooms WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patRooms.rows), { name: "pat-track/rooms.csv" });
-      const patCertificates = await db.execute(sql`SELECT * FROM pat_certificates WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patCertificates.rows), { name: "pat-track/certificates.csv" });
-      const patCertificateRooms = await db.execute(sql`SELECT * FROM pat_certificate_rooms WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patCertificateRooms.rows), { name: "pat-track/certificate-rooms.csv" });
-      const patReplacements = await db.execute(sql`SELECT * FROM pat_replacements WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patReplacements.rows), { name: "pat-track/replacements.csv" });
-      const patFailures = await db.execute(sql`SELECT * FROM pat_failures WHERE client_id = ${cid} ORDER BY id`);
-      archive.append(rawToCsv(patFailures.rows), { name: "pat-track/failures.csv" });
+      await out.csv("pat-track/equipment-templates.csv", async () => (await db.execute(sql`SELECT * FROM pat_equipment_templates WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/equipment-template-items.csv", async () => (await db.execute(sql`SELECT * FROM pat_equipment_template_items WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/rooms.csv", async () => (await db.execute(sql`SELECT * FROM pat_rooms WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/certificates.csv", async () => (await db.execute(sql`SELECT * FROM pat_certificates WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/certificate-rooms.csv", async () => (await db.execute(sql`SELECT * FROM pat_certificate_rooms WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/replacements.csv", async () => (await db.execute(sql`SELECT * FROM pat_replacements WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("pat-track/failures.csv", async () => (await db.execute(sql`SELECT * FROM pat_failures WHERE client_id = ${cid} ORDER BY id`)).rows);
       // Supplemental location corrections sit beside, never over, the recorded
       // failure location and its provenance (failures.csv snapshot_source).
-      const patFailureCorrections = await db.execute(sql`
+      await out.csv("pat-track/failure-location-corrections.csv", async () => (await db.execute(sql`
         SELECT id, failure_id, previous_location_text, corrected_location_text, reason, corrected_by_name, created_at
         FROM pat_failure_location_corrections WHERE client_id = ${cid} ORDER BY failure_id, id
-      `);
-      archive.append(rawToCsv(patFailureCorrections.rows), { name: "pat-track/failure-location-corrections.csv" });
+      `)).rows);
 
       // ── PestTrack ─────────────────────────────────────────────────────────
-      const pestVisits = await db.select().from(pestVisitsTable).where(eq(pestVisitsTable.clientId, cid));
-      archive.append(rowsToCsv(pestVisits), { name: "pest-track/visits.csv" });
+      await out.csv("pest-track/visits.csv", () => db.select().from(pestVisitsTable).where(eq(pestVisitsTable.clientId, cid)));
 
-      const pestActivity = await db.select().from(pestActivityTable).where(eq(pestActivityTable.clientId, cid));
-      archive.append(rowsToCsv(pestActivity), { name: "pest-track/activity.csv" });
+      await out.csv("pest-track/activity.csv", () => db.select().from(pestActivityTable).where(eq(pestActivityTable.clientId, cid)));
 
       // ── Incidents ─────────────────────────────────────────────────────────
-      const incidents = await db.select().from(incidentsTable).where(eq(incidentsTable.clientId, cid));
-      archive.append(rowsToCsv(incidents), { name: "incidents/records.csv" });
+      await out.csv("incidents/records.csv", () => db.select().from(incidentsTable).where(eq(incidentsTable.clientId, cid)));
 
       // ── PremisesTrack ─────────────────────────────────────────────────────
-      const premises = await db.select().from(premisesInspectionsTable).where(eq(premisesInspectionsTable.clientId, cid));
-      archive.append(rowsToCsv(premises), { name: "premises-track/inspections.csv" });
+      await out.csv("premises-track/inspections.csv", () => db.select().from(premisesInspectionsTable).where(eq(premisesInspectionsTable.clientId, cid)));
 
       // ── Staff roster ──────────────────────────────────────────────────────
-      const staffRows = await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`);
-      archive.append(rawToCsv(staffRows.rows), { name: "staff-roster/staff.csv" });
+      await out.csv("staff-roster/staff.csv", async () => (await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`)).rows);
 
       // Privacy governance contains the customer's own operational records,
       // rights-request evidence and timers. Keep it in the tenant export so
       // administrators can retain a portable copy before offboarding.
-      const [privacyProgram, privacyActivities, privacyRequests, privacyRetention, privacyVerifications, privacyProcessors, privacyBreaches] = await Promise.all([
-        db.execute(sql`SELECT * FROM privacy_programs WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_processing_activities WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_rights_requests WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_retention_schedules WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_retention_verifications WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_processors WHERE client_id = ${cid} ORDER BY id`),
-        db.execute(sql`SELECT * FROM privacy_breaches WHERE client_id = ${cid} ORDER BY id`),
-      ]);
-      archive.append(JSON.stringify({
-        program: privacyProgram.rows,
-        processingActivities: privacyActivities.rows,
-        rightsRequests: privacyRequests.rows,
-        retentionSchedules: privacyRetention.rows,
-        retentionVerifications: privacyVerifications.rows,
-        processorsAndTransfers: privacyProcessors.rows,
-        breachAssessments: privacyBreaches.rows,
-      }, null, 2), { name: "privacy-governance.json" });
+      // A failed section is left out of the JSON and named in export-errors.csv.
+      const privacySections = await Promise.all(([
+        ["program", sql`SELECT * FROM privacy_programs WHERE client_id = ${cid} ORDER BY id`],
+        ["processingActivities", sql`SELECT * FROM privacy_processing_activities WHERE client_id = ${cid} ORDER BY id`],
+        ["rightsRequests", sql`SELECT * FROM privacy_rights_requests WHERE client_id = ${cid} ORDER BY id`],
+        ["retentionSchedules", sql`SELECT * FROM privacy_retention_schedules WHERE client_id = ${cid} ORDER BY id`],
+        ["retentionVerifications", sql`SELECT * FROM privacy_retention_verifications WHERE client_id = ${cid} ORDER BY id`],
+        ["processorsAndTransfers", sql`SELECT * FROM privacy_processors WHERE client_id = ${cid} ORDER BY id`],
+        ["breachAssessments", sql`SELECT * FROM privacy_breaches WHERE client_id = ${cid} ORDER BY id`],
+      ] as const).map(async ([key, query]) => {
+        try {
+          return [[key, (await db.execute(query)).rows] as const];
+        } catch (error) {
+          out.fail(`privacy-governance.json (${key})`, error);
+          return [];
+        }
+      }));
+      archive.append(JSON.stringify(Object.fromEntries(privacySections.flat()), null, 2), { name: "privacy-governance.json" });
 
+      incomplete = appendExportSummary(archive, out, { now, clientId: cid, maxBytes, usedBytes, omittedForCap });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Only an unexpected fault outside a single dataset gets here (each
+      // dataset records its own failure); nothing has been sent yet.
       console.error("Export query error", err);
       archive.abort();
-      if (!res.headersSent) {
-        res.removeHeader("Content-Disposition");
-        res.status(500).json({ error: "Export failed" });
-      }
-      else res.destroy(err instanceof Error ? err : new Error(msg));
+      if (!res.headersSent) res.status(500).json({ error: "Export failed" });
       return;
     }
+    if (failed) return;
 
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="complytrack-export-${dateStr}${incomplete ? "-INCOMPLETE" : ""}.zip"`);
+    res.setHeader("X-Export-Status", incomplete ? "incomplete" : "complete");
+    res.setHeader("X-Export-Omitted-Datasets", String(out.errors.length));
+    archive.pipe(res);
     await archive.finalize();
   })
 );

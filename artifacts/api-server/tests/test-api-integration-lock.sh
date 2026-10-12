@@ -79,9 +79,13 @@ const directLocked = new Set([
   "test:photo-attachments",
   "test:fix-track-overdue-alerts", "test:track-summary-delivery",
   "test:contractor-upload-signatures", "test:contractor-compliance-reminders",
+  "test:track-controls-mobile", "test:export-module-isolation",
 ]);
 const runnerLocked = new Set([
+  "test:two-factor-policy", "test:passkey-webauthn",
+  "test:safe-track-ack-refresh", "test:sign-off-access",
   "test:photo-storage-roundtrip", "test:photo-storage-roundtrip:fake", // runner sources the lock after its config gate
+  "test:fixtrack-video-roundtrip", "test:fixtrack-video-roundtrip:fake", // same runner as the photo round trip
   "test:isolation:ci", "test:modules:ci", "test:dept-isolation:ci",
   "test:dailytrack-locks:ci", "test:config:ci", "test:doc-track-status",
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
@@ -105,7 +109,10 @@ const runnerLocked = new Set([
 const freshSchema = new Set([
   "test:schema:fresh", "test:kitchen-mobile-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
-  "test:kitchen-inspection-export", "test:content-filter",
+  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:cleaning-schedule-export",
+  "test:kitchen-cleaning-export", "test:pat-register-access",
+  "test:storage-metering", "test:storage-usage-snapshot",
+  "test:content-filter",
   "test:feedback-triage", "test:contractor-token-security",
   "test:contractor-key-rotation",
   "test:fix-track-contractor-approval", // delegates each suite to run-fresh-schema.sh
@@ -139,6 +146,7 @@ const pure = new Set([
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
@@ -239,9 +247,11 @@ const pureEntrypoints = new Set([
   "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
 ]);
 const helperModules = new Set([
+  "pdf-text.mjs",
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
   "fixture-ownership.mjs", "storage-acl-session.mjs",
+  "webauthn-test-authenticator.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.
 const unscriptedLockedRunners = ["tests/run-audit-log-endpoint.sh"];

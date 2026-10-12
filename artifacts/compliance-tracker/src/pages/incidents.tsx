@@ -782,7 +782,7 @@ ${rows.map(r => `<tr>
       <div className="flex flex-wrap gap-2 items-center">
         {sites.length > 0 && (
           <Select value={filterSite} onValueChange={setFilterSite}>
-            <SelectTrigger className="w-44 rounded-sm">
+            <SelectTrigger aria-label="Filter incidents by site" className="w-44 rounded-sm">
               <SelectValue placeholder="All sites" />
             </SelectTrigger>
             <SelectContent>
@@ -792,7 +792,7 @@ ${rows.map(r => `<tr>
           </Select>
         )}
         <Select value={filterStatus} onValueChange={v => setFilterStatus(v as Status | "all")}>
-          <SelectTrigger className="w-44 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by status" className="w-44 rounded-sm">
             <Filter className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
@@ -802,7 +802,7 @@ ${rows.map(r => `<tr>
           </SelectContent>
         </Select>
         <Select value={filterSeverity} onValueChange={v => setFilterSeverity(v)}>
-          <SelectTrigger className="w-36 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by severity" className="w-36 rounded-sm">
             <SelectValue placeholder="All severities" />
           </SelectTrigger>
           <SelectContent>
@@ -811,7 +811,7 @@ ${rows.map(r => `<tr>
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={v => setFilterType(v)}>
-          <SelectTrigger className="w-48 rounded-sm">
+          <SelectTrigger aria-label="Filter incidents by type" className="w-48 rounded-sm">
             <SelectValue placeholder="All types" />
           </SelectTrigger>
           <SelectContent>
@@ -834,6 +834,8 @@ ${rows.map(r => `<tr>
           className="w-40 rounded-sm"
         />
         <button
+          type="button"
+          aria-pressed={filterRiddor}
           onClick={() => setFilterRiddor(r => !r)}
           className={cn(
             "flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-sm border transition-colors",

@@ -119,9 +119,12 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label>{label}</Label>{children}</div>;
 }
 
-function MediaThumb({ path, onRemove }: { path: string; onRemove?: () => void }) {
+function MediaThumb({ path, clientId, onRemove }: { path: string; clientId: number | null; onRemove?: () => void }) {
   const isVideo = /\.(mp4|mov|webm|avi)$/i.test(path);
-  const src = `/api/storage/objects/${path}`;
+  // Stored paths already start with /objects/; a consultant's tenant goes in
+  // the URL because media elements cannot send the active-client query.
+  const objectPath = path.startsWith("/objects/") ? path : `/objects/${path.replace(/^\/+/, "")}`;
+  const src = `/api/storage${objectPath}${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`;
   return (
     <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-border bg-muted group flex-shrink-0">
       {isVideo
@@ -370,7 +373,7 @@ function IssueForm({ form, setForm, issueId, isNew }: {
         {mediaUrls.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {mediaUrls.map(path => (
-              <MediaThumb key={path} path={path} onRemove={() => removeMedia(path)} />
+              <MediaThumb key={path} path={path} clientId={activeClientId} onRemove={() => removeMedia(path)} />
             ))}
           </div>
         )}
@@ -1142,7 +1145,7 @@ export default function FixTrackPage() {
 
                       {issue.mediaUrls?.length > 0 && (
                         <div className="flex gap-2 flex-wrap pt-1">
-                          {issue.mediaUrls.map(path => <MediaThumb key={path} path={path} />)}
+                          {issue.mediaUrls.map(path => <MediaThumb key={path} path={path} clientId={activeClientId} />)}
                         </div>
                       )}
                     </div>

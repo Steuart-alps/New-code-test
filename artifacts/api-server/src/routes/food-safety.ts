@@ -1213,9 +1213,19 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 // ── Status — due/overdue per check type ───────────────────────────────────────
+// GET /api/food-safety/status[?siteId=N]
+// Without siteId: aggregates every check across the client (unchanged).
+// With siteId: the diary counts only that site's diary, matching the dashboard
+// summary; weekly reviews, probe checks and cleaning logs count that site's
+// records plus client-wide ones (site_id IS NULL), which cover every site, as
+// do client-wide cleaning tasks.
 router.get("/status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
+  const siteId = await resolveDiarySiteId(req, res, clientId);
+  if (siteId === undefined) return;
+  const diaryScope = siteId === null ? sql`` : sql`AND site_id = ${siteId}`;
+  const checkScope = siteId === null ? sql`` : sql`AND (site_id = ${siteId} OR site_id IS NULL)`;
 
   const MS_DAY = 86400000;
   const todayDays = Math.floor(Date.now() / MS_DAY);
@@ -1232,16 +1242,16 @@ router.get("/status", requireAuth, async (req, res) => {
   }
 
   const [diary, weekly, probe, cleanDaily, cleanWeekly, cleanMonthly, taskCountsRes] = await Promise.all([
-    db.execute(sql`SELECT MAX(record_date)::text AS last_date FROM food_safety_records WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(week_commencing)::text AS last_date FROM kitchen_weekly_records WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(check_date)::text AS last_date FROM kitchen_probe_checks WHERE client_id = ${clientId}`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'daily'`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'weekly'`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'monthly'`),
+    db.execute(sql`SELECT MAX(record_date)::text AS last_date FROM food_safety_records WHERE client_id = ${clientId} ${diaryScope}`),
+    db.execute(sql`SELECT MAX(week_commencing)::text AS last_date FROM kitchen_weekly_records WHERE client_id = ${clientId} ${checkScope}`),
+    db.execute(sql`SELECT MAX(check_date)::text AS last_date FROM kitchen_probe_checks WHERE client_id = ${clientId} ${checkScope}`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'daily' ${checkScope}`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'weekly' ${checkScope}`),
+    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'monthly' ${checkScope}`),
     db.execute(sql`
       SELECT frequency, COUNT(*)::int AS task_count
       FROM kitchen_cleaning_tasks
-      WHERE client_id = ${clientId} AND active = true
+      WHERE client_id = ${clientId} AND active = true ${checkScope}
       GROUP BY frequency
     `),
   ]);

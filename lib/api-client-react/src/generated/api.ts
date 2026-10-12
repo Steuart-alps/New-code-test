@@ -3909,7 +3909,7 @@ export const getGetFireSafetyStatusQueryKey = (params?: GetFireSafetyStatusParam
     }
 
 
-export const getGetFireSafetyStatusQueryOptions = <TData = Awaited<ReturnType<typeof getFireSafetyStatus>>, TError = ErrorType<unknown>>(params?: GetFireSafetyStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetFireSafetyStatusQueryOptions = <TData = Awaited<ReturnType<typeof getFireSafetyStatus>>, TError = ErrorType<void>>(params?: GetFireSafetyStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3928,14 +3928,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetFireSafetyStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getFireSafetyStatus>>>
-export type GetFireSafetyStatusQueryError = ErrorType<unknown>
+export type GetFireSafetyStatusQueryError = ErrorType<void>
 
 
 /**
  * @summary Per-check-type due status (last done, next due, overdue flags)
  */
 
-export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFireSafetyStatus>>, TError = ErrorType<unknown>>(
+export function useGetFireSafetyStatus<TData = Awaited<ReturnType<typeof getFireSafetyStatus>>, TError = ErrorType<void>>(
  params?: GetFireSafetyStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFireSafetyStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {

@@ -113,6 +113,9 @@ async function main() {
     ]);
 
     const old = new Date(Date.now() - 2 * 86_400_000);
+    // Intentionally historical: targetDate 2026-01-02 must stay in the past so
+    // these issues are "past target"; staleness comes from the relative
+    // updatedAt values. Rows are inserted directly, not edited through the API.
     await db.insert(fixTrackIssuesTable).values([
       { clientId, title: "Urgent past target", issueType: "electrical", location: "Plant room", priority: "urgent", status: "reported", reportedBy: "Tester", reportedDate: "2026-01-01", targetDate: "2026-01-02", updatedAt: new Date() },
       { clientId, title: "Urgent gone cold", issueType: "plumbing", location: "Kitchen", priority: "urgent", status: "in_progress", reportedBy: "Tester", reportedDate: "2026-01-01", updatedAt: old },

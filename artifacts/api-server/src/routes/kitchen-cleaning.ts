@@ -71,36 +71,53 @@ router.get("/export", requireAuth, requireClientAdmin, async (req, res) => {
   const { from, to, frequency } = parsed.data;
   if (from > to) return res.status(400).json({ error: "The start date must be on or before the end date" });
 
-  const [logsResult, clientResult] = await Promise.all([
+  const scope = await resolveAccessibleSite(req, res, clientId, req.query.siteId);
+  if (!scope.ok) return;
+  // A single-site export only includes logs stamped with that site; logs
+  // without a site appear in the all-sites export.
+  const siteFilter = scope.siteId === null
+    ? sql``
+    : sql`AND l.site_id = ${scope.siteId}`;
+
+  const [logsResult, clientResult, siteResult] = await Promise.all([
     db.execute(sql`
-      SELECT log_date, frequency, completions, signed_by, submitted_at
-      FROM kitchen_cleaning_logs
-      WHERE client_id = ${clientId}
-        AND log_date >= ${from}
-        AND log_date <= ${to}
-        AND frequency = ${frequency}
-      ORDER BY log_date ASC
+      SELECT l.log_date, l.frequency, l.completions, l.signed_by, l.submitted_at, s.name AS site_name
+      FROM kitchen_cleaning_logs l
+      LEFT JOIN sites s ON s.id = l.site_id AND s.client_id = l.client_id
+      WHERE l.client_id = ${clientId}
+        AND l.log_date >= ${from}
+        AND l.log_date <= ${to}
+        AND l.frequency = ${frequency}
+        ${siteFilter}
+      ORDER BY l.log_date ASC, s.name ASC NULLS LAST
     `),
     db.execute(sql`SELECT name FROM clients WHERE id = ${clientId} LIMIT 1`),
+    scope.siteId === null
+      ? Promise.resolve(null)
+      : db.execute(sql`SELECT name FROM sites WHERE id = ${scope.siteId} AND client_id = ${clientId} LIMIT 1`),
   ]);
 
   const logs = logsResult.rows.map((row: any) => ({
     date: String(row.log_date),
     frequency: String(row.frequency),
+    siteName: row.site_name ? String(row.site_name) : null,
     completions: (Array.isArray(row.completions) ? row.completions : []) as CleaningScheduleCompletion[],
     signedBy: row.signed_by ? String(row.signed_by) : "",
     submittedAt: row.submitted_at ? new Date(row.submitted_at) : null,
   }));
   const businessName = String((clientResult.rows[0] as any)?.name ?? "");
+  const siteName = siteResult ? String((siteResult.rows[0] as any)?.name ?? "") : null;
   const pdf = await createCleaningSchedulePdf({
     businessName,
+    siteName,
     dateFrom: from,
     dateTo: to,
     frequency: frequency.charAt(0).toUpperCase() + frequency.slice(1),
     generatedAt: new Date().toLocaleDateString("en-GB"),
     logs,
   });
-  const filename = `cleaning-schedule-${frequency}-${from}-to-${to}.pdf`;
+  const siteSuffix = scope.siteId === null ? "" : `-site-${scope.siteId}`;
+  const filename = `cleaning-schedule-${frequency}-${from}-to-${to}${siteSuffix}.pdf`;
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Content-Length", pdf.length);

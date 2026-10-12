@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
 import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
-import { summarizeKitchenStatuses, type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
+import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
@@ -425,14 +426,15 @@ type KitchenCheckStatus = {
   status: KitchenCheckState;
 };
 
-function KitchenTrackStatusPill() {
+function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
   const [statuses, setStatuses] = useState<KitchenCheckStatus[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setStatuses(null);
     (async () => {
       try {
-        const res = await apiFetch("/food-safety/status");
+        const res = await apiFetch(`/food-safety/status${siteId !== "all" ? `?siteId=${siteId}` : ""}`);
         if (!cancelled && res.ok) {
           const json: unknown = await res.json();
           setStatuses(Array.isArray(json) ? json as KitchenCheckStatus[] : []);
@@ -440,41 +442,11 @@ function KitchenTrackStatusPill() {
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [siteId]);
 
-  if (!statuses?.length) return null;
+  if (!statuses) return null;
 
-  const { overdue, dueSoon, ok, never, tone, label } = summarizeKitchenStatuses(
-    statuses.map(({ status }) => status),
-  );
-  const pillClass = tone === "overdue"
-    ? "bg-rose-100 text-rose-700"
-    : tone === "due_soon"
-    ? "bg-amber-100 text-amber-700"
-    : tone === "never"
-    ? "bg-muted text-muted-foreground"
-    : "bg-emerald-100 text-emerald-700";
-
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium shrink-0", pillClass)}>
-        {label}
-      </span>
-      <span
-        className="hidden text-xs text-muted-foreground tabular-nums shrink-0 md:inline"
-        aria-label={`${overdue} overdue, ${dueSoon} due soon, ${ok} clear, ${never} never recorded`}
-        title="Overdue / due soon / clear / never recorded"
-      >
-        <span className={overdue > 0 ? "font-semibold text-rose-700" : undefined}>{overdue}</span>
-        {" / "}
-        <span className={dueSoon > 0 ? "font-semibold text-amber-700" : undefined}>{dueSoon}</span>
-        {" / "}
-        <span className={ok > 0 ? "font-semibold text-emerald-700" : undefined}>{ok}</span>
-        {" / "}
-        <span>{never}</span>
-      </span>
-    </span>
-  );
+  return <KitchenStatusPill statuses={statuses.map(({ status }) => status)} />;
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -657,7 +629,7 @@ export default function Dashboard() {
               <TrackRow
                 key={track.trackId}
                 track={track}
-                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill /> : null}
+                kitchenOverdueBadge={hasKitchentrack && track.trackId === "kitchen" ? <KitchenTrackStatusPill siteId={siteId} /> : null}
               />
             ))}
           </div>

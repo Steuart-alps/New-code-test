@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/api";
 import { downloadFile } from "@/lib/download";
+import { useListSites } from "@workspace/api-client-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -337,6 +338,8 @@ function HistoryPanel({ history, onSelect }: {
   );
 }
 
+const ALL_SITES = "__all__";
+
 // ── Main tab ──────────────────────────────────────────────────────────────────
 
 export default function CleaningScheduleTab() {
@@ -359,6 +362,8 @@ export default function CleaningScheduleTab() {
   const [exportFrom, setExportFrom]     = useState(format(subDays(new Date(), 30), "yyyy-MM-dd"));
   const [exportTo, setExportTo]         = useState(todayIso());
   const [exportFrequency, setExportFrequency] = useState<Frequency>("daily");
+  const [exportSiteId, setExportSiteId] = useState<string>(ALL_SITES);
+  const { data: sites = [] } = useListSites();
 
   const submitted = !!log?.submitted_at;
 
@@ -463,6 +468,11 @@ export default function CleaningScheduleTab() {
     loadHistory();
   }, []);
 
+  // A site picked for another client would be rejected by the export.
+  useEffect(() => {
+    setExportSiteId(ALL_SITES);
+  }, [activeClientId]);
+
   useEffect(() => {
     if (tasks.length >= 0) loadLog(activeFreq, periodDate);
   }, [activeFreq, periodDate, tasks]);
@@ -537,9 +547,11 @@ export default function CleaningScheduleTab() {
     try {
       const params = new URLSearchParams({ from: exportFrom, to: exportTo, frequency: exportFrequency });
       if (activeClientId) params.set("clientId", String(activeClientId));
+      const siteSuffix = exportSiteId === ALL_SITES ? "" : `-site-${exportSiteId}`;
+      if (exportSiteId !== ALL_SITES) params.set("siteId", exportSiteId);
       await downloadFile(
         `${API_BASE}/kitchen-cleaning/export?${params}`,
-        `cleaning-schedule-${exportFrequency}-${exportFrom}-to-${exportTo}.pdf`,
+        `cleaning-schedule-${exportFrequency}-${exportFrom}-to-${exportTo}${siteSuffix}.pdf`,
       );
       setExportOpen(false);
       toast({ title: "Cleaning record downloaded", description: "The PDF is ready for your food hygiene records." });
@@ -772,6 +784,23 @@ export default function CleaningScheduleTab() {
             <p className="text-sm text-muted-foreground">
               Choose the logs to include in the PDF for your food hygiene records.
             </p>
+            <div className="space-y-1.5">
+              <Label>Site</Label>
+              <Select value={exportSiteId} onValueChange={setExportSiteId}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_SITES}>All sites</SelectItem>
+                  {sites.map(site => (
+                    <SelectItem key={site.id} value={String(site.id)}>{site.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {exportSiteId !== ALL_SITES && (
+                <p className="text-xs text-muted-foreground">
+                  Only logs recorded against this site are included.
+                </p>
+              )}
+            </div>
             <div className="space-y-1.5">
               <Label>Frequency</Label>
               <Select value={exportFrequency} onValueChange={value => setExportFrequency(value as Frequency)}>

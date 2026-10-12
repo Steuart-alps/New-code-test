@@ -42,6 +42,8 @@ interface AuthContextValue {
   setActiveClientId: (id: number | null) => void;
   services: "all" | string[] | null;
   needsTwoFactorSetup: boolean;
+  /** False when every business this user belongs to has made 2FA optional. */
+  twoFactorRequired: boolean;
   hasService: (key: string) => boolean;
 }
 
@@ -52,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<AuthClient | null>(null);
   const [services, setServices] = useState<"all" | string[] | null>(null);
   const [needsTwoFactorSetup, setNeedsTwoFactorSetup] = useState(false);
+  const [twoFactorRequired, setTwoFactorRequired] = useState(true);
   const [billingLocked, setBillingLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
@@ -176,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setClient(data.client);
         setServices(data.services ?? null);
         setNeedsTwoFactorSetup(Boolean(data.requires2faSetup));
+        setTwoFactorRequired(data.twoFactorRequired !== false);
         setBillingLocked(Boolean(data.billingLocked));
         if (data.client && !activeClientId) {
           setActiveClientId(data.client.id);
@@ -223,6 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBillingLocked(Boolean(data.billingLocked));
     setActiveClientId(data.client?.id ?? null);
     setNeedsTwoFactorSetup(false);
+    setTwoFactorRequired(data.twoFactorRequired !== false);
     return { requires2fa: false };
   }
 
@@ -237,7 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, client, services, hasService, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId, needsTwoFactorSetup }}>
+    <AuthContext.Provider value={{ user, client, services, hasService, billingLocked, isLoading, login, logout, refresh, activeClientId, setActiveClientId, needsTwoFactorSetup, twoFactorRequired }}>
       {children}
     </AuthContext.Provider>
   );

@@ -37,6 +37,9 @@ function session() {
 
 async function main() {
   const stamp = Date.now();
+  // Department staff mutate these records and expect 403/200 results. Keep the
+  // date relative to today: a fixed day ages past the 24-hour correction window
+  // and turns those authorization checks into 423 record-lock responses.
   const fixtureDate = new Date().toISOString().slice(0, 10);
   const admin = session();
   const email = `pat-dept-admin-${stamp}@test.local`;
