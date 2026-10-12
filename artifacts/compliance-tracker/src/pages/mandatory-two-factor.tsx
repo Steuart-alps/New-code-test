@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Check, Copy, Download, KeyRound, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearCsrfToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,7 @@ export default function MandatoryTwoFactorPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "That code was not accepted");
+      clearCsrfToken(); // enrolment signs in with a new session and CSRF token
       setRecoveryCodes(data.recoveryCodes ?? []);
       await refresh();
     } catch (err: unknown) {

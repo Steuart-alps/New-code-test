@@ -53,6 +53,7 @@ function UserDialog({
   departments,
   clientId,
   isConsultant,
+  currentUserId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -61,7 +62,11 @@ function UserDialog({
   departments: Department[];
   clientId: number | null;
   isConsultant: boolean;
+  currentUserId: number | null;
 }) {
+  // Another user's email and password can't be changed here; they reset their
+  // own password from the sign-in page.
+  const editingOther = !!user && user.id !== currentUserId;
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -161,8 +166,13 @@ function UserDialog({
           </div>
           <div className="space-y-2">
             <Label>Email</Label>
-            <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
+            <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required disabled={editingOther} />
           </div>
+          {editingOther ? (
+            <p className="text-xs text-muted-foreground">
+              Only the user can change their password, using "Forgot password?" on the sign-in page.
+            </p>
+          ) : (
           <div className="space-y-2">
             <Label>{user ? "New Password (leave blank to keep)" : "Password"}</Label>
             <Input
@@ -178,6 +188,7 @@ function UserDialog({
               </p>
             )}
           </div>
+          )}
           <div className="space-y-2">
             <Label>Role</Label>
             <Select value={form.role} onValueChange={v => setForm(f => ({ ...f, role: v }))}>
@@ -237,7 +248,7 @@ function UserDialog({
 }
 
 export default function UsersPage() {
-  const { activeClientId } = useAuth();
+  const { activeClientId, user: currentUser } = useAuth();
   const isConsultant = useIsConsultant();
   const canAdmin = useCanAdmin();
   const [users, setUsers] = useState<User[]>([]);
@@ -488,6 +499,7 @@ export default function UsersPage() {
         departments={departments}
         clientId={activeClientId}
         isConsultant={isConsultant}
+        currentUserId={currentUser?.id ?? null}
       />
     </AppLayout>
   );

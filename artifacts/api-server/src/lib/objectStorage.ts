@@ -85,6 +85,85 @@ export function isTenantReservedObjectPath(objectPath: string, tenantId: number 
   return objectPath.startsWith(`/objects/uploads/tenant-${tenantId}/`);
 }
 
+// Stored objects are served from the app's own origin, so their content type
+// decides what a browser does with them. Only these render inline; anything
+// else (HTML, SVG, XML, scripts, Office files, unknown bytes) is a download.
+const INLINE_IMAGE_TYPES = new Set([
+  "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/heic", "image/heif",
+]);
+
+/**
+ * Security headers for serving a stored object. nosniff stops a browser from
+ * second-guessing the stored type; non-inline types are forced to download;
+ * and the sandboxing CSP keeps anything that is rendered from running script
+ * or loading content on the app origin. PDFs and videos are left without the
+ * CSP: browsers' built-in PDF viewers refuse to run in a sandboxed document,
+ * and neither type can execute script against the app.
+ */
+export function objectDownloadSecurityHeaders(contentType: string): Record<string, string> {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  const headers: Record<string, string> = { "X-Content-Type-Options": "nosniff" };
+  const isPdf = type === "application/pdf";
+  const isVideo = type.startsWith("video/");
+  if (!isPdf && !isVideo && !INLINE_IMAGE_TYPES.has(type)) {
+    headers["Content-Disposition"] = "attachment";
+  }
+  if (!isPdf && !isVideo) {
+    headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+  }
+  return headers;
+}
+
+const OOXML_TYPES: Record<string, string> = {
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+const LEGACY_OFFICE_TYPES: Record<string, string> = {
+  ".doc": "application/msword",
+  ".xls": "application/vnd.ms-excel",
+  ".ppt": "application/vnd.ms-powerpoint",
+};
+const TEXT_TYPES: Record<string, string> = {
+  ".txt": "text/plain; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+};
+
+/**
+ * Classify a DocTrack/SafeTrack document from its first bytes (and, for
+ * container formats that share a signature, its file extension). Returns the
+ * content type to store, or null when the file is not an allowed document:
+ * PDF, Word/Excel/PowerPoint (current and legacy formats), images, the video
+ * formats the upload form offers, or UTF-8 plain text/CSV.
+ */
+export function detectDocumentUploadType(bytes: Buffer, fileName: string): string | null {
+  const extension = (fileName.match(/\.[a-z0-9]{1,10}$/i)?.[0] ?? "").toLowerCase();
+  const known = detectUploadType(bytes) ?? detectIssueVideoType(bytes);
+  if (known) return known;
+  const ascii = (start: number, end: number) => bytes.subarray(start, end).toString("latin1");
+  if (bytes.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "AVI ") return "video/x-msvideo";
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3
+    && ascii(4, Math.min(bytes.length, 64)).includes("matroska")) return "video/x-matroska";
+  // Office Open XML files are ZIP containers.
+  if (OOXML_TYPES[extension] && bytes.length >= 4 && ascii(0, 4) === "PK\x03\x04") return OOXML_TYPES[extension];
+  // Legacy Office files are OLE compound documents.
+  const cfb = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+  if (LEGACY_OFFICE_TYPES[extension] && bytes.length >= 8 && cfb.every((byte, index) => bytes[index] === byte)) {
+    return LEGACY_OFFICE_TYPES[extension];
+  }
+  if (TEXT_TYPES[extension] && bytes.length > 0 && !bytes.includes(0)) {
+    try {
+      // stream: true tolerates a character cut off at the end of the sample.
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+      return TEXT_TYPES[extension];
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 type UsageMetadataFile = Pick<File, "name" | "getMetadata"> & { metadata?: File["metadata"] };
 
 /** One finalised private object and its provider-reported size. */
@@ -279,11 +358,13 @@ export class ObjectStorageService {
     const nodeStream = file.createReadStream(byteRange ? { start: byteRange.start, end: byteRange.end } : undefined);
     const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
+    const contentType = (metadata.contentType as string) || "application/octet-stream";
     const headers: Record<string, string> = {
-      "Content-Type": (metadata.contentType as string) || "application/octet-stream",
+      "Content-Type": contentType,
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
       // Lets video players seek with byte ranges from the first response.
       "Accept-Ranges": "bytes",
+      ...objectDownloadSecurityHeaders(contentType),
     };
     if (metadata.size) {
       const length = byteRange ? byteRange.end - byteRange.start + 1 : Number(metadata.size);
@@ -486,6 +567,26 @@ export class ObjectStorageService {
     const kind = detectUploadType(bytes);
     if (!kind || !allowed.has(kind)) throw new ObjectContentError();
     return kind;
+  }
+
+  /**
+   * Check an uploaded DocTrack/SafeTrack document's bytes against the
+   * document allow-list and store the content type derived from them, so the
+   * client-declared type is never what the file is later served as. Callers
+   * must have established that the object belongs to the tenant first.
+   */
+  async verifyDocumentUpload(objectPath: string, fileName: string): Promise<string> {
+    const file = await this.getObjectEntityFile(this.normalizeObjectEntityPath(objectPath));
+    const [bytes] = await file.download({ start: 0, end: 8191 });
+    const contentType = detectDocumentUploadType(bytes, fileName);
+    if (!contentType) {
+      throw new ObjectContentError("Choose a PDF, Word, Excel, PowerPoint, image, video, text or CSV file");
+    }
+    const [metadata] = await file.getMetadata();
+    if (String(metadata.contentType ?? "").toLowerCase() !== contentType) {
+      await file.setMetadata({ contentType });
+    }
+    return contentType;
   }
 
   /**

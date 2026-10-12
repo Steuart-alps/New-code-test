@@ -221,6 +221,51 @@ export const resetPasswordRateLimit = makeLoginRateLimit({
   requireStore: true,
 });
 
+/**
+ * Wrong second-factor codes per account (web pending sign-in or mobile login
+ * challenge), across all source IPs, in each shared 15-minute window. Only
+ * rejected codes (401) count. Without a resolvable account the source IP is
+ * the key instead.
+ */
+export const totpAccountRateLimit = makeLoginRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  namespace: "totp-account",
+  failureStatuses: [401],
+  key: (req) => {
+    const accountId = (req as Request & { totpAccountId?: number }).totpAccountId
+      ?? (req.session as { pending2faUserId?: number } | undefined)?.pending2faUserId;
+    return Number.isSafeInteger(accountId) ? `user:${accountId}` : `ip:${clientIp(req)}`;
+  },
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/** Ten password-reset email requests per source IP in each shared hour. */
+export const forgotPasswordRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  namespace: "forgot-password",
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
+/** Three password-reset emails per requested address in each shared hour. */
+export const forgotPasswordEmailRateLimit = makeLoginRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  namespace: "forgot-password-email",
+  key: (req) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    return email ? `email:${email}` : `ip:${clientIp(req)}`;
+  },
+  store: productionStoreProxy,
+  storeOnlyInProduction: true,
+  requireStore: true,
+});
+
 /** Public token links are intentionally usable without login, but are still
  * bounded per source IP to slow token enumeration and abusive scraping. */
 export const publicLinkRateLimit = makeLoginRateLimit({

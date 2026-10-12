@@ -301,6 +301,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Another account may have used this tab: start from an empty cache.
     queryClient.clear();
     userRef.current = data.user;
+    clearCsrfToken(); // signing in issues a new session, so a new CSRF token
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);

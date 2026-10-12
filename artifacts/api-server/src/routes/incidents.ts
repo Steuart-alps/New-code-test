@@ -91,6 +91,22 @@ function validateRiddorRecord(data: {
   return null;
 }
 
+/**
+ * Injury details are health data (special category under UK GDPR), so only
+ * managers read them: client admins, consultants and department managers.
+ * Other staff and viewers see the incident with injuriesSustained = null.
+ */
+function canReadHealthData(req: { currentUser?: { role: string; isDepartmentManager?: boolean | null } }): boolean {
+  const user = req.currentUser;
+  if (!user) return false;
+  return user.role === "client_admin" || user.role === "consultant"
+    || (user.role === "client_staff" && user.isDepartmentManager === true);
+}
+
+function redactHealthData<T extends { injuriesSustained?: string | null }>(req: Parameters<typeof canReadHealthData>[0], row: T): T {
+  return canReadHealthData(req) ? row : { ...row, injuriesSustained: null };
+}
+
 async function canAccessSite(clientId: number, siteId: number | null | undefined, deptId: number | null) {
   if (siteId == null) return true;
   const [site] = await db.select({ departmentId: sitesTable.departmentId }).from(sitesTable)
@@ -129,7 +145,7 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(incidentsTable.incidentDate), desc(incidentsTable.id));
 
-  res.json(rows.map(withRiddorDeadline));
+  res.json(rows.map((row) => withRiddorDeadline(redactHealthData(req, row))));
 });
 
 // GET /api/incidents/summary
@@ -232,6 +248,9 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
   const { riddorRationale, submittedAt, submissionEvidence, ...updateData } = parsed.data;
+  // Staff who can't read injury details get them back as null; saving the
+  // form must not wipe what a manager recorded (adding details is allowed).
+  if (!canReadHealthData(req) && !updateData.injuriesSustained?.trim()) delete updateData.injuriesSustained;
   const riddorChanged = ["riddorReportable", "riddorCategory", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
   const hasRiddorRecord = riddorChanged || !!riddorRationale?.trim() || !!submittedAt || !!submissionEvidence?.trim();
@@ -292,7 +311,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   });
   if (!updated) return res.status(409).json({ error: "Linked corrective actions changed; reload before closing this incident" });
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: id, action: "updated", before: existing, after: updated });
-  res.json(withRiddorDeadline(updated));
+  res.json(withRiddorDeadline(redactHealthData(req, updated)));
 });
 
 // DELETE /api/incidents/:id

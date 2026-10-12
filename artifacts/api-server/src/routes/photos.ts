@@ -68,6 +68,32 @@ export const PHOTO_ENTITY_TABLES = {
 
 export type PhotoEntityType = keyof typeof PHOTO_ENTITY_TABLES;
 
+/**
+ * Records whose module limits department-scoped staff and viewers to sites in
+ * their department (or with no department), plus records with no site — the
+ * same rule each of these modules applies to its own lists and edits. A photo
+ * may only be listed, attached or removed within that same scope. BikeTrack,
+ * GreenTrack and PestTrack records are not department-scoped by their modules,
+ * so tenant scope alone applies to them; PAT tests have their own rule.
+ */
+const SITE_DEPARTMENT_SCOPED_ENTITIES: ReadonlySet<PhotoEntityType> = new Set<PhotoEntityType>([
+  "fire_safety_check", "pool_check", "daily_checklist", "daily_checklist_pm",
+  "food_safety_record", "food_safety_check", "legionella_check", "hot_tub_check",
+  "incident", "training_record", "tree_inspection",
+  "swim_session", "swim_surveillance_check", "swim_first_aid_check", "swim_incident",
+  "safe_risk_assessment", "safe_sop", "safe_handbook", "safe_training_record", "safe_induction",
+]);
+
+/** SQL condition limiting `alias.site_id` to the department's sites (or none). */
+function departmentSiteCondition(alias: string, clientId: number, departmentId: number | null) {
+  if (departmentId === null) return sql``;
+  const column = sql.raw(`${alias}.site_id`);
+  return sql`AND (${column} IS NULL OR ${column} IN (
+    SELECT id FROM sites WHERE client_id = ${clientId}
+      AND (department_id IS NULL OR department_id = ${departmentId})
+  ))`;
+}
+
 export function isSupportedPhotoEntityType(entityType: string): entityType is PhotoEntityType {
   return Object.prototype.hasOwnProperty.call(PHOTO_ENTITY_TABLES, entityType);
 }
@@ -115,10 +141,35 @@ async function requireOwnedPhotoEntity(
   }
   // table names come only from the constant above, never the request.
   const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
+  const scope = SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)
+    ? departmentSiteCondition("e", clientId, departmentId)
+    : sql``;
   const result = await db.execute(sql`
-    SELECT id FROM ${table} WHERE id = ${entityId} AND client_id = ${clientId} LIMIT 1
+    SELECT e.id FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} ${scope} LIMIT 1
   `);
   return Boolean((result as any).rows[0]);
+}
+
+/**
+ * Whether a photo's parent record is outside the caller's department scope.
+ * A missing parent is not: orphaned photo rows stay deletable.
+ */
+async function photoParentOutsideDepartment(
+  executor: { execute: typeof db.execute },
+  entityType: string,
+  entityId: number,
+  clientId: number,
+  departmentId: number | null,
+): Promise<boolean> {
+  if (departmentId === null || !isSupportedPhotoEntityType(entityType)
+    || !SITE_DEPARTMENT_SCOPED_ENTITIES.has(entityType)) return false;
+  const table = sql.raw(PHOTO_ENTITY_TABLES[entityType]);
+  const result = await executor.execute(sql`
+    SELECT e.id, (TRUE ${departmentSiteCondition("e", clientId, departmentId)}) AS in_scope
+    FROM ${table} e WHERE e.id = ${entityId} AND e.client_id = ${clientId} LIMIT 1
+  `);
+  const row = (result as any).rows[0] as { in_scope: boolean } | undefined;
+  return !!row && !row.in_scope;
 }
 
 async function rejectUnownedPhotoEntity(
@@ -382,6 +433,10 @@ router.delete("/:id", requireAuth, denyViewers, async (req, res) => {
     // orphaned row (no parent) remains deletable, as described below.
     if (row.entity_type === "pat_test"
       && await patTestHistoryAccess(tx as any, clientId, row.entity_id, departmentId) === "forbidden") {
+      return null;
+    }
+    // Other records' photos stay inside the record's department scope too.
+    if (await photoParentOutsideDepartment(tx as any, row.entity_type, row.entity_id, clientId, departmentId)) {
       return null;
     }
 

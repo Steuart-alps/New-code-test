@@ -577,6 +577,13 @@ export async function runRuntimeMigrations() {
     `);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "used_at" timestamp`);
     await db.execute(sql`ALTER TABLE "password_reset_tokens" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now()`);
+    // Reset and invitation links are stored as "sha256:<hex>"; hash legacy
+    // plaintext rows in place so unexpired links keep working.
+    await db.execute(sql`
+      UPDATE "password_reset_tokens"
+      SET "token" = 'sha256:' || encode(sha256(convert_to("token", 'UTF8')), 'hex')
+      WHERE "token" NOT LIKE 'sha256:%'
+    `);
 
     // Shared authentication throttles keep sign-in quotas consistent across
     // API processes. Only HMACed IP/namespace keys are persisted.
@@ -4297,6 +4304,17 @@ async function migrateMobileSessions() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "IDX_mobile_sessions_expires_at"
     ON "mobile_sessions" ("expires_at")
+  `);
+  // When the user last proved their password (and second factor). Refreshing
+  // a token carries it forward, so renewal is capped from the original login.
+  await db.execute(sql`ALTER TABLE "mobile_sessions" ADD COLUMN IF NOT EXISTS "authenticated_at" timestamp`);
+  // Bearer tokens are stored as "sha256:<hex>" (lib/sessionRevocation.ts).
+  // Hash any legacy plaintext rows in place; signed-in phones keep working
+  // because lookups hash the presented token.
+  await db.execute(sql`
+    UPDATE "mobile_sessions"
+    SET "token" = 'sha256:' || encode(sha256(convert_to("token", 'UTF8')), 'hex')
+    WHERE "token" NOT LIKE 'sha256:%'
   `);
 }
 

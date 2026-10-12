@@ -8,6 +8,7 @@ import { hashPassword } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
+import { hashStoredCredential, revokeUserSessions } from "../lib/sessionRevocation";
 
 const router = Router();
 
@@ -45,9 +46,10 @@ async function sendInviteEmail(
         eq(passwordResetTokensTable.userId, user.id),
         isNull(passwordResetTokensTable.usedAt),
       ));
+    // Only a digest is stored; the emailed link is the credential.
     await db.insert(passwordResetTokensTable).values({
       userId: user.id,
-      token,
+      token: hashStoredCredential(token),
       expiresAt,
     });
 
@@ -91,6 +93,24 @@ const UpdateUserBody = z.object({
   isMaintenanceManager: z.boolean().optional(),
   isDepartmentManager: z.boolean().optional(),
 });
+
+/**
+ * Self-signup owners have the consultant role and belong to their business
+ * like its admins, so canAccessClient alone would let a client admin take
+ * over the owner's account. Only a consultant may change, remove or reset
+ * the second factor of a consultant.
+ */
+function rejectsConsultantTarget(
+  actor: { id: number; role: string },
+  target: { id: number; role: string },
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+): boolean {
+  if (target.role === "consultant" && actor.role !== "consultant" && target.id !== actor.id) {
+    res.status(403).json({ error: "Only an account owner can change an owner's account" });
+    return true;
+  }
+  return false;
+}
 
 router.get("/users", requireAuth, requireClientAdmin, async (req, res) => {
   const user = req.currentUser!;
@@ -215,6 +235,23 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
+  if (rejectsConsultantTarget(actor, target, res)) return;
+
+  // Another user's sign-in details are never set directly: an admin who could
+  // change them could take the account over. Email changes for others are
+  // refused, and new passwords go through the emailed set-up link
+  // (POST /users/:id/resend-invite). An unchanged email (the edit form always
+  // sends it) is accepted.
+  if (target.id !== actor.id) {
+    if (body.email !== undefined && body.email.trim().toLowerCase() !== target.email.trim().toLowerCase()) {
+      res.status(400).json({ error: "Another user's email address can't be changed here. Remove the user and invite their new address instead." });
+      return;
+    }
+    if (body.password !== undefined) {
+      res.status(400).json({ error: "Another user's password can't be set directly. Send them a password setup link instead." });
+      return;
+    }
+  }
 
   // Mirrors the same restriction on POST /users: only a consultant may grant
   // the consultant role. Checked unconditionally (including self-edits, which
@@ -228,7 +265,7 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
   const updates: Partial<typeof usersTable.$inferInsert> = {
     updatedAt: new Date(),
   };
-  if (body.email !== undefined) updates.email = body.email;
+  if (body.email !== undefined && target.id === actor.id) updates.email = body.email;
   if (body.name !== undefined) updates.name = body.name;
   if (body.role !== undefined) updates.role = body.role as typeof userRoleEnum[number];
   if (body.departmentId !== undefined) updates.departmentId = body.departmentId;
@@ -250,6 +287,11 @@ router.put("/users/:id", requireAuth, requireClientAdmin, async (req, res) => {
     .where(eq(usersTable.id, id))
     .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
 
+  // A changed password signs the user out everywhere except this session.
+  if (updates.passwordHash) {
+    await revokeUserSessions(id, { exceptSessionId: req.sessionID });
+  }
+
   res.json(rows[0]);
 });
 
@@ -268,6 +310,7 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
     res.status(403).json({ error: "Forbidden" });
     return;
   }
+  if (rejectsConsultantTarget(actor, target, res)) return;
 
   await db.delete(usersTable).where(eq(usersTable.id, id));
   res.json({ ok: true });
@@ -289,6 +332,7 @@ router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req,
     res.status(403).json({ error: "Forbidden" });
     return;
   }
+  if (rejectsConsultantTarget(actor, target, res)) return;
 
   // The reset and its security alert commit together, so the alert survives a
   // provider outage or restart. Email failure never undoes or repeats the
@@ -298,6 +342,9 @@ router.post("/users/:id/reset-2fa", requireAuth, requireClientAdmin, async (req,
     res.status(404).json({ error: "User not found" });
     return;
   }
+  // The reset is for a lost or compromised authenticator: sign the account out
+  // of every browser and phone (keeping the caller's own session).
+  await revokeUserSessions(id, { exceptSessionId: req.sessionID });
   if (reset.alertId !== null) {
     try {
       await deliverTwoFactorResetAlert(reset.alertId);

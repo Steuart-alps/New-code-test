@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { clientsTable, usersTable, consultantClientsTable } from "@workspace/db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
-import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, requireConsultant, requireClientAdmin, canAccessClient, denyViewers, isPlatformOperator } from "../middleware/requireAuth";
 import { seedStarterContent } from "../lib/seedStarterContent";
 import { logger } from "../lib/logger";
 
@@ -51,7 +51,13 @@ router.get("/clients/:id", requireAuth, async (req, res) => {
 
 router.post("/clients", requireAuth, requireConsultant, async (req, res) => {
   const body = UpsertClientBody.parse(req.body);
-  const rows = await db.insert(clientsTable).values(body).returning();
+  // A new business starts on the same 14-day trial as a self-registration, so
+  // it locks when the trial ends unless it subscribes. Only platform operators
+  // create businesses without a trial.
+  const trialEndsAt = isPlatformOperator(req.currentUser)
+    ? null
+    : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  const rows = await db.insert(clientsTable).values({ ...body, trialEndsAt }).returning();
   // Link the creating consultant to the new client so they can access it.
   await db
     .insert(consultantClientsTable)
@@ -144,6 +150,9 @@ router.post("/starter-pack/load", requireAuth, denyViewers, async (req, res) => 
   res.json({ ok: true });
 });
 
+// Permanent deletion only follows an account erasure request that was
+// approved by an independent reviewer and has passed its 30-day minimum wait
+// (POST /data-deletion/request, then review). It never bypasses that path.
 router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) => {
   const id = Number(req.params.id);
   if (!canAccessClient(req, id)) {
@@ -156,11 +165,15 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
       SELECT EXISTS (
         SELECT 1 FROM client_data_deletion_requests
         WHERE client_id = ${id}
+          AND status = 'approved' AND earliest_deletion_at <= now()
+      ) AND NOT EXISTS (
+        SELECT 1 FROM client_data_deletion_requests
+        WHERE client_id = ${id}
           AND (status = 'pending' OR
                (status = 'approved' AND earliest_deletion_at > now()))
-      ) AS blocked
+      ) AS ready
     `);
-    if ((erasureReview.rows[0] as { blocked?: boolean } | undefined)?.blocked) return "request";
+    if (!(erasureReview.rows[0] as { ready?: boolean } | undefined)?.ready) return "request";
     const holdCheck = await tx.execute(sql`
       SELECT EXISTS (
         SELECT 1 FROM privacy_retention_schedules
@@ -175,7 +188,7 @@ router.delete("/clients/:id", requireAuth, requireConsultant, async (req, res) =
   });
   if (result !== "deleted") {
     return res.status(409).json({ error: result === "request"
-      ? "Account deletion requires manual review and the full 30-day retention window"
+      ? "Account deletion requires manual review and the full 30-day retention window. Request deletion from Settings; it can be completed once the request is approved and 30 days have passed."
       : "Client data cannot be deleted while a privacy legal hold or deletion exception is active" });
   }
   res.json({ ok: true });

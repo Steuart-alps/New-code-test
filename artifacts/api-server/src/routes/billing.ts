@@ -40,7 +40,7 @@ import { logger } from "../lib/logger";
 import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllowed } from "../lib/stripeStartup";
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
-import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers } from "../middleware/requireAuth";
+import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers, requirePlatformOperator } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -434,7 +434,9 @@ router.get("/discount-code", requireAuth, requireRole("consultant"), async (req,
 });
 
 // POST /api/billing/discount-code — generate (or replace) the client's code.
-router.post("/discount-code", requireAuth, requireRole("consultant"), async (req, res) => {
+// ALPS discount codes are issued by the platform operator (PLATFORM_ADMIN_EMAILS),
+// not by account owners, who all have the consultant role.
+router.post("/discount-code", requireAuth, requireRole("consultant"), requirePlatformOperator, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   try {
