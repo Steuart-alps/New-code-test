@@ -452,7 +452,7 @@ function KitchenTrackStatusPill({ siteId }: { siteId: string }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { hasService, services } = useAuth();
+  const { hasService, services, user } = useAuth();
   const canAdmin = useCanAdmin();
   const canManageContractorEmails = canAdmin || useIsMaintenanceManager();
   const hasStandaloneDailytrackAm = hasService("dailytrack_am");
@@ -501,14 +501,17 @@ export default function Dashboard() {
     try {
       const params = siteId !== "all" ? `?siteId=${siteId}` : "";
       const res = await apiFetch(`/dashboard/summary${params}`, { signal });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof body?.error === "string" ? body.error : `Request failed (${res.status})`);
+      }
       const json = await res.json();
       if (signal.aborted) return;
       setTracks(json.tracks ?? []);
       setChecklistTotals(json.checklistTotals ?? null);
     } catch (e) {
       if (signal.aborted) return;
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
       setChecklistTotals(null);
       setTracks([]);
     } finally {
@@ -608,9 +611,19 @@ export default function Dashboard() {
         )}
 
         {/* Error */}
-        {!loading && error && (
-          <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            Failed to load dashboard: {error}
+        {!loading && error && user?.role === "consultant" && error === "No client context" ? (
+          <div className="rounded-md border border-border bg-muted/40 p-4 text-sm">
+            <p className="font-medium">Choose a business</p>
+            <p className="mt-1 text-muted-foreground">Pick the business you want to work in to see its dashboard.</p>
+            <Link href="/clients" className="mt-3 inline-flex items-center gap-1 font-medium text-primary underline underline-offset-2">
+              Choose a business <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        ) : !loading && error && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <span>We couldn't load the dashboard: {error}</span>
+            <button type="button" className="rounded-sm border border-rose-300 bg-white px-3 py-1 font-medium hover:bg-rose-100"
+              onClick={() => void load(new AbortController().signal)}>Retry</button>
           </div>
         )}
 
