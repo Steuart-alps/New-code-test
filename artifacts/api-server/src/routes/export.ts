@@ -304,6 +304,16 @@ premises-track/
 room-track/
   rooms.csv                      — room register
   checks.csv                     — room checks
+registers/
+  allergen-items.csv             — allergen records per dish or product
+                                   (removed items included, with deleted_at)
+  allergen-item-changes.csv      — allergen tick change log
+  coshh-substances.csv           — COSHH register
+  asbestos-records.csv           — asbestos survey and management plan per site
+  asbestos-register-entries.csv  — asbestos register entries
+tasks/
+  tasks.csv                      — assigned and recurring staff tasks
+  task-completions.csv           — who completed each task, and when
 track-actions/
   actions.csv                    — corrective actions for modules other than
                                    FireTrack and LegionellaTrack
@@ -376,6 +386,8 @@ async function bundleAttachments(cid: number, archive: ZipArchive, maxBytes: num
     { files: "files/client-documents", optional: true, load: () => db.execute(sql`SELECT 'client-documents' AS module, id::text AS record_id, name AS label, name AS file_name, NULL::bigint AS file_size, object_path FROM client_documents WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
     { files: "files/contractors/certificates (uploaded)", load: () => db.execute(sql`SELECT 'contractors/certificates' AS module, id::text AS record_id, certificate_name AS label, certificate_name AS file_name, NULL::bigint AS file_size, object_path FROM contractor_certificates WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
     { files: "files/contractors/certificates (register)", load: () => db.execute(sql`SELECT 'contractors/certificates' AS module, cert.id::text AS record_id, cert.name AS label, cert.name AS file_name, NULL::bigint AS file_size, cert.file_url AS object_path FROM certificates cert JOIN contractors c ON c.id = cert.contractor_id WHERE c.client_id = ${cid} AND cert.file_url LIKE '/objects/%'`) },
+    { files: "files/registers/coshh-safety-data-sheets", optional: true, load: () => db.execute(sql`SELECT 'registers/coshh' AS module, id::text AS record_id, product_name AS label, sds_file_name AS file_name, NULL::bigint AS file_size, sds_object_path AS object_path FROM coshh_substances WHERE client_id = ${cid} AND sds_object_path IS NOT NULL AND sds_object_path != ''`) },
+    { files: "files/registers/asbestos-survey-reports", optional: true, load: () => db.execute(sql`SELECT 'registers/asbestos' AS module, id::text AS record_id, COALESCE(report_file_name, 'asbestos-survey-' || id::text) AS label, report_file_name AS file_name, NULL::bigint AS file_size, report_object_path AS object_path FROM asbestos_records WHERE client_id = ${cid} AND report_object_path IS NOT NULL AND report_object_path != ''`) },
     { files: "files/check-photos", load: () => db.execute(sql`SELECT CASE WHEN entity_type LIKE 'green%' THEN 'green-track/photos' WHEN entity_type LIKE 'swim%' THEN 'swim-track/photos' ELSE 'check-photos' END AS module, id::text AS record_id, COALESCE(caption, entity_type || '-' || entity_id::text) AS label, NULL::text AS file_name, NULL::bigint AS file_size, object_path FROM check_photos WHERE client_id = ${cid} AND object_path IS NOT NULL AND object_path != ''`) },
     { files: "files/fix-track/media", optional: true, load: () => db.execute(sql`SELECT 'fix-track/media' AS module, fi.id::text || '-' || media.ordinality::text AS record_id, fi.title AS label, NULL::text AS file_name, NULL::bigint AS file_size, media.object_path FROM fix_track_issues fi CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(fi.media_urls, '[]'::jsonb)) WITH ORDINALITY AS media(object_path, ordinality) WHERE fi.client_id = ${cid} AND media.object_path LIKE '/objects/%'`) },
     { files: "files/fix-track/completion-documents", optional: true, load: () => db.execute(sql`SELECT 'fix-track/completion-documents' AS module, id::text AS record_id, title AS label, NULL::text AS file_name, NULL::bigint AS file_size, completion_document_path AS object_path FROM fix_track_issues WHERE client_id = ${cid} AND completion_document_path IS NOT NULL AND completion_document_path != ''`) },
@@ -663,6 +675,18 @@ router.get(
       await out.csv("room-track/rooms.csv", async () => (await db.execute(sql`SELECT * FROM room_track_rooms WHERE client_id = ${cid} ORDER BY id`)).rows);
 
       await out.csv("room-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM room_track_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+
+      // ── Registers (allergens, COSHH, asbestos) ────────────────────────────
+      // Soft-deleted rows are included: deleted_at shows when they were removed.
+      await out.csv("registers/allergen-items.csv", async () => (await db.execute(sql`SELECT * FROM allergen_items WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("registers/allergen-item-changes.csv", async () => (await db.execute(sql`SELECT * FROM allergen_item_changes WHERE client_id = ${cid} ORDER BY item_id, id`)).rows);
+      await out.csv("registers/coshh-substances.csv", async () => (await db.execute(sql`SELECT * FROM coshh_substances WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("registers/asbestos-records.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_records WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("registers/asbestos-register-entries.csv", async () => (await db.execute(sql`SELECT * FROM asbestos_register_entries WHERE client_id = ${cid} ORDER BY record_id, id`)).rows);
+
+      // ── Tasks ─────────────────────────────────────────────────────────────
+      await out.csv("tasks/tasks.csv", async () => (await db.execute(sql`SELECT * FROM tasks WHERE client_id = ${cid} ORDER BY id`)).rows);
+      await out.csv("tasks/task-completions.csv", async () => (await db.execute(sql`SELECT * FROM task_completions WHERE client_id = ${cid} ORDER BY task_id, occurrence_date, id`)).rows);
 
       // ── Corrective actions (other modules) ────────────────────────────────
       // FireTrack and LegionellaTrack actions are in their own folders above.
