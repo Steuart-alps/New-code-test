@@ -125,6 +125,7 @@ const freshSchema = new Set([
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
+  "test:retention-clock",
   "test:train-track-roster-identity",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
@@ -151,6 +152,8 @@ const pure = new Set([
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
+  "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
+  "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -245,7 +248,7 @@ const pureEntrypoints = new Set([
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
-  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

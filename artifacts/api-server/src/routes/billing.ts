@@ -19,6 +19,7 @@ import {
   BUNDLE_KEY,
   BUNDLE_LABEL,
   SERVICE_CAP_PENCE,
+  COMING_SOON_SERVICE_KEYS,
   getEntitledServices,
   getServicePricePreflight,
   addonPurchaseAvailability,
@@ -41,6 +42,7 @@ import { BILLING_UNVERIFIED_ERROR, getBillingReadiness, isBillingActivationAllow
 import { getPublicAppUrl } from "../lib/email";
 import { z } from "zod";
 import { requireAuth, getClientId, requireRole, requireClientAdmin, denyViewers, requirePlatformOperator } from "../middleware/requireAuth";
+import { syncClientSubscriptionState } from "../lib/subscriptionState";
 
 const router = Router();
 
@@ -79,7 +81,14 @@ router.get("/cancellation-status", requireAuth, async (req, res) => {
 // GET /api/billing/config — returns publishable key + current plan info
 router.get("/config", requireAuth, async (req, res) => {
   try {
-    const publishableKey = await getStripePublishableKey();
+    // Without Stripe configured there is no key; the page still needs the
+    // plan, trial and offboarding fields, so report billing as unavailable.
+    let publishableKey: string | null = null;
+    try {
+      publishableKey = await getStripePublishableKey();
+    } catch {
+      publishableKey = null;
+    }
 
     const clientId = getClientId(req);
     let subscription = null;
@@ -108,14 +117,23 @@ router.get("/config", requireAuth, async (req, res) => {
     let hasBundle = false;
     let subscribed = false;
     let perSiteRate = perSite?.unitAmount ?? 0;
+    let selectedServices: string[] = [];
     if (clientId) {
       entitled = await getEntitledServices(clientId);
       const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+      selectedServices = Array.isArray(client?.selectedServices) ? client.selectedServices : [];
       if (client?.stripeCustomerId) {
         try {
           const live = await findLiveSubscription(client.stripeCustomerId);
           if (live) {
             subscribed = true;
+            // Show the live Stripe status rather than the local fallback.
+            subscription = {
+              ...(subscription && typeof subscription === "object" ? subscription : {}),
+              id: live.id,
+              status: live.status,
+              cancel_at_period_end: live.cancel_at_period_end,
+            };
             perSiteRate = 0;
             for (const item of live.items.data) {
               const key = item.price?.metadata?.service_key;
@@ -173,6 +191,10 @@ router.get("/config", requireAuth, async (req, res) => {
       cancelledAt,
       dataDeletionScheduledAt,
       dataDeletedAt,
+      // Checkout and add-ons are unavailable while Stripe is unconfigured or
+      // its catalogue unverified; a lapsed trial keeps access meanwhile.
+      billingAvailable: Boolean(publishableKey) && isBillingActivationAllowed(),
+      storageAddonAvailable: Boolean(process.env.STORAGE_ADDON_PRICE_ID?.trim()),
       services: {
         entitled,
         addons: activeAddons,
@@ -182,11 +204,16 @@ router.get("/config", requireAuth, async (req, res) => {
         // clients.subscription_status field and can say "active" for demo/
         // trial accounts with no Stripe customer.
         subscribed,
+        // Modules chosen at signup, to pre-select at checkout.
+        selected: selectedServices,
         perSiteRate,
         capPence: SERVICE_CAP_PENCE,
         addonAvailability,
         catalog: [
-          ...Object.entries(SERVICES).map(([key, s]) => ({ key, label: s.label, amountPence: s.amountPence })),
+          ...Object.entries(SERVICES).map(([key, s]) => ({
+            key, label: s.label, amountPence: s.amountPence,
+            ...(COMING_SOON_SERVICE_KEYS.includes(key) ? { comingSoon: true } : {}),
+          })),
           { key: BUNDLE_KEY, label: BUNDLE_LABEL, amountPence: SERVICE_CAP_PENCE },
         ],
       },
@@ -265,9 +292,13 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
   const checkoutBundle = typeof bundle === "boolean"
     ? bundle
     : client.selectedServices?.includes(BUNDLE_KEY) === true;
+  // Services that are not available yet cannot be bought on their own; one
+  // remembered from signup is dropped rather than blocking checkout.
   const checkoutServices = Array.isArray(requestedServices)
     ? requestedServices
-    : (client.selectedServices ?? []).filter((service) => service !== BUNDLE_KEY);
+    : (client.selectedServices ?? []).filter(
+      (service) => service !== BUNDLE_KEY && !COMING_SOON_SERVICE_KEYS.includes(service),
+    );
 
   // Discount codes are manager-issued per client; the entered code must match
   // the code issued to THIS client (server-derived context) exactly.
@@ -297,7 +328,7 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
     // price ids); the client only picks WHICH services, and quantity is the
     // client's current number of sites (never below 1).
     const quantity = quantityForSiteCount(await countClientSites(clientId));
-    const lineItems: { price: string; quantity: number }[] = [];
+    let lineItems: { price: string; quantity: number }[] = [];
     if (checkoutBundle) {
       const bundlePrice = await getServicePrice(BUNDLE_KEY);
       if (!bundlePrice) return res.status(400).json({ error: "Bundle price not configured" });
@@ -311,10 +342,22 @@ router.post("/checkout", requireAuth, requireRole("consultant", "client_admin"),
       if (unknown.length > 0) {
         return res.status(400).json({ error: `Unknown service(s): ${unknown.join(", ")}` });
       }
+      const comingSoon = requested.filter((s) => COMING_SOON_SERVICE_KEYS.includes(s));
+      if (comingSoon.length > 0) {
+        return res.status(400).json({ error: `Not available yet: ${comingSoon.map((s) => SERVICES[s as ServiceKey]?.label ?? s).join(", ")}` });
+      }
+      let perSiteTotal = corePrice.unitAmount;
       for (const addon of requested) {
         const price = await getServicePrice(addon);
         if (!price) return res.status(400).json({ error: `Price not configured for ${addon}` });
         lineItems.push({ price: price.priceId, quantity });
+        perSiteTotal += price.unitAmount;
+      }
+      // The advertised per-site cap: a selection that reaches it is sold as
+      // the bundle (every service, at the cap) rather than above the cap.
+      if (perSiteTotal >= SERVICE_CAP_PENCE) {
+        const bundlePrice = await getServicePrice(BUNDLE_KEY);
+        if (bundlePrice) lineItems = [{ price: bundlePrice.priceId, quantity }];
       }
     }
 
@@ -467,6 +510,9 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
   if (action !== "add" && action !== "remove") {
     return res.status(400).json({ error: "Action must be 'add' or 'remove'" });
   }
+  if (action === "add" && COMING_SOON_SERVICE_KEYS.includes(service)) {
+    return res.status(400).json({ error: `${SERVICES[service as ServiceKey].label} is not available yet` });
+  }
   const clientId = getClientId(req);
   if (!clientId) { res.status(400).json({ error: "clientId required" }); return; }
 
@@ -520,6 +566,13 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
         collectFirstMonthInvoice: collectAddonFirstMonthInvoice,
         invalidateEntitlements,
         getEntitledServices,
+        bundle: {
+          capPence: SERVICE_CAP_PENCE,
+          serviceKey: BUNDLE_KEY,
+          label: BUNDLE_LABEL,
+          getPrice: () => getServicePrice(BUNDLE_KEY),
+          corePriceId: (await getPerSitePrice())?.priceId ?? null,
+        },
         onRollbackFailure: (rollbackError) => {
           req.log?.error?.(
             { rollbackError, clientId, service },
@@ -552,7 +605,7 @@ router.post("/services", requireAuth, requireRole("consultant", "client_admin"),
           error: "We couldn't complete the charge, so the service wasn't enabled. Please try again.",
         });
       }
-      return res.json({ ok: true, entitled: activation.entitled });
+      return res.json({ ok: true, entitled: activation.entitled, bundled: activation.bundled === true });
     } else {
       // Removal needs only the client's own subscription item, never the
       // catalogue price: an archived or missing price must not trap a client
@@ -830,7 +883,16 @@ router.post("/refresh-access", requireAuth, denyViewers, async (req, res) => {
     invalidateTrialLock(clientId);
     invalidateEntitlements(clientId);
     const billingLocked = await isClientBillingLocked(clientId);
-    res.json({ billingLocked });
+    if (!billingLocked) {
+      const [client] = await db.select({ customerId: clientsTable.stripeCustomerId })
+        .from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+      if (client?.customerId) {
+        await syncClientSubscriptionState(client.customerId).catch((err) => {
+          req.log?.warn?.({ err, clientId }, "Could not sync subscription state after checkout");
+        });
+      }
+    }
+    res.json({ billingLocked, billingAvailable: isBillingActivationAllowed() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

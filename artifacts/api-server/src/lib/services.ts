@@ -40,6 +40,16 @@ export const SERVICES = {
 export type ServiceKey = keyof typeof SERVICES;
 export const ADDON_KEYS = ["firetrack", "kitchentrack", "legionellatrack", "safetrack", "fixtrack", "doctrack", "traintrack", "hottubtrack", "treetrack", "biketrack", "aquatrack", "pooltrack", "greentrack", "swimtrack", "incidenttrack", "pattrack", "pesttrack", "premisestrack", "roomtrack", "dailytrack_am", "dailytrack_pm"] as const satisfies readonly ServiceKey[];
 
+/**
+ * Services listed in the catalogue whose module is not available yet (its page
+ * shows "Coming soon"). They cannot be bought on their own: checkout and
+ * add-on activation refuse them. Bundle customers get them when they launch.
+ */
+export const COMING_SOON_SERVICE_KEYS: readonly string[] = ["greentrack"];
+export const PURCHASABLE_ADDON_KEYS: readonly ServiceKey[] = ADDON_KEYS.filter(
+  (key) => !COMING_SOON_SERVICE_KEYS.includes(key),
+);
+
 export const BUNDLE_KEY = "bundle";
 export const BUNDLE_LABEL = "ComplyTrack Complete";
 /** Per-site monthly cap: at or beyond this, every service is unlocked. */

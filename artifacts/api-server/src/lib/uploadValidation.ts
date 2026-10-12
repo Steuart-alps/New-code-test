@@ -11,6 +11,31 @@ export class ObjectContentError extends Error {
 
 export const MAX_RESTRICTED_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION = 12_000;
+// ~50 megapixels: well above any phone camera (48 MP), but a full decode stays
+// around 200 MB, which a 512 MB instance can afford one at a time.
+export const MAX_IMAGE_PIXELS = 50_000_000;
+
+// One libvips worker thread, and at most one image decode / two PDF workers at
+// a time, so concurrent uploads queue instead of exhausting memory.
+sharp.concurrency(1);
+
+function createSemaphore(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async function withPermit<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+const withImagePermit = createSemaphore(1);
+const withPdfPermit = createSemaphore(2);
 
 export type AllowedUploadType =
   | "application/pdf"
@@ -104,39 +129,42 @@ export async function validateUploadContent(
   if (!type || !allowed.has(type)) throw new ObjectContentError();
   try {
     if (type === "application/pdf") {
-      await validatePdf(bytes);
+      await withPdfPermit(() => validatePdf(bytes));
       return { contentType: type, sourceContentType: type };
     }
     if (type === "image/png") validatePngChunkChecksums(bytes);
-    const image = sharp(bytes, {
-      // libvips reports checksum/decompression damage as warnings for some PNG
-      // chunks. Treat warnings as fatal so a successful re-encode cannot mask
-      // corruption in attacker-supplied input.
-      failOn: "warning",
-      limitInputPixels: MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION,
-      pages: 1,
-      sequentialRead: true,
+    return await withImagePermit(async () => {
+      const image = sharp(bytes, {
+        // libvips reports checksum/decompression damage as warnings for some PNG
+        // chunks. Treat warnings as fatal so a successful re-encode cannot mask
+        // corruption in attacker-supplied input.
+        failOn: "warning",
+        limitInputPixels: MAX_IMAGE_PIXELS,
+        pages: 1,
+        sequentialRead: true,
+      });
+      const metadata = await image.metadata();
+      const isHeifInput = type === "image/heic" || type === "image/heif" || type === "image/avif";
+      const expectedFormat = isHeifInput
+        ? "heif"
+        : type === "image/jpeg" ? "jpeg" : type === "image/png" ? "png" : "webp";
+      if (metadata.format !== expectedFormat
+        || metadata.pages && metadata.pages !== 1
+        || !metadata.width || !metadata.height
+        || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION
+        || metadata.width * metadata.height > MAX_IMAGE_PIXELS) {
+        throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
+      }
+      // Full decode is forced by re-encoding, unlike metadata-only inspection.
+      const contentType: AllowedUploadType = isHeifInput ? "image/jpeg" : type;
+      const normalizedBytes = contentType === "image/jpeg"
+        ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
+        : contentType === "image/png"
+          ? await image.rotate().png({ compressionLevel: 9 }).toBuffer()
+          : await image.rotate().webp({ quality: 90 }).toBuffer();
+      if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
+      return { contentType, sourceContentType: type, normalizedBytes };
     });
-    const metadata = await image.metadata();
-    const isHeifInput = type === "image/heic" || type === "image/heif" || type === "image/avif";
-    const expectedFormat = isHeifInput
-      ? "heif"
-      : type === "image/jpeg" ? "jpeg" : type === "image/png" ? "png" : "webp";
-    if (metadata.format !== expectedFormat
-      || metadata.pages && metadata.pages !== 1
-      || !metadata.width || !metadata.height
-      || metadata.width > MAX_IMAGE_DIMENSION || metadata.height > MAX_IMAGE_DIMENSION) {
-      throw new ObjectContentError("Image format, dimensions, or frame count is invalid");
-    }
-    // Full decode is forced by re-encoding, unlike metadata-only inspection.
-    const contentType: AllowedUploadType = isHeifInput ? "image/jpeg" : type;
-    const normalizedBytes = contentType === "image/jpeg"
-      ? await image.rotate().jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
-      : contentType === "image/png"
-        ? await image.rotate().png({ compressionLevel: 9 }).toBuffer()
-        : await image.rotate().webp({ quality: 90 }).toBuffer();
-    if (normalizedBytes.length > MAX_RESTRICTED_UPLOAD_BYTES) throw new ObjectContentError("Normalized image is too large");
-    return { contentType, sourceContentType: type, normalizedBytes };
   } catch (error) {
     if (error instanceof ObjectContentError) throw error;
     throw new ObjectContentError(type === "application/pdf" ? "PDF structure is invalid" : "Image data is invalid");

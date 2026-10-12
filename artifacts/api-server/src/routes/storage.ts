@@ -96,12 +96,20 @@ async function estimateStorageCost(clientId: number, usedBytes: number, monthlyD
   if (!client?.stripeCustomerId) return null;
   const subscription = await findLiveSubscription(client.stripeCustomerId).catch(() => null);
   if (!subscription) return null;
+  const storagePriceId = process.env.STORAGE_ADDON_PRICE_ID?.trim();
+  const isStorageItem = (item: (typeof subscription.items.data)[number]) =>
+    item.price?.metadata?.service_key === "storage" || (Boolean(storagePriceId) && item.price?.id === storagePriceId);
   const allowances = subscription.items.data
+    .filter((item) => !isStorageItem(item))
     .map((item) => String(item.price?.metadata?.service_key ?? ""))
     .map((key) => Number(allowanceMap[key]))
     .filter((value) => Number.isFinite(value) && value >= 0);
   if (!allowances.length) return null;
-  const includedBytes = Math.max(...allowances) * GIB;
+  // Storage bought as an add-on (one unit per GiB) adds to the plan allowance.
+  const purchasedGib = subscription.items.data
+    .filter(isStorageItem)
+    .reduce((sum, item) => sum + Math.max(0, Number(item.quantity ?? 0) || 0), 0);
+  const includedBytes = (Math.max(...allowances) + purchasedGib) * GIB;
   const excess = Math.max(0, usedBytes - includedBytes);
   const providerMinorUnits = Math.round(providerRate * 100 * excess / GIB);
   const storageMinorUnits = Math.round(

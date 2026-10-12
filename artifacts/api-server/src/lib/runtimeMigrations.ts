@@ -1,4 +1,4 @@
-import { db } from "@workspace/db";
+import { db, setSessionLockTimeout } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
@@ -15,6 +15,7 @@ import {
   tokenPayloadNeedsReencryption,
   validateTokenEncryptionConfig,
   describeTokenKeyConfiguration,
+  TokenPayloadError,
 } from "./bearerTokens";
 
 // ── Queued contractor credentials: bounded startup passes ─────────────────────
@@ -323,17 +324,177 @@ async function scrubQueuedRow(tx: MigrationTx, row: any): Promise<boolean> {
   return (result.rows as any[]).length > 0;
 }
 
+// ── Contractor-link key configuration ────────────────────────────────────────
+// A bad or missing contractor token key configuration (or a queued envelope
+// naming a key this server no longer holds) disables contractor links only:
+// it is logged loudly and reported in /readyz details, but never blocks the
+// schema migrations. Nothing is written in that state — encryptTokenPayload
+// refuses an invalid configuration and the queue passes are skipped — so a
+// working link is never stored unencrypted (see
+// .agents/memory/contractor-token-key-rotation.md).
+let contractorTokenProblem: string | null = null;
+
+/** Why contractor links are disabled after the last migration run, or null. */
+export function getContractorTokenProblem(): string | null {
+  return contractorTokenProblem;
+}
+
+function describeContractorTokenError(err: unknown): string {
+  if (err instanceof TokenPayloadError) {
+    return err.reason === "unknown_key"
+      ? "A queued contractor email names an encryption key version this server does not hold"
+      : "A queued contractor email could not be re-encrypted";
+  }
+  // Configuration errors are fixed strings naming environment variables only.
+  return err instanceof Error ? err.message : "Contractor token encryption is misconfigured";
+}
+
+function isContractorKeyError(err: unknown): boolean {
+  if (err instanceof TokenPayloadError) return true;
+  try {
+    validateTokenEncryptionConfig();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function runContractorCredentialPasses(): Promise<void> {
+  contractorTokenProblem = null;
+  try {
+    // Validate even on a new database with no encrypted rows, so a broken key
+    // rotation is reported at start-up rather than only at dispatch.
+    validateTokenEncryptionConfig();
+    await ensureQueueMigrationIndexes();
+    await sweepPlainTextQueuedCredentials();
+    await scrubLegacyQueuedCredentials();
+    await reencryptQueuedTokenPayloads();
+  } catch (err) {
+    // Only key problems disable contractor links; a database error still
+    // fails the migration run like any other statement.
+    if (!isContractorKeyError(err)) throw err;
+    contractorTokenProblem = describeContractorTokenError(err);
+    logger.error(
+      { err, problem: contractorTokenProblem },
+      "CONTRACTOR LINKS DISABLED: contractor token encryption key configuration is invalid; queued contractor credentials were not migrated. Fix CONTRACTOR_TOKEN_ENCRYPTION_KEY / _VERSION / _PREVIOUS_KEYS and restart.",
+    );
+  }
+}
+
+// ── Lock-safe migration session ───────────────────────────────────────────────
+// Every boot re-runs ~200 idempotent DDL statements. During a deploy overlap the
+// old instance is still serving, so each statement waits at most
+// MIGRATION_LOCK_TIMEOUT for a lock (instead of queueing behind, and blocking,
+// live traffic); the whole idempotent run is retried a few times before
+// start-up fails.
+const MIGRATION_LOCK_TIMEOUT = "5s";
+const MIGRATION_ATTEMPTS = 3;
+
+function isLockTimeout(err: unknown): boolean {
+  for (let e: any = err; e; e = e.cause) {
+    if (e.code === "55P03") return true;
+  }
+  return false;
+}
+
+/** Split a statement's comma-separated clauses at paren depth 0, outside quotes. */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim());
+}
+
+/**
+ * True for `ALTER TABLE t ADD COLUMN IF NOT EXISTS ...` statements (only ADD
+ * COLUMN clauses, no parameters) whose every column already exists. Skipping
+ * them is exactly what IF NOT EXISTS would do, minus the ACCESS EXCLUSIVE lock.
+ */
+export function isRedundantAddColumn(statement: string, params: unknown[], existing: ReadonlySet<string>): boolean {
+  if (params.length > 0) return false;
+  const match = /^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?\s+([\s\S]*?);?\s*$/i.exec(statement);
+  if (!match) return false;
+  const table = match[1].toLowerCase();
+  const clauses = splitTopLevel(match[2]);
+  if (clauses.length === 0) return false;
+  for (const clause of clauses) {
+    const column = /^ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+"?([A-Za-z_][A-Za-z0-9_]*)"?\s/i.exec(`${clause} `);
+    if (!column || !existing.has(`${table}.${column[1].toLowerCase()}`)) return false;
+  }
+  return true;
+}
+
+async function withMigrationSession<T>(run: () => Promise<T>): Promise<T> {
+  const columns = await db.execute(sql`
+    SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'
+  `);
+  const existing = new Set(
+    (columns.rows as Array<{ table_name: string; column_name: string }>)
+      .map((row) => `${row.table_name.toLowerCase()}.${row.column_name.toLowerCase()}`),
+  );
+  const dialect = (db as any).dialect;
+  const hadOwnExecute = Object.prototype.hasOwnProperty.call(db, "execute");
+  const originalExecute = db.execute;
+  const execute = originalExecute.bind(db);
+  (db as any).execute = (query: any) => {
+    try {
+      const rendered = typeof query === "string"
+        ? { sql: query, params: [] }
+        : dialect?.sqlToQuery?.(typeof query?.getSQL === "function" ? query.getSQL() : query);
+      if (rendered && isRedundantAddColumn(rendered.sql, rendered.params ?? [], existing)) {
+        return Promise.resolve({ rows: [], rowCount: 0, command: "ALTER", fields: [] });
+      }
+    } catch {
+      // Unrenderable here: just run it.
+    }
+    return execute(query);
+  };
+  setSessionLockTimeout(MIGRATION_LOCK_TIMEOUT);
+  try {
+    return await run();
+  } finally {
+    setSessionLockTimeout(null);
+    if (hadOwnExecute) (db as any).execute = originalExecute;
+    else delete (db as any).execute;
+  }
+}
+
 /**
  * Idempotent runtime migrations for additive schema changes.
- * Safe to run on every boot — uses IF NOT EXISTS guards.
+ * Safe to run on every boot — uses IF NOT EXISTS guards. Statements wait at
+ * most MIGRATION_LOCK_TIMEOUT for a lock; the run is retried on lock timeouts.
  */
 export async function runRuntimeMigrations() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await withMigrationSession(runRuntimeMigrationsOnce);
+    } catch (err) {
+      if (attempt >= MIGRATION_ATTEMPTS || !isLockTimeout(err)) throw err;
+      logger.warn({ attempt }, "Runtime migration lock timeout — retrying");
+      await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
+    }
+  }
+}
+
+async function runRuntimeMigrationsOnce() {
   try {
     await ensureRuntimeBaseline();
-
-    // Validate even on a new database with no encrypted rows, so a broken key
-    // rotation cannot let the service report ready and fail only at dispatch.
-    validateTokenEncryptionConfig();
 
     // ---- Customer privacy-governance records ----
     // These records support operational accountability; they do not determine
@@ -1372,10 +1533,7 @@ export async function runRuntimeMigrations() {
     // This credential-scrubbing migration assumes one application instance starts
     // at a time and finishes migrations before readiness. Zero-downtime deployment
     // alongside an older writer is intentionally not supported.
-    await ensureQueueMigrationIndexes();
-    await sweepPlainTextQueuedCredentials();
-    await scrubLegacyQueuedCredentials();
-    await reencryptQueuedTokenPayloads();
+    await runContractorCredentialPasses();
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_contractor_email_queue_quote_token_hash" ON contractor_email_queue ("quote_token_hash")`);
     await db.execute(sql`ALTER TABLE "contractor_email_queue"
       DROP CONSTRAINT IF EXISTS "contractor_email_queue_entity_type_check",
@@ -1637,6 +1795,33 @@ export async function runRuntimeMigrations() {
       ON "daily_checklist_submissions" ("client_id", "client_entry_id")
       WHERE "client_entry_id" IS NOT NULL
     `);
+
+    // ---- Scheduled jobs: run history, delivery leases, trial-ended notice ----
+    // scheduled_job_runs backs the stale-job note in /readyz and weekly-job
+    // catch-up; scheduled_email_claims holds expiring reminder-email leases
+    // (lib/emailDeliveryClaims.ts); trial_ended_email_sent_at dedupes the
+    // one-shot "your trial has ended" email.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "scheduled_job_runs" (
+        "job_name" text PRIMARY KEY,
+        "last_started_at" timestamptz,
+        "last_success_at" timestamptz,
+        "last_failure_at" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "scheduled_email_claims" (
+        "job" text NOT NULL,
+        "delivery_key" text NOT NULL,
+        "lease_token" text,
+        "lease_expires_at" timestamptz,
+        "sent_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY ("job", "delivery_key")
+      )
+    `);
+    await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "trial_ended_email_sent_at" timestamp`);
 
     logger.info("Runtime migrations complete");
   } catch (err) {

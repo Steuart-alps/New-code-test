@@ -24,7 +24,8 @@ services:
     preDeployCommand: node lib/db/bootstrap.mjs
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
     # /readyz stays 503 until Stripe is configured, so the platform health
-    # check uses the liveness endpoint.
+    # check uses /healthz, which is 503 until runtime migrations finish (a
+    # failed migration exits, so a broken deploy is never promoted).
     healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
@@ -48,6 +49,9 @@ services:
         sync: false
       - key: STRIPE_PUBLISHABLE_KEY
         sync: false
+      # Monthly per-GiB Stripe price for extra storage (unset hides "Buy").
+      - key: STORAGE_ADDON_PRICE_ID
+        sync: false
       # Email (Resend)
       - key: RESEND_API_KEY
         sync: false
@@ -59,6 +63,9 @@ services:
       # the Stripe price catalogue, issue ALPS discount codes and create
       # businesses without a trial. Unset means nobody.
       - key: PLATFORM_ADMIN_EMAILS
+        sync: false
+      # Error reporting (Sentry free tier is enough): job failures, crashes.
+      - key: SENTRY_DSN
         sync: false
       # File storage (Google Cloud Storage)
       - key: GCS_SERVICE_ACCOUNT_JSON

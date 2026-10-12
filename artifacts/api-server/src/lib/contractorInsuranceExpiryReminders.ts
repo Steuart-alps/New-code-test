@@ -15,6 +15,15 @@ import { and, eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getNotificationEmails } from "./getNotificationEmails";
+import {
+  claimEmailDelivery,
+  emailDeliveryIdempotencyKey,
+  markEmailDeliverySent,
+  pruneSentEmailDeliveries,
+  settleEmailDelivery,
+} from "./emailDeliveryClaims";
+
+const JOB = "contractor-insurance-digest";
 
 /** Insurance is flagged when it expires within this many days (or has already expired). */
 const LEAD_DAYS = 30;
@@ -103,6 +112,10 @@ export async function runContractorInsuranceExpiryReminderJob(): Promise<Contrac
   const appUrl = getPublicAppUrl();
   const now = new Date();
   const threshold = new Date(now.getTime() + LEAD_DAYS * 24 * 60 * 60 * 1000);
+  // The Monday (UTC date) that starts this digest week.
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7)));
+  const weekKey = monday.toISOString().slice(0, 10);
+  await pruneSentEmailDeliveries(JOB, 60).catch((err) => logger.warn({ err }, "Could not prune insurance digest markers"));
 
   const clients = await db
     .select({ id: clientsTable.id, name: clientsTable.name })
@@ -147,15 +160,28 @@ export async function runContractorInsuranceExpiryReminderJob(): Promise<Contrac
       const subject = `⚠️ ${alerts.length} contractor${alerts.length !== 1 ? "s" : ""} with expiring insurance — ComplyTrack`;
       const html = buildEmailHtml(alerts, appUrl);
 
-      for (const email of emails) {
-        try {
-          await sendSystemEmail({ to: email, subject, html });
-          result.emailsSent++;
-        } catch (err) {
-          logger.warn({ err, email, clientId: client.id }, "Failed to send contractor insurance expiry reminder");
-          result.errors++;
+      // One digest per client per week, even when the start-up catch-up and
+      // the Monday schedule (or two instances) both run: claim the week first;
+      // the claim becomes the week's sent marker once anything was accepted.
+      const claim = await claimEmailDelivery(JOB, `${client.id}:${weekKey}`);
+      if (!claim) continue;
+      let delivered = 0;
+      try {
+        for (const email of emails) {
+          try {
+            await sendSystemEmail({ to: email, subject, html, idempotencyKey: emailDeliveryIdempotencyKey(claim, email) });
+            delivered++;
+            result.emailsSent++;
+          } catch (err) {
+            logger.warn({ err, email, clientId: client.id }, "Failed to send contractor insurance expiry reminder");
+            result.errors++;
+          }
         }
+      } finally {
+        if (delivered > 0) await markEmailDeliverySent(claim).catch(() => {});
+        else await settleEmailDelivery(claim).catch(() => {});
       }
+      if (delivered === 0) continue;
 
       result.clientsAlerted++;
       logger.info(

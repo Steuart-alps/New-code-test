@@ -3,6 +3,7 @@ import { clientsTable, sitesTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
+import { isCoveredByMinimumQuantity } from "./siteChargeCoverage";
 
 export const PER_SITE_UNIT_AMOUNT = 1000; // £10.00 in pence
 export const PER_SITE_CURRENCY = "gbp";
@@ -531,17 +532,49 @@ export async function processPendingCharges(clientId: number): Promise<void> {
       // second-granularity; a site added in the same second as checkout must
       // still be billed (never lose a valid charge at the boundary).
       const preSubscription = queuedAt < subscriptionStartedAt;
-      const billable = active && perSiteServiceItems.length > 0 && perSiteRate > 0 && !preSubscription;
+      let billable = active && perSiteServiceItems.length > 0 && perSiteRate > 0 && !preSubscription;
+      let coveredByMinimum = false;
+      if (billable) {
+        // A subscription started with no sites is billed at the minimum
+        // quantity of 1, which already pays for the first site added after
+        // it. Charging that site again would double-bill.
+        const startedAt = new Date(subscriptionStartedAt).toISOString();
+        const history = await tx.execute(sql`
+          SELECT
+            (SELECT count(*)::int FROM sites
+              WHERE client_id = ${clientId} AND created_at < (${startedAt}::timestamptz AT TIME ZONE 'UTC')) AS sites_before,
+            (SELECT count(*)::int FROM billing_pending_charges
+              WHERE client_id = ${clientId} AND created_at < (${startedAt}::timestamptz AT TIME ZONE 'UTC')) AS rows_before,
+            (SELECT min(id) FROM billing_pending_charges
+              WHERE client_id = ${clientId} AND created_at >= (${startedAt}::timestamptz AT TIME ZONE 'UTC')) AS first_after
+        `);
+        const counts = (history.rows[0] ?? {}) as { sites_before?: number; rows_before?: number; first_after?: number | null };
+        if (isCoveredByMinimumQuantity({
+          rowId: row.id,
+          firstRowAfterSubscriptionId: counts.first_after == null ? null : Number(counts.first_after),
+          sitesBeforeSubscription: Number(counts.sites_before ?? 0),
+          rowsBeforeSubscription: Number(counts.rows_before ?? 0),
+        })) {
+          billable = false;
+          coveredByMinimum = true;
+          logger.info(
+            { clientId, pendingChargeId: row.id },
+            "Skipped added-site charge: first site is covered by the subscription's minimum quantity",
+          );
+        }
+      }
       if (!billable) {
         await tx.execute(sql`
           UPDATE billing_pending_charges
           SET status = 'skipped', charged_at = now()
           WHERE id = ${row.id}
         `);
-        logger.info(
-          { clientId, pendingChargeId: row.id },
-          "Skipped added-site charge: no live per-site subscription",
-        );
+        if (!coveredByMinimum) {
+          logger.info(
+            { clientId, pendingChargeId: row.id },
+            "Skipped added-site charge: no live per-site subscription",
+          );
+        }
         return false;
       }
       const amount = row.amount > 0 ? row.amount : row.sites_added * perSiteRate;

@@ -177,6 +177,10 @@ function decryptWithSecret(
 
 /** Encrypt raw credentials only for the short-lived dispatch boundary. */
 export function encryptTokenPayload(payload: Record<string, string>): string {
+  // An invalid key configuration disables contractor links (see
+  // runtimeMigrations.ts): refuse to seal anything rather than write a link
+  // under a key that rotation or dispatch cannot account for.
+  validateTokenEncryptionConfig();
   const valid = validateTokenPayload(payload);
   const { version, secret } = currentEncryptionKey();
   const iv = crypto.randomBytes(IV_BYTES);

@@ -14,10 +14,10 @@ import { enforceTrialLock } from "./middleware/trialLock";
 import { enforceDailyEntryCutoff } from "./middleware/dailyEntryCutoff";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { Sentry } from "./lib/sentry";
-import { sendCancellationWarningEmail } from "./lib/offboarding";
 import { recordAlpsDiscountCheckoutEvent } from "./lib/alpsDiscount";
 import { csrfProtection } from "./middleware/csrf";
 import { computeReadiness, getBillingReadiness } from "./lib/stripeStartup";
+import { withReadinessDetails } from "./lib/readinessDetails";
 import { internalAnalyticsRouter } from "./routes/analytics";
 
 const app: Express = express();
@@ -171,30 +171,10 @@ app.post(
       return;
     }
 
-    // Best-effort: send a cancellation warning email when a subscription is
-    // cancelled immediately or scheduled to cancel at period end.
-    // Must happen AFTER processWebhook so the DB is already updated.
-    // Never throws — a failure must not affect the 200 already sent.
-    try {
-      const sub = event?.data?.object ?? {};
-      const isCancelled = event.type === "customer.subscription.deleted";
-      const isCancelAtPeriodEnd =
-        event.type === "customer.subscription.updated" &&
-        sub.cancel_at_period_end === true;
-
-      if ((isCancelled || isCancelAtPeriodEnd) && sub.customer) {
-        const accessEndsAt: string | number | null =
-          typeof sub.cancel_at === "number" ? sub.cancel_at :
-          typeof sub.current_period_end === "number" ? sub.current_period_end :
-          null;
-        sendCancellationWarningEmail({
-          stripeCustomerId: String(sub.customer),
-          accessEndsAt,
-        }).catch((err) => logger.warn({ err }, "Cancellation warning email failed"));
-      }
-    } catch (err) {
-      logger.warn({ err }, "Could not parse Stripe event for cancellation warning");
-    }
+    // Best-effort follow-up once the synced tables are updated: local plan
+    // status, retention-clock reset on resubscription, cancellation and
+    // failed-payment emails. Never throws — the 200 has already been sent.
+    WebhookHandlers.afterSync(event).catch((err) => logger.warn({ err }, "Stripe webhook follow-up failed"));
   }
 );
 
@@ -209,10 +189,15 @@ app.use("/api", enforceDailyEntryCutoff);
 app.use("/api", enforceTrialLock);
 
 // Root-level health check — matches the deployment probe path and is exempt
-// from the /api prefix so load balancers can reach it directly.
-app.get("/healthz", (_req, res) => res.json({ status: "ok" }));
+// from the /api prefix so load balancers can reach it directly. It is 503
+// until runtime migrations finish, so Render never promotes an instance whose
+// migrations are still running (or failed: the process then exits).
+app.get("/healthz", (_req, res) => {
+  if (!applicationReady) return void res.status(503).json({ status: "starting" });
+  res.json({ status: "ok" });
+});
 app.get("/readyz", (_req, res) => {
-  const report = computeReadiness(applicationReady, getBillingReadiness());
+  const report = withReadinessDetails(computeReadiness(applicationReady, getBillingReadiness()));
   res.status(report.httpStatus).json(report.body);
 });
 

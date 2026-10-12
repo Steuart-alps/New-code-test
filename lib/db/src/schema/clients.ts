@@ -21,6 +21,7 @@ export const clientsTable = pgTable("clients", {
   // business-specific starter checks and healthcare water temperature defaults.
   businessType: text("business_type"),
   trialReminderSentAt: timestamp("trial_reminder_sent_at"),
+  trialEndedEmailSentAt: timestamp("trial_ended_email_sent_at"),
   // Claimed before cancellation cutoff warnings are delivered. Kept separate
   // from trial reminders because paid access can end independently of a trial.
   cancellationWarningSentAt: timestamp("cancellation_warning_sent_at"),

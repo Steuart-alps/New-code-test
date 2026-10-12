@@ -3,7 +3,10 @@ import type { AddonPaymentResult, PerSitePrice } from "./billing";
 interface SubscriptionItemLike {
   id: string;
   current_period_start?: number | null;
+  quantity?: number | null;
   price?: {
+    id?: string;
+    unit_amount?: number | null;
     metadata?: Record<string, string>;
   } | null;
 }
@@ -20,7 +23,7 @@ type AddonActivationResult =
   | { status: "already_active" }
   | { status: "payment_unknown" }
   | { status: "charge_failed" }
-  | { status: "activated"; entitled: unknown };
+  | { status: "activated"; entitled: unknown; bundled?: boolean };
 
 /**
  * Apply the paid portion of an add-on activation. Dependencies are injected so
@@ -52,6 +55,19 @@ export async function activatePaidAddonService(input: {
   getEntitledServices: (clientId: number) => Promise<unknown>;
   onRollbackFailure?: (error: unknown) => void;
   onChargeFailure?: (error: unknown) => void;
+  /**
+   * The per-site cap. When the client's per-site services plus this add-on
+   * would reach it, the subscription is moved to the bundle instead, so the
+   * advertised cap is never exceeded.
+   */
+  bundle?: {
+    capPence: number;
+    serviceKey: string;
+    label: string;
+    getPrice: () => Promise<PerSitePrice | null>;
+    /** A legacy core price without service_key metadata, if any. */
+    corePriceId?: string | null;
+  };
 }): Promise<AddonActivationResult> {
   if (!input.allowedServiceKeys.includes(input.service)) {
     return { status: "unknown_service" };
@@ -70,6 +86,11 @@ export async function activatePaidAddonService(input: {
   const periodStart =
     input.subscription.items.data[0]?.current_period_start ??
     input.subscription.created;
+
+  if (input.bundle) {
+    const bundled = await switchToBundleAtCap(input, input.bundle, price, quantity, periodStart);
+    if (bundled) return bundled;
+  }
 
   await input.stripe.subscriptions.update(
     input.subscription.id,
@@ -132,4 +153,88 @@ export async function activatePaidAddonService(input: {
   input.invalidateEntitlements(input.clientId);
   const entitled = await input.getEntitledServices(input.clientId);
   return { status: "activated", entitled };
+}
+/**
+ * Replace the per-site service items with the bundle when adding this service
+ * would reach the cap. Returns null (no switch) when the cap is not reached,
+ * when an existing item's price is unknown, or when no bundle price exists.
+ * The client pays the difference between the cap and what it already pays for
+ * this month (no proration), and a failed charge restores the original items.
+ */
+async function switchToBundleAtCap(
+  input: Parameters<typeof activatePaidAddonService>[0],
+  bundle: NonNullable<Parameters<typeof activatePaidAddonService>[0]["bundle"]>,
+  price: PerSitePrice,
+  quantity: number,
+  periodStart: number,
+): Promise<AddonActivationResult | null> {
+  // Per-site service items (core, add-ons); storage is a separate product.
+  const perSiteItems = input.subscription.items.data.filter((item) => {
+    const key = item.price?.metadata?.service_key;
+    if (key) return key !== "storage";
+    return Boolean(bundle.corePriceId) && item.price?.id === bundle.corePriceId;
+  });
+  if (perSiteItems.some((item) => typeof item.price?.unit_amount !== "number" || !item.price?.id)) return null;
+  const currentRate = perSiteItems.reduce((sum, item) => sum + (item.price!.unit_amount as number), 0);
+  if (currentRate + price.unitAmount < bundle.capPence) return null;
+  const bundlePrice = await bundle.getPrice();
+  if (!bundlePrice) return null;
+
+  await input.stripe.subscriptions.update(
+    input.subscription.id,
+    {
+      items: [
+        ...perSiteItems.map((item) => ({ id: item.id, deleted: true })),
+        { price: bundlePrice.priceId, quantity },
+      ],
+      proration_behavior: "none",
+    },
+    { idempotencyKey: `svc-bundle-${input.subscription.id}-${input.service}-${periodStart}` },
+  );
+
+  const amount = Math.max(0, bundle.capPence - currentRate) * quantity;
+  try {
+    if (amount > 0) {
+      const payment = await input.collectFirstMonthInvoice(input.stripe, {
+        customerId: input.customerId,
+        amount,
+        currency: bundlePrice.currency,
+        description: `${bundle.label} — upgrade for the rest of this month, ${quantity} site${quantity === 1 ? "" : "s"} (no proration)`,
+        metadata: {
+          addon_service: bundle.serviceKey,
+          client_id: String(input.clientId),
+          period_start: String(periodStart),
+        },
+        idempotencyPrefix: `svc-bundle-${input.subscription.id}-${input.service}-${periodStart}`,
+      });
+      if (payment === "unknown") {
+        input.invalidateEntitlements(input.clientId);
+        return { status: "payment_unknown" };
+      }
+      if (payment === "not_collected") throw new Error("Bundle upgrade invoice was not collected");
+    }
+  } catch (error) {
+    try {
+      const fresh = await input.findLiveSubscription(input.customerId);
+      const added = fresh?.items.data.find((item) => item.price?.metadata?.service_key === bundle.serviceKey);
+      if (added) {
+        await input.stripe.subscriptions.update(input.subscription.id, {
+          items: [
+            { id: added.id, deleted: true },
+            ...perSiteItems.map((item) => ({ price: item.price!.id, quantity: item.quantity ?? quantity })),
+          ],
+          proration_behavior: "none",
+        });
+      }
+    } catch (rollbackError) {
+      input.onRollbackFailure?.(rollbackError);
+    }
+    input.invalidateEntitlements(input.clientId);
+    input.onChargeFailure?.(error);
+    return { status: "charge_failed" };
+  }
+
+  input.invalidateEntitlements(input.clientId);
+  const entitled = await input.getEntitledServices(input.clientId);
+  return { status: "activated", entitled, bundled: true };
 }
