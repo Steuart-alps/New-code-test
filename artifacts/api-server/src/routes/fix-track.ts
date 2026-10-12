@@ -1012,9 +1012,16 @@ router.post("/issues/:id/request-upload", requireAuth, denyViewers, async (req, 
     return;
   }
 
+  // The signed PUT binds this type, and storage serves it back from the app's
+  // origin, so only media and PDF types may be reserved (never HTML or script).
+  const contentType = parsed.data.contentType.trim().toLowerCase();
+  const extension = FIXTRACK_UPLOAD_EXTENSIONS[contentType];
+  if (!extension) {
+    res.status(400).json({ error: "Choose a photo, video or PDF file" });
+    return;
+  }
+
   try {
-    const contentType = parsed.data.contentType.trim().toLowerCase();
-    const extension = FIXTRACK_UPLOAD_EXTENSIONS[contentType] ?? "";
     const uploadUrl = await storage.getObjectEntityUploadURL(clientId, contentType, extension);
     const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
     res.json({ uploadUrl, objectPath });
@@ -1074,6 +1081,9 @@ router.post("/issues/:id/media", requireAuth, denyViewers, async (req, res): Pro
       return;
     }
     if (err instanceof ObjectContentError) {
+      // Rejected bytes are still unfinalised; drop them rather than leave them
+      // in staging. A foreign path is refused by this call.
+      await storage.discardTenantUpload(parsed.data.objectPath, clientId).catch(() => {});
       res.status(400).json({ error: err.message });
       return;
     }
