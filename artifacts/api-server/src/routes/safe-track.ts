@@ -343,7 +343,8 @@ const sopCreate = z.object({
   scope: z.string().max(1000).nullable().optional(),
   content: z.string().max(50000).nullable().optional(),
   version: z.string().max(20).optional(),
-  publishedAt: z.string().datetime().nullable().optional(),
+  // Drizzle timestamp columns need a Date, not the ISO string the web sends.
+  publishedAt: z.string().datetime().nullable().optional().transform((value) => (value ? new Date(value) : value)),
   siteId: z.number().int().nullable().optional(),
   departmentId: z.number().int().nullable().optional(),
   signature: signatureField,
@@ -403,7 +404,8 @@ const handbookCreate = z.object({
   section: z.string().max(300).nullable().optional(),
   content: z.string().max(50000).nullable().optional(),
   version: z.string().max(20).optional(),
-  publishedAt: z.string().datetime().nullable().optional(),
+  // Drizzle timestamp columns need a Date, not the ISO string the web sends.
+  publishedAt: z.string().datetime().nullable().optional().transform((value) => (value ? new Date(value) : value)),
   siteId: z.number().int().nullable().optional(),
   signature: signatureField,
   requiresAcknowledgement: z.boolean().optional(),
