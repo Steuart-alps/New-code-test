@@ -27,6 +27,8 @@ unfamiliar area.
 - `pnpm --filter @workspace/api-spec run codegen` — after changing the OpenAPI spec
 - API tests: `pnpm --filter @workspace/api-server run test:<name>` (see its `package.json`;
   `*:ci` variants boot their own server). They need `DATABASE_URL` and `SESSION_SECRET`.
+  Test APIs enforce mandatory 2FA: sign fixture users in with `tests/two-factor-fixture.mjs`
+  (only legacy runners set `ALLOW_PASSWORD_ONLY_TEST_LOGIN=1`).
 
 ## Database
 

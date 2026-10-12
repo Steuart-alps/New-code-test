@@ -35,12 +35,16 @@
 //        - DELETE removes only the caller's own token (cross-user delete leaves
 //          the other user's token intact)
 //
+// Every account enrols a TOTP authenticator through tests/two-factor-fixture.mjs,
+// as mandatory 2FA requires.
+//
 // Usage: API_BASE=... DATABASE_URL=... node tests/config-endpoints.mjs
 // (normally via `pnpm run test:config:ci`, which boots a private API).
 // Exits 0 when every check passes, 1 otherwise.
 
 import { randomUUID } from "node:crypto";
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
+import { signIn } from "./two-factor-fixture.mjs";
 
 const runId = resolveRunId();
 const fixtures = createFixtureOwnership({ runId, suite: "config-endpoints" });
@@ -125,10 +129,8 @@ async function registerAccount(label, ts) {
     if (verify.status !== 200) {
       throw new Error(`FATAL: email verification failed for ${label} (${verify.status})`);
     }
-    const login = await session("POST", "/auth/login", { email, password: "password-123" });
-    if (login.status !== 200) {
-      throw new Error(`FATAL: login after verification failed for ${label} (${login.status})`);
-    }
+    // Mandatory 2FA: enrol a deterministic TOTP authenticator before app access.
+    await signIn(session, { email, password: "password-123", label });
   }
   const me = await session("GET", "/auth/me");
   const user = me.data?.user ?? me.data;
@@ -153,8 +155,7 @@ async function createAndLogin(admin, clientId, role, label, ts) {
   });
   expectOk(`setup: create ${role} (${label})`, created.status, [200, 201]);
   const session = makeSession();
-  const login = await session("POST", "/auth/login", { email, password });
-  expectOk(`setup: login ${role} (${label})`, login.status, [200, 201]);
+  await signIn(session, { email, password, label: `${role} (${label})` });
   return session;
 }
 

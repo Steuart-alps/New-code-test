@@ -250,7 +250,7 @@ const helperModules = new Set([
   "pdf-text.mjs",
   "approval-workflow-fixtures.mjs", "doc-train-flows.mjs",
   "private-file-acl-fixture.mjs", "storage-test-availability.mjs",
-  "fixture-ownership.mjs", "storage-acl-session.mjs",
+  "fixture-ownership.mjs", "storage-acl-session.mjs", "two-factor-fixture.mjs",
   "webauthn-test-authenticator.mjs",
 ]);
 // Runners kept for manual use without a package script. They must still lock.

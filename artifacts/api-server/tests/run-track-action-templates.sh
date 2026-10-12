@@ -12,7 +12,7 @@ cleanup() { [ -z "$SERVER_PID" ] || { kill "$SERVER_PID" >/dev/null 2>&1 || true
 trap cleanup EXIT
 if ! ready; then
   pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 45); do ready && break; kill -0 "$SERVER_PID" 2>/dev/null || exit 1; sleep 1; done
   ready || { echo "API server did not become ready" >&2; exit 1; }

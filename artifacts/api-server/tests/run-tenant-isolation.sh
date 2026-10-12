@@ -33,7 +33,7 @@ trap cleanup EXIT
 if ! healthy; then
   echo "No API server responding at ${API_BASE} — starting a test instance..."
   pnpm run build
-  NODE_ENV=test PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
+  NODE_ENV=test ENFORCE_MANDATORY_2FA=1 PORT="$TEST_PORT" node --enable-source-maps ./dist/index.mjs &
   SERVER_PID=$!
   for _ in $(seq 1 120); do
     if healthy; then break; fi
@@ -49,4 +49,6 @@ if ! healthy; then
   fi
 fi
 
-node tests/tenant-isolation.mjs
+# Mandatory 2FA is enforced: fixtures enrol TOTP and must never accept a
+# password-only session.
+env -u ALLOW_PASSWORD_ONLY_TEST_LOGIN node tests/tenant-isolation.mjs
