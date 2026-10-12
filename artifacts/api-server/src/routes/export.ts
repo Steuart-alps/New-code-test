@@ -18,7 +18,7 @@ import kitchenInspectionExport from "./kitchen-inspection-export";
 // archiver v8 is pure ESM — use ZipArchive directly, no factory function.
 import { ZipArchive } from "archiver";
 import { db } from "@workspace/db";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, notInArray } from "drizzle-orm";
 import path from "path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -244,6 +244,9 @@ kitchen/
   manager-signoffs.csv           — daily manager sign-offs
   weekly-reviews.csv             — weekly kitchen review records
   probe-checks.csv               — probe thermometer checks
+  mobile-daily-checklists.csv    — AM/PM checklists submitted from the mobile app
+  cleaning-tasks.csv             — cleaning schedule tasks
+  cleaning-logs.csv              — cleaning schedule completions
 fix-track/
   issues.csv                     — maintenance issues
 doc-track/
@@ -273,10 +276,14 @@ pool-track/
 swim-track/
   sessions.csv                   — supervised swim sessions
   surveillance-checks.csv        — lifeguard surveillance checks
+  first-aid-checks.csv           — rescue and first aid equipment checks
   incidents.csv                  — swim incidents
 green-track/
   machines.csv                   — grounds machinery register
   pre-use-checks.csv             — pre-use inspection records
+  puwer-inspections.csv          — PUWER inspections
+  service-records.csv            — machinery service records
+  defects.csv                    — machinery defects
 tree-track/
   inspections.csv                — tree inspection records
 bike-track/
@@ -291,8 +298,15 @@ pest-track/
   activity.csv                   — pest activity log
 incidents/
   records.csv                    — general incident reports
+  riddor-events.csv              — RIDDOR decisions and HSE submissions
 premises-track/
   inspections.csv                — premises inspection records
+room-track/
+  rooms.csv                      — room register
+  checks.csv                     — room checks
+track-actions/
+  actions.csv                    — corrective actions for modules other than
+                                   FireTrack and LegionellaTrack
 staff-roster/
   staff.csv                      — staff roster
 
@@ -537,6 +551,13 @@ router.get(
 
       await out.csv("kitchen/probe-checks.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_probe_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
 
+      // AM/PM checklists submitted from the mobile app are a separate store.
+      await out.csv("kitchen/mobile-daily-checklists.csv", async () => (await db.execute(sql`SELECT * FROM daily_checklist_submissions WHERE client_id = ${cid} ORDER BY checklist_date DESC, id`)).rows);
+
+      await out.csv("kitchen/cleaning-tasks.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_cleaning_tasks WHERE client_id = ${cid} ORDER BY id`)).rows);
+
+      await out.csv("kitchen/cleaning-logs.csv", async () => (await db.execute(sql`SELECT * FROM kitchen_cleaning_logs WHERE client_id = ${cid} ORDER BY log_date DESC, id`)).rows);
+
       // ── FixTrack ──────────────────────────────────────────────────────────
       await out.csv("fix-track/issues.csv", () => db.select().from(fixTrackIssuesTable).where(eq(fixTrackIssuesTable.clientId, cid)));
 
@@ -579,12 +600,20 @@ router.get(
 
       await out.csv("swim-track/surveillance-checks.csv", async () => (await db.execute(sql`SELECT * FROM swim_surveillance_checks WHERE client_id = ${cid} ORDER BY check_time DESC`)).rows);
 
+      await out.csv("swim-track/first-aid-checks.csv", async () => (await db.execute(sql`SELECT * FROM swim_first_aid_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+
       await out.csv("swim-track/incidents.csv", async () => (await db.execute(sql`SELECT * FROM swim_incidents WHERE client_id = ${cid} ORDER BY incident_date DESC`).catch(() => ({ rows: [] }))).rows);
 
       // ── GreenTrack ────────────────────────────────────────────────────────
       await out.csv("green-track/machines.csv", async () => (await db.execute(sql`SELECT * FROM green_machines WHERE client_id = ${cid} ORDER BY created_at DESC`)).rows);
 
       await out.csv("green-track/pre-use-checks.csv", async () => (await db.execute(sql`SELECT * FROM green_pre_use_checks WHERE client_id = ${cid} ORDER BY check_date DESC`)).rows);
+
+      await out.csv("green-track/puwer-inspections.csv", async () => (await db.execute(sql`SELECT * FROM green_puwer_inspections WHERE client_id = ${cid} ORDER BY inspection_date DESC, id`)).rows);
+
+      await out.csv("green-track/service-records.csv", async () => (await db.execute(sql`SELECT * FROM green_service_records WHERE client_id = ${cid} ORDER BY service_date DESC, id`)).rows);
+
+      await out.csv("green-track/defects.csv", async () => (await db.execute(sql`SELECT * FROM green_defects WHERE client_id = ${cid} ORDER BY report_date DESC, id`)).rows);
 
       // ── TreeTrack ─────────────────────────────────────────────────────────
       await out.csv("tree-track/inspections.csv", () => db.select().from(treeInspectionsTable).where(eq(treeInspectionsTable.clientId, cid)));
@@ -625,8 +654,22 @@ router.get(
       // ── Incidents ─────────────────────────────────────────────────────────
       await out.csv("incidents/records.csv", () => db.select().from(incidentsTable).where(eq(incidentsTable.clientId, cid)));
 
+      await out.csv("incidents/riddor-events.csv", async () => (await db.execute(sql`SELECT * FROM incident_riddor_events WHERE client_id = ${cid} ORDER BY incident_id, id`)).rows);
+
       // ── PremisesTrack ─────────────────────────────────────────────────────
       await out.csv("premises-track/inspections.csv", () => db.select().from(premisesInspectionsTable).where(eq(premisesInspectionsTable.clientId, cid)));
+
+      // ── RoomTrack ─────────────────────────────────────────────────────────
+      await out.csv("room-track/rooms.csv", async () => (await db.execute(sql`SELECT * FROM room_track_rooms WHERE client_id = ${cid} ORDER BY id`)).rows);
+
+      await out.csv("room-track/checks.csv", async () => (await db.execute(sql`SELECT * FROM room_track_checks WHERE client_id = ${cid} ORDER BY check_date DESC, id`)).rows);
+
+      // ── Corrective actions (other modules) ────────────────────────────────
+      // FireTrack and LegionellaTrack actions are in their own folders above.
+      await out.csv("track-actions/actions.csv", () => db.select().from(trackActionsTable).where(and(
+        eq(trackActionsTable.clientId, cid),
+        notInArray(trackActionsTable.module, ["fire", "legionella"]),
+      )));
 
       // ── Staff roster ──────────────────────────────────────────────────────
       await out.csv("staff-roster/staff.csv", async () => (await db.execute(sql`SELECT id, client_id, site_id, name, job_title, department, email, phone, start_date, active, notes, created_at, updated_at FROM staff_roster WHERE client_id = ${cid} ORDER BY name ASC`)).rows);
