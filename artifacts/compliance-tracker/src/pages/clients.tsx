@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -404,7 +404,7 @@ export default function ClientsPage() {
       <div className="space-y-6">
         <PendingDeletionRequests />
         <div className="flex items-center justify-between">
-          <p className="text-muted-foreground text-sm">Manage client organisations</p>
+          <p className="text-muted-foreground text-sm">Manage client organisations · <Link href="/portfolio" className="font-medium text-primary underline-offset-2 hover:underline">See the portfolio overview</Link></p>
           <Button onClick={() => { setEditingClient(null); setDialogOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
             Add Client
@@ -456,7 +456,7 @@ export default function ClientsPage() {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs"
-                    onClick={() => { setActiveClientId(c.id); navigate("/"); }}
+                    onClick={() => { setActiveClientId(c.id); navigate("/dashboard"); }}
                   >
                     View
                   </Button>

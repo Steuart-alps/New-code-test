@@ -17,6 +17,7 @@ import SettingsPage from "@/pages/settings";
 import AccountSecurityPage from "@/pages/account-security";
 import UsersPage from "@/pages/users";
 import ClientsPage, { LockedClientsPage } from "@/pages/clients";
+import PortfolioPage from "@/pages/portfolio";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -170,7 +171,9 @@ function ProtectedRoutes() {
 
   // Logged in — redirect away from public pages
   if (location === "/login" || location === "/") {
-    return <Redirect to="/dashboard" />;
+    // Consultants land on their portfolio, which forwards to the dashboard
+    // unless they manage two or more businesses.
+    return <Redirect to={user.role === "consultant" ? "/portfolio?from=landing" : "/dashboard"} />;
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
@@ -223,6 +226,7 @@ function ProtectedRoutes() {
       <Route path="/account-security" component={AccountSecurityPage} />
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
+      {isConsultant && <Route path="/portfolio" component={PortfolioPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>
       <Route path="/daily/pm">{() => <DailyChecklistPage type="pm" />}</Route>

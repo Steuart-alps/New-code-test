@@ -27,7 +27,8 @@ import {
   FileCheck2,
   BedDouble,
   Tractor,
-  Inbox
+  Inbox,
+  LayoutGrid
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -134,6 +135,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   }
 
   if (isConsultant) {
+    groups.find(g => g.id === "core")?.items.splice(1, 0, { href: "/portfolio", label: "Portfolio", icon: LayoutGrid });
     groups.find(g => g.id === "admin")?.items.push({ href: "/clients", label: "Clients", icon: Building2 });
   }
 

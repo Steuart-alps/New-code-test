@@ -26,6 +26,7 @@ import alpsLogo from "@/assets/alps-logo.png";
 import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
+import { ManagedByBadge } from "@/components/managed-by-badge";
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -426,6 +427,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             transition={{ duration: 0.4, ease: "easeOut" }}
             className="max-w-7xl mx-auto space-y-8"
           >
+            <ManagedByBadge />
             <CancellationBanner />
             {location !== "/compliance-hub" && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
