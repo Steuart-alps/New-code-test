@@ -68,6 +68,8 @@ import FoodSafetyPage from "@/pages/food-safety";
 import DailyHistoryPage from "@/pages/daily-history";
 import StaffTrainingPage from "@/pages/staff-training";
 import { WaterSafetyPage } from "@/pages/safety-summary";
+import SetupPage from "@/pages/setup";
+import TasksPage from "@/pages/tasks";
 import { trackModuleFirstUse } from "@/lib/analytics";
 import KioskPage, { StaffSetPinPage } from "@/pages/staff-kiosk";
 
@@ -212,6 +214,8 @@ function ProtectedRoutes() {
       <Route path="/room-track" component={RoomTrackPage} />
       <Route path="/reports" component={ReportsPage} />
       <Route path="/compliance-hub" component={ComplianceHubPage} />
+      {canAdmin && <Route path="/setup" component={SetupPage} />}
+      <Route path="/tasks" component={TasksPage} />
       {canAdmin && <Route path="/sites/:id" component={SiteDetailPage} />}
       {canAdmin && <Route path="/sites" component={SitesPage} />}
       {canAdmin && <Route path="/categories/:id" component={CategoryDetailPage} />}

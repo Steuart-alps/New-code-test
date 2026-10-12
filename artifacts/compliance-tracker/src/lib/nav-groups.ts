@@ -50,6 +50,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       defaultOpen: true,
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/tasks", label: "Tasks", icon: ClipboardList },
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
