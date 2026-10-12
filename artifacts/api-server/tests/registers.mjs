@@ -157,6 +157,28 @@ const list = await ok(owner.request("GET", "/registers/asbestos"), 200, "asbesto
 const listed = list.find((r) => r.id === record.id);
 assert.equal(listed.entries.length, 1);
 assert.equal(listed.entries[0].action, "remove");
+// Survey history: detaching (or replacing) the report keeps the previous one
+// listed. Storage is not available here, so the stored report is seeded.
+const oldReport = `/objects/uploads/tenant-${owner.clientId}/asbestos-history-${record.id}.pdf`;
+await pool.query("UPDATE asbestos_records SET report_object_path = $1, report_file_name = 'survey-2019.pdf' WHERE id = $2", [oldReport, record.id]);
+await ok(owner.request("PUT", `/registers/asbestos/${record.id}`, {
+  siteId: siteA.id, builtBefore2000: "yes", surveyType: "management", surveyDate, surveyor: "Survey Ltd", objectPath: oldReport,
+}), 200, "unchanged report is kept");
+assert.equal((await pool.query("SELECT count(*)::int AS n FROM asbestos_survey_history WHERE record_id = $1", [record.id])).rows[0].n, 0, "keeping the report adds no history");
+const detached = await ok(owner.request("PUT", `/registers/asbestos/${record.id}`, {
+  siteId: siteA.id, builtBefore2000: "yes", surveyType: "refurbishment_demolition", surveyDate: isoDay(-2), objectPath: null,
+}), 200, "detach survey report");
+assert.equal(detached.reportObjectPath, null);
+const history = (await ok(owner.request("GET", "/registers/asbestos"), 200, "asbestos list with history")).find((r) => r.id === record.id).surveyHistory;
+assert.equal(history.length, 1, "previous survey kept");
+assert.equal(history[0].reportObjectPath, oldReport);
+assert.equal(history[0].reportFileName, "survey-2019.pdf");
+assert.equal(history[0].surveyType, "management");
+assert.equal(history[0].surveyDate, surveyDate);
+assert.equal(history[0].surveyor, "Survey Ltd");
+await ok(foreign.request("GET", `/registers/asbestos/${record.id}/history/${history[0].id}/report-url`), 404, "foreign history report link");
+await ok(owner.request("GET", `/registers/asbestos/${modern.id}/history/${history[0].id}/report-url`), 404, "history entry of another record");
+await ok(viewer.request("GET", "/registers/asbestos"), 200, "viewer reads history");
 await ok(viewer.request("POST", `/registers/asbestos/${record.id}/entries`, { location: "x", material: "y", condition: "good", priority: "low", action: "manage" }), 403, "viewer add entry");
 await ok(viewer.request("PUT", `/registers/asbestos/${record.id}`, { siteId: siteA.id, builtBefore2000: "no" }), 403, "viewer edit record");
 await ok(viewer.request("DELETE", `/registers/asbestos/entries/${entry.id}`), 403, "viewer delete entry");
