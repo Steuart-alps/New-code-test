@@ -61,6 +61,9 @@ import registersRouter from "./registers";
 
 import csvImportsRouter from "./csv-imports";
 import consultantPortfolioRouter from "./consultant-portfolio";
+
+import setupRouter from "./setup";
+import tasksRouter from "./tasks";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
@@ -155,4 +158,5 @@ router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
 router.use("/track-actions", trackActionsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
+router.use(setupRouter, tasksRouter);
 export default router;

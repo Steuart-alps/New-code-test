@@ -119,6 +119,9 @@
 
     "test:csv-imports-portfolio": "bash tests/run-csv-imports-portfolio.sh",
     "test:csv-import-lib": "bash tests/run-bundled-unit.sh tests/csv-import-lib.ts cjs",
+
+    "test:setup-tasks": "bash tests/run-setup-tasks.sh",
+    "test:task-schedule": "bash tests/run-bundled-unit.sh tests/task-schedule.ts esm",
     "test:fix-track-contractor-approval": "bash tests/run-fix-track-contractor-approval.sh",
     "test:contractor-token-security": "bash tests/run-fresh-schema.sh tests/contractor-token-security.mjs",
     "test:contractor-approval-inbox-browser": "bash tests/run-contractor-approval-inbox-browser.sh",

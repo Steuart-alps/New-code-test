@@ -125,3 +125,5 @@ export * from "./scheduled-jobs";
 export * from "./registers";
 
 export * from "./consultant-branding";
+
+export * from "./tasks";

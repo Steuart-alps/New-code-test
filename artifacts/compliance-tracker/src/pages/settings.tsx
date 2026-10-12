@@ -8,6 +8,7 @@ import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
+import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -2383,6 +2384,7 @@ export default function SettingsPage() {
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
+        {canAdmin && <BusinessTypeCard />}
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">

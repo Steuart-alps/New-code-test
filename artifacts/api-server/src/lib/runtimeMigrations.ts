@@ -1942,6 +1942,65 @@ async function runRuntimeMigrationsOnce() {
       )
     `);
 
+    // ---- Setup wizard and staff tasks (Oct 2026) ----
+    // clients.setup_completed_at: null shows the first-run setup wizard to
+    // admins. The backfill runs only in the transaction that adds the column,
+    // so businesses that already have sites or compliance checks never see the
+    // wizard, while new sign-ups (seeded with starter checks at registration)
+    // keep seeing it after later restarts.
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema() AND table_name = 'clients' AND column_name = 'setup_completed_at'
+        ) THEN
+          ALTER TABLE "clients" ADD COLUMN "setup_completed_at" timestamp;
+          UPDATE "clients" c SET "setup_completed_at" = now()
+          WHERE c."setup_completed_at" IS NULL
+            AND (EXISTS (SELECT 1 FROM "sites" s WHERE s."client_id" = c."id")
+              OR EXISTS (SELECT 1 FROM "compliance_items" i WHERE i."client_id" = c."id"));
+        END IF;
+      END $$
+    `);
+    // Staff tasks: one-off or daily/weekly/monthly; occurrences are derived on
+    // read, only completions are stored (one per task per occurrence date).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "tasks" (
+        "id"               serial PRIMARY KEY,
+        "client_id"        integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id"          integer REFERENCES "sites"("id") ON DELETE CASCADE,
+        "title"            text NOT NULL,
+        "instruction"      text,
+        "module"           text,
+        "assignee_user_id" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "assignee_role"    text,
+        "recurrence"       text NOT NULL DEFAULT 'once',
+        "starts_on"        date NOT NULL,
+        "active"           boolean NOT NULL DEFAULT true,
+        "created_by"       integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at"       timestamp NOT NULL DEFAULT now(),
+        "updated_at"       timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tasks_client" ON "tasks" ("client_id")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_tasks_assignee" ON "tasks" ("assignee_user_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "task_completions" (
+        "id"                serial PRIMARY KEY,
+        "client_id"         integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "task_id"           integer NOT NULL REFERENCES "tasks"("id") ON DELETE CASCADE,
+        "occurrence_date"   date NOT NULL,
+        "completed_by"      integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "completed_by_name" text NOT NULL,
+        "note"              text,
+        "completed_at"      timestamp NOT NULL DEFAULT now(),
+        "created_at"        timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_task_completions_task_date" ON "task_completions" ("task_id", "occurrence_date")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_task_completions_client" ON "task_completions" ("client_id")`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

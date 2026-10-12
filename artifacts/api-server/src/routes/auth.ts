@@ -818,7 +818,7 @@ router.post("/auth/reset-password", resetPasswordRateLimit, async (req, res) => 
   res.json({ ok: true });
 });
 
-const BUSINESS_TYPES = [
+export const BUSINESS_TYPES = [
   "hotel_accommodation",
   "holiday_park_campsite",
   "leisure_sports_centre",
