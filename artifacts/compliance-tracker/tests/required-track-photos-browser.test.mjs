@@ -128,6 +128,9 @@ const updateRequests = [];
 const requirementRequests = [];
 const requirementResponses = [];
 const unexpectedApiRequests = [];
+// The layout's "Managed by" strip reads once per page load, never per render.
+let managedByRequests = 0;
+let harnessNavigations = 0;
 let csrfTokenRequests = 0;
 let nextRecordId = 7100;
 let nextPhotoId = 9100;
@@ -353,6 +356,12 @@ async function routeApi(route, url) {
     return jsonResponse(route, index >= 0 ? rows[index] : { id: Number(updateMatch[1]), ...body });
   }
 
+  if (pathname === "/api/managed-by" && method === "GET") {
+    // No consultant practice branding for this business.
+    managedByRequests += 1;
+    return jsonResponse(route, null);
+  }
+
   unexpectedApiRequests.push({
     method,
     url: url.toString(),
@@ -376,6 +385,7 @@ async function waitForVite() {
 }
 
 async function navigateHarness(pageName) {
+  harnessNavigations += 1;
   const response = await page.goto(
     `${baseUrl}/tests/required-track-photos-harness.html?page=${pageName}`,
     { waitUntil: "domcontentloaded" },
@@ -733,6 +743,7 @@ try {
   assert.ok(storagePutHeaders.every(token => token === null), "object-storage PUTs must not receive the session CSRF header");
   assert.ok(requirementRequests.length >= 3, "requirements should be retried and reloaded for the optional case");
   assert.deepEqual(unexpectedApiRequests, [], `unexpected API requests must fail the browser test: ${JSON.stringify(unexpectedApiRequests)}`);
+  assert.ok(managedByRequests <= harnessNavigations, `managed-by read ${managedByRequests} times over ${harnessNavigations} page loads`);
   assert.deepEqual(pageErrors, [], `the actual track pages must not throw: ${pageErrors.join("; ")}`);
 
   console.log("GreenTrack and SwimTrack required-photo regression checks passed.");
