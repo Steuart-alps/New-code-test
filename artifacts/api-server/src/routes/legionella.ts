@@ -6,6 +6,8 @@ import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
@@ -250,11 +252,12 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { lastDate, lastResult });
   }
+  // A registered outlet that has never been tested keeps its check type at
+  // "never" until it is, whatever the other outlets' readings say.
+  const unreadOutlets = await unreadLegionellaOutletUnits(clientId, [selectedSiteId]);
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const todayDays = toUtcDays(todayIso);
+  const todayDays = toUtcDays(await getAccountToday(clientId));
 
   const siteProfile = await getLegionellaProfile(clientId, selectedSiteId);
   const frequencies = approvedFrequencies(siteProfile, CHECK_TYPES, "frequencyDays");
@@ -263,8 +266,8 @@ router.get("/status", requireAuth, async (req, res) => {
     const last = lastByType.get(checkType) ?? null;
     if (frequencyDays === null) return { checkType, frequencyDays, lastDate: last?.lastDate ?? null,
       lastResult: last?.lastResult ?? null, dueDate: null, status: "plan_required" as const };
-    if (!last) {
-      return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
+    if (!last || unreadOutlets.has(`${selectedSiteId}:${checkType}`)) {
+      return { checkType, frequencyDays, lastDate: null, lastResult: last?.lastResult ?? null, dueDate: null, status: "never" as const };
     }
     const dueDays = toUtcDays(last.lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);

@@ -11,6 +11,8 @@ import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireCl
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { defaultFoodJurisdiction } from "../lib/foodJurisdiction";
 
+import { getAccountToday } from "../lib/accountClock";
+
 const router = Router();
 
 // Rows are user-defined shapes, but must be flat objects of primitive values
@@ -1220,61 +1222,127 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 
 // ── Status — due/overdue per check type ───────────────────────────────────────
 // GET /api/food-safety/status[?siteId=N]
-// Without siteId: aggregates every check across the client (unchanged).
+// Only submitted diaries count; a draft is not a completed day.
 // With siteId: the diary counts only that site's diary, matching the dashboard
 // summary; weekly reviews, probe checks and cleaning logs count that site's
 // records plus client-wide ones (site_id IS NULL), which cover every site, as
 // do client-wide cleaning tasks.
+// Without siteId: each site the caller can see is evaluated as above and the
+// worst site is reported per check type (with how many sites are affected), so
+// one site's diary cannot make another look up to date. A business without
+// sites is evaluated on its whole-business records.
 router.get("/status", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const siteId = await resolveDiarySiteId(req, res, clientId);
   if (siteId === undefined) return;
-  const diaryScope = siteId === null ? sql`` : sql`AND site_id = ${siteId}`;
-  const checkScope = siteId === null ? sql`` : sql`AND (site_id = ${siteId} OR site_id IS NULL)`;
 
   const MS_DAY = 86400000;
-  const todayDays = Math.floor(Date.now() / MS_DAY);
-  const toUtcDays = (iso: string) => Math.floor(new Date(iso).getTime() / MS_DAY);
+  const todayDays = Math.floor(Date.parse(`${await getAccountToday(clientId)}T00:00:00Z`) / MS_DAY);
+  const toUtcDays = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / MS_DAY);
+  type KitchenStatus = "ok" | "due_soon" | "overdue" | "never";
 
   function computeStatus(lastDate: string | null, frequencyDays: number) {
-    if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as const };
+    if (!lastDate) return { lastDate: null, dueDate: null, status: "never" as KitchenStatus };
     const dueDays = toUtcDays(lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
     const daysUntilDue = dueDays - todayDays;
     const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
-    const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
+    const status: KitchenStatus = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
     return { lastDate, dueDate, status };
   }
 
+  // Units: the selected site, every visible site, or the whole business (null).
+  let units: { id: number | null; name: string | null }[];
+  if (siteId !== null) {
+    units = [{ id: siteId, name: null }];
+  } else {
+    const departmentId = getActiveDepartmentId(req);
+    const siteRows = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable)
+      .where(and(
+        eq(sitesTable.clientId, clientId),
+        departmentId === null ? undefined : or(isNull(sitesTable.departmentId), eq(sitesTable.departmentId, departmentId)),
+      ))
+      .orderBy(sitesTable.name, sitesTable.id);
+    units = siteRows.length ? siteRows : [{ id: null, name: null }];
+  }
+  const siteIds = units.flatMap(unit => unit.id === null ? [] : [unit.id]);
+  const idList = sql.join(siteIds.map(id => sql`${id}`), sql`, `);
+  // The diary is per site; the other records also count whole-business rows.
+  const diaryScope = siteIds.length ? sql`AND site_id IN (${idList})` : sql`AND site_id IS NULL`;
+  const checkScope = siteIds.length ? sql`AND (site_id IN (${idList}) OR site_id IS NULL)` : sql`AND site_id IS NULL`;
+  const latestBySite = (table: string, column: string, extra = sql``, scope = checkScope) => db.execute(sql`
+    SELECT site_id, MAX(${sql.raw(column)})::text AS last_date
+    FROM ${sql.raw(table)} WHERE client_id = ${clientId} ${extra} ${scope}
+    GROUP BY site_id
+  `);
+
   const [diary, weekly, probe, cleanDaily, cleanWeekly, cleanMonthly, taskCountsRes] = await Promise.all([
-    db.execute(sql`SELECT MAX(record_date)::text AS last_date FROM food_safety_records WHERE client_id = ${clientId} ${diaryScope}`),
-    db.execute(sql`SELECT MAX(week_commencing)::text AS last_date FROM kitchen_weekly_records WHERE client_id = ${clientId} ${checkScope}`),
-    db.execute(sql`SELECT MAX(check_date)::text AS last_date FROM kitchen_probe_checks WHERE client_id = ${clientId} ${checkScope}`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'daily' ${checkScope}`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'weekly' ${checkScope}`),
-    db.execute(sql`SELECT MAX(log_date)::text AS last_date FROM kitchen_cleaning_logs WHERE client_id = ${clientId} AND frequency = 'monthly' ${checkScope}`),
+    latestBySite("food_safety_records", "record_date", sql`AND submitted_at IS NOT NULL`, diaryScope),
+    latestBySite("kitchen_weekly_records", "week_commencing"),
+    latestBySite("kitchen_probe_checks", "check_date"),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'daily'`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'weekly'`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'monthly'`),
     db.execute(sql`
-      SELECT frequency, COUNT(*)::int AS task_count
+      SELECT site_id, frequency, COUNT(*)::int AS task_count
       FROM kitchen_cleaning_tasks
       WHERE client_id = ${clientId} AND active = true ${checkScope}
-      GROUP BY frequency
+      GROUP BY site_id, frequency
     `),
   ]);
 
-  const taskCounts = Object.fromEntries(
-    (taskCountsRes.rows as any[]).map((r: any) => [r.frequency, Number(r.task_count)])
+  const byKey = (result: { rows: unknown[] }) => new Map(
+    (result.rows as { site_id: number | null; last_date: string | null }[])
+      .map(row => [row.site_id == null ? "none" : String(row.site_id), row.last_date]),
   );
+  // A site's latest record is its own or a whole-business one, whichever is later.
+  const latestFor = (map: Map<string, string | null>, unitId: number | null, includeWholeBusiness: boolean) => {
+    const own = unitId === null ? null : map.get(String(unitId)) ?? null;
+    const whole = includeWholeBusiness || unitId === null ? map.get("none") ?? null : null;
+    return own && whole ? (own > whole ? own : whole) : own ?? whole;
+  };
+  const tasks = (taskCountsRes.rows as { site_id: number | null; frequency: string; task_count: number }[]);
+  const taskCount = (unitId: number | null, frequency: string) => tasks
+    .filter(row => row.frequency === frequency && (row.site_id == null || (unitId !== null && Number(row.site_id) === unitId)))
+    .reduce((total, row) => total + Number(row.task_count), 0);
 
-  const statuses: any[] = [
-    { checkType: "daily_diary",   frequencyDays: 1,  ...computeStatus((diary.rows[0] as any)?.last_date  ?? null, 1) },
-    { checkType: "weekly_review", frequencyDays: 7,  ...computeStatus((weekly.rows[0] as any)?.last_date ?? null, 7) },
-    { checkType: "probe_check",   frequencyDays: 30, ...computeStatus((probe.rows[0] as any)?.last_date  ?? null, 30) },
+  const measures = [
+    { checkType: "daily_diary", frequencyDays: 1, map: byKey(diary), wholeBusiness: false },
+    { checkType: "weekly_review", frequencyDays: 7, map: byKey(weekly), wholeBusiness: true },
+    { checkType: "probe_check", frequencyDays: 30, map: byKey(probe), wholeBusiness: true },
+    { checkType: "cleaning_daily", frequencyDays: 1, map: byKey(cleanDaily), wholeBusiness: true, tasks: "daily" },
+    { checkType: "cleaning_weekly", frequencyDays: 7, map: byKey(cleanWeekly), wholeBusiness: true, tasks: "weekly" },
+    { checkType: "cleaning_monthly", frequencyDays: 30, map: byKey(cleanMonthly), wholeBusiness: true, tasks: "monthly" },
   ];
+  const severity = (status: KitchenStatus) => status === "overdue" ? 3 : status === "never" ? 2 : status === "due_soon" ? 1 : 0;
 
-  if ((taskCounts["daily"]   ?? 0) > 0) statuses.push({ checkType: "cleaning_daily",   frequencyDays: 1,  ...computeStatus((cleanDaily.rows[0] as any)?.last_date   ?? null, 1) });
-  if ((taskCounts["weekly"]  ?? 0) > 0) statuses.push({ checkType: "cleaning_weekly",  frequencyDays: 7,  ...computeStatus((cleanWeekly.rows[0] as any)?.last_date  ?? null, 7) });
-  if ((taskCounts["monthly"] ?? 0) > 0) statuses.push({ checkType: "cleaning_monthly", frequencyDays: 30, ...computeStatus((cleanMonthly.rows[0] as any)?.last_date ?? null, 30) });
+  const statuses: any[] = [];
+  for (const measure of measures) {
+    const perUnit = units
+      .filter(unit => !measure.tasks || taskCount(unit.id, measure.tasks) > 0)
+      .map(unit => ({ unit, ...computeStatus(latestFor(measure.map, unit.id, measure.wholeBusiness), measure.frequencyDays) }));
+    if (!perUnit.length) continue;
+    const worst = perUnit.reduce((current, row) => {
+      const difference = severity(row.status) - severity(current.status);
+      if (difference !== 0) return difference > 0 ? row : current;
+      return (row.dueDate ?? "") < (current.dueDate ?? "") ? row : current;
+    });
+    statuses.push({
+      checkType: measure.checkType,
+      frequencyDays: measure.frequencyDays,
+      lastDate: worst.lastDate,
+      dueDate: worst.dueDate,
+      status: worst.status,
+      ...(siteId === null && siteIds.length ? {
+        siteId: worst.unit.id,
+        siteName: worst.unit.name,
+        siteCount: perUnit.length,
+        // Sites that are overdue or have never recorded it.
+        sitesAffected: perUnit.filter(row => row.status === "overdue" || row.status === "never").length,
+      } : {}),
+    });
+  }
 
   res.json(statuses);
 });

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, MinusCircle, SlidersHorizontal,
+  CheckCircle2, Circle, MinusCircle, SlidersHorizontal,
   MapPin, UserPlus, Mail, Settings2, MailWarning,
 } from "lucide-react";
 import {
@@ -20,7 +20,14 @@ import { useAuth, useCanAdmin, useIsMaintenanceManager } from "@/context/auth-co
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type TrackStatus = "ok" | "attention" | "overdue" | "no_data";
-type TrackHealth = "action_required" | "clear";
+// not_started: nothing recorded yet and nothing overdue — neutral, not a failure.
+type TrackHealth = "action_required" | "not_started" | "clear";
+
+const HEALTH_LABEL: Record<TrackHealth, string> = {
+  action_required: "action required",
+  not_started: "not started",
+  clear: "clear",
+};
 
 interface TrackItem {
   label: string;
@@ -74,6 +81,7 @@ const STATUS_BADGE: Record<TrackStatus, string> = {
 
 function StatusIcon({ status, health, className }: { status: TrackStatus; health: TrackHealth; className?: string }) {
   if (health === "action_required") return <AlertCircle className={cn("text-rose-500", className)} />;
+  if (health === "not_started") return <Circle className={cn("text-muted-foreground/60", className)} />;
   if (status === "attention") return <AlertTriangle className={cn("text-amber-500", className)} />;
   if (health === "clear") return <CheckCircle2 className={cn("text-emerald-500", className)} />;
   return                             <MinusCircle    className={cn("text-muted-foreground/50",    className)} />;
@@ -99,7 +107,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
         <Link
           href={track.path}
           className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-          aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+          aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
         >
           <StatusIcon status={track.status} health={track.health} className="w-4 h-4 shrink-0" />
 
@@ -107,6 +115,8 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
             "font-medium text-sm flex-1",
             track.health === "action_required"
               ? "text-rose-700"
+              : track.health === "not_started"
+              ? "text-muted-foreground"
               : track.status === "attention"
               ? "text-amber-700"
               : track.status === "no_data"
@@ -144,7 +154,7 @@ function TrackRow({ track, kitchenOverdueBadge }: { track: TrackSummary; kitchen
           <Link
             href={track.path}
             className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            aria-label={`Open ${track.label}: ${track.health === "action_required" ? "action required" : "clear"}`}
+            aria-label={`Open ${track.label}: ${HEALTH_LABEL[track.health] ?? "clear"}`}
           >
             <ArrowRight className="w-4 h-4" />
           </Link>
@@ -200,11 +210,13 @@ function DisabledTrack({ track }: { track: TrackSummary }) {
 function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
   const enabled = tracks.filter((t) => t.enabled);
   // These buckets are deliberately ordered so every module is counted once:
-  // an overdue/no-data module is action-needed even when its status is not
+  // an overdue or failed module is action-needed even when its status is not
   // "attention", while future due items remain a separate, non-urgent state.
+  // Modules with nothing recorded yet are "not started", a neutral state.
   const actionRequired = enabled.filter((t) => t.health === "action_required").length;
-  const due = enabled.filter((t) => t.health !== "action_required" && t.status === "attention").length;
-  const complete = enabled.filter((t) => t.health !== "action_required" && t.status === "ok").length;
+  const due = enabled.filter((t) => t.health === "clear" && t.status === "attention").length;
+  const complete = enabled.filter((t) => t.health === "clear" && t.status === "ok").length;
+  const notStarted = enabled.filter((t) => t.health === "not_started").length;
   const notApplicable = tracks.filter((t) => !t.enabled).length;
 
   if (enabled.length === 0) return null;
@@ -227,6 +239,12 @@ function SummaryBar({ tracks }: { tracks: TrackSummary[] }) {
         <span className="flex items-center gap-1.5 text-emerald-600">
           <CheckCircle2 className="w-4 h-4" />
           {complete} complete
+        </span>
+      )}
+      {notStarted > 0 && (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Circle className="w-4 h-4" />
+          {notStarted} not started
         </span>
       )}
       {notApplicable > 0 && (
@@ -529,13 +547,15 @@ export default function Dashboard() {
   const enabledTracks   = tracks.filter((t) => t.enabled);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
 
-  // Put actionable modules first; due-soon modules stay visible but follow them.
+  // Put actionable modules first; due-soon modules stay visible but follow
+  // them, and modules not started yet come last.
   const statusOrder: Record<TrackStatus, number> = {
     overdue: 0, attention: 1, ok: 2, no_data: 3,
   };
+  const healthOrder: Record<TrackHealth, number> = { action_required: 0, clear: 1, not_started: 2 };
   const sorted = [...enabledTracks].sort(
     (a, b) =>
-      (a.health === "action_required" ? 0 : 1) - (b.health === "action_required" ? 0 : 1) ||
+      (healthOrder[a.health] ?? 1) - (healthOrder[b.health] ?? 1) ||
       statusOrder[a.status] - statusOrder[b.status],
   );
 

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
@@ -41,7 +41,10 @@ export const complianceItemsTable = pgTable("compliance_items", {
   visitScheduledAt: timestamp("visit_scheduled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_compliance_items_client").on(table.clientId),
+]);
 
 export const insertComplianceItemSchema = createInsertSchema(complianceItemsTable).omit({
   id: true,

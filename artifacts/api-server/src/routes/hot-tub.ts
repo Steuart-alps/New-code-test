@@ -6,6 +6,8 @@ import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { PER_TUB_CHECK_TYPES, sitesWithUnreadHotTubs } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
@@ -306,17 +308,19 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { date, result });
   }
+  // A registered tub with no readings yet is "never" for its own checks, so a
+  // newly added tub cannot be hidden by the site's other tubs.
+  const hasUnreadTub = (await sitesWithUnreadHotTubs(clientId, [selectedSiteId])).has(selectedSiteId);
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayIso = await getAccountToday(clientId);
   const todayDays = toUtcDays(todayIso);
 
   const frequencies = approvedFrequencies(await getHotTubProfile(clientId, selectedSiteId), HOT_TUB_CHECK_TYPES, "frequencyDays");
   const statuses = HOT_TUB_CHECK_TYPES.map((checkType) => {
     const frequencyDays = frequencies?.[checkType] ?? null;
     const last = lastByType.get(checkType) ?? null;
-    const lastDate = last?.date ?? null;
+    const lastDate = hasUnreadTub && PER_TUB_CHECK_TYPES.has(checkType) ? null : last?.date ?? null;
     if (frequencyDays === null) return { checkType, frequencyDays, lastDate, lastResult: last?.result ?? null,
       dueDate: null, status: "plan_required" as const };
     if (!lastDate) {
