@@ -91,7 +91,7 @@ const runnerLocked = new Set([
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
   "test:track-action-templates", "test:room-track", "test:doc-track-object-acl",
   "test:bike-hire-export", "test:riddor-audit-history",
-  "test:compliance-audit-history", "test:twofa-recovery", "test:fix-track-history",
+  "test:compliance-audit-history", "test:compliance-content", "test:twofa-recovery", "test:fix-track-history",
   "test:contractor-portal", "test:premises-inspection-date-range",
   "test:pat-dept-isolation", "test:data-deletion-request",
   "test:daily-track-month-history", "test:stored-track-lock",
