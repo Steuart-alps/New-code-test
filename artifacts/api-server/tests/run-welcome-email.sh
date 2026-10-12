@@ -37,6 +37,7 @@ run_case() {
   local api_base="http://localhost:${port}/api"
 
   NODE_ENV=test \
+    ALLOW_PASSWORD_ONLY_TEST_LOGIN=1 \
     TEST_EMAIL_CAPTURE_PATH="$capture_file" \
     TEST_EMAIL_BEHAVIOR="$behavior" \
     TEST_EMAIL_DELAY_MS="$TEST_EMAIL_DELAY_MS" \

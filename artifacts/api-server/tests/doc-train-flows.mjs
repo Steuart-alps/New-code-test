@@ -1,5 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { completeTwoFactor } from "./two-factor-fixture.mjs";
 const execFile = promisify(execFileCallback);
 const sqlLiteral = (value) => `'${String(value).replaceAll("'", "''")}'`;
 async function fixtureSql(sql) {
@@ -134,6 +135,7 @@ export async function testDocTrainFlows({
       password: "password-123",
     });
     expectOk("doc/train: staff logs in", staffLogin.status);
+    await completeTwoFactor(staffReq, staffLogin, { label: "doc/train staff" });
     const selfAck = await staffReq("POST", `/doc-track/documents/${documentId}/acknowledge`, {
       signature: "Self signature",
       staffRosterId: managerRoster.data?.id,
