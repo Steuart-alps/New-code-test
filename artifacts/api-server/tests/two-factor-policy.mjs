@@ -109,6 +109,19 @@ async function main() {
   check("staff can use the app after enrolling", (await staff("GET", "/sites")).status === 200);
   check("disabling is refused while required", (await staff("POST", "/auth/2fa/disable", { password })).status === 403);
 
+  // Client admins ("Admin" in the app) can use the switch as well as owners.
+  const adminEmail = `two-factor-policy-admin-${suffix}@test.local`;
+  const createdAdmin = await manager("POST", "/users", { name: "Policy Admin", email: adminEmail, password, role: "client_admin", active: true, clientId: me.data?.user?.clientId });
+  check("manager can create a client admin", createdAdmin.status === 201, JSON.stringify(createdAdmin.data));
+  const admin = session();
+  const adminLogin = await admin("POST", "/auth/login", { email: adminEmail, password });
+  check("client admin must set up 2FA while required", adminLogin.data?.requires2faSetup === true);
+  check("client admin can enrol", await enrol(admin) !== null);
+  const adminOff = await admin("PUT", "/settings", { requireTwoFactor: "false" });
+  check("client admin can make 2FA optional", adminOff.status === 200 && adminOff.data?.requireTwoFactor === "false");
+  const adminOn = await admin("PUT", "/settings", { requireTwoFactor: "true" });
+  check("client admin can require 2FA again", adminOn.status === 200 && adminOn.data?.requireTwoFactor === "true");
+
   console.log(`${passed} checks passed, ${failed} failed.`);
   if (failed) process.exit(1);
 }
