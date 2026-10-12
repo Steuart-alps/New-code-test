@@ -26,6 +26,7 @@ import {
   type ServiceActionResponseBody,
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
+import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -56,6 +57,12 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+/** Add the selected business to a billing API path (unless one is already set). */
+function withBillingClient(path: string, clientId: number | null | undefined): string {
+  if (clientId === null || clientId === undefined || /[?&]clientId=/.test(path)) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}clientId=${encodeURIComponent(clientId)}`;
 }
 
 function StatusBadge({ status }: { status: string | null }) {
@@ -151,12 +158,24 @@ function StorageUsageCard() {
     }
   };
 
+  // Only offer to buy storage when the storage add-on is configured.
+  const [storageAddonAvailable, setStorageAddonAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean }>(withBillingClient("/billing/config", activeClientId))
+      .then((config) => {
+        if (!cancelled) setStorageAddonAvailable(config.storageAddonAvailable === true && config.billingAvailable !== false);
+      })
+      .catch(() => { if (!cancelled) setStorageAddonAvailable(false); });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
   const buyAdditionalStorage = async () => {
     const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
     const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
     setStoragePurchaseBusy(true);
     try {
-      const response = await authenticatedApiFetch("/billing/storage", {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage", activeClientId), {
         method: "POST",
         body: JSON.stringify({ gib, requestId: crypto.randomUUID() }),
       });
@@ -233,7 +252,7 @@ function StorageUsageCard() {
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
                     ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
-                      ? `Estimated excess storage charge: $${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month`
+                      ? `Estimated excess storage charge: US$${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month (USD)`
                       : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
                     : "Storage pricing is currently unavailable for this subscription."}
                 </p>
@@ -243,17 +262,19 @@ function StorageUsageCard() {
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={buyAdditionalStorage}
-                  disabled={storagePurchaseBusy}
-                >
-                  {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
-                  {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
-                </Button>
+                {storageAddonAvailable && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3"
+                    onClick={buyAdditionalStorage}
+                    disabled={storagePurchaseBusy}
+                  >
+                    {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
+                    {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                  </Button>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -1321,6 +1342,8 @@ function EmailSetupGuide({
 
 interface BillingConfig {
   subscription?: { status?: string } | null;
+  /** False while Stripe is unconfigured or unverified: checkout is unavailable. */
+  billingAvailable?: boolean;
   siteCount: number;
   perSite: { priceId: string; unitAmount: number; currency: string } | null;
   billableQuantity: number;
@@ -1333,11 +1356,13 @@ interface BillingConfig {
     addons: string[];
     bundle: boolean;
     subscribed: boolean;
+    /** Modules chosen at signup ("bundle" for the Complete bundle). */
+    selected?: string[];
     perSiteRate: number;
     capPence: number;
     /** Add-ons whose recurring GBP price can't be purchased right now. */
     addonAvailability?: { checked: boolean; unavailable: string[] };
-    catalog: { key: string; label: string; amountPence: number }[];
+    catalog: { key: string; label: string; amountPence: number; comingSoon?: boolean }[];
   };
 }
 
@@ -1356,8 +1381,10 @@ function BillingCard() {
   // these rows never show Active until a later action is confirmed.
   const [unconfirmedServices, setUnconfirmedServices] = useState<Set<string>>(() => new Set());
 
+  const billingPath = (path: string) => withBillingClient(path, activeClientId);
+
   const fetchConfig = () => {
-    apiFetch<BillingConfig>("/billing/config")
+    apiFetch<BillingConfig>(billingPath("/billing/config"))
       .then(setConfig)
       .catch(() => setConfig(null))
       .finally(() => setLoading(false));
@@ -1365,12 +1392,28 @@ function BillingCard() {
 
   useEffect(() => {
     fetchConfig();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClientId]);
+
+  // Module picker for checkout, pre-selected with the modules chosen at signup.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedAddons, setPickedAddons] = useState<Set<string>>(new Set());
+  const [pickedBundle, setPickedBundle] = useState(false);
+  const purchasableAddons = CHECKOUT_ADDONS.filter((addon) => !addon.comingSoon);
+  const openCheckoutPicker = () => {
+    const selected = config?.services?.selected ?? [];
+    const known = new Set(purchasableAddons.map((addon) => addon.key));
+    setPickedBundle(selected.includes("bundle"));
+    setPickedAddons(new Set(selected.filter((key) => known.has(key))));
+    setPickerOpen(true);
+  };
+  const pickedTotal = checkoutPerSiteTotal(pickedAddons.size, pickedBundle);
+  const pickedReachesCap = !pickedBundle && pickedTotal === checkoutPerSiteTotal(0, true);
 
   const openPortal = async () => {
     setBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/portal", { method: "POST" });
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/portal"), { method: "POST" });
       if (data.url) window.location.href = data.url;
     } catch (err: any) {
       toast({ title: "Couldn't open billing portal", description: err.message, variant: "destructive" });
@@ -1382,9 +1425,14 @@ function BillingCard() {
   const startCheckout = async () => {
     setCheckoutBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/checkout", {
+      // Send the modules picked in the dialog; the server prices them (and
+      // switches to the Complete bundle at the per-site cap).
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/checkout"), {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          bundle: pickedBundle,
+          services: pickedBundle ? [] : Array.from(pickedAddons),
+        }),
       });
       if (!data.url) throw new Error("Could not start checkout");
       window.location.href = data.url;
@@ -1425,7 +1473,7 @@ function BillingCard() {
         // The body carries only the service and action: the server derives the
         // Stripe idempotency key from subscription + service + billing period,
         // so a retry after a failure reuses the same key and cannot double-charge.
-        const response = await authenticatedApiFetch("/billing/services", {
+        const response = await authenticatedApiFetch(billingPath("/billing/services"), {
           method: "POST",
           body: JSON.stringify({ service: serviceKey, action }),
         });
@@ -1478,7 +1526,7 @@ function BillingCard() {
       // Always re-read server truth: the row's state comes from the live
       // subscription, never from the outcome of this request alone.
       fetchConfig();
-      await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});
+      await apiFetch(billingPath("/billing/refresh-access"), { method: "POST" }).catch(() => {});
       await Promise.resolve(refreshAuth()).catch(() => {});
       serviceActionsInFlight.current.delete(serviceKey);
       setActionBusy(null);
@@ -1493,7 +1541,10 @@ function BillingCard() {
   const sites = config?.siteCount ?? 0;
   const billable = config?.billableQuantity ?? Math.max(sites, 1);
   const total = config?.monthlyTotal != null ? config.monthlyTotal / 100 : billable * perSiteRate;
-  const status = config?.subscription?.status ?? "trial";
+  const status = hasSubscription
+    ? (config?.subscription?.status ?? "active").replace(/_/g, " ")
+    : config?.cancelledAt ? "cancelled" : (config?.subscription?.status === "trial" || !config?.subscription?.status ? "trial" : "no active subscription");
+  const billingAvailable = config?.billingAvailable !== false;
 
   return (
     <>
@@ -1541,11 +1592,18 @@ function BillingCard() {
                     <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
                   </Button>
                 ) : canAdmin ? (
-                  <Button onClick={startCheckout} disabled={checkoutBusy}>
+                  <Button onClick={openCheckoutPicker} disabled={checkoutBusy || !billingAvailable}>
                     <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Set up billing"}
                   </Button>
                 ) : null}
               </div>
+
+              {!billingAvailable && !hasSubscription && (
+                <div role="status" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>Billing is temporarily unavailable, so subscriptions can't be set up right now. Your access is kept in the meantime — please try again later.</p>
+                </div>
+              )}
 
               {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (
                 <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/30">
@@ -1603,7 +1661,8 @@ function BillingCard() {
                   const availability = servicesConfig.addonAvailability;
                   const availabilityUnknown = availability?.checked === false;
                   const priceUnavailable = availabilityUnknown || (availability?.unavailable.includes(service.key) ?? false);
-                  const purchaseBlocked = !onSubscription && priceUnavailable;
+                  const comingSoon = service.comingSoon === true;
+                  const purchaseBlocked = !onSubscription && (priceUnavailable || comingSoon);
                   const notice = serviceNotices[service.key];
                   const busyHere = actionBusy === service.key;
                   return (
@@ -1628,7 +1687,7 @@ function BillingCard() {
                             </span>
                           ) : purchaseBlocked ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
-                              Temporarily unavailable
+                              {comingSoon ? "Coming soon" : "Temporarily unavailable"}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">
@@ -1638,7 +1697,9 @@ function BillingCard() {
                         </div>
                         {purchaseBlocked && !onTrial && (
                           <p className="mt-2 text-xs text-muted-foreground max-w-md" data-testid="addon-unavailable-reason">
-                            {availabilityUnknown
+                            {comingSoon
+                              ? `${service.label} is coming soon and can't be added yet.`
+                              : availabilityUnknown
                               ? "We couldn't check add-on availability just now, so adding is paused. Nothing has been charged — please refresh or try again shortly."
                               : `${service.label} can't be added online right now because its price is temporarily unavailable. Nothing has been charged — please try again later or contact support.`}
                           </p>
@@ -1694,6 +1755,64 @@ function BillingCard() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={pickerOpen} onOpenChange={(open) => { if (!checkoutBusy) setPickerOpen(open); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose your modules</DialogTitle>
+            <DialogDescription>
+              ComplyTrack core is always included. Prices are per site, per month, plus VAT.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 rounded-md border p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pickedBundle}
+                onChange={() => setPickedBundle((value) => !value)}
+              />
+              <span className="flex-1 text-sm font-semibold">ComplyTrack Complete — every module</span>
+              <span className="text-sm font-medium">£{checkoutPerSiteTotal(0, true)}</span>
+            </label>
+            {purchasableAddons.map((addon) => (
+              <label key={addon.key} className={cn("flex items-center gap-3 rounded-md border p-3", pickedBundle ? "opacity-60" : "cursor-pointer")}>
+                <input
+                  type="checkbox"
+                  disabled={pickedBundle}
+                  checked={pickedBundle || pickedAddons.has(addon.key)}
+                  onChange={() => setPickedAddons((current) => {
+                    const next = new Set(current);
+                    if (next.has(addon.key)) next.delete(addon.key); else next.add(addon.key);
+                    return next;
+                  })}
+                />
+                <span className="flex-1 text-sm">
+                  <span className="font-medium">{addon.label}</span>
+                  <span className="ml-1.5 text-xs text-muted-foreground">{addon.desc}</span>
+                </span>
+                <span className="text-sm text-muted-foreground">+ £10</span>
+              </label>
+            ))}
+            {CHECKOUT_ADDONS.filter((addon) => addon.comingSoon).map((addon) => (
+              <div key={addon.key} className="flex items-center gap-3 rounded-md border p-3 opacity-50">
+                <span className="flex-1 text-sm font-medium">{addon.label}</span>
+                <span className="text-xs uppercase text-muted-foreground">Coming soon</span>
+              </div>
+            ))}
+          </div>
+          {pickedReachesCap && (
+            <p className="text-xs text-emerald-800">
+              Your selection reaches the £{pickedTotal} per-site cap, so you'll get ComplyTrack Complete — every module — for the same price.
+            </p>
+          )}
+          <DialogFooter className="items-center gap-3 sm:justify-between">
+            <span className="text-sm font-semibold">£{pickedTotal} per site / month</span>
+            <Button onClick={startCheckout} disabled={checkoutBusy}>
+              <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Continue to checkout"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -1789,14 +1908,17 @@ function DataExportCard() {
 }
 
 function InvoicesCard() {
+  const { activeClientId } = useAuth();
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<{ invoices: InvoiceRow[] }>("/billing/invoices")
+    setInvoices(null);
+    setError(null);
+    apiFetch<{ invoices: InvoiceRow[] }>(withBillingClient("/billing/invoices", activeClientId))
       .then((d) => setInvoices(d.invoices))
       .catch((err: any) => setError(err.message || "Couldn't load invoices"));
-  }, []);
+  }, [activeClientId]);
 
   const fmtAmount = (inv: InvoiceRow) => {
     const amount = (inv.status === "paid" ? inv.amountPaid : inv.amountDue) / 100;
@@ -2994,21 +3116,22 @@ const MODULES = [
 
 function ModulesCard() {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const [modules, setModules] = useState<ModuleState | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<ModuleState>("/billing/modules")
+    apiFetch<ModuleState>(withBillingClient("/billing/modules", activeClientId))
       .then(setModules)
       .catch(() => setModules(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeClientId]);
 
   const toggle = async (id: "safetrack" | "dailytrack", currentlyEnabled: boolean) => {
     setToggling(id);
     try {
-      const updated = await apiFetch<ModuleState>(`/billing/modules/${id}`, {
+      const updated = await apiFetch<ModuleState>(withBillingClient(`/billing/modules/${id}`, activeClientId), {
         method: "POST",
         body: JSON.stringify({ enabled: !currentlyEnabled }),
       });
