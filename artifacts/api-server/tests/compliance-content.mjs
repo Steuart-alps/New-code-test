@@ -236,6 +236,18 @@ async function waterAndFood(careHome, plain) {
   check("kitchen: default jurisdiction follows the Scottish hub nation",
     after.data?.food_jurisdiction === "scotland" && after.data?.food_reheating_limit === "Above 82°C",
     `${after.data?.food_jurisdiction} ${after.data?.food_reheating_limit}`);
+  const niProfile = await plain("PUT", "/compliance-hub/profile", {
+    nation: "northern_ireland", operationType: "Restaurant", responsiblePersonName: "Jo Manager", responsiblePersonRole: "Owner",
+    reviewCadence: "Annual", nextReviewDate: plusDays(day, 365), competentAppointments: [],
+  });
+  check("kitchen: save Northern Ireland hub profile", [200, 201].includes(niProfile.status), String(niProfile.status));
+  const ni = await plain("GET", "/food-safety/config");
+  check("kitchen: default jurisdiction follows the Northern Ireland hub nation",
+    ni.data?.food_jurisdiction === "northern_ireland" && ni.data?.food_reheating_limit === "Above 75°C"
+      && JSON.parse(ni.data?.food_temperature_rules ?? "{}").reheating?.min === 75,
+    `${ni.data?.food_jurisdiction} ${ni.data?.food_reheating_limit} ${ni.data?.food_temperature_rules}`);
+  const savedNi = await plain("PUT", "/food-safety/config", { food_jurisdiction: "northern_ireland" });
+  check("kitchen: Northern Ireland can be saved as the jurisdiction", savedNi.status === 200, `${savedNi.status} ${JSON.stringify(savedNi.data)}`);
 }
 
 async function main() {

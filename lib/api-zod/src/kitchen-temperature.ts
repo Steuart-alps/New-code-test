@@ -53,7 +53,9 @@ export const DEFAULT_KITCHEN_TEMPERATURE_RULES: KitchenTemperatureRules = {
 export function parseKitchenTemperatureRules(raw?: string | null, jurisdiction?: string | null): KitchenTemperatureRules {
   if (!raw) return kitchenTemperatureRulesSchema.parse({
     ...DEFAULT_KITCHEN_TEMPERATURE_RULES,
-    reheating: { min: jurisdiction === 'england_wales' ? 75 : 82, max: null },
+    // Scotland (FSS CookSafe) reheats to 82°C; England/Wales and Northern
+    // Ireland (FSA guidance) to 75°C.
+    reheating: { min: jurisdiction === 'england_wales' || jurisdiction === 'northern_ireland' ? 75 : 82, max: null },
   });
   return kitchenTemperatureRulesSchema.parse(JSON.parse(raw));
 }

@@ -148,6 +148,7 @@ function coolingMins(start: string, finish: string): number | null {
 const REHEATING_LIMITS = {
   scotland: "Above 82°C",
   england_wales: "Above 75°C",
+  northern_ireland: "Above 75°C",
 } as const;
 
 type FoodJurisdiction = keyof typeof REHEATING_LIMITS;
@@ -510,6 +511,7 @@ function ConfigDialog() {
               >
                 <option value="scotland">Scotland — above 82°C</option>
                 <option value="england_wales">England / Wales — above 75°C</option>
+                <option value="northern_ireland">Northern Ireland — above 75°C</option>
               </select>
               <p className="text-xs text-muted-foreground">
                 Selecting a jurisdiction sets the standard reheating target used for new diary records.
