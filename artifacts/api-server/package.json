@@ -12,6 +12,7 @@
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
     "test:cleaning-schedule-export": "bash tests/run-fresh-schema.sh tests/cleaning-schedule-export.mjs",
+    "test:inspection-pack-calendar": "bash tests/run-fresh-schema.sh tests/inspection-pack-calendar.mjs",
     "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",

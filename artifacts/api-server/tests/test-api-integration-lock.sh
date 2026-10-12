@@ -110,6 +110,7 @@ const freshSchema = new Set([
   "test:schema:fresh", "test:kitchen-mobile-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:cleaning-schedule-export",
+  "test:inspection-pack-calendar",
   "test:kitchen-cleaning-export", "test:pat-register-access",
   "test:storage-metering", "test:storage-usage-snapshot",
   "test:content-filter",
