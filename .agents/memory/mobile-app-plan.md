@@ -3,7 +3,9 @@ name: Mobile app plan
 description: Durable architecture constraints for the ComplyTrack Expo mobile app
 ---
 
-> **Historical (Replit-only, 2026-10-09):** the next two sections describe the Replit-managed Expo session and Preview-on-your-phone flow, which no longer exist; `pnpm --filter @workspace/mobile run dev` now runs plain `expo start`. The Expo Go-only product decision itself still stands.
+> **Historical (Replit-only, 2026-10-09):** the next two sections describe the Replit-managed Expo session and Preview-on-your-phone flow, which no longer exist; `pnpm --filter @workspace/mobile run dev` now runs plain `expo start`. **Superseded for releases (2026-10-12):** store launch uses EAS standalone builds (`eas.json`, `docs/mobile-launch.md`); Expo Go via `expo start` stays the development loop, so keep every native-only feature optional when its module is missing.
+
+Store-review config lives in `app.json` and is guarded by mobile `test:store-compliance`: `ITSAppUsesNonExemptEncryption=false`, photo/camera wording covering issues, check evidence, certificates and asset tags, `microphonePermission: false`, `blockedPermissions` (RECORD_AUDIO, location), `expo-location` excluded from autolinking (installed but unused), opaque full-bleed `app-icon.png` (the old `icon.png` has a white border and is only the web favicon). Profile has privacy/terms links and "Delete my account" (`app/account/delete.tsx`: owners use the existing reviewed `/api/data-deletion/request`, staff are told their manager removes them).
 
 ComplyTrack Mobile currently uses stock Expo Go with the Replit-managed Expo CLI session; do not reintroduce a development client without revisiting the product decision.
 

@@ -132,6 +132,13 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="account/delete"
+        options={{
+          title: 'Delete my account',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="issues/new"
         options={{
           title: 'Report Issue',

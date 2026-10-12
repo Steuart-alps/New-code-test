@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "main": "expo-router/entry",
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "expo-location"
+      ]
+    }
+  },
   "scripts": {
     "dev": "pnpm exec expo start",
     "build": "node scripts/build.js",
@@ -25,6 +32,7 @@
     "test:check-outbox": "node tests/check-outbox.mjs",
     "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
     "test:auth-offline": "node tests/auth-offline.mjs",
+    "test:store-compliance": "node tests/store-compliance.mjs",
     "export:ios": "node scripts/require-domain.js && rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
     "export:android": "node scripts/require-domain.js && rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
     "validate:production": "node scripts/validate-production.js"

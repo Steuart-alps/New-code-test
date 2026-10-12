@@ -14,9 +14,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { isInvalidMobileLoginChallenge } from '@/lib/api';
+import { privacyPolicyUrl, termsUrl } from '@/lib/links';
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -325,6 +327,22 @@ export default function LoginScreen() {
               ComplyTrack by ALPS Consulting
             </Text>
              </>}
+            <View style={styles.legalRow}>
+              <TouchableOpacity
+                testID="login-privacy"
+                accessibilityRole="link"
+                onPress={() => WebBrowser.openBrowserAsync(privacyPolicyUrl()).catch(() => undefined)}
+              >
+                <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Privacy policy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="login-terms"
+                accessibilityRole="link"
+                onPress={() => WebBrowser.openBrowserAsync(termsUrl()).catch(() => undefined)}
+              >
+                <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Terms of service</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -441,5 +459,18 @@ const styles = StyleSheet.create({
     marginTop: 24,
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 12,
+  },
+  legalLink: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    textDecorationLine: 'underline',
+    paddingVertical: 6,
   },
 });
