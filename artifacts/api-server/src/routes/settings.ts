@@ -19,6 +19,7 @@ import {
   SAFE_TRACK_REMINDER_FREQUENCY_SETTING,
   SAFE_TRACK_REMINDER_TIME_SETTING,
 } from "../lib/safeTrackAckReminders";
+import { REQUIRE_TWO_FACTOR_SETTING } from "../lib/twoFactorPolicy";
 
 const router: IRouter = Router();
 
@@ -53,6 +54,9 @@ const SETTING_KEYS = [
   // Account-level warning only; reaching it never blocks or deletes uploads.
   "storageWarningThresholdBytes",
   ACCOUNT_TIMEZONE_SETTING,
+  // "false" lets login accounts in this business skip the authenticator app;
+  // absent or "true" keeps two-factor authentication mandatory.
+  REQUIRE_TWO_FACTOR_SETTING,
 ] as const;
 
 async function validateTrackSummaryRouting(
@@ -218,6 +222,17 @@ router.put("/settings", requireAuth, requireClientAdmin, async (req, res) => {
     } else {
       rawBody[ACCOUNT_TIMEZONE_SETTING] = rawTimezone.trim();
     }
+  }
+  if (rawBody[REQUIRE_TWO_FACTOR_SETTING] !== undefined) {
+    const rawRequired = rawBody[REQUIRE_TWO_FACTOR_SETTING];
+    if (rawRequired !== null && rawRequired !== "true" && rawRequired !== "false") {
+      res.status(400).json({ error: "Two-factor requirement must be true or false" });
+      return;
+    }
+    req.log.info(
+      { clientId, actorId: req.currentUser!.id, required: rawRequired !== "false" },
+      "Two-factor requirement changed",
+    );
   }
   if (rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING] !== undefined) {
     const rawFrequency = rawBody[SAFE_TRACK_REMINDER_FREQUENCY_SETTING];
