@@ -25,6 +25,16 @@ try {
       export const resolveDownloadToken = () => { throw Error('Unexpected token lookup'); };
       export const getMonthlyDownloadBytes = () => { throw Error('Unexpected usage lookup'); };
       export const utcMonth = () => '2026-01';`,
+    // pino's worker transport cannot run from a single-file ESM bundle.
+    logger: `
+      const noop = () => {};
+      export const logger = { trace: noop, debug: noop, info: noop, warn: noop, error: noop, fatal: noop, child() { return logger; } };`,
+    usage: `
+      export const storageUsageLedger = { begin: async () => null, record: async () => {}, abandon: async () => {} };
+      export const readStorageUsageSnapshot = () => { throw Error('Unexpected usage snapshot'); };
+      export const reconcileStorageUsage = () => { throw Error('Unexpected usage reconciliation'); };
+      export const refreshStorageUsageInBackground = () => { throw Error('Unexpected usage refresh'); };
+      export const storageUsageSnapshotIsStale = () => { throw Error('Unexpected usage snapshot'); };`,
     validation: `
       export class ObjectContentError extends Error {}
       export const MAX_RESTRICTED_UPLOAD_BYTES = 10485760;
@@ -50,6 +60,8 @@ try {
           [/\/acknowledgementRegisterPdf$/, "pdf"],
           [/\/downloadUsage$/, "downloads"],
           [/\/uploadValidation$/, "validation"],
+          [/\/storageUsageSnapshot$/, "usage"],
+          [/\/lib\/logger$|^\.\/logger$/, "logger"],
         ]) {
           builder.onResolve({ filter }, () => ({ path: name, namespace: "acl-test" }));
         }
