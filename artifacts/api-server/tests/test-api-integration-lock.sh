@@ -109,7 +109,7 @@ const runnerLocked = new Set([
 const freshSchema = new Set([
   "test:schema:fresh", "test:kitchen-mobile-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
-  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:cleaning-schedule-export",
+  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:kitchen-cleaning-export", "test:pat-register-access",
   "test:storage-metering", "test:storage-usage-snapshot",
   "test:content-filter",
