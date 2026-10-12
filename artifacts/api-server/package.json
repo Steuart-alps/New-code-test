@@ -11,6 +11,7 @@
     "test:kitchen-hold-controls": "bash tests/run-fresh-schema.sh tests/kitchen-hold-controls.mjs",
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
+    "test:cleaning-schedule-export": "bash tests/run-fresh-schema.sh tests/cleaning-schedule-export.mjs",
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
