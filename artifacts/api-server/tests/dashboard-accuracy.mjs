@@ -161,10 +161,9 @@ try {
 
   const tubTypes = ok(await owner.request('GET', `/hot-tub/status?siteId=${siteA.id}`)).map(row => row.checkType);
   assert.equal(ok(await approve('hot-tub', Object.fromEntries(tubTypes.map(type => [type, 30])))).approved, true);
-  // Runtime-only schemas lack some spa columns the tub/check routes write
-  // (hot_tubs.description, hot_tub_checks.ph_value...), so seed directly.
-  const addTub = async name => (await pool.query(
-    'INSERT INTO hot_tubs (client_id, site_id, name) VALUES ($1, $2, $3) RETURNING id', [c, siteA.id, name])).rows[0];
+  // The registry route writes hot_tubs.description, which runtime-only
+  // schemas once lacked; checks are seeded directly to control their dates.
+  const addTub = async name => ok(await owner.request('POST', '/hot-tub/tubs', { name, siteId: siteA.id, description: `${name} by the deck` }));
   const tub1 = await addTub('Tub 1');
   await pool.query(`INSERT INTO hot_tub_checks (client_id, site_id, hot_tub_id, check_type, check_date, result)
     VALUES ($1, $2, $3, 'filter_clean', $4, 'pass')`, [c, siteA.id, tub1.id, londonDay()]);
@@ -196,11 +195,13 @@ try {
     await q(`INSERT INTO train_track_records (client_id, site_id, staff_name, training_type, completed_date, expiry_date)
              VALUES ($1, $2, $3, 'Food hygiene', $4, $5)`, [c, a, `Staff ${i}`, londonDay(-400), yesterday]);
   }
-  // review_date is the risk assessment's "Review Date" field (the Drizzle
-  // column production has); SOPs have no review date.
-  await q(`INSERT INTO safe_risk_assessments (client_id, site_id, title, review_date) VALUES ($1, $2, 'Cellar RA', $3)`, [c, a, yesterday]);
-  await q(`INSERT INTO safe_risk_assessments (client_id, site_id, title, review_date) VALUES ($1, $2, 'Kitchen RA', $3)`, [c, a, londonDay(10)]);
-  await q(`INSERT INTO safe_sops (client_id, site_id, title) VALUES ($1, $2, 'Closing SOP')`, [c, a]);
+  // A risk assessment's "Review Date" (review_date) drives the SafeTrack tile;
+  // SOPs have no review date. Created through the routes so both schema
+  // shapes must hold every column the SafeTrack writer uses.
+  const safeDoc = (path, body) => owner.request('POST', `/safe-track/${path}`, { siteId: a, ...body });
+  ok(await safeDoc('risk-assessments', { title: 'Cellar RA', description: 'Steps', assessedBy: 'Manager', reviewDate: yesterday }));
+  ok(await safeDoc('risk-assessments', { title: 'Kitchen RA', reviewDate: londonDay(10) }));
+  ok(await safeDoc('sops', { title: 'Closing SOP', scope: 'Bar' }));
   const bike = (await q(`INSERT INTO bikes (client_id, site_id, ref, name) VALUES ($1, $2, 'B1', 'Blue bike') RETURNING id`, [c, a])).rows[0];
   await q(`INSERT INTO bike_hire_records (client_id, site_id, bike_id, guest_name, hire_date, return_date_expected, status)
            VALUES ($1, $2, $3, 'Guest Smith', $4, $5, 'active')`, [c, a, bike.id, londonDay(-3), yesterday]);
