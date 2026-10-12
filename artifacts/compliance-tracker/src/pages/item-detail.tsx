@@ -19,6 +19,7 @@ import {
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
+import { LoadError } from "@/components/load-error";
 import { format } from "date-fns";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
@@ -58,7 +59,7 @@ export default function ItemDetailPage() {
   const [, params] = useRoute("/items/:id");
   const id = params ? Number(params.id) : NaN;
 
-  const { data: item, isLoading } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id), queryKey: getGetComplianceItemQueryKey(id) } });
+  const { data: item, isLoading, error: itemError, refetch: refetchItem } = useGetComplianceItem(id, { query: { enabled: Number.isFinite(id), queryKey: getGetComplianceItemQueryKey(id) } });
   const { data: certificates = [] } = useListItemCertificates(id, { query: { enabled: Number.isFinite(id), queryKey: getListItemCertificatesQueryKey(id) } });
   const { data: contractors = [] } = useListContractors();
   const { data: sites = [] } = useListSites();
@@ -95,6 +96,10 @@ export default function ItemDetailPage() {
 
   if (isLoading) {
     return <AppLayout title="Compliance Check"><div className="py-12 flex justify-center"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div></AppLayout>;
+  }
+  // Only a 404 means the check does not exist; anything else is a failed load.
+  if (!item && itemError && (itemError as { status?: number }).status !== 404) {
+    return <AppLayout title="Compliance Check"><div className="py-12"><LoadError message="This compliance check could not be loaded." onRetry={() => void refetchItem()} /></div></AppLayout>;
   }
   if (!item) {
     return <AppLayout title="Not Found"><div className="py-12 text-center text-muted-foreground">Compliance check not found.</div></AppLayout>;
@@ -250,7 +255,7 @@ export default function ItemDetailPage() {
                       <h4 className="font-semibold truncate">{cert.name}</h4>
                       <div className="flex flex-wrap gap-3 mt-1.5 text-sm">
                         <ExpiryBadge expiryDate={cert.expiryDate} />
-                        {cert.issueDate && <span className="text-muted-foreground">Issued: {format(new Date(cert.issueDate), "MMM d, yyyy")}</span>}
+                        {cert.issueDate && <span className="text-muted-foreground">Issued: {format(new Date(cert.issueDate), "d MMM yyyy")}</span>}
                       </div>
                       {cert.notes && <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">{cert.notes}</p>}
                     </div>

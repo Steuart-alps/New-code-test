@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { printHtmlDocument } from "@/lib/download";
-import { beginApiMutation, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const types = ["Class I", "Class II", "Class III", "Extension Lead", "IT Equipment", "Portable Tool", "Cleaning Equipment", "AV Equipment", "Kitchen Appliance", "Other"];
@@ -40,7 +40,8 @@ type View = "appliances" | "tests";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, `/pat-track${path}`);
-  const response = await fetch(`${baseUrl}/api/pat-track${path}`, await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
+  const response = await fetch(withActiveClient(`${baseUrl}/api/pat-track${path}`, init?.body), await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
+  notifyAuthStatus(response);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error ?? body?.message ?? `Request failed (${response.status})`);
@@ -129,7 +130,7 @@ export function LegacyPATRegister({ view }: { view: View }) {
   const testsQ = useQuery({ queryKey: ["pat-track","legacy-tests"], queryFn: () => api<PATTest[]>("/tests") });
   const statusQ = useQuery({ queryKey: ["pat-track","legacy-status"], queryFn: () => api<Status>("/status") });
   const configQ = useQuery({ queryKey: ["pat-track","legacy-config"], queryFn: () => api<Config>("/config"), enabled: canAdmin });
-  const sitesQ = useQuery({ queryKey: ["pat-track","legacy-sites"], queryFn: async () => { const r = await fetch(`${baseUrl}/api/sites`, { credentials: "include" }); if (!r.ok) throw new Error("Unable to load sites"); return r.json() as Promise<Site[]>; } });
+  const sitesQ = useQuery({ queryKey: ["pat-track","legacy-sites"], queryFn: async () => { const r = await fetch(withActiveClient(`${baseUrl}/api/sites`), { credentials: "include" }); if (!r.ok) throw new Error("Unable to load sites"); return r.json() as Promise<Site[]>; } });
   const refresh = () => { ["legacy-appliances","legacy-tests","legacy-status"].forEach(x => qc.invalidateQueries({ queryKey: ["pat-track",x] })); };
   const appliances = appliancesQ.data ?? [], tests = testsQ.data ?? [], q = search.toLowerCase();
   const shownAppliances = useMemo(() => appliances.filter(a => [a.name,a.appliance_type,a.location,a.asset_tag].some(x => x?.toLowerCase().includes(q))), [appliances,q]);
@@ -173,7 +174,7 @@ ${rows.map(a => {
     try {
       const params = new URLSearchParams({ status: registerStatus });
       if (registerSiteId) params.set("siteId", registerSiteId);
-      const response = await fetch(`${baseUrl}/api/pat-track/register?${params}`, { credentials: "include" });
+      const response = await fetch(withActiveClient(`${baseUrl}/api/pat-track/register?${params}`), { credentials: "include" });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         throw new Error(body?.error ?? `Request failed (${response.status})`);

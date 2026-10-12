@@ -37,10 +37,11 @@ import {
   Filter, Pencil, Trash2, Lock, Route, Cpu, Check, X, Minus, Settings, XCircle, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth, useCanAdmin } from "@/context/auth-context";
+import { useAuth, useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { AuditLog } from "@/components/audit-log";
+import { LoadError } from "@/components/load-error";
 
 // ── Check type config ─────────────────────────────────────────────────────────
 
@@ -988,6 +989,8 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
 export default function FireSafetyPage() {
   const { hasService } = useAuth();
   const canAdmin = useCanAdmin();
+  // Viewers are read-only: recording, editing and deleting checks would 403.
+  const canEdit = useCanEdit();
   const hasFiretrack = hasService("firetrack");
 
   const [filterType, setFilterType] = useState<AnyCheckType | "">("");
@@ -995,12 +998,12 @@ export default function FireSafetyPage() {
   const [recordOpen, setRecordOpen] = useState(false);
   const [quickCheckType, setQuickCheckType] = useState<AnyCheckType | undefined>(undefined);
 
-  const { data: status, isLoading: statusLoading, error: statusError } = useGetFireSafetyStatus(
+  const { data: status, isLoading: statusLoading, error: statusError, refetch: refetchStatus } = useGetFireSafetyStatus(
     { siteId: filterSite },
     { query: { enabled: hasFiretrack, retry: (count, err: any) => err?.status !== 403 && count < 3, queryKey: getGetFireSafetyStatusQueryKey({ siteId: filterSite }) } }
   );
   const serverLocked = (statusError as any)?.status === 403;
-  const { data: checks, isLoading: checksLoading } = useListFireSafetyChecks(
+  const { data: checks, isLoading: checksLoading, isError: checksFailed, refetch: refetchChecks } = useListFireSafetyChecks(
     { checkType: filterType as FireCheckType || undefined, siteId: filterSite },
     { query: { enabled: hasFiretrack, queryKey: getListFireSafetyChecksQueryKey({ checkType: filterType as FireCheckType || undefined, siteId: filterSite }) } }
   );
@@ -1079,7 +1082,7 @@ export default function FireSafetyPage() {
           </div>
           <div className="flex items-center gap-2">
             {canAdmin && <FireConfigDialog siteId={filterSite} />}
-            <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />
+            {canEdit && <RecordCheckDialog siteId={filterSite} open={recordOpen} onOpenChange={setRecordOpen} defaultCheckType={quickCheckType} />}
           </div>
         </div>
 
@@ -1090,13 +1093,16 @@ export default function FireSafetyPage() {
               <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
             </CardContent>
           </Card>
+        ) : statusError ? (
+          <LoadError message="Fire check status could not be loaded." onRetry={() => void refetchStatus()} />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {status?.map(item => (
               <Card
                 key={item.checkType}
                 className={cn(
-                  "border-l-4 transition-all hover:shadow-md cursor-pointer group",
+                  "border-l-4 transition-all hover:shadow-md group",
+                  canEdit && "cursor-pointer",
                   item.lastResult === "fail"       ? "border-l-red-600 bg-red-100/60" :
                   item.lastResult === "action_required"
                                              ? "border-l-orange-600 bg-orange-100/60" :
@@ -1105,7 +1111,7 @@ export default function FireSafetyPage() {
                   item.status === "never"    ? "border-l-slate-400 bg-slate-50/50" :
                                                "border-l-emerald-500 bg-emerald-50/50"
                 )}
-                onClick={() => { setQuickCheckType(item.checkType as AnyCheckType); setRecordOpen(true); }}
+                onClick={canEdit ? () => { setQuickCheckType(item.checkType as AnyCheckType); setRecordOpen(true); } : undefined}
               >
                 <CardHeader className="pb-2 pt-3 px-4">
                   <div className="flex items-start justify-between gap-2">
@@ -1130,9 +1136,9 @@ export default function FireSafetyPage() {
                   {item.status === "never" && (
                     <div className="text-xs text-muted-foreground italic">Not yet recorded</div>
                   )}
-                  <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
+                  {canEdit && <div className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity pt-0.5 font-medium">
                     + Record check →
-                  </div>
+                  </div>}
                 </CardContent>
               </Card>
             ))}
@@ -1216,10 +1222,14 @@ export default function FireSafetyPage() {
               <div className="p-12 flex justify-center">
                 <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" />
               </div>
+            ) : checksFailed ? (
+              <div className="p-6">
+                <LoadError message="Check history could not be loaded." onRetry={() => void refetchChecks()} />
+              </div>
             ) : !checks || checks.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <Flame className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">No checks recorded yet. Record your first check above.</p>
+                <p className="text-sm">{canEdit ? "No checks recorded yet. Record your first check above." : "No checks recorded yet."}</p>
               </div>
             ) : (
               <div className="divide-y divide-border">
@@ -1257,13 +1267,13 @@ export default function FireSafetyPage() {
                           )}
                           <CheckPhotoUploader entityType="fire_safety_check" entityId={check.id} compact />
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                        {canEdit && <div className="flex items-center gap-1 flex-shrink-0">
                           <EditCheckDialog check={check} siteId={filterSite} />
                           <Button variant="ghost" size="sm" onClick={() => handleDelete(check.id)}
                             className="text-destructive hover:bg-destructive/10">
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
-                        </div>
+                        </div>}
                       </div>
                     </div>
                   );

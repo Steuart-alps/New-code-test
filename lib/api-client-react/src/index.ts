@@ -13,5 +13,7 @@ export {
   setPaymentRequiredHandler,
   setMutationObserver,
   setCsrfTokenProvider,
+  callerChoseClientId,
+  appendClientId,
 } from "./custom-fetch";
 export type { AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider } from "./custom-fetch";

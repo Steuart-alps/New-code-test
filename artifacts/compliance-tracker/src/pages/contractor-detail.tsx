@@ -280,14 +280,15 @@ export default function ContractorDetailPage() {
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/60 text-primary-foreground flex items-center justify-center text-2xl font-bold shadow-lg shadow-primary/20">
                 {contractor.name.charAt(0).toUpperCase()}
               </div>
-              <div className="flex gap-2">
+              {/* Editing and deleting contractors is admin-only on the server. */}
+              {canResend && <div className="flex gap-2">
                 <Button variant="ghost" size="icon" onClick={() => setIsEditContractorOpen(true)}>
                   <Pencil className="w-4 h-4" />
                 </Button>
                 <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteContractorConfirm(true)}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
-              </div>
+              </div>}
             </div>
 
             <h2 className="text-2xl font-display font-bold">{contractor.name}</h2>
@@ -440,9 +441,9 @@ export default function ContractorDetailPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">External requirements assigned to this contractor</p>
               </div>
-              <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
+              {canResend && <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Requirement
-              </Button>
+              </Button>}
             </div>
             <div>
               {items.length === 0 ? (
@@ -486,13 +487,13 @@ export default function ContractorDetailPage() {
                             <Send className="w-4 h-4" />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
+                        {canResend && <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
                           <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive"
+                        </Button>}
+                        {canResend && <Button variant="ghost" size="icon" className="text-destructive"
                           onClick={() => deleteItem.mutate({ id: item.id })}>
                           <Trash2 className="w-4 h-4" />
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   ))}

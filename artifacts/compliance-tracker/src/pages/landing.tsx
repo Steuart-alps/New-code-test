@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
   BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, BookOpen, Waves, TreePine, Bug,
@@ -641,9 +641,9 @@ export default function LandingPage() {
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
           <div className="flex items-center gap-5">
-            <button onClick={() => navigate("/terms")} className="text-sm font-light hover:text-white transition-colors">Terms</button>
-            <button onClick={() => navigate("/privacy")} className="text-sm font-light hover:text-white transition-colors">Privacy</button>
-            <button onClick={() => navigate("/login")} className="text-sm font-light hover:text-white transition-colors">Sign in</button>
+            <Link href="/terms" className="text-sm font-light hover:text-white transition-colors">Terms</Link>
+            <Link href="/privacy" className="text-sm font-light hover:text-white transition-colors">Privacy</Link>
+            <Link href="/login" className="text-sm font-light hover:text-white transition-colors">Sign in</Link>
           </div>
         </div>
       </footer>

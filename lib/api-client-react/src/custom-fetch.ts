@@ -397,6 +397,34 @@ async function parseSuccessBody(
   }
 }
 
+/** Whether the URL query or a JSON object body already names a clientId. */
+export function callerChoseClientId(url: string, body: unknown): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart !== -1) {
+    const query = url.slice(queryStart + 1).split("#", 1)[0];
+    if (new URLSearchParams(query).has("clientId")) return true;
+  }
+  if (typeof body === "string" && looksLikeJson(body)) {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      return Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed)
+        && Object.prototype.hasOwnProperty.call(parsed, "clientId");
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Adds `clientId` to a URL's query string, before any fragment. */
+export function appendClientId(url: string, clientId: number): string {
+  const hashStart = url.indexOf("#");
+  const base = hashStart === -1 ? url : url.slice(0, hashStart);
+  const hash = hashStart === -1 ? "" : url.slice(hashStart);
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}clientId=${encodeURIComponent(String(clientId))}${hash}`;
+}
+
 export async function customFetch<T = unknown>(
   input: RequestInfo | URL,
   options: CustomFetchOptions = {},
@@ -446,13 +474,14 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  // Inject clientId into all GET-like requests so the API can scope results
-  if (_clientIdGetter && method === "GET") {
+  // Scope every request (reads and writes) to the selected business so a
+  // consultant working in another client never falls back to their home one.
+  // A clientId the caller already chose, in the URL or a JSON body, wins.
+  if (_clientIdGetter) {
     const clientId = _clientIdGetter();
-    if (clientId !== null) {
-      const rawUrl = resolveUrl(input);
-      const separator = rawUrl.includes("?") ? "&" : "?";
-      const patchedUrl = `${rawUrl}${separator}clientId=${clientId}`;
+    const rawUrl = resolveUrl(input);
+    if (clientId !== null && !callerChoseClientId(rawUrl, init.body)) {
+      const patchedUrl = appendClientId(rawUrl, clientId);
       if (typeof input === "string") input = patchedUrl;
       else if (isUrl(input)) input = new URL(patchedUrl);
       else input = new Request(patchedUrl, input as Request);

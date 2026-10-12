@@ -7,7 +7,7 @@ import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react"
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { apiFetch as authenticatedApiFetch, withCsrfToken } from "@/lib/api";
+import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -47,7 +47,10 @@ interface DomainState {
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, await withCsrfToken({
+  // Business settings follow the selected business. Billing calls keep their
+  // existing scoping, and account (/auth) calls are not business-scoped.
+  const scoped = path.startsWith("/billing") || path.startsWith("/auth/") ? path : withActiveClient(path, init?.body);
+  const res = await fetch(`${apiBase}${scoped}`, await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
@@ -739,7 +742,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "kitchen", label: "KitchenTrack" },
   { key: "fire", label: "FireTrack" },
   { key: "legionella", label: "LegionellaTrack" },
-  { key: "pool", label: "AquaTrack" },
+  { key: "pool", label: "AquaTrack (water tests)" },
   { key: "pat", label: "PATtrack" },
   { key: "pest", label: "PestTrack" },
   { key: "fix", label: "FixTrack" },
@@ -752,7 +755,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "tree", label: "TreeTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
-  { key: "swim", label: "SwimTrack" },
+  { key: "swim", label: "AquaTrack (sessions & safety)" },
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
@@ -1862,10 +1865,43 @@ function InvoicesCard() {
 }
 
 
+// ── Account timezone choices ─────────────────────────────────────────────────
+// Common IANA zones for UK businesses, UK first. A stored zone that is not
+// listed is still offered so saving the form never changes it unasked.
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Europe/London", label: "UK — London (GMT/BST)" },
+  { value: "Europe/Jersey", label: "Jersey" },
+  { value: "Europe/Guernsey", label: "Guernsey" },
+  { value: "Europe/Isle_of_Man", label: "Isle of Man" },
+  { value: "Europe/Gibraltar", label: "Gibraltar" },
+  { value: "Europe/Dublin", label: "Ireland — Dublin" },
+  { value: "Europe/Lisbon", label: "Portugal — Lisbon" },
+  { value: "Atlantic/Canary", label: "Canary Islands" },
+  { value: "Europe/Paris", label: "France — Paris" },
+  { value: "Europe/Madrid", label: "Spain — Madrid" },
+  { value: "Europe/Amsterdam", label: "Netherlands — Amsterdam" },
+  { value: "Europe/Brussels", label: "Belgium — Brussels" },
+  { value: "Europe/Berlin", label: "Germany — Berlin" },
+  { value: "Europe/Zurich", label: "Switzerland — Zurich" },
+  { value: "Europe/Rome", label: "Italy — Rome" },
+  { value: "Europe/Athens", label: "Greece — Athens" },
+  { value: "America/New_York", label: "US — Eastern (New York)" },
+  { value: "America/Chicago", label: "US — Central (Chicago)" },
+  { value: "America/Denver", label: "US — Mountain (Denver)" },
+  { value: "America/Los_Angeles", label: "US — Pacific (Los Angeles)" },
+  { value: "America/Toronto", label: "Canada — Toronto" },
+  { value: "Asia/Dubai", label: "UAE — Dubai" },
+  { value: "Asia/Singapore", label: "Singapore" },
+  { value: "Asia/Hong_Kong", label: "Hong Kong" },
+  { value: "Australia/Sydney", label: "Australia — Sydney" },
+  { value: "Pacific/Auckland", label: "New Zealand — Auckland" },
+  { value: "UTC", label: "UTC" },
+];
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
-  pool_check:        "PoolTrack — pool water tests",
+  pool_check:        "AquaTrack — pool water tests",
   hot_tub_check:     "TubTrack — hot tub checks",
   legionella_check:  "LegionellaTrack — water safety checks",
   tree_inspection:   "TreeTrack — tree inspections",
@@ -1879,10 +1915,10 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
   green_pre_use_check:       "GreenTrack — pre-use checks",
   green_service:             "GreenTrack — service records",
   green_defect:              "GreenTrack — defect reports",
-  swim_session:              "SwimTrack — pool sessions",
-  swim_surveillance_check:   "SwimTrack — surveillance checks",
-  swim_first_aid_check:      "SwimTrack — first-aid checks",
-  swim_incident:             "SwimTrack — incident records",
+  swim_session:              "AquaTrack — pool sessions",
+  swim_surveillance_check:   "AquaTrack — surveillance checks",
+  swim_first_aid_check:      "AquaTrack — first-aid checks",
+  swim_incident:             "AquaTrack — incident records",
 };
 
 function PhotoRequirementsCard() {
@@ -2248,15 +2284,22 @@ export default function SettingsPage() {
                 <div className="space-y-1.5 col-span-2">
                   <Label>Account Timezone</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
+                    Used for daily entry dates and the staff correction cutoff. Existing accounts default to UK time (Europe/London).
                   </p>
-                  <Input
-                    name="accountTimezone"
-                    value={formData.accountTimezone}
-                    onChange={handleChange}
-                    placeholder="Europe/London"
-                    autoComplete="off"
-                  />
+                  <Select
+                    value={formData.accountTimezone || "Europe/London"}
+                    onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                  >
+                    <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
+                        <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
+                      )}
+                      {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>

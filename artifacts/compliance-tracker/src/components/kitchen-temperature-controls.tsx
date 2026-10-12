@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useGetFoodSafetyConfig, useListSites, parseKitchenTemperatureRules, kitchenTemperatureRulesSchema, temperatureRangeLabel, type KitchenTemperatureRules } from "@workspace/api-client-react";
 import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
-import { ModuleActionsPanel } from "./module-actions-panel";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -126,6 +125,6 @@ export function KitchenTemperatureControls() {
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
     </details>
     <p className="text-sm text-muted-foreground">Failed readings remain historical evidence. A manager assigns the corrective action and verifies its evidence with a final signature; this does not change the original reading to a pass.</p>
-    <ModuleActionsPanel moduleKey="kitchen" />
+    {/* Module actions render once, from the app layout, on every kitchen page. */}
   </div>;
 }
