@@ -101,7 +101,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   try {
     const siteRows = await db.execute(sql`
       SELECT id, name FROM sites
-      WHERE client_id = ${clientId} AND archived = false
+      WHERE client_id = ${clientId}
       ${siteId ? sql`AND id = ${siteId}` : sql``}
       ORDER BY name
     `);
@@ -109,8 +109,9 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       .map((r: any) => ({ id: r.id, name: r.name }))
       .filter((site) => accessibleSiteIds == null || accessibleSiteIds.includes(site.id));
     sitesAvailable = true;
-  } catch {
-    // sites table always exists; skip silently if error
+  } catch (error) {
+    // Checklist totals stay unavailable rather than reporting zero expected sites.
+    req.log.error({ err: error }, "Unable to load sites for the dashboard summary");
   }
 
   const amEnabled = entitled("kitchentrack") || entitled("premisestrack") || entitled("dailytrack_am");
