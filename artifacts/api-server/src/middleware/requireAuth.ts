@@ -72,6 +72,31 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
 }
 
 /**
+ * The clientId a request names, read the same way by enforceClientAccess and
+ * getClientId. It may arrive in the query string, the JSON body or both (the
+ * web client adds the active business to every URL); every supplied value
+ * must agree, so a route that reads req.body.clientId directly can never act
+ * on a business other than the one the guard checked. Returns undefined when
+ * none is supplied, "conflict" when values differ, otherwise the number (NaN
+ * when malformed).
+ */
+export function requestedClientId(req: Request): number | "conflict" | undefined {
+  const raw: unknown[] = [];
+  const fromQuery = req.query.clientId;
+  if (Array.isArray(fromQuery)) raw.push(...fromQuery);
+  else raw.push(fromQuery);
+  const body = req.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) raw.push((body as Record<string, unknown>).clientId);
+  const values = raw
+    .filter((value) => value !== undefined && value !== null && value !== "")
+    .map((value) => (typeof value === "number" || typeof value === "string" ? Number(value) : Number.NaN));
+  if (values.length === 0) return undefined;
+  const first = values[0];
+  if (values.some((value) => !Object.is(value, first))) return "conflict";
+  return first;
+}
+
+/**
  * Global guard: if the request supplies a clientId (query or body), the caller
  * must actually be allowed to act on that client. Consultants are limited to
  * clients they are linked to; everyone else to their own client. Mounted once
@@ -84,12 +109,16 @@ export function enforceClientAccess(req: Request, res: Response, next: NextFunct
     next();
     return;
   }
-  const raw = req.query.clientId ?? req.body?.clientId;
-  if (raw === undefined || raw === null || raw === "") {
+  const requested = requestedClientId(req);
+  if (requested === undefined) {
     next();
     return;
   }
-  const clientId = Number(raw);
+  if (requested === "conflict") {
+    res.status(400).json({ error: "The clientId in the URL and the request body do not match" });
+    return;
+  }
+  const clientId = requested;
   if (!Number.isInteger(clientId) || clientId <= 0) {
     res.status(400).json({ error: "Invalid clientId" });
     return;
@@ -217,9 +246,9 @@ export function getActiveDepartmentId(req: Request): number | null {
 export function getClientId(req: Request): number | null {
   if (!req.currentUser) return null;
   if (req.currentUser.role === "consultant") {
-    const raw = req.query.clientId ?? req.body?.clientId;
-    if (raw !== undefined && raw !== null && raw !== "") {
-      const clientId = Number(raw);
+    const clientId = requestedClientId(req);
+    if (clientId === "conflict") return null;
+    if (clientId !== undefined) {
       // Defense in depth: enforceClientAccess already rejects unauthorized
       // clientIds, but never honor one here that isn't explicitly linked.
       return canAccessClient(req, clientId) ? clientId : null;
