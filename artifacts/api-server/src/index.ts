@@ -589,6 +589,18 @@ async function startApplication() {
   setReadinessNote("contractorLinks", contractorTokenProblem ? { disabled: true, reason: contractorTokenProblem } : null);
   await loadJobRunHistory();
 
+  // Billing reads (deletion eligibility, subscription state, portfolio) query
+  // the synced stripe.* tables. Without Stripe no attempt creates them, so
+  // create them empty: those reads then see "no subscription" instead of
+  // failing. With Stripe configured, the initialization attempt does this.
+  if (!getStripeCredentialSource() && process.env.DATABASE_URL) {
+    try {
+      await runMigrations({ databaseUrl: process.env.DATABASE_URL });
+    } catch (err) {
+      logger.warn({ err }, "Could not create the Stripe sync schema while Stripe is unconfigured");
+    }
+  }
+
   // Stripe start-up is bounded: /readyz reports "starting" until the first
   // attempt settles or STRIPE_INIT_TIMEOUT_MS passes, then "ok" or "degraded"
   // with a blocker. Failures retry in the background; billing activation stays
