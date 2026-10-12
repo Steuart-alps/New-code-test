@@ -1,7 +1,8 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
 import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -1789,12 +1790,22 @@ function KitchenChecklistCard({
     const endpoint = KCL_ENDPOINT[type];
     const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId: staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) { await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
-    } catch (err: any) {
-      toast({ title: "Save failed", description: err?.message, variant: "destructive" });
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -1833,18 +1844,7 @@ function KitchenChecklistCard({
                 {item.section && item.section !== items[i - 1]?.section && (
                   <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>{item.section}</p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onToggle={() => toggle(i)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -1916,8 +1916,10 @@ function DailyChecksTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const getAm = (type: string) => amRows.find(c => c.checklistType === type);
-  const getPm = (type: string) => pmRows.find(c => c.checklistType === type);
+  // Without a site filter the lists hold every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getAm = (type: string) => amRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
+  const getPm = (type: string) => pmRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <div className="space-y-4">

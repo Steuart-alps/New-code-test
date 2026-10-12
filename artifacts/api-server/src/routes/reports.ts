@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getUnscopedComplianceReport } from "../lib/unscopedComplianceReport";
 import { getDepartmentComplianceReport } from "../lib/departmentComplianceReport";
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
+import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
 
 const router = Router();
 type RiskAcknowledgementStatus = "acknowledged" | "pending" | "expired" | "missing";
@@ -377,12 +378,9 @@ router.get("/reports/compliance", requireAuth, async (req, res) => {
         COUNT(DISTINCT dc.check_date)::int AS submitted
       FROM sites s
       CROSS JOIN (VALUES ('am'), ('pm')) AS t(checklist_type)
-      LEFT JOIN daily_checklists dc
-        ON  dc.site_id        = s.id
-        AND dc.client_id      = ${clientId}
-        AND dc.checklist_type = t.checklist_type
-        AND dc.check_date     BETWEEN ${from} AND ${to}
-        AND dc.submitted_at IS NOT NULL
+      LEFT JOIN ${submittedDailyChecklists(clientId, from, to)} dc
+        ON  dc.site_id = s.id
+        AND dc.period  = t.checklist_type
       WHERE s.client_id = ${clientId}
       ${siteWhereClause}
       GROUP BY s.id, s.name, t.checklist_type
@@ -520,19 +518,17 @@ router.get("/reports/compliance-trend", requireAuth, async (req, res) => {
 
     db.execute(sql`
       SELECT
-        to_char(dc.check_date, 'YYYY-MM') AS month,
+        left(dc.check_date, 7)            AS month,
         s.id                              AS site_id,
         s.name                            AS site_name,
-        dc.checklist_type,
+        dc.period                         AS checklist_type,
         COUNT(DISTINCT dc.check_date)::int AS submitted
-      FROM daily_checklists dc
+      FROM ${submittedDailyChecklists(clientId, from, to)} dc
       JOIN sites s ON s.id = dc.site_id AND s.client_id = ${clientId}
-      WHERE dc.client_id   = ${clientId}
-        AND dc.check_date  BETWEEN ${from} AND ${to}
-        AND dc.submitted_at IS NOT NULL
+      WHERE true
         ${siteFilter}
-      GROUP BY month, s.id, s.name, dc.checklist_type
-      ORDER BY month, s.name, dc.checklist_type
+      GROUP BY month, s.id, s.name, dc.period
+      ORDER BY month, s.name, dc.period
     `),
     db.execute(sql`
       SELECT to_char(activity.record_date::date, 'YYYY-MM') AS month,

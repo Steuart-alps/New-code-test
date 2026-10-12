@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { submittedDailyChecklists } from "./dailyChecklistCompletion";
 
 /** The unfiltered /reports/compliance calculation, also used by monthly email. */
 export async function getUnscopedComplianceReport(clientId: number, from: string, to: string) {
@@ -11,11 +12,8 @@ export async function getUnscopedComplianceReport(clientId: number, from: string
              COUNT(DISTINCT dc.check_date)::int AS submitted
       FROM sites s
       CROSS JOIN (VALUES ('am'), ('pm')) AS t(checklist_type)
-      LEFT JOIN daily_checklists dc ON dc.site_id = s.id
-        AND dc.client_id = ${clientId}
-        AND dc.checklist_type = t.checklist_type
-        AND dc.check_date BETWEEN ${from} AND ${to}
-        AND dc.submitted_at IS NOT NULL
+      LEFT JOIN ${submittedDailyChecklists(clientId, from, to)} dc
+        ON dc.site_id = s.id AND dc.period = t.checklist_type
       WHERE s.client_id = ${clientId}
       GROUP BY s.id, s.name, t.checklist_type
       ORDER BY s.name, t.checklist_type

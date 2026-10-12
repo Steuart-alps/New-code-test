@@ -1591,6 +1591,17 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
     await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
 
+    // ---- Daily checklist slot lookup index ----
+    // Deliberately NOT unique: daily_checklists had no unique key and older
+    // databases may hold duplicate (client, site, type, date) rows, which a
+    // unique index would reject at start-up. POST /daily-track-am|pm dedupes
+    // in a transaction (lib/dailyChecklistWrite.ts); this index serves that
+    // lookup and the date-range reports.
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "IDX_daily_checklists_client_date_site_type"
+      ON "daily_checklists" ("client_id", "check_date", "site_id", "checklist_type")
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

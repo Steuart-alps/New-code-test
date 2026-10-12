@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -12,7 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Square, Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
+import { Sunset, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, PenLine, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -188,6 +191,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     : (TEMPLATES[type] ?? []);
 
   const { user } = useAuth();
+  const { toast } = useToast();
   const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
@@ -208,10 +212,22 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
     setSaving(true);
     const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) { await apiFetch(`/daily-track-pm/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(`/daily-track-pm`, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`/daily-track-pm/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-pm`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -254,18 +270,7 @@ function ChecklistCard({ type, siteId, siteName, date, existing, onSaved, canAdm
                     {item.section}
                   </p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onToggle={() => toggle(i)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -319,6 +324,7 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
   const [managerName, setManagerName] = useState(existing?.managerName ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
   const submitted = !!existing?.submittedAt;
 
   useEffect(() => { setManagerName(existing?.managerName ?? ""); setNotes(existing?.notes ?? ""); }, [existing]);
@@ -328,9 +334,18 @@ function ManagerSignoffCard({ siteId, date, existing, onSaved }: {
     const payload: any = { signoffDate: date, siteId: siteId ?? null, managerName: managerName || "Manager", notes: notes || null };
     if (submit) payload.submittedAt = new Date().toISOString();
     try {
-      if (existing) { await apiFetch(`/daily-track-pm/signoffs/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(`/daily-track-pm/signoffs`, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`/daily-track-pm/signoffs/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-pm/signoffs`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        toast({ title: "Sign-off not saved", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "End of day signed off" : "Sign-off saved" });
       onSaved();
+    } catch {
+      toast({ title: "Sign-off not saved", description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -382,6 +397,7 @@ export default function DailyTrackPmPage() {
   const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [signoff, setSignoff] = useState<ManagerSignoff | undefined>(undefined);
+  const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
@@ -396,18 +412,26 @@ export default function DailyTrackPmPage() {
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
-    const [clRes, soRes] = await Promise.all([
+    const [clRes, soRes, mobile] = await Promise.all([
       apiFetch(`/daily-track-pm?${params}`),
       apiFetch(`/daily-track-pm/signoffs?${params}`),
+      hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "pm") : Promise.resolve(null),
     ]);
     if (clRes.ok) setChecklists(await clRes.json());
-    if (soRes.ok) { const rows: ManagerSignoff[] = await soRes.json(); setSignoff(rows[0]); }
+    if (soRes.ok) {
+      // Only this site's (or the no-site) sign-off; a submitted one wins.
+      const rows = (await soRes.json() as ManagerSignoff[]).filter(row => (row.siteId ?? null) === selectedSiteId);
+      setSignoff(rows.find(row => row.submittedAt) ?? rows[0]);
+    }
+    setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
-  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type);
+  // Without a site filter the list holds every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <AppLayout title="DailyTrack PM">
@@ -445,6 +469,7 @@ export default function DailyTrackPmPage() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
             <ChecklistCard key={type} type={type} siteId={selectedSiteId} siteName={selectedSiteName} date={date} existing={getChecklist(type)} onSaved={load} canAdmin={canAdmin} />
           ))}
