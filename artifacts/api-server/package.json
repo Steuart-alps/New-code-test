@@ -18,6 +18,7 @@
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",
+    "test:security-hardening": "bash tests/run-fresh-schema.sh tests/security-hardening.mjs",
     "test:password-reset-rate-limit-postgres": "bash tests/run-fresh-schema.sh tests/password-reset-rate-limit-postgres.mjs",
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
