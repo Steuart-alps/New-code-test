@@ -1,8 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { 
+import {
   ShieldCheck,
-  Bell,
   LogOut,
   ChevronDown,
   ArrowLeft,
@@ -12,7 +11,8 @@ import {
   KeyRound,
   Menu,
   ChevronRight,
-  MessageSquareWarning
+  MessageSquareWarning,
+  X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -47,12 +47,42 @@ const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/bike-track", moduleKey: "bike" },
   { prefix: "/hot-tub", moduleKey: "hot_tub" },
   { prefix: "/tree-track", moduleKey: "tree" },
-  { prefix: "/green-track", moduleKey: "green" },
+  // GreenTrack renders its module actions in its own "Actions" tab.
   { prefix: "/swim-track", moduleKey: "swim" },
   { prefix: "/incidents", moduleKey: "incident" },
 ];
 
 import { getNavGroups, isNavItemActive, isNavItemAvailable, type NavGroup } from "@/lib/nav-groups";
+
+const TRACK_GUIDANCE_KEY = "complytrack:trackGuidanceDismissed";
+
+/** Per-user "don't show again" for the track guidance banner. */
+function useTrackGuidanceDismissed(userId: number | undefined): [boolean, () => void] {
+  const key = `${TRACK_GUIDANCE_KEY}:${userId ?? "guest"}`;
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return window.localStorage.getItem(key) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      setDismissed(window.localStorage.getItem(key) === "true");
+    } catch {
+      setDismissed(false);
+    }
+  }, [key]);
+  const dismiss = () => {
+    setDismissed(true);
+    try {
+      window.localStorage.setItem(key, "true");
+    } catch {
+      // Storage unavailable: hidden for this page view only.
+    }
+  };
+  return [dismissed, dismiss];
+}
 
 function useNavGroups(): NavGroup[] {
   const isConsultant = useIsConsultant();
@@ -161,6 +191,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const moduleActionKey = moduleActionRoutes.find(route => location.startsWith(route.prefix))?.moduleKey;
+  // The guidance applies to track (module) records, so only show it there.
+  const isTrackPage = moduleActionKey !== undefined || location.startsWith("/green-track");
+  const [trackGuidanceDismissed, dismissTrackGuidance] = useTrackGuidanceDismissed(user?.id);
 
   const primaryColor = client?.primaryColor ?? "#7FA8C9";
 
@@ -309,8 +342,8 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
         <div className="absolute inset-0 w-full h-full bg-[#F7F2E4]/30 pointer-events-none -z-10" />
 
         {/* Top Header */}
-        <header className="h-[80px] bg-white/80 backdrop-blur-md border-b border-border flex items-center justify-between px-6 lg:px-8 z-10 sticky top-0">
-          <div className="flex items-center gap-3">
+        <header className="h-[64px] md:h-[80px] bg-white/80 backdrop-blur-md border-b border-border flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 z-10 sticky top-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <div className="md:hidden flex items-center">
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                 <SheetTrigger asChild>
@@ -367,21 +400,22 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             {location !== "/dashboard" && (
               <button
                 onClick={() => window.history.back()}
-                className="p-1.5 rounded-sm hover:bg-muted border border-transparent hover:border-border transition-all text-[#162D42]/60 hover:text-[#162D42]"
+                className="p-1.5 shrink-0 rounded-sm hover:bg-muted border border-transparent hover:border-border transition-all text-[#162D42]/60 hover:text-[#162D42]"
                 title="Go back"
+                aria-label="Go back"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <h1 className="text-2xl font-display font-medium text-[#162D42] truncate">
+            <h1 className="min-w-0 text-lg sm:text-2xl font-display font-medium text-[#162D42] truncate" title={title}>
               {title}
             </h1>
           </div>
-          
-          <div className="flex items-center gap-4">
+
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             <Link
               href="/account-security"
-              className="flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"
+              className="hidden md:flex items-center gap-2 px-2 py-2 rounded-sm text-sm text-[#162D42] hover:bg-muted transition-colors"
               aria-label="Account security"
               title="Account security"
               data-testid="link-account-security"
@@ -395,31 +429,61 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 <span className="font-medium uppercase tracking-wider">Owner</span>
               </div>
             )}
-            <button className="relative p-2 rounded-sm hover:bg-muted border border-transparent hover:border-border transition-all text-[#162D42]">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full border-2 border-white"></span>
-            </button>
+            {/* On phones, account actions live in the avatar menu so the header fits. */}
             <div className="md:hidden">
-              <Avatar className="w-8 h-8 rounded-none">
-                <AvatarFallback className="rounded-none bg-[#F7F2E4] text-[#162D42] text-xs font-medium">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="rounded-sm" aria-label="Account menu" data-testid="button-account-menu">
+                    <Avatar className="w-8 h-8 rounded-none">
+                      <AvatarFallback className="rounded-none bg-[#F7F2E4] text-[#162D42] text-xs font-medium">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 rounded-none border-border">
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground truncate">{user?.email ?? ""}</div>
+                  <DropdownMenuSeparator />
+                  {isConsultant && (
+                    <DropdownMenuItem asChild className="rounded-none cursor-pointer">
+                      <Link href="/clients">
+                        <ArrowLeftRight className="w-4 h-4 mr-2" />
+                        Switch Client
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem asChild className="rounded-none cursor-pointer">
+                    <Link href="/account-security">
+                      <KeyRound className="w-4 h-4 mr-2" />
+                      Security
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowAppDialog(true)} className="rounded-none cursor-pointer">
+                    <Smartphone className="w-4 h-4 mr-2" />
+                    Get the mobile app
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={logout} className="rounded-none cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10" data-testid="menu-sign-out">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <button
               onClick={logout}
-              className="flex items-center gap-2 px-4 py-2 rounded-[2px] text-sm font-medium text-destructive bg-destructive/5 hover:bg-destructive/10 transition-colors"
+              className="hidden md:flex items-center gap-2 px-4 py-2 rounded-[2px] text-sm font-medium text-destructive bg-destructive/5 hover:bg-destructive/10 transition-colors"
               data-testid="button-sign-out"
               title="Sign out"
             >
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Sign out</span>
+              <span>Sign out</span>
             </button>
           </div>
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-6 lg:p-8">
+        <div className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -427,10 +491,16 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
             className="max-w-7xl mx-auto space-y-8"
           >
             <CancellationBanner />
-            {location !== "/compliance-hub" && (
+            {isTrackPage && !trackGuidanceDismissed && (
               <div className="flex items-center justify-between gap-3 rounded-sm border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-950">
                 <span>Track records support your site-specific controls; review the applicable UK sources, appointments and corrective actions.</span>
-                <Link href="/compliance-hub" className="shrink-0 font-semibold underline underline-offset-2">Compliance Hub</Link>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link href="/compliance-hub" className="font-semibold underline underline-offset-2">Compliance Hub</Link>
+                  <button type="button" onClick={dismissTrackGuidance} aria-label="Dismiss this guidance" title="Don't show again"
+                    className="rounded-sm p-1 hover:bg-amber-100">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
             {children}
