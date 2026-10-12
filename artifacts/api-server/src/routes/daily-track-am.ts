@@ -12,6 +12,7 @@ import {
   type DailyChecklistType,
 } from "../lib/dailyChecklistEntitlements";
 import { resolveStaffPerformer as resolveStaffRoster, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { saveDailyChecklist } from "../lib/dailyChecklistWrite";
 
 const router = Router();
 
@@ -184,21 +185,25 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     });
   }
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
-  const performer = await resolveStaffRoster(clientId, data.staffRosterId, data.completedBy);
-  if (data.staffRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
-  const [row] = await db.insert(dailyChecklistsTable).values({
+  // Idempotent: a repeat POST for the same site/type/date updates its draft
+  // rather than adding a duplicate row.
+  const result = await saveDailyChecklist({
     clientId,
     siteId: data.siteId ?? null,
     checklistType: data.checklistType,
     checkDate: data.checkDate,
-    items: (data.items ?? []) as any,
-    completedBy: performer?.performedBy ?? null,
-    staffRosterId: performer?.staffRosterId ?? null,
-    managerNote: data.managerNote ?? null,
+    items: data.items,
+    managerNote: data.managerNote,
     submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
     createdBy: req.currentUser!.id,
-  } as any).returning();
-  res.status(201).json(row);
+  }, (existing) => existing
+    ? resolveStaffPerformerUpdate(clientId, data.staffRosterId, data.completedBy, existing.staffRosterId, existing.completedBy)
+    : resolveStaffRoster(clientId, data.staffRosterId, data.completedBy));
+  if (result.outcome === "invalid_performer") return res.status(400).json({ error: "Invalid staff roster member" });
+  if (result.outcome === "already_submitted") {
+    return res.status(409).json({ error: "Checklist already submitted", code: "CHECKLIST_ALREADY_SUBMITTED", id: result.row.id });
+  }
+  res.status(result.outcome === "created" ? 201 : 200).json(result.row);
 });
 
 // PUT /api/daily-track-am/:id

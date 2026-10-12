@@ -95,6 +95,7 @@ const runnerLocked = new Set([
   "test:contractor-portal", "test:premises-inspection-date-range",
   "test:pat-dept-isolation", "test:data-deletion-request",
   "test:daily-track-month-history", "test:stored-track-lock",
+  "test:daily-checklist-reports",
   "test:privacy-governance:ci", "test:staff-roster-reconciliation",
   "test:staff-pin", "test:staff-attribution", "test:mandatory-2fa",
   "test:generic-document-object-acl", "test:track-evidence",
