@@ -122,6 +122,7 @@
     "test:registers": "bash tests/run-fresh-schema.sh tests/registers.mjs",
 
     "test:csv-imports-portfolio": "bash tests/run-csv-imports-portfolio.sh",
+    "test:trial-lock-allowlist": "node tests/trial-lock-allowlist.mjs",
     "test:csv-import-lib": "bash tests/run-bundled-unit.sh tests/csv-import-lib.ts cjs",
 
     "test:setup-tasks": "bash tests/run-setup-tasks.sh",
