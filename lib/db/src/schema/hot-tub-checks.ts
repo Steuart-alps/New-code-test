@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, date, timestamp, numeric } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, timestamp, numeric, index } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -36,7 +36,10 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_hot_tub_checks_client_date").on(table.clientId, table.checkDate),
+]);
 
 export type HotTubCheck = typeof hotTubChecksTable.$inferSelect;
 export type NewHotTubCheck = typeof hotTubChecksTable.$inferInsert;

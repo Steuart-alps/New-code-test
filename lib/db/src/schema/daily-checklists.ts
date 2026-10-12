@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -17,7 +17,10 @@ export const dailyChecklistsTable = pgTable("daily_checklists", {
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_daily_checklists_client_date_site").on(table.clientId, table.checkDate, table.siteId),
+]);
 
 export const dailyManagerSignoffsTable = pgTable("daily_manager_signoffs", {
   id: serial("id").primaryKey(),

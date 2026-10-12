@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, index } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -20,6 +20,9 @@ export const fireSafetyChecksTable = pgTable("fire_safety_checks", {
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_fire_safety_client_site_type_date").on(table.clientId, table.siteId, table.checkType, table.checkDate),
+]);
 
 export type FireSafetyCheck = typeof fireSafetyChecksTable.$inferSelect;

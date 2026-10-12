@@ -1582,6 +1582,23 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- Dashboard and reminder read indexes ----
+    // /dashboard/summary and the daily check reminders filter these tables by
+    // tenant (and site/date/status). Plain CREATE INDEX IF NOT EXISTS: the
+    // tables are small, so the brief build lock is acceptable. Mirrored in the
+    // Drizzle schema where the table is declared there.
+    for (const statement of [
+      sql`CREATE INDEX IF NOT EXISTS "IDX_daily_checklists_client_date_site" ON "daily_checklists" ("client_id", "check_date", "site_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_fix_track_issues_client_status" ON "fix_track_issues" ("client_id", "status")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_doc_track_documents_client" ON "doc_track_documents" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_compliance_items_client" ON "compliance_items" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_hot_tub_checks_client_date" ON "hot_tub_checks" ("client_id", "check_date")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_sites_client" ON "sites" ("client_id")`,
+      sql`CREATE INDEX IF NOT EXISTS "IDX_fire_safety_client_site_type_date" ON "fire_safety_checks" ("client_id", "site_id", "check_type", "check_date")`,
+    ]) {
+      await db.execute(statement);
+    }
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
