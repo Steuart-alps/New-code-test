@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 
 type CalendarKind =
   | "compliance_due" | "contractor_visit" | "contractor_insurance" | "contractor_indemnity"
-  | "contractor_dbs" | "contractor_accreditation" | "fix_visit" | "pest_visit" | "training_expiry";
+  | "contractor_dbs" | "contractor_accreditation" | "fix_visit" | "pest_visit" | "training_expiry"
+  | "coshh_review" | "asbestos_plan_review";
 
 interface CalendarEntry {
   id: string;
@@ -25,12 +26,13 @@ interface CalendarEntry {
 
 interface Site { id: number; name: string }
 
-/** Four colour groups; dot + chip classes for each. */
+/** Five colour groups; dot + chip classes for each. */
 const GROUPS = {
   checks: { label: "Compliance checks", dot: "bg-blue-500", chip: "border-blue-200 bg-blue-50 text-blue-900" },
   visits: { label: "Contractor visits", dot: "bg-violet-500", chip: "border-violet-200 bg-violet-50 text-violet-900" },
   expiries: { label: "Contractor insurance, DBS and accreditations", dot: "bg-amber-500", chip: "border-amber-200 bg-amber-50 text-amber-900" },
   training: { label: "Training expiries", dot: "bg-pink-500", chip: "border-pink-200 bg-pink-50 text-pink-900" },
+  registers: { label: "COSHH and asbestos reviews", dot: "bg-teal-500", chip: "border-teal-200 bg-teal-50 text-teal-900" },
 } as const;
 
 const KIND_GROUP: Record<CalendarKind, keyof typeof GROUPS> = {
@@ -43,6 +45,8 @@ const KIND_GROUP: Record<CalendarKind, keyof typeof GROUPS> = {
   contractor_dbs: "expiries",
   contractor_accreditation: "expiries",
   training_expiry: "training",
+  coshh_review: "registers",
+  asbestos_plan_review: "registers",
 };
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

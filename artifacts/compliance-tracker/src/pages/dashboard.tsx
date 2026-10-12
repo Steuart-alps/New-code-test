@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
 import { ComplianceChecksDue } from "@/components/compliance-checks-due";
+import { RegisterReviewsDue } from "@/components/register-reviews-due";
 import { DashboardStartCards } from "@/components/dashboard-start-cards";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
@@ -598,6 +599,7 @@ export default function Dashboard() {
 
         <DashboardStartCards />
         <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
+        <RegisterReviewsDue siteId={siteId === "all" ? null : Number(siteId)} />
 
         {canAdmin && (
           <SetupChecklist
