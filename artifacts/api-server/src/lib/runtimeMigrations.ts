@@ -1591,6 +1591,20 @@ export async function runRuntimeMigrations() {
     await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
     await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
 
+    // ---- Consultant practice branding (Oct 2026) ----
+    // One row per consultant user: practice name and a finalised private logo
+    // object, shown as "Managed by" to the businesses linked to them.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "consultant_branding" (
+        "consultant_user_id" integer PRIMARY KEY REFERENCES "users"("id") ON DELETE CASCADE,
+        "practice_name" text,
+        "logo_object_path" text,
+        "logo_content_type" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
