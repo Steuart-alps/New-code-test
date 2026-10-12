@@ -20,6 +20,8 @@ ObjectStorageService.prototype.getObjectEntityFile = async function (path) {
   return {
     name: path,
     exists: async () => [true],
+    // Document uploads sniff the first bytes before the type is accepted.
+    download: async () => [Buffer.from("%PDF-1.7\n%schema fixture\n")],
     getMetadata: async () => [{ metadata: {} }],
     setMetadata: async () => [],
   } as any;
