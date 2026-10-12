@@ -151,7 +151,7 @@ let staffPage;
 try {
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
     args: [
       "--autoplay-policy=no-user-gesture-required",
       // Fake mode only: resolve the storage host to the in-process fake inside

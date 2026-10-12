@@ -84,7 +84,7 @@ let pageA;
 try {
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
     // Fake mode only: resolve the storage host to the in-process fake inside
     // this browser. Real mode talks to storage.googleapis.com unchanged.
     args: fakeStorage

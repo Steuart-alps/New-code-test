@@ -520,7 +520,7 @@ try {
   await waitForVite();
   browser = await chromium.launch({
     headless: true,
-    executablePath: process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium",
+    executablePath: process.env.CHROMIUM_PATH || undefined,
   });
   page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
   page.setDefaultTimeout(15000);
