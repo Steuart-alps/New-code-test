@@ -129,7 +129,9 @@ export async function apiFetch(path: string, init?: RequestInit) {
   const method = (init?.method ?? "GET").toUpperCase();
   // Sign-in, 2FA and session endpoints act on the account, not a business.
   const isAuthPath = path.startsWith("/auth/");
-  if (!isAuthPath) path = withActiveClient(path, init?.body);
+  // Analytics events must never identify a business, so never add its id.
+  const isAnalyticsPath = path.startsWith("/analytics/");
+  if (!isAuthPath && !isAnalyticsPath) path = withActiveClient(path, init?.body);
   const mutationSucceeded = beginApiMutation(method, path);
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");

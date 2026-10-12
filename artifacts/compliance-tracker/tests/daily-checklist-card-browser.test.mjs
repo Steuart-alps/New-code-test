@@ -133,8 +133,10 @@ async function main() {
       await checkbox(page, "Alpha check").click();
       await checkbox(page, "Bravo check").click();
       await page.getByRole("button", { name: "Save draft" }).click();
-      await page.getByText("Database unavailable").waitFor();
-      await page.getByText("Draft not saved").waitFor();
+      // Exact matches: Radix Toast also briefly mirrors the title and
+      // description into a visually hidden live region for screen readers.
+      await page.getByText("Database unavailable", { exact: true }).waitFor();
+      await page.getByText("Draft not saved", { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.savedCount), 0, "no reload after a failed save");
       assert.equal(await isChecked(page, "Alpha check"), true, "ticks survive a failed save");
       assert.equal(await isChecked(page, "Bravo check"), true, "ticks survive a failed save");
@@ -151,8 +153,8 @@ async function main() {
       const { page } = await open([[409, { error: "Checklist already submitted", code: "CHECKLIST_ALREADY_SUBMITTED", id: 9 }]]);
       await checkbox(page, "Alpha check").click();
       await page.getByRole("button", { name: "Submit checklist" }).click();
-      await page.getByText("Checklist already submitted").waitFor();
-      await page.getByText("Checklist not submitted").waitFor();
+      await page.getByText("Checklist already submitted", { exact: true }).waitFor();
+      await page.getByText("Checklist not submitted", { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.savedCount), 1);
       await page.close();
     });
