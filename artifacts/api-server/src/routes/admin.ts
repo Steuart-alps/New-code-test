@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { seedDemo } from "../lib/seedDemo";
 import { ensureServicePrices, getServicePricePreflight } from "../lib/services";
-import { requireAuth, requireConsultant } from "../middleware/requireAuth";
+import { requireAuth, requireConsultant, requirePlatformOperator } from "../middleware/requireAuth";
 import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
 import { db } from "@workspace/db";
@@ -232,8 +232,10 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
 // Read-only launch check. This is deliberately separate from the repair
 // endpoint below: an administrator can see every catalogue gap without
 // creating Stripe products, changing a subscription, or granting access.
+// Platform operators only (PLATFORM_ADMIN_EMAILS): every self-signup owner
+// has the consultant role.
 // GET /api/admin/service-price-preflight
-router.get("/api/admin/service-price-preflight", requireAuth, requireConsultant, async (_req, res) => {
+router.get("/admin/service-price-preflight", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await getServicePricePreflight();
     res.status(result.ready ? 200 : 503).json(result);
@@ -276,9 +278,9 @@ router.post("/admin/seed-demo", async (req, res) => {
 // Ensure a Stripe price exists for every activatable module so clients can
 // turn any of them on from their billing page. Idempotent — safe to call
 // repeatedly; only creates prices for modules that are currently missing one.
-// Consultant-only (platform administration action).
+// Platform operators only (PLATFORM_ADMIN_EMAILS); creates Stripe prices.
 // POST /api/admin/ensure-service-prices
-router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, async (_req, res) => {
+router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await ensureServicePrices();
     logger.info({ result }, "Ensured Stripe service prices");

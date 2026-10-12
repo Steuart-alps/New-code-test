@@ -181,6 +181,7 @@ const stubs = {
     export const requireRole = (..._roles) => (_req, _res, next) => next();
     export const requireClientAdmin = (_req, _res, next) => next();
     export const denyViewers = (_req, _res, next) => next();
+    export const requirePlatformOperator = (_req, _res, next) => next();
   `,
   trialLock: `
     export const invalidateTrialLock = () => {};

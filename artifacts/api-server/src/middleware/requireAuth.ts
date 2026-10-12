@@ -207,6 +207,35 @@ export function requireConsultant(req: Request, res: Response, next: NextFunctio
   return requireRole("consultant")(req, res, next);
 }
 
+/**
+ * Platform operators run the ComplyTrack service itself (Stripe catalogue
+ * repair, ALPS discount codes, unrestricted business creation). The
+ * "consultant" role cannot be used for this because every self-signup owner
+ * has it, so operators are named explicitly by sign-in email in the
+ * PLATFORM_ADMIN_EMAILS allowlist (comma-separated, case-insensitive). Unset
+ * or empty means nobody is a platform operator.
+ */
+export function isPlatformOperator(user: Pick<SafeUser, "email"> | null | undefined): boolean {
+  if (!user?.email) return false;
+  const allowlist = (process.env.PLATFORM_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.length > 0);
+  return allowlist.includes(user.email.trim().toLowerCase());
+}
+
+export function requirePlatformOperator(req: Request, res: Response, next: NextFunction) {
+  if (!req.currentUser) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (!isPlatformOperator(req.currentUser)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
 export function requireClientAdmin(req: Request, res: Response, next: NextFunction) {
   return requireRole("consultant", "client_admin")(req, res, next);
 }

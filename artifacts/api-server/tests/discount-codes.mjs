@@ -42,9 +42,9 @@ function makeSession() {
   };
 }
 
-async function registerAccount(label, ts) {
+async function registerAccount(label, ts, fixedEmail) {
   const session = makeSession();
-  const email = `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
+  const email = fixedEmail ?? `${label}-${ts}-${Math.floor(Math.random() * 1e6)}@test.local`;
   const password = "password-123";
   const reg = await session("POST", "/auth/register", { name: `${label} account`, email, password });
   if (![200, 201].includes(reg.status)) {
@@ -94,7 +94,15 @@ const CODE_RE = /^ALPS-[2-9A-HJKMNP-TV-Z]{4}(-[2-9A-HJKMNP-TV-Z]{4}){3}$/;
 
 async function main() {
   const ts = Date.now();
-  const a = await registerAccount("discount-a", ts);
+  // Issuing codes is for platform operators (PLATFORM_ADMIN_EMAILS); the
+  // runner names a unique operator address for this run and starts the API
+  // with it. Account B is an ordinary self-signup owner.
+  const operatorEmail = process.env.DISCOUNT_OPERATOR_EMAIL;
+  if (!operatorEmail) {
+    console.error("FATAL: run via tests/run-discount-codes.sh (needs DISCOUNT_OPERATOR_EMAIL in PLATFORM_ADMIN_EMAILS)");
+    process.exit(1);
+  }
+  const a = await registerAccount("discount-a", ts, operatorEmail);
   const b = await registerAccount("discount-b", ts);
 
   console.log("\n── Manager issue / status / replace ──");
@@ -151,6 +159,10 @@ async function main() {
     const post = await sub("POST", "/billing/discount-code");
     check(`${role}: POST blocked`, post.status === 403, `got ${post.status}`);
   }
+
+  // Self-signup owners hold the consultant role but are not platform operators.
+  const ownerIssue = await b.session("POST", "/billing/discount-code");
+  check("non-operator owner: POST blocked", ownerIssue.status === 403, `got ${ownerIssue.status}`);
 
   // Cross-tenant: consultant B cannot touch client A's code
   const crossGet = await b.session("GET", `/billing/discount-code?clientId=${a.clientId}`);
