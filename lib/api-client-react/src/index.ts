@@ -12,5 +12,6 @@ export {
   setUnauthorizedHandler,
   setPaymentRequiredHandler,
   setMutationObserver,
+  setCsrfTokenProvider,
 } from "./custom-fetch";
-export type { AuthTokenGetter, ApiMutationObserver } from "./custom-fetch";
+export type { AuthTokenGetter, ApiMutationObserver, CsrfTokenProvider } from "./custom-fetch";

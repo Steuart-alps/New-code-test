@@ -10,10 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import alpsLogo from "@/assets/alps-logo.png";
+import { API_BASE } from "@/lib/api";
 
 type View = "login" | "totp" | "passkey" | "forgot" | "forgot-sent";
 
-const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
 export default function LoginPage() {
   const { login, refresh } = useAuth();
@@ -90,7 +90,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/auth/2fa/verify`, {
+      const res = await fetch(`${API_BASE}/auth/2fa/verify`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -113,7 +113,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/auth/forgot-password`, {
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail }),

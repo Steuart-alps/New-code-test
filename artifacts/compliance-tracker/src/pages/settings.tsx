@@ -7,7 +7,7 @@ import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react"
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { apiFetch as authenticatedApiFetch } from "@/lib/api";
+import { apiFetch as authenticatedApiFetch, withCsrfToken } from "@/lib/api";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -47,11 +47,11 @@ interface DomainState {
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
+  const res = await fetch(`${apiBase}${path}`, await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);

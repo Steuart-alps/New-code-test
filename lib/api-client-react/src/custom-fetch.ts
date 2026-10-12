@@ -10,6 +10,7 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -44,6 +45,24 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+export type CsrfTokenProvider = {
+  get: () => Promise<string | null> | string | null;
+  reset: () => void;
+};
+
+let _csrfTokenProvider: CsrfTokenProvider | null = null;
+
+/**
+ * Register a provider for the session-bound CSRF token that the API requires
+ * on cookie-authenticated POST/PUT/PATCH/DELETE requests in production. The
+ * token is sent as `X-CSRF-Token` on those requests unless an Authorization
+ * header is present (bearer requests are exempt). `reset` is called after a
+ * 401 or 403 so a stale token is not reused. Pass `null` to clear.
+ */
+export function setCsrfTokenProvider(provider: CsrfTokenProvider | null): void {
+  _csrfTokenProvider = provider;
 }
 
 let _unauthorizedHandler: (() => void) | null = null;
@@ -414,6 +433,19 @@ export async function customFetch<T = unknown>(
     }
   }
 
+  // Cookie-authenticated mutations must carry the session's CSRF token.
+  const sendsCsrfToken =
+    _csrfTokenProvider !== null &&
+    UNSAFE_METHODS.has(method) &&
+    !headers.has("authorization") &&
+    !headers.has("x-csrf-token");
+  if (sendsCsrfToken) {
+    const token = await _csrfTokenProvider!.get();
+    if (token) {
+      headers.set("x-csrf-token", token);
+    }
+  }
+
   // Inject clientId into all GET-like requests so the API can scope results
   if (_clientIdGetter && method === "GET") {
     const clientId = _clientIdGetter();
@@ -441,6 +473,13 @@ export async function customFetch<T = unknown>(
   const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
+    if (sendsCsrfToken && (response.status === 401 || response.status === 403)) {
+      try {
+        _csrfTokenProvider?.reset();
+      } catch {
+        // never let the provider break error propagation
+      }
+    }
     if (response.status === 401 && _unauthorizedHandler) {
       try {
         _unauthorizedHandler();

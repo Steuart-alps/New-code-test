@@ -1,3 +1,5 @@
+import { setCsrfTokenProvider } from "@workspace/api-client-react";
+
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export const API_BASE = `${BASE}/api`;
@@ -21,6 +23,30 @@ export async function getCsrfToken(): Promise<string | null> {
       });
   }
   return csrfRequest;
+}
+
+/** Forget the cached token, e.g. after sign-out destroys the session it belonged to. */
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
+// Generated API hooks share the same session-bound token.
+setCsrfTokenProvider({ get: getCsrfToken, reset: clearCsrfToken });
+
+/**
+ * Adds the session's CSRF token to a state-changing request sent with plain
+ * `fetch`. Prefer `apiFetch`; this is for page helpers that build their own
+ * request.
+ */
+export async function withCsrfToken(init: RequestInit = {}): Promise<RequestInit> {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) return init;
+  const headers = new Headers(init.headers);
+  if (!headers.has("Authorization") && !headers.has("X-CSRF-Token")) {
+    const token = await getCsrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+  }
+  return { ...init, headers };
 }
 
 type MutationObserver = (method: string, url: string) => (() => void) | void;

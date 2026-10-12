@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
-import { apiFetch, setApiFetchMutationObserver } from "@/lib/api";
+import { apiFetch, clearCsrfToken, setApiFetchMutationObserver } from "@/lib/api";
 import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, setMutationObserver } from "@workspace/api-client-react";
 import { createCompletedWorkObserver } from "@/lib/analytics";
 
@@ -156,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!userRef.current) return;
       const lastAnywhere = Math.max(lastActivityRef.current, readShared());
       if (Date.now() - lastAnywhere >= IDLE_LIMIT_MS) {
-        apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
+        apiFetch("/auth/logout", { method: "POST" }).catch(() => {}).finally(clearCsrfToken);
         setUser(null);
         setClient(null);
         setServices(null);
@@ -233,6 +233,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     await apiFetch("/auth/logout", { method: "POST" });
+    // The session (and its CSRF token) is gone; the next sign-in gets a new one.
+    clearCsrfToken();
     setUser(null);
     setClient(null);
     setServices(null);
