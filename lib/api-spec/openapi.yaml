@@ -3488,10 +3488,24 @@ components:
         - monthlyDownloadTrackingAvailable
         - month
         - estimatedCost
+        - usageCheckedAt
+        - usageAgeSeconds
+        - usageRefreshing
       properties:
         usedBytes:
           type: integer
           minimum: 0
+        usageCheckedAt:
+          type: ["string", "null"]
+          format: date-time
+          description: When the totals were last reconciled with the storage provider; null before the first check.
+        usageAgeSeconds:
+          type: ["integer", "null"]
+          minimum: 0
+          description: Seconds since usageCheckedAt. Uploads and deletions since then are already included.
+        usageRefreshing:
+          type: boolean
+          description: A reconciliation with the storage provider is running; totals may change shortly.
         objectCount:
           type: integer
           minimum: 0

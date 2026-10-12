@@ -1794,6 +1794,8 @@ export const AddPrivacyRetentionVerificationResponse = zod.object({
  */
 export const getStorageUsageResponseUsedBytesMin = 0;
 
+export const getStorageUsageResponseUsageAgeSecondsMin = 0;
+
 export const getStorageUsageResponseObjectCountMin = 0;
 
 
@@ -1820,6 +1822,9 @@ export const getStorageUsageResponseEstimatedCostMarkupPercentMin = 0;
 
 export const GetStorageUsageResponse = zod.object({
   "usedBytes": zod.number().min(getStorageUsageResponseUsedBytesMin),
+  "usageCheckedAt": zod.date().nullable().describe('When the totals were last reconciled with the storage provider; null before the first check.'),
+  "usageAgeSeconds": zod.number().min(getStorageUsageResponseUsageAgeSecondsMin).nullable().describe('Seconds since usageCheckedAt. Uploads and deletions since then are already included.'),
+  "usageRefreshing": zod.boolean().describe('A reconciliation with the storage provider is running; totals may change shortly.'),
   "objectCount": zod.number().min(getStorageUsageResponseObjectCountMin),
   "warningThresholdBytes": zod.number().min(1),
   "warning": zod.boolean(),

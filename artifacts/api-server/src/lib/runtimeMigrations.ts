@@ -648,6 +648,42 @@ export async function runRuntimeMigrations() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_download_tokens_expiry" ON "storage_download_tokens" ("expires_at")`);
+    // Retained-storage usage ledger and per-tenant reconciliation snapshots
+    // (lib/storageUsageSnapshot.ts).
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_objects" (
+        "object_path" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "size_bytes" bigint NOT NULL,
+        "present" boolean NOT NULL,
+        "changed_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "storage_usage_objects_size_nonnegative" CHECK ("size_bytes" >= 0)
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_objects_tenant" ON "storage_usage_objects" ("client_id", "present")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_pending" (
+        "id" text PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "started_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "idx_storage_usage_pending_tenant" ON "storage_usage_pending" ("client_id", "started_at")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "storage_usage_snapshots" (
+        "client_id" integer PRIMARY KEY REFERENCES "clients"("id") ON DELETE CASCADE,
+        "reconciled_at" timestamptz,
+        "used_bytes" bigint NOT NULL DEFAULT 0,
+        "object_count" integer NOT NULL DEFAULT 0,
+        "drift_bytes" bigint NOT NULL DEFAULT 0,
+        "drift_objects" integer NOT NULL DEFAULT 0,
+        "last_drift_at" timestamptz,
+        "last_failed_at" timestamptz,
+        "refresh_lease_token" text,
+        "refresh_lease_until" timestamptz,
+        "updated_at" timestamptz NOT NULL DEFAULT now()
+      )
+    `);
     // Bound the immutable response ledger and remove spent opaque credentials.
     await db.execute(sql`DELETE FROM "storage_download_events" WHERE "created_at" < (date_trunc('month', now()) - interval '15 months')`);
     await db.execute(sql`DELETE FROM "storage_download_tokens" WHERE "expires_at" < now()`);

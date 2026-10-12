@@ -867,6 +867,19 @@ export type StorageUsageEstimatedCost = {
 export interface StorageUsage {
   /** @minimum 0 */
   usedBytes: number;
+  /**
+     * When the totals were last reconciled with the storage provider; null before the first check.
+     * @nullable
+     */
+  usageCheckedAt: string | null;
+  /**
+     * Seconds since usageCheckedAt. Uploads and deletions since then are already included.
+     * @minimum 0
+     * @nullable
+     */
+  usageAgeSeconds: number | null;
+  /** A reconciliation with the storage provider is running; totals may change shortly. */
+  usageRefreshing: boolean;
   /** @minimum 0 */
   objectCount: number;
   /** @minimum 1 */

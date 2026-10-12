@@ -79,6 +79,16 @@ function StatusBadge({ status }: { status: string | null }) {
   );
 }
 
+function formatCheckedAge(seconds: number): string {
+  if (seconds < 60) return "just now";
+  const [value, unit] = seconds < 3600
+    ? [Math.floor(seconds / 60), "minute"]
+    : seconds < 86400
+      ? [Math.floor(seconds / 3600), "hour"]
+      : [Math.floor(seconds / 86400), "day"];
+  return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -102,6 +112,8 @@ function StorageUsageCard() {
       queryKey: ["/api/storage/usage", activeClientId],
       enabled: activeClientId !== null,
       retry: false,
+      // While the server rechecks with the storage provider, pick up the result.
+      refetchInterval: (query) => (query.state.data?.usageRefreshing ? 5000 : false),
     },
   });
   const usage = usageQuery.data;
@@ -197,6 +209,13 @@ function StorageUsageCard() {
                 <p className="text-sm text-muted-foreground">Retained storage</p>
                 <p className="mt-1 text-2xl font-semibold">{formatBytes(usage.usedBytes)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{usage.objectCount.toLocaleString()} stored {usage.objectCount === 1 ? "file" : "files"}</p>
+                <p className="mt-1 text-xs text-muted-foreground" data-testid="storage-usage-checked">
+                  {usage.usageRefreshing
+                    ? "Rechecking with our storage provider…"
+                    : typeof usage.usageAgeSeconds === "number"
+                      ? `Checked with our storage provider ${formatCheckedAge(usage.usageAgeSeconds)}. New uploads and deletions show straight away.`
+                      : null}
+                </p>
               </div>
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">Downloads this month</p>
