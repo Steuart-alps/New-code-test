@@ -25,9 +25,36 @@ export async function getEmailSettings(clientId?: number | null): Promise<Record
   return settings;
 }
 
+const SENDER_ADDRESS = /^[^\s@<>"(),;:\\[\]]+@([a-z0-9-]+(?:\.[a-z0-9-]+)+)$/i;
+
+/**
+ * Whether a business may send as `address`. With the platform's provider
+ * account, only the business's own registered sending domain is allowed
+ * (resendDomainName, set by routes/emailDomain.ts), so one business can never
+ * send as another business or as the platform. A business that connected its
+ * own provider key sends through that account, which only delivers from
+ * domains verified there.
+ */
+export function isAllowedTenantSender(address: string | null | undefined, settings: Record<string, string | null | undefined>): boolean {
+  const domain = address?.trim().match(SENDER_ADDRESS)?.[1]?.toLowerCase();
+  if (!domain) return false;
+  if (settings["resendApiKey"]?.trim()) return true;
+  const ownDomain = settings["resendDomainName"]?.trim().toLowerCase();
+  return !!ownDomain && domain === ownDomain;
+}
+
+/** A display name safe to place in a From header (no quotes, brackets or line breaks). */
+export function sanitizeSenderName(name: string | null | undefined): string {
+  return (name ?? "").replace(/[\r\n"<>\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
 function buildFrom(settings: Record<string, string>): string {
-  const email = settings["smtpFrom"] ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
-  const name = settings["smtpFromName"] ?? "ComplyTrack";
+  // A stored address that is not on the business's own domain (e.g. saved
+  // before this check existed) falls back to the platform sender.
+  const email = isAllowedTenantSender(settings["smtpFrom"], settings)
+    ? settings["smtpFrom"].trim()
+    : process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+  const name = sanitizeSenderName(settings["smtpFromName"]) || "ComplyTrack";
   return `${name} <${email}>`;
 }
 
