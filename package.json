@@ -13,7 +13,7 @@
   },
   "private": true,
   "devDependencies": {
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.55.1",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2"
   },
@@ -22,7 +22,7 @@
       "picomatch@2": "2.3.2",
       "picomatch@4": "4.0.4",
       "path-to-regexp": "8.4.0",
-      "brace-expansion": "2.1.4",
+      "brace-expansion": "2.1.7",
       "@babel/core": "7.29.6",
       "@tootallnate/once": "2.0.1",
       "@xmldom/xmldom@0.8": "0.8.15",
@@ -33,18 +33,19 @@
       "@esbuild-kit/core-utils>esbuild": "0.25.12",
       "tsx>esbuild": "0.28.1",
       "vite>esbuild": "0.28.1",
-      "fast-uri": "3.1.6",
+      "fast-uri": "3.1.8",
       "fast-xml-builder": "1.1.7",
       "fast-xml-parser": "5.7.0",
       "form-data@2": "2.5.6",
       "image-size": "npm:image-size-safe@2.0.3",
-      "js-yaml": "4.3.1",
+      "js-yaml": "4.3.2",
       "linkify-it": "5.0.2",
       "markdown-it": "14.2.0",
       "nanoid@3": "3.3.18",
       "nanoid@5": "5.1.16",
       "postcss": "8.5.23",
       "qs": "6.16.0",
+      "undici@6": "6.28.1",
       "uuid": "11.1.1",
       "yaml": "2.8.3",
       "ws": "8.21.0"
@@ -58,7 +59,7 @@
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.1",
     "pdfjs-dist": "^6.3.289",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "stripe": "20.0.0",
     "stripe-replit-sync": "1.0.0"
   }
