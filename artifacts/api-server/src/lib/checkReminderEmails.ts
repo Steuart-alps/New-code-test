@@ -14,6 +14,7 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
 // ── Email HTML builder ────────────────────────────────────────────────────────
 
@@ -148,14 +149,35 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
         ? `⚠️ ${overdueCount} safety check${overdueCount !== 1 ? "s" : ""} overdue — ComplyTrack`
         : `📋 Safety checks due today — ComplyTrack`;
 
-      await sendEmail({ to: emails, subject, html });
+      // Claim before sending so two instances (e.g. during a deploy overlap)
+      // cannot both send today's digest. The lease expires, so a crash
+      // mid-send is retried under the same provider idempotency key.
+      const lease = await claimEmailDelivery("check-reminder", `${client.id}:${todayIso}`);
+      if (!lease) continue;
+      let settled = false;
+      try {
+        const again = await db.execute(sql`
+          SELECT 1 FROM check_reminder_log
+          WHERE client_id = ${client.id} AND log_date = ${todayIso}
+          LIMIT 1
+        `);
+        if (((again as any).rows ?? []).length > 0) continue;
 
-      // Log the send
-      await db.execute(sql`
-        INSERT INTO check_reminder_log (client_id, log_date, sent_at)
-        VALUES (${client.id}, ${todayIso}, now())
-        ON CONFLICT (client_id, log_date) DO NOTHING
-      `);
+        await sendEmail({ to: emails, subject, html, idempotencyKey: emailDeliveryIdempotencyKey(lease) });
+
+        // Log the send and release the lease together.
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO check_reminder_log (client_id, log_date, sent_at)
+            VALUES (${client.id}, ${todayIso}, now())
+            ON CONFLICT (client_id, log_date) DO NOTHING
+          `);
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
+      }
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

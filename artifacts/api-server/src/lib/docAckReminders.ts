@@ -14,6 +14,7 @@ import { logger } from "./logger";
 import { sendEmail, getPublicAppUrl } from "./email";
 import { sendPushToUsers } from "./pushNotifications";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
 interface OutstandingDocSummary {
   title: string;
@@ -147,27 +148,34 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
       const { emails, userIds } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
-      // Claim first so concurrent job runs can't double-send; release the
-      // claim if the send fails so a later run retries.
-      const claim = await db.execute(sql`
-        INSERT INTO doc_ack_reminder_log (client_id, sent_at)
-        SELECT ${client.id}, now()
-        WHERE NOT EXISTS (
-          SELECT 1 FROM doc_ack_reminder_log
-          WHERE client_id = ${client.id} AND sent_at > now() - interval '7 days'
-        )
-        RETURNING id
-      `);
-      const claimId = ((claim as any).rows ?? [])[0]?.id;
-      if (!claimId) continue;
-
+      // Lease first so concurrent job runs can't double-send. The throttle
+      // row is written only after the provider accepted the email, so a crash
+      // mid-send is retried (same idempotency key) once the lease expires.
+      const lease = await claimEmailDelivery("doc-ack", String(client.id));
+      if (!lease) continue;
       const docCount = outstanding.length;
       const subject = `📄 ${docCount} document${docCount !== 1 ? "s" : ""} awaiting staff acknowledgement — ComplyTrack`;
+      let settled = false;
       try {
-        await sendEmail({ to: emails, subject, html: buildEmailHtml(outstanding, appUrl) });
-      } catch (sendErr) {
-        await db.execute(sql`DELETE FROM doc_ack_reminder_log WHERE id = ${claimId}`);
-        throw sendErr;
+        const again = await db.execute(sql`
+          SELECT 1 FROM doc_ack_reminder_log
+          WHERE client_id = ${client.id} AND sent_at > now() - interval '7 days'
+          LIMIT 1
+        `);
+        if (((again as any).rows ?? []).length > 0) continue;
+        await sendEmail({
+          to: emails,
+          subject,
+          html: buildEmailHtml(outstanding, appUrl),
+          idempotencyKey: emailDeliveryIdempotencyKey(lease, new Date().toISOString().slice(0, 10)),
+        });
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`INSERT INTO doc_ack_reminder_log (client_id, sent_at) VALUES (${client.id}, now())`);
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
       }
 
       // Push managers a matching alert (best-effort; never blocks the job).
@@ -175,7 +183,7 @@ export async function runDocAckReminderJob(): Promise<DocAckReminderJobResult> {
         title: "Document sign-offs outstanding",
         body: `${docCount} document${docCount !== 1 ? "s" : ""} awaiting staff acknowledgement.`,
         data: { route: "/(tabs)/docs" },
-      });
+      }).catch((err) => logger.warn({ err, clientId: client.id }, "Doc acknowledgement push failed"));
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

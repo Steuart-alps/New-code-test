@@ -11,6 +11,7 @@ import { logger } from "./logger";
 import { sendSystemEmail, getPublicAppUrl } from "./email";
 import { getEntitledServices, isEntitled } from "./services";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery } from "./emailDeliveryClaims";
 
 export const SAFE_TRACK_REMINDER_FREQUENCY_SETTING = "safeTrackReminderFrequency";
 export const SAFE_TRACK_REMINDER_TIME_SETTING = "safeTrackReminderTime";
@@ -384,8 +385,18 @@ export interface SafeTrackAckReminderDependencies {
   getRecipients?: (clientId: number) => Promise<{ emails: string[] }>;
   claim?: (clientId: number, frequency: SafeTrackReminderFrequency) => Promise<number | null>;
   release?: (claimId: number) => Promise<void>;
+  /** Make a claim permanent once at least one email was accepted. */
+  confirm?: (claimId: number) => Promise<void>;
   send?: typeof sendSystemEmail;
 }
+
+/**
+ * A claimed log row is provisional until confirmed: it carries an expiring
+ * delivery lease. If the worker dies before confirming, the lease expires and
+ * the row stops counting as "recently sent", so the next run retries instead
+ * of skipping the whole cadence window.
+ */
+const LEASE_JOB = "safe-track-ack";
 
 async function claimReminder(
   clientId: number,
@@ -399,9 +410,13 @@ async function claimReminder(
     const locked = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(${clientId}) AS locked`);
     if (!((locked.rows ?? [])[0] as any)?.locked) return null;
     const recent = await tx.execute(sql`
-      SELECT 1 FROM safe_track_ack_reminder_log
-       WHERE client_id = ${clientId}
-         AND sent_at > now() - (${frequency === "weekly" ? 7 : 1} * interval '1 day')
+      SELECT 1 FROM safe_track_ack_reminder_log l
+       WHERE l.client_id = ${clientId}
+         AND l.sent_at > now() - (${frequency === "weekly" ? 7 : 1} * interval '1 day')
+         AND NOT EXISTS (
+           SELECT 1 FROM scheduled_email_claims c
+            WHERE c.job = ${LEASE_JOB} AND c.delivery_key = l.id::text
+              AND c.sent_at IS NULL AND c.lease_expires_at <= now())
       LIMIT 1
     `);
     if ((recent.rows ?? []).length) return null;
@@ -410,7 +425,10 @@ async function claimReminder(
       VALUES (${clientId}, now())
       RETURNING id
     `);
-    return ((claim.rows ?? [])[0] as any)?.id ?? null;
+    const id = ((claim.rows ?? [])[0] as any)?.id ?? null;
+    if (id === null) return null;
+    const lease = await claimEmailDelivery(LEASE_JOB, String(id), { executor: tx });
+    return lease ? id : null;
   });
 }
 
@@ -437,7 +455,15 @@ export async function runSafeTrackAckReminderJob(
   const getOutstanding = dependencies.getOutstanding ?? getOutstandingSafeTrackAcknowledgements;
   const getStaffOutstanding = dependencies.getStaffOutstanding ?? getOutstandingSafeTrackStaffReminders;
   const getRecipients = dependencies.getRecipients ?? getNotificationEmails;
-  const release = dependencies.release ?? (async (claimId: number) => { await db.execute(sql`DELETE FROM safe_track_ack_reminder_log WHERE id = ${claimId}`); });
+  const release = dependencies.release ?? (async (claimId: number) => {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`DELETE FROM safe_track_ack_reminder_log WHERE id = ${claimId}`);
+      await tx.execute(sql`DELETE FROM scheduled_email_claims WHERE job = ${LEASE_JOB} AND delivery_key = ${String(claimId)}`);
+    });
+  });
+  const confirm = dependencies.confirm ?? (async (claimId: number) => {
+    await db.execute(sql`DELETE FROM scheduled_email_claims WHERE job = ${LEASE_JOB} AND delivery_key = ${String(claimId)}`);
+  });
   const send = dependencies.send ?? sendSystemEmail;
   const appUrl = dependencies.appUrl?.() ?? getPublicAppUrl();
 
@@ -462,6 +488,8 @@ export async function runSafeTrackAckReminderJob(
       result.remindersClaimed++;
 
       let delivered = 0;
+      // A retry after a crash re-sends under the same keys on the same day.
+      const deliveryDay = now().toISOString().slice(0, 10);
       const managerSubject = `SafeTrack: ${outstanding.length} required document${outstanding.length === 1 ? "" : "s"} awaiting acknowledgement`;
       for (const email of managerEmails) {
         try {
@@ -469,7 +497,7 @@ export async function runSafeTrackAckReminderJob(
             to: email,
             subject: managerSubject,
             html: buildEmailHtml(outstanding, appUrl),
-            idempotencyKey: `safe-track-manager-${client.id}-${claimId}-${email}`,
+            idempotencyKey: `safe-track-manager-${client.id}-${deliveryDay}-${email}`,
           });
           delivered++;
           result.emailsSent++;
@@ -484,7 +512,7 @@ export async function runSafeTrackAckReminderJob(
             to: reminder.email,
             subject: "SafeTrack: your required sign-offs are outstanding",
             html: buildStaffEmailHtml(reminder.staffName, reminder.documents, appUrl),
-            idempotencyKey: `safe-track-staff-${client.id}-${claimId}-${reminder.staffRosterId}`,
+            idempotencyKey: `safe-track-staff-${client.id}-${deliveryDay}-${reminder.staffRosterId}`,
           });
           delivered++;
           result.emailsSent++;
@@ -501,6 +529,12 @@ export async function runSafeTrackAckReminderJob(
         claimId = null;
         continue;
       }
+      const confirmedId = claimId;
+      claimId = null;
+      await confirm(confirmedId).catch((err) => {
+        // The lease expires and a later run may resend under the same keys.
+        logger.warn({ err, clientId: client.id }, "Could not confirm SafeTrack acknowledgement claim");
+      });
       result.clientsAlerted++;
       logger.info({
         clientId: client.id,
