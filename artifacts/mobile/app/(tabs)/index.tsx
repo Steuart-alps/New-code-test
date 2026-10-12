@@ -288,13 +288,13 @@ export default function TodayScreen() {
             label="FireTrack"
             icon="alert-triangle"
             statuses={fireStatus}
-            onPress={() => router.push('/checks/fire' as any)}
+            onPress={() => router.push(`/controls/fire${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}` as any)}
           />
           <ModuleStatusCard
             label="LegionellaTrack"
             icon="droplet"
             statuses={waterStatus}
-            onPress={() => router.push('/checks/water' as any)}
+            onPress={() => router.push(`/controls/water${selectedSiteId ? `?siteId=${selectedSiteId}` : ''}` as any)}
           />
           <ModuleStatusCard
             label="HotTubTrack"
