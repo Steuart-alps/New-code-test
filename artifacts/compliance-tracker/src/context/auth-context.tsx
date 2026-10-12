@@ -221,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNeedsTwoFactorSetup(true);
       return { requires2fa: false, requires2faSetup: true };
     }
+    clearCsrfToken(); // signing in issues a new session, so a new CSRF token
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);

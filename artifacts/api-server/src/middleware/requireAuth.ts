@@ -4,6 +4,7 @@ import { auditContext, db } from "@workspace/db";
 import { consultantClientsTable } from "@workspace/db/schema";
 import { getUserById } from "../lib/auth";
 import { isTwoFactorRequired } from "../lib/twoFactorPolicy";
+import { storedCredentialCandidates } from "../lib/sessionRevocation";
 import type { SafeUser, UserRole } from "@workspace/db/schema";
 
 declare global {
@@ -42,11 +43,13 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
   if (!userId) {
     const auth = req.headers.authorization;
     if (auth?.startsWith("Bearer ")) {
-      const token = auth.slice(7);
+      const [hashed, legacy = hashed] = storedCredentialCandidates(auth.slice(7));
       try {
+        // Tokens are stored hashed; a legacy plaintext row (written by an
+        // older instance mid-deploy) still matches until start-up hashes it.
         const result = await db.execute(sql`
           SELECT user_id FROM mobile_sessions
-          WHERE token = ${token} AND expires_at > now()
+          WHERE token IN (${hashed}, ${legacy}) AND expires_at > now()
           LIMIT 1
         `);
         const row = (result as any).rows?.[0] as { user_id: number } | undefined;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import type { PasskeyOptions } from "@/context/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearCsrfToken } from "@/lib/api";
 import { useLocation } from "wouter";
 import { ShieldCheck, ArrowLeft, KeyRound } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
@@ -66,6 +66,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Passkey verification failed");
+      clearCsrfToken(); // a completed sign-in gets a new session and CSRF token
       if (data.requires2fa) {
         setView("totp");
         setPasskeyOptions(null);
@@ -98,6 +99,7 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Verification failed");
+      clearCsrfToken(); // the signed-in session is new, so is its CSRF token
       // Session is now fully established — reload auth state
       await refresh();
     } catch (err: unknown) {
