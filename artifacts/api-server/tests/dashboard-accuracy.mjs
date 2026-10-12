@@ -196,8 +196,11 @@ try {
     await q(`INSERT INTO train_track_records (client_id, site_id, staff_name, training_type, completed_date, expiry_date)
              VALUES ($1, $2, $3, 'Food hygiene', $4, $5)`, [c, a, `Staff ${i}`, londonDay(-400), yesterday]);
   }
-  await q(`INSERT INTO safe_risk_assessments (client_id, site_id, title, next_review_date) VALUES ($1, $2, 'Cellar RA', $3)`, [c, a, yesterday]);
-  await q(`INSERT INTO safe_sops (client_id, site_id, title, next_review_date) VALUES ($1, $2, 'Closing SOP', $3)`, [c, a, londonDay(10)]);
+  // review_date is the risk assessment's "Review Date" field (the Drizzle
+  // column production has); SOPs have no review date.
+  await q(`INSERT INTO safe_risk_assessments (client_id, site_id, title, review_date) VALUES ($1, $2, 'Cellar RA', $3)`, [c, a, yesterday]);
+  await q(`INSERT INTO safe_risk_assessments (client_id, site_id, title, review_date) VALUES ($1, $2, 'Kitchen RA', $3)`, [c, a, londonDay(10)]);
+  await q(`INSERT INTO safe_sops (client_id, site_id, title) VALUES ($1, $2, 'Closing SOP')`, [c, a]);
   const bike = (await q(`INSERT INTO bikes (client_id, site_id, ref, name) VALUES ($1, $2, 'B1', 'Blue bike') RETURNING id`, [c, a])).rows[0];
   await q(`INSERT INTO bike_hire_records (client_id, site_id, bike_id, guest_name, hire_date, return_date_expected, status)
            VALUES ($1, $2, $3, 'Guest Smith', $4, $5, 'active')`, [c, a, bike.id, londonDay(-3), yesterday]);
@@ -233,6 +236,7 @@ try {
   assert.ok(seeded.train.enabled ? seeded.train.items.some(item => item.label === 'Staff 0 — Food hygiene') : true);
   assert.ok(seeded.bike.enabled ? seeded.bike.items.some(item => item.detail.startsWith('Guest Smith')) : true);
   assert.ok(seeded.pest.enabled ? seeded.pest.items.some(item => /Acme Pest/.test(item.detail)) : true);
+  assert.deepEqual(seeded.safe.items.map(item => item.label), ['Cellar RA', 'Kitchen RA'], JSON.stringify(seeded.safe));
   const allSeeded = await summary();
   if (allSeeded.pest.enabled) {
     assert.equal(allSeeded.pest.badge, '1 visit overdue', "site B's superseded visit is not overdue");
