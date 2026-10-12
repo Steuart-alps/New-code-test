@@ -29,6 +29,12 @@ const formSchema = z.object({
   contractorId: z.coerce.number().optional().nullable(),
   dueDate: z.string().optional().nullable(),
   leadTimeDays: z.coerce.number().optional().nullable(),
+  // Blank = one-off check. With an interval, completing the check reopens it
+  // due that many months after completion.
+  frequencyMonths: z.preprocess(
+    (v) => (v === "" || v == null || Number.isNaN(v) ? null : Number(v)),
+    z.number().int("Use whole months").min(1, "At least 1 month").max(120, "At most 120 months").nullable(),
+  ),
   notes: z.string().optional(),
 });
 
@@ -57,7 +63,7 @@ export function ItemFormDialog({
     defaultValues: {
       title: "", description: "", status: "pending", priority: "medium",
       categoryId: undefined, siteId: undefined, contractorId: undefined,
-      dueDate: "", leadTimeDays: 7, notes: "",
+      dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
     }
   });
 
@@ -73,6 +79,7 @@ export function ItemFormDialog({
         contractorId: item.contractorId || undefined,
         dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
         leadTimeDays: item.leadTimeDays || 7,
+        frequencyMonths: item.frequencyMonths ?? null,
         notes: item.notes || "",
       });
     } else {
@@ -81,10 +88,14 @@ export function ItemFormDialog({
         categoryId: defaultCategoryId ?? undefined,
         siteId: defaultSiteId ? String(defaultSiteId) : undefined,
         contractorId: undefined,
-        dueDate: "", leadTimeDays: 7, notes: "",
+        dueDate: "", leadTimeDays: 7, frequencyMonths: null, notes: "",
       });
     }
   }, [item, isOpen, form, defaultCategoryId, defaultSiteId]);
+
+  const rawFrequency = form.watch("frequencyMonths") as unknown;
+  const watchedFrequency = rawFrequency === "" || rawFrequency == null || !Number.isInteger(Number(rawFrequency)) || Number(rawFrequency) < 1
+    ? null : Number(rawFrequency);
 
   const onSubmit = async (data: FormValues) => {
     try {
@@ -97,6 +108,7 @@ export function ItemFormDialog({
         categoryId: data.categoryId || null,
         contractorId: data.contractorId || null,
         leadTimeDays: data.leadTimeDays || null,
+        frequencyMonths: data.frequencyMonths ?? null,
         assignedTo: null,
         dueDate: data.dueDate ? new Date(data.dueDate).toISOString() : null,
       };
@@ -262,6 +274,29 @@ export function ItemFormDialog({
             <div className="space-y-1">
               <Label className="text-xs font-medium">Alert Lead Time (Days)</Label>
               <Input type="number" {...form.register("leadTimeDays")} className="bg-background h-9" placeholder="7" />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <Label htmlFor="frequencyMonths" className="text-xs font-medium">Repeat every (months)</Label>
+              <Input
+                id="frequencyMonths"
+                type="number"
+                min={1}
+                max={120}
+                step={1}
+                {...form.register("frequencyMonths")}
+                className="bg-background h-9 w-full sm:w-40"
+                placeholder="One-off"
+              />
+              {form.formState.errors.frequencyMonths ? (
+                <p className="text-xs text-destructive">{form.formState.errors.frequencyMonths.message}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {watchedFrequency
+                    ? `When marked completed, this check reopens due ${watchedFrequency} month${watchedFrequency === 1 ? "" : "s"} after the completion date.`
+                    : "Leave blank for a one-off check. Set the interval your contractor, competent person or guidance recommends for your premises."}
+                </p>
+              )}
             </div>
 
             <div className="col-span-2 space-y-1">

@@ -26,6 +26,10 @@ export const complianceItemsTable = pgTable("compliance_items", {
   assignedTo: text("assigned_to"),
   dueDate: timestamp("due_date"),
   leadTimeDays: integer("lead_time_days"),
+  /** Optional repeat interval. Completing a check that has one records the
+   *  completion (completedAt + audit event) and reopens it as pending, due
+   *  this many months after the completion date. Null = one-off check. */
+  frequencyMonths: integer("frequency_months"),
   notificationSentAt: timestamp("notification_sent_at"),
   completedAt: timestamp("completed_at"),
   notes: text("notes"),
