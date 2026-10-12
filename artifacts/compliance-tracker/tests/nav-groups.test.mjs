@@ -25,5 +25,6 @@ assert.ok(!userItems.includes("Staff Roster"), "User should not see Staff Roster
 assert.ok(!userItems.includes("Sites"), "User should not see Sites");
 assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
+assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Everyone should see the Calendar");
 
 console.log("Nav groups visibility regression tests passed.");

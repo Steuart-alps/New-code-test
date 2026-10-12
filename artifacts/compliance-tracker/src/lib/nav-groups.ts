@@ -27,7 +27,8 @@ import {
   FileCheck2,
   BedDouble,
   Tractor,
-  Inbox
+  Inbox,
+  CalendarDays
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -51,6 +52,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
         { href: "/categories", label: "Categories", icon: Tags },
