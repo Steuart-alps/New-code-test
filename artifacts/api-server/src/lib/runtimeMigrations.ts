@@ -1796,6 +1796,22 @@ async function runRuntimeMigrationsOnce() {
       WHERE "client_entry_id" IS NOT NULL
     `);
 
+    // ---- Mobile outbox replays for other check submissions (Oct 2026) ----
+    // Fire, legionella, hot tub, PAT and incident records sent from the
+    // mobile outbox carry a stable device entry ID plus a fingerprint of the
+    // payload (lib/clientEntryReplay.ts), so a retry after a lost response
+    // returns the stored row instead of creating a duplicate. Nullable: web
+    // submissions carry none. Schema: the matching lib/db tables.
+    for (const table of ["fire_safety_checks", "legionella_checks", "hot_tub_checks", "pat_tests", "incidents"]) {
+      await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_id" text`));
+      await db.execute(sql.raw(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "client_entry_hash" text`));
+      await db.execute(sql.raw(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "UQ_${table}_client_entry_id"
+        ON "${table}" ("client_id", "client_entry_id")
+        WHERE "client_entry_id" IS NOT NULL
+      `));
+    }
+
     // ---- Scheduled jobs: run history, delivery leases, trial-ended notice ----
     // scheduled_job_runs backs the stale-job note in /readyz and weekly-job
     // catch-up; scheduled_email_claims holds expiring reminder-email leases

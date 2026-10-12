@@ -9,6 +9,7 @@ import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { appendAuditEvent } from "../lib/audit";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { isReportableRiddorCategory, withRiddorDeadline } from "../lib/riddor";
 
 const router = Router();
@@ -54,6 +55,8 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial().extend({
   incidentType: z.string().min(1).optional(),
 });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 function allowedSites(clientId: number, deptId: number) {
   return db.select({ id: sitesTable.id })
@@ -189,7 +192,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", issues: parsed.error.issues });
   const data = parsed.data;
 
@@ -201,22 +204,38 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
 
   const riddorError = validateRiddorRecord(data);
   if (riddorError) return res.status(400).json({ error: riddorError });
-  const { riddorRationale, submittedAt, submissionEvidence, ...incidentData } = data;
+  const { riddorRationale, submittedAt, submissionEvidence, clientEntryId: _entryId, ...incidentData } = data;
   const actor = (req as any).currentUser;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(incidentsTable)
+    .where(and(eq(incidentsTable.clientId, clientId), eq(incidentsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const present = (row: typeof incidentsTable.$inferSelect) => withRiddorDeadline(redactHealthData(req, row));
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, actor.id, entry, present);
   const decisionAt = new Date();
-  const inserted = await db.transaction(async (tx) => {
-    const [incident] = await tx.insert(incidentsTable).values({
-      clientId, ...incidentData, createdBy: actor?.id ?? null,
-    }).returning();
-    await tx.insert(incidentRiddorEventsTable).values({
-      clientId, incidentId: incident.id, eventType: incident.reportedToHse ? "submission" : "decision", actorId: actor?.id ?? null,
-      decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
-      riddorReportable: incident.riddorReportable, riddorCategory: incident.riddorCategory, reportedToHse: incident.reportedToHse,
-      rationale: riddorRationale?.trim() ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
-      submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
+  let inserted;
+  try {
+    inserted = await db.transaction(async (tx) => {
+      const [incident] = await tx.insert(incidentsTable).values({
+        clientId, ...incidentData, createdBy: actor?.id ?? null,
+        clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
+      }).returning();
+      await tx.insert(incidentRiddorEventsTable).values({
+        clientId, incidentId: incident.id, eventType: incident.reportedToHse ? "submission" : "decision", actorId: actor?.id ?? null,
+        decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
+        riddorReportable: incident.riddorReportable, riddorCategory: incident.riddorCategory, reportedToHse: incident.reportedToHse,
+        rationale: riddorRationale?.trim() ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
+        submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
+      });
+      return incident;
     });
-    return incident;
-  });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, actor.id, entry, present);
+    throw err;
+  }
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: inserted.id, action: "created", after: inserted });
 
   res.status(201).json(withRiddorDeadline(inserted));

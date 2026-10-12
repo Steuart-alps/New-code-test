@@ -5,6 +5,7 @@ import { hotTubChecksTable, sitesTable, HOT_TUB_CHECK_TYPES, trackControlProfile
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { PER_TUB_CHECK_TYPES, sitesWithUnreadHotTubs } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
@@ -165,6 +166,8 @@ router.delete("/tubs/:id", requireAuth, denyViewers, async (req, res) => {
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
   if (siteId == null) return null;
@@ -391,7 +394,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (data.checkType === "water_chemistry" && (data.phValue == null || data.sanitiserLevel == null))
@@ -420,29 +423,47 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     if (effectiveAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
 
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(hotTubChecksTable)
+    .where(and(eq(hotTubChecksTable.clientId, clientId), eq(hotTubChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
   const profile = effectiveSiteId == null ? null : await getHotTubProfile(clientId, effectiveSiteId);
   const breach = hotTubBreach(data, data.checkType, profile);
-  const inserted = await db.transaction(async tx => {
-    const [row] = await tx.insert(hotTubChecksTable).values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: breach ? "fail" : data.result,
-      session: data.session ?? null,
-      phValue: data.phValue != null ? String(data.phValue) : null,
-      sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
-      temperature: data.temperature != null ? String(data.temperature) : null,
-      siteId: effectiveSiteId,
-      hotTubId: data.hotTubId ?? null,
-      location: data.location ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      notes: data.notes ?? null,
-      createdBy: req.currentUser!.id,
-    }).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
-    return row;
-  });
+  let inserted;
+  try {
+    inserted = await db.transaction(async tx => {
+      const [row] = await tx.insert(hotTubChecksTable).values({
+        clientId,
+        checkType: data.checkType,
+        checkDate: data.checkDate,
+        result: breach ? "fail" : data.result,
+        session: data.session ?? null,
+        phValue: data.phValue != null ? String(data.phValue) : null,
+        sanitiserLevel: data.sanitiserLevel != null ? String(data.sanitiserLevel) : null,
+        temperature: data.temperature != null ? String(data.temperature) : null,
+        siteId: effectiveSiteId,
+        hotTubId: data.hotTubId ?? null,
+        location: data.location ?? null,
+         performedBy: performer.performedBy,
+         staffRosterId: performer.staffRosterId,
+        notes: data.notes ?? null,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
+      }).returning();
+      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      return row;
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   res.status(201).json(inserted);
 });

@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, date, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -53,9 +54,17 @@ export const incidentsTable = pgTable("incidents", {
   correctiveActions: text("corrective_actions"),
   reportedBy: text("reported_by").notNull(),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_incidents_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 export type Incident = typeof incidentsTable.$inferSelect;
 export type NewIncident = typeof incidentsTable.$inferInsert;
