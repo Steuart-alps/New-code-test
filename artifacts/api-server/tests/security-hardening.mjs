@@ -174,7 +174,11 @@ test("the provider key is write-only and senders must use the business's own dom
   // The form submits an empty key when left untouched: the stored key stays.
   assert.equal((await owner.request("PUT", "/settings", { resendApiKey: "", companyName: "Settings Ltd" })).status, 200);
   assert.equal(sql(`SELECT value FROM app_settings WHERE client_id = ${owner.clientId} AND key = 'resendApiKey'`), secret);
-  assert.equal((await owner.request("PUT", "/settings", { resendApiKey: null })).status, 200);
+  // Settings' "Remove key" sends null, which clears it.
+  const removed = await owner.request("PUT", "/settings", { resendApiKey: null });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.data.resendApiKeySet, false);
+  assert.equal((await owner.request("GET", "/settings")).data.resendApiKeySet, false);
 
   // Without its own provider key, a business may only send from its own domain.
   const foreign = await owner.request("PUT", "/settings", { smtpFrom: "alerts@another-business.example" });

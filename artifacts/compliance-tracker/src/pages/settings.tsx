@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react";
+import { useGetSettings, useGetStorageUsage, type AppSettings } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -2608,8 +2608,23 @@ export default function SettingsPage() {
                     autoComplete="off"
                     value={formData.resendApiKey}
                     onChange={handleChange}
-                    placeholder="Optional provider key"
+                    placeholder={(settings as any)?.resendApiKeySet ? "Saved key (leave blank to keep it)" : "Optional provider key"}
                   />
+                  {(settings as any)?.resendApiKeySet && (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <p className="text-xs text-muted-foreground">A provider key is saved. Leaving the box blank keeps it.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        data-testid="button-remove-provider-key"
+                        disabled={updateSettings.isPending}
+                        onClick={() => updateSettings.mutate({ data: { resendApiKey: null } as AppSettings })}
+                      >
+                        Remove key
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </details>
             </CardContent>
