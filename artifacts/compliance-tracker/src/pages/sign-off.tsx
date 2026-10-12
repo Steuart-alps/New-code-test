@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { downloadFile } from "@/lib/download";
+import { downloadFile, getDownloadErrorMessage } from "@/lib/download";
 import {
   Shield, CheckCircle2, Loader2, Download, PenLine, ChevronRight,
   RotateCcw, FileText, FileSpreadsheet, File, Presentation,
@@ -169,11 +169,11 @@ function SignDialog({
       const res = await pf(
         `/sign-off/${token}/documents/${doc.id}/download?documentType=${encodeURIComponent(doc.document_type)}&staffId=${staffMember.id}`,
       );
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Please try again."));
       const { downloadUrl } = await res.json();
       await downloadFile(downloadUrl, doc.file_name ?? doc.title);
-    } catch {
-      toast({ title: "Could not open document", variant: "destructive" });
+    } catch (err) {
+      toast({ title: "Could not open document", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
     } finally {
       setDownloading(false);
     }

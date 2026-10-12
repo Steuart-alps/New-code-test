@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookOpen, CheckCircle2, Download, Loader2 } from "lucide-react";
 import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { getDownloadErrorMessage } from "@/lib/download";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +59,7 @@ export function MyDocumentsView({ canAcknowledge }: { canAcknowledge: boolean })
     setBusyId(doc.id);
     try {
       const res = await apiFetch(`/doc-track/documents/${doc.id}/download-url`);
-      if (!res.ok) throw new Error(await getApiErrorMessage(res, "Could not open document"));
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Could not open document"));
       const { downloadUrl } = await res.json() as { downloadUrl: string };
       if (popup) {
         popup.opener = null;

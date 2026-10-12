@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { format, isPast, differenceInDays } from "date-fns";
 import { ShieldCheck, FileUp, Trash2, Plus, CheckCircle2, AlertTriangle, Clock, X, Loader2, Download } from "lucide-react";
+import { getDownloadErrorMessage } from "@/lib/download";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -229,8 +230,9 @@ export default function ContractorPortalPage() {
       // The portal API returns a short-lived signed URL from its token-scoped
       // /download endpoint (it does not stream the file from /file).
       const res = await fetch(apiUrl(`${token}/certificates/${certId}/download`));
+      if (!res.ok) throw new Error(await getDownloadErrorMessage(res, "Could not prepare certificate download"));
       const result = await res.json() as { downloadUrl?: string; error?: string };
-      if (!res.ok || !result.downloadUrl) throw new Error(result.error ?? "Could not prepare certificate download");
+      if (!result.downloadUrl) throw new Error(result.error ?? "Could not prepare certificate download");
       window.location.assign(result.downloadUrl);
     } catch (e) {
       setCertError(e instanceof Error ? e.message : "Could not download certificate");

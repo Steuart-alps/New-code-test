@@ -11,6 +11,10 @@ const EXPECTED = {
   error: "File uploads are temporarily unavailable. Please try again later.",
   code: "OBJECT_STORAGE_UNAVAILABLE",
 };
+const EXPECTED_DOWNLOAD = {
+  error: "File downloads are temporarily unavailable. Please try again later.",
+  code: "OBJECT_STORAGE_UNAVAILABLE",
+};
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = await mkdtemp(path.join(dir, ".build-storage-outage-"));
 let db, pool, sql, clientId;
@@ -38,9 +42,9 @@ async function publicRequest(method, route, body) {
   return { status: response.status, data: await response.json().catch(() => null) };
 }
 
-function assertSafeOutage(name, response) {
+function assertSafeOutage(name, response, expected = EXPECTED) {
   assert.equal(response.status, 503, `${name}: status`);
-  assert.deepEqual(response.data, EXPECTED, `${name}: exact safe response`);
+  assert.deepEqual(response.data, expected, `${name}: exact safe response`);
   const serialized = JSON.stringify(response.data);
   for (const forbidden of ["detail", "stack", "credential", "bucket", "TEST_ONLY_PROVIDER"]) {
     assert.equal(serialized.toLowerCase().includes(forbidden.toLowerCase()), false, `${name}: hides ${forbidden}`);
@@ -130,7 +134,60 @@ try {
   })).status, 404, "resource ownership still precedes signing");
   assert.equal((await publicRequest("POST", "/fix-track/action/not-a-valid-token/upload-url", {})).status, 400, "invalid public token still fails normally");
 
-  console.log(`${routes.length} upload routes returned the exact safe storage outage contract`);
+  // Download links: give each record a stored file, then check every
+  // signed-download handler returns the fixed body, never the provider text.
+  const objectPath = "/objects/uploads/storage-outage-test.pdf";
+  await db.execute(sql`
+    UPDATE safe_risk_assessments
+    SET object_path = ${objectPath}, file_name = 'risk.pdf', requires_acknowledgement = true
+    WHERE id = ${risk.data.id} AND client_id = ${clientId}
+  `);
+  const docRows = await db.execute(sql`
+    INSERT INTO doc_track_documents (client_id, title, category, object_path, file_name)
+    VALUES (${clientId}, 'Storage outage doc', 'policy', ${objectPath}, 'doc.pdf')
+    RETURNING id
+  `);
+  const docId = docRows.rows[0].id;
+  const certRows = await db.execute(sql`
+    INSERT INTO contractor_certificates (client_id, contractor_id, certificate_name, object_path)
+    VALUES (${clientId}, ${contractor.data.id}, 'Storage outage cert', ${objectPath})
+    RETURNING id
+  `);
+  const certId = certRows.rows[0].id;
+  const signOffToken = crypto.randomBytes(24).toString("hex");
+  await db.execute(sql`
+    UPDATE clients
+    SET sign_off_token = ${signOffToken}, sign_off_token_expires_at = now() + interval '1 day', sign_off_token_revoked_at = NULL
+    WHERE id = ${clientId}
+  `);
+  const staffRows = await db.execute(sql`
+    INSERT INTO staff_roster (client_id, name) VALUES (${clientId}, 'Storage outage staff') RETURNING id
+  `);
+  const staffId = staffRows.rows[0].id;
+  const downloadToken = crypto.randomBytes(32).toString("base64url");
+  await db.execute(sql`
+    INSERT INTO storage_download_tokens (token_digest, client_id, object_path, expires_at)
+    VALUES (${crypto.createHash("sha256").update(downloadToken, "utf8").digest("hex")}, ${clientId}, ${objectPath}, now() + interval '1 hour')
+  `);
+
+  const downloads = [
+    ["SafeTrack download", () => request("GET", `/safe-track/risk-assessments/${risk.data.id}/download-url`)],
+    ["DocTrack download", () => request("GET", `/doc-track/documents/${docId}/download-url`)],
+    ["sign-off download", () => publicRequest(
+      "GET", `/sign-off/${signOffToken}/documents/${risk.data.id}/download?documentType=ra&staffId=${staffId}`,
+    )],
+    ["contractor portal download", () => publicRequest(
+      "GET", `/contractor-portal/${portal.data.token}/certificates/${certId}/download`,
+    )],
+    ["signed token download", () => publicRequest("GET", `/storage/download/${downloadToken}`)],
+  ];
+  for (const [name, call] of downloads) assertSafeOutage(name, await call(), EXPECTED_DOWNLOAD);
+
+  assert.equal((await request("GET", "/safe-track/risk-assessments/2147483647/download-url")).status, 404, "record lookup still precedes download signing");
+  assert.equal((await publicRequest("GET", `/sign-off/${signOffToken}/documents/${risk.data.id}/download?documentType=ra&staffId=2147483647`)).status, 404, "sign-off staff scope still precedes download signing");
+  assert.equal((await publicRequest("GET", `/storage/download/${"x".repeat(43)}`)).status, 404, "unknown download token still fails normally");
+
+  console.log(`${routes.length} upload routes and ${downloads.length} download routes returned the exact safe storage outage contract`);
 } finally {
   if (db && clientId) await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`).catch(() => {});
   await pool?.end().catch(() => {});
