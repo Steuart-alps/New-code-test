@@ -13,6 +13,16 @@ export const INCIDENT_TYPES = [
 export const INCIDENT_SEVERITIES = ["minor", "moderate", "serious", "fatal"] as const;
 export const INCIDENT_STATUSES = ["open", "under_investigation", "closed"] as const;
 export const EMPLOYMENT_TYPES = ["employee", "contractor", "visitor", "member_of_public"] as const;
+/** RIDDOR 2013 categories. over_3_day_record_only is recorded, not reported. */
+export const RIDDOR_CATEGORIES = [
+  "death",
+  "specified_injury",
+  "over_7_day_injury",
+  "non_worker_hospital",
+  "occupational_disease",
+  "dangerous_occurrence",
+  "over_3_day_record_only",
+] as const;
 
 export const incidentsTable = pgTable("incidents", {
   id: serial("id").primaryKey(),
@@ -33,6 +43,8 @@ export const incidentsTable = pgTable("incidents", {
   firstAiderName: text("first_aider_name"),
   witnesses: text("witnesses"),
   riddorReportable: boolean("riddor_reportable").notNull().default(false),
+  /** Optional RIDDOR category (RIDDOR_CATEGORIES); sets the reporting deadline. */
+  riddorCategory: text("riddor_category"),
   reportedToHse: boolean("reported_to_hse").notNull().default(false),
   hseReference: text("hse_reference"),
   hseReportDate: date("hse_report_date"),
@@ -57,6 +69,7 @@ export const incidentRiddorEventsTable = pgTable("incident_riddor_events", {
   actorId: integer("actor_id").references(() => usersTable.id, { onDelete: "set null" }),
   eventType: text("event_type").notNull(), // decision | submission
   riddorReportable: boolean("riddor_reportable").notNull(),
+  riddorCategory: text("riddor_category"),
   reportedToHse: boolean("reported_to_hse").notNull().default(false),
   // Snapshot the accountable person and the actual decision time. A user
   // account can subsequently be renamed or removed, so actorId alone is not a

@@ -3,12 +3,13 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import {
   incidentsTable, incidentRiddorEventsTable, sitesTable, appSettingsTable, usersTable,
-  INCIDENT_STATUSES, INCIDENT_SEVERITIES, EMPLOYMENT_TYPES,
+  INCIDENT_STATUSES, INCIDENT_SEVERITIES, EMPLOYMENT_TYPES, RIDDOR_CATEGORIES,
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
 import { appendAuditEvent } from "../lib/audit";
+import { isReportableRiddorCategory, withRiddorDeadline } from "../lib/riddor";
 
 const router = Router();
 
@@ -30,6 +31,7 @@ const createSchema = z.object({
   firstAiderName: z.string().max(200).nullable().optional(),
   witnesses: z.string().max(2000).nullable().optional(),
   riddorReportable: z.boolean().default(false),
+  riddorCategory: z.enum(RIDDOR_CATEGORIES).nullable().optional(),
   reportedToHse: z.boolean().default(false),
   hseReference: z.string().max(200).nullable().optional(),
   hseReportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
@@ -63,7 +65,7 @@ function allowedSites(clientId: number, deptId: number) {
 }
 
 function validateRiddorRecord(data: {
-  riddorReportable?: boolean; reportedToHse?: boolean; riddorRationale?: string | null;
+  riddorReportable?: boolean; riddorCategory?: string | null; reportedToHse?: boolean; riddorRationale?: string | null;
   hseReference?: string | null; hseReportDate?: string | null; submittedAt?: string | null;
   submissionEvidence?: string | null;
 }, requireSubmission = true) {
@@ -71,6 +73,10 @@ function validateRiddorRecord(data: {
     return "Record the rationale for the RIDDOR decision";
   }
   if (data.reportedToHse && !data.riddorReportable) return "Only a reportable incident can be marked submitted to HSE";
+  if (data.riddorCategory && isReportableRiddorCategory(data.riddorCategory as any) !== !!data.riddorReportable)
+    return data.riddorReportable
+      ? "Over-3-day injuries are recorded, not reported: untick RIDDOR reportable or choose another category"
+      : "This RIDDOR category is reportable: tick RIDDOR reportable or choose another category";
   if (!data.reportedToHse && (data.submittedAt !== undefined && data.submittedAt !== null ||
     data.submissionEvidence !== undefined && data.submissionEvidence !== null && !!data.submissionEvidence.trim()))
     return "Submission time and evidence require a reported HSE submission";
@@ -123,7 +129,7 @@ router.get("/", requireAuth, async (req, res) => {
     .where(and(...conditions))
     .orderBy(desc(incidentsTable.incidentDate), desc(incidentsTable.id));
 
-  res.json(rows);
+  res.json(rows.map(withRiddorDeadline));
 });
 
 // GET /api/incidents/summary
@@ -189,7 +195,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
     await tx.insert(incidentRiddorEventsTable).values({
       clientId, incidentId: incident.id, eventType: incident.reportedToHse ? "submission" : "decision", actorId: actor?.id ?? null,
       decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
-      riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse,
+      riddorReportable: incident.riddorReportable, riddorCategory: incident.riddorCategory, reportedToHse: incident.reportedToHse,
       rationale: riddorRationale?.trim() ?? null, hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
       submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
     });
@@ -197,7 +203,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   });
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: inserted.id, action: "created", after: inserted });
 
-  res.status(201).json(inserted);
+  res.status(201).json(withRiddorDeadline(inserted));
 });
 
 // PUT /api/incidents/:id
@@ -226,11 +232,20 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   if ("siteId" in parsed.data && !await canAccessSite(clientId, parsed.data.siteId, getActiveDepartmentId(req)))
     return res.status(403).json({ error: "Invalid or inaccessible site" });
   const { riddorRationale, submittedAt, submissionEvidence, ...updateData } = parsed.data;
-  const riddorChanged = ["riddorReportable", "reportedToHse", "hseReference", "hseReportDate"]
+  const riddorChanged = ["riddorReportable", "riddorCategory", "reportedToHse", "hseReference", "hseReportDate"]
     .some(k => k in updateData && (updateData as any)[k] !== (existing as any)[k]);
   const hasRiddorRecord = riddorChanged || !!riddorRationale?.trim() || !!submittedAt || !!submissionEvidence?.trim();
   if ((updateData.reportedToHse ?? existing.reportedToHse) && !(updateData.riddorReportable ?? existing.riddorReportable))
     return res.status(400).json({ error: "Only a reportable incident can be marked submitted to HSE" });
+  // An unchanged legacy combination is left alone; any change must be consistent.
+  if (riddorChanged) {
+    const category = updateData.riddorCategory === undefined ? existing.riddorCategory : updateData.riddorCategory;
+    const reportable = updateData.riddorReportable ?? existing.riddorReportable;
+    if (category && isReportableRiddorCategory(category as any) !== reportable)
+      return res.status(400).json({ error: reportable
+        ? "Over-3-day injuries are recorded, not reported: untick RIDDOR reportable or choose another category"
+        : "This RIDDOR category is reportable: tick RIDDOR reportable or choose another category" });
+  }
   const newSubmission = (updateData.reportedToHse ?? existing.reportedToHse) &&
     (!existing.reportedToHse || (updateData.hseReference !== undefined && updateData.hseReference !== existing.hseReference) ||
       (updateData.hseReportDate !== undefined && updateData.hseReportDate !== existing.hseReportDate));
@@ -268,7 +283,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
       await tx.insert(incidentRiddorEventsTable).values({
         clientId, incidentId: id, eventType: newSubmission ? "submission" : "decision",
         actorId: actor?.id ?? null, decisionMaker: actor?.name ?? actor?.email ?? null, decisionAt,
-        riddorReportable: incident.riddorReportable, reportedToHse: incident.reportedToHse, rationale: riddorRationale?.trim() ?? null,
+        riddorReportable: incident.riddorReportable, riddorCategory: incident.riddorCategory, reportedToHse: incident.reportedToHse, rationale: riddorRationale?.trim() ?? null,
         hseReference: incident.hseReference, hseReportDate: incident.hseReportDate,
         submittedAt: submittedAt ? new Date(submittedAt) : null, submissionEvidence: submissionEvidence?.trim() || null,
       });
@@ -277,7 +292,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   });
   if (!updated) return res.status(409).json({ error: "Linked corrective actions changed; reload before closing this incident" });
   await appendAuditEvent(req, { clientId, entityType: "incident", entityId: id, action: "updated", before: existing, after: updated });
-  res.json(updated);
+  res.json(withRiddorDeadline(updated));
 });
 
 // DELETE /api/incidents/:id
@@ -313,6 +328,7 @@ router.get("/:id/riddor-history", requireAuth, async (req, res) => {
     id: incidentRiddorEventsTable.id,
     eventType: incidentRiddorEventsTable.eventType,
     riddorReportable: incidentRiddorEventsTable.riddorReportable,
+    riddorCategory: incidentRiddorEventsTable.riddorCategory,
     reportedToHse: incidentRiddorEventsTable.reportedToHse,
     rationale: incidentRiddorEventsTable.rationale,
     hseReference: incidentRiddorEventsTable.hseReference,
