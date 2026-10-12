@@ -2002,7 +2002,11 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
   "dueDate": zod.string().nullish(),
-  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never']),
+  "siteId": zod.number().nullish().describe('The site this row\'s status comes from; across all sites, the worst site for this check type. Null when no site is visible.'),
+  "siteName": zod.string().nullish().describe('Name of the site in siteId.'),
+  "siteCount": zod.number().optional().describe('How many visible sites were assessed for this check type.'),
+  "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
 
