@@ -125,6 +125,7 @@
     "test:welcome-email": "bash tests/run-welcome-email.sh",
     "test:viewer-route-policy": "node tests/viewer-route-policy.mjs",
     "test:csrf-origin-policy": "bash tests/run-bundled-unit.sh tests/csrf-origin-policy.ts esm",
+    "test:csrf-enforced:ci": "bash tests/run-csrf-enforced.sh",
     "test:byte-range": "bash tests/run-bundled-unit.sh tests/byte-range.ts esm",
     "test:contractor-upload-signatures": "bash tests/run-db-workflow.sh tests/contractor-upload-signatures.mjs",
     "test:contractor-compliance-reminders": "bash tests/run-db-workflow.sh tests/contractor-compliance-reminders.mjs",
