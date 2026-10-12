@@ -1823,6 +1823,11 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "trial_ended_email_sent_at" timestamp`);
 
+    // KitchenTrack cooking limit: the column default still held the old
+    // "Above 75°C (10 seconds)" text; match the app's default for new rows.
+    // Existing rows keep the limit they were recorded against.
+    await db.execute(sql`ALTER TABLE "food_safety_records" ALTER COLUMN "cooking_limit" SET DEFAULT '75°C or above (core)'`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
