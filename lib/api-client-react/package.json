@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test:custom-fetch-csrf": "node tests/custom-fetch-csrf.test.mjs"
+  },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
     "@tanstack/react-query": "catalog:"
