@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 let passed = 0;
@@ -38,7 +39,8 @@ async function main() {
     db, pool, sql, appSettingsTable, clientsTable, usersTable, fixTrackIssuesTable,
     getStaleDays, getOverdueUrgentIssues, runFixTrackOverdueAlertJob,
   } = lib;
-  const tag = `fix-alert-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const runId = resolveRunId();
+  const tag = `fix-alert-${runId}`;
   let clientId;
   let secondClientId;
   const neutralizedClientIds = [];
@@ -254,22 +256,20 @@ async function main() {
     await runFixTrackOverdueAlertJob(fakeSend);
     check("older cooldown permits a later reminder", sent.length === 1, `sent=${sent.length}`);
   } finally {
+    // Remove only this run's tenants. Their FixTrack issues produced audit_log
+    // rows, which would otherwise block DELETE FROM clients, so the tenants go
+    // through the owned-fixture purge (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
     try {
-      if (clientId) {
-        await db.execute(sql`DELETE FROM fix_track_alert_log WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM fix_track_escalation_log WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM fix_track_issues WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM app_settings WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM users WHERE client_id = ${clientId}`);
-        await db.execute(sql`DELETE FROM clients WHERE id = ${clientId}`);
+      for (const id of [clientId, secondClientId].filter(Boolean)) {
+        await db.execute(sql`DELETE FROM fix_track_alert_log WHERE client_id = ${id}`);
+        await db.execute(sql`DELETE FROM fix_track_escalation_log WHERE client_id = ${id}`);
+        await db.execute(sql`DELETE FROM app_settings WHERE client_id = ${id}`);
       }
-      if (secondClientId) {
-        await db.execute(sql`DELETE FROM fix_track_alert_log WHERE client_id = ${secondClientId}`);
-        await db.execute(sql`DELETE FROM fix_track_escalation_log WHERE client_id = ${secondClientId}`);
-        await db.execute(sql`DELETE FROM fix_track_issues WHERE client_id = ${secondClientId}`);
-        await db.execute(sql`DELETE FROM app_settings WHERE client_id = ${secondClientId}`);
-        await db.execute(sql`DELETE FROM clients WHERE id = ${secondClientId}`);
-      }
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({
+        runId, clientIds: [clientId, secondClientId].filter(Boolean),
+      }));
       for (const id of neutralizedClientIds) {
         await db.execute(sql`
           DELETE FROM fix_track_alert_log
@@ -277,7 +277,11 @@ async function main() {
         `);
       }
     } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
+      console.error("Cleanup failed:", err);
       failures.push(`cleanup — ${err?.message ?? err}`);
+    } finally {
+      cleanupConnection?.release();
     }
     await rm(outDir, { recursive: true, force: true }).catch(() => {});
     await pool.end().catch(() => {});
