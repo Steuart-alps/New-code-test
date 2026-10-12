@@ -2045,6 +2045,16 @@ async function runRuntimeMigrationsOnce() {
     // The runtime CREATE TABLE gave these no default; Drizzle inserts rely on it.
     await db.execute(sql`ALTER TABLE "safe_sops" ALTER COLUMN "version" SET DEFAULT '1.0'`);
     await db.execute(sql`ALTER TABLE "safe_handbook" ALTER COLUMN "version" SET DEFAULT '1.0'`);
+    // bike_services has no Drizzle table and was created with performed_by and
+    // cost (pounds), but the BikeTrack service routes and web app have always
+    // used serviced_by, cost_pence (as GreenTrack does) and created_by, so every
+    // service log failed on every database. The old columns are never written.
+    await db.execute(sql`
+      ALTER TABLE "bike_services"
+        ADD COLUMN IF NOT EXISTS "serviced_by" text,
+        ADD COLUMN IF NOT EXISTS "cost_pence" integer,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
 
     logger.info("Runtime migrations complete");
   } catch (err) {
