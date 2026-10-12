@@ -6,7 +6,7 @@ import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, site
 import { eq, and, or, isNull, inArray, desc, ne, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
-import { buildCalendarInvite, escapeHtml, getPublicAppUrl, sendEmail } from "../lib/email";
+import { buildCalendarInvite, escapeHtml, getClientSenderEmail, getPublicAppUrl, sendEmail } from "../lib/email";
 import {
   ObjectStorageService,
   ObjectContentError,
@@ -220,13 +220,11 @@ function dateOnly(value: unknown): string | null {
   return String(value).slice(0, 10);
 }
 
-function fixTrackCalendarInvite(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+function fixTrackCalendarInvite(draft: any, fromEmail: string, clientId: number, issueId: number, sequence: number): string | null {
   const targetDate = dateOnly(draft.target_date);
   if (!targetDate) return null;
   const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
   if (Number.isNaN(dueDate.getTime())) return null;
-  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
-  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
   return buildCalendarInvite({
     itemTitle: draft.title,
     dueDate,
@@ -246,13 +244,11 @@ function fixTrackCalendarInvite(draft: any, clientId: number, issueId: number, s
   });
 }
 
-function fixTrackCalendarCancellation(draft: any, clientId: number, issueId: number, sequence: number): string | null {
+function fixTrackCalendarCancellation(draft: any, fromEmail: string, clientId: number, issueId: number, sequence: number): string | null {
   const targetDate = dateOnly(draft.target_date);
   if (!targetDate || !draft.previous_ics) return null;
   const dueDate = new Date(`${targetDate}T00:00:00.000Z`);
   if (Number.isNaN(dueDate.getTime())) return null;
-  const rawFrom = String(draft.from_email ?? process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev");
-  const fromEmail = rawFrom.match(/<([^>]+)>/)?.[1]?.trim() ?? rawFrom.trim();
   return buildCalendarInvite({
     itemTitle: draft.title,
     dueDate,
@@ -757,8 +753,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     if (approvalInvalidated) {
         const draftResult = await tx.execute(sql`SELECT i.*,s.name AS site_name,c.name AS contractor_name,
          c.email AS contractor_email,cl.name AS company_name,q.mode,q.quote_token,q.body_html,q.body_text,
-          q.email_preview_json,q.encrypted_token_payload,q.ics_content,q.email_type,
-          (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email
+          q.email_preview_json,q.encrypted_token_payload,q.ics_content,q.email_type
         FROM fix_track_issues i
         LEFT JOIN sites s ON s.id=i.site_id AND s.client_id=i.client_id
         JOIN contractors c ON c.id=i.contractor_id AND c.client_id=i.client_id
@@ -809,7 +804,7 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         }
         const icsContent = draft.mode === "quote"
           ? null
-          : fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.ics_content));
+          : fixTrackCalendarInvite(draft, await getClientSenderEmail(clientId), clientId, id, nextCalendarSequence(draft.ics_content));
         const rendered = draft.mode === "quote"
           ? await sendContractorQuoteEmail({
               contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
@@ -1226,7 +1221,6 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
      SELECT i.title, i.description, i.location, i.priority, i.issue_type, i.site_id, i.target_date,
            s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
             cl.name AS company_name,
-            (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
             (SELECT ics_content FROM contractor_email_queue
               WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
               ORDER BY created_at DESC LIMIT 1) AS previous_ics
@@ -1282,7 +1276,7 @@ router.post("/issues/:id/request-send", requireAuth, denyViewers, async (req, re
   </div>`;
   if (parsed.data.mode === "assign") {
     const tokens = await generateActionTokens(id, clientId, existing.contractorId);
-    icsContent = fixTrackCalendarInvite(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    icsContent = fixTrackCalendarInvite(draft, await getClientSenderEmail(clientId), clientId, id, nextCalendarSequence(draft.previous_ics));
     icsFilename = icsContent ? calendarFilename(draft.title) : null;
     const rendered = await sendContractorAssignmentEmail({
       contractorName: draft.contractor_name, contractorEmail: draft.contractor_email,
@@ -1418,7 +1412,6 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
     const locked = await tx.execute(sql`
       SELECT i.*, s.name AS site_name, c.name AS contractor_name, c.email AS contractor_email,
         cl.name AS company_name,
-        (SELECT value FROM app_settings WHERE client_id=i.client_id AND key='smtpFrom' LIMIT 1) AS from_email,
         (SELECT ics_content FROM contractor_email_queue
           WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
             AND email_type='assignment' AND status='sent'
@@ -1445,7 +1438,7 @@ router.post("/issues/:id/request-cancellation", requireAuth, denyViewers, async 
     }
     if (draft.latest_email_type === "cancellation") return { kind: "already_requested" as const };
 
-    const icsContent = fixTrackCalendarCancellation(draft, clientId, id, nextCalendarSequence(draft.previous_ics));
+    const icsContent = fixTrackCalendarCancellation(draft, await getClientSenderEmail(clientId), clientId, id, nextCalendarSequence(draft.previous_ics));
     if (!icsContent) return { kind: "not_cancellable" as const };
     const subject = `Cancelled: ${draft.title}${draft.site_name ? ` — ${draft.site_name}` : ""}`;
     const text = [
