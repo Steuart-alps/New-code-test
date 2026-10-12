@@ -1,6 +1,7 @@
 // E2E regression test for the client-admin staff invitation flow.
 // Usage: node tests/staff-invitations.mjs (API must be running on API_BASE)
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
 const BASE = process.env.API_BASE || "http://localhost:8080/api";
@@ -108,14 +109,17 @@ async function main() {
     invitationUrl = urlMatch ? new URL(urlMatch[1]) : null;
   } catch {}
   check("invitation contains the reset-password URL", invitationUrl?.pathname === "/reset-password");
+  // The emailed link is the credential; the database holds only its digest.
+  const emailedToken = invitationUrl?.searchParams.get("token") ?? "";
   check(
-    "invitation URL contains the database token",
-    invitationUrl?.searchParams.get("token") === tokens[0]?.token,
+    "invitation URL token matches the stored digest, never the plaintext",
+    /^[0-9a-f]{64}$/.test(emailedToken)
+      && tokens[0]?.token === `sha256:${createHash("sha256").update(emailedToken).digest("hex")}`,
     invitationUrl?.toString(),
   );
 
   const reset = await admin("POST", "/auth/reset-password", {
-    token: tokens[0]?.token,
+    token: emailedToken,
     password: "staff-password-456",
   });
   check("invitation token sets the password", reset.status === 200, `got ${reset.status}`);
@@ -126,7 +130,7 @@ async function main() {
   });
   check("invited staff can log in with the new password", staffLogin.status === 200, `got ${staffLogin.status}`);
   const reuse = await admin("POST", "/auth/reset-password", {
-    token: tokens[0]?.token,
+    token: emailedToken,
     password: "another-password-789",
   });
   check("invitation token cannot be reused", reuse.status === 400, `got ${reuse.status}`);
