@@ -1172,7 +1172,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       }
     }
 
-    return { trackId: "swim", label: "AquaTrack", path: "/swim-track", enabled, status, badge, items };
+    return { trackId: "swim", label: "AquaTrack sessions", path: "/swim-track", enabled, status, badge, items };
   };
 
   // ── IncidentTrack ─────────────────────────────────────────────────────────────
@@ -1232,7 +1232,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       enabled: entitled("firetrack"), daysDetail: true }),
     checkAlertTrack({ trackId: "legionella", module: "legionella", label: "LegionellaTrack", path: "/legionella",
       enabled: entitled("legionellatrack"), daysDetail: true }),
-    checkAlertTrack({ trackId: "pool", module: "pool", label: "AquaTrack", path: "/aqua-track",
+    checkAlertTrack({ trackId: "pool", module: "pool", label: "AquaTrack water quality", path: "/aqua-track",
       enabled: entitled("pooltrack"), daysDetail: false }),
     patTrack(),
     pestTrack(),
