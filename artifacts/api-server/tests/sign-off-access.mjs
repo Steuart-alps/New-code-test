@@ -216,6 +216,16 @@ if (phase === "after-restart") {
         `${name}: DocTrack copy of ${source.title} is listed exactly when the source is`);
     }
   }
+  // The one-off repair gave copies made before the fix their department.
+  for (const legacy of savedState.legacyCopies) {
+    const [copy] = await query(`SELECT department FROM doc_track_documents WHERE id = ${lit(legacy.id)}`);
+    assert.equal(copy?.department, legacy.expected, `legacy ${legacy.label}: department ${legacy.expected}`);
+  }
+  const [marker] = await query(`SELECT name FROM runtime_migration_progress WHERE name = 'doctrack_safetrack_copy_departments_v1'`);
+  assert.ok(marker, "the repair records that it ran");
+  const kitchenView = await listFor(alpha, staff.kim);
+  assert.equal(kitchenView.has(`doc:${savedState.legacyCopies[0].id}`), false, "Kitchen staff no longer see the Housekeeping SOP copy");
+  assert.equal((await listFor(alpha, staff.hal)).has(`doc:${savedState.legacyCopies[0].id}`), true, "Housekeeping staff still see it");
   console.log("sign-off access tests passed (after restart)");
   process.exit(0);
 }
@@ -505,7 +515,33 @@ if (STATE_FILE) {
     handbookSiteHousekeeping: "Housekeeping", handbookSiteKitchen: "Kitchen", handbookGlobalFileless: null, handbookNoFileName: null,
   };
   const safeDocs = Object.entries(departmentOf).map(([name, department]) => ({ ...docs[name], department }));
-  await writeFile(STATE_FILE, JSON.stringify({ stamp, staff: { kim, hal, nia }, safeDocs }));
+
+  // Copies made before the merge carried departments: a SafeTrack source
+  // already marked as copied, and a DocTrack copy with no department (or one
+  // a manager has since scoped). Clearing this suite database's one-off
+  // marker makes the next boot run the repair again over them.
+  const legacyCopy = async (type, sourceValues, copyDepartment) => {
+    const source = await addDocument(alpha, type, sourceValues);
+    const copy = await addDocument(alpha, "doc", {
+      title: sourceValues.title, department: copyDepartment,
+      category: { ra: "risk_assessment", sop: "sop", handbook: "handbook" }[type],
+    });
+    const table = { ra: "safe_risk_assessments", sop: "safe_sops", handbook: "safe_handbook" }[type];
+    await query(`UPDATE ${table} SET migrated_doc_id = ${lit(copy.id)} WHERE id = ${lit(source.id)} RETURNING id`);
+    return copy.id;
+  };
+  const legacyCopies = [
+    { label: "direct-scope SOP copy", expected: "Housekeeping",
+      id: await legacyCopy("sop", { title: "Legacy linen SOP", department_id: housekeepingDept }, null) },
+    { label: "site-scope handbook copy", expected: "Kitchen",
+      id: await legacyCopy("handbook", { title: "Legacy kitchen handbook", site_id: kitchenSite }, null) },
+    { label: "global RA copy", expected: null,
+      id: await legacyCopy("ra", { title: "Legacy global RA", site_id: sharedSite }, null) },
+    { label: "copy a manager already scoped", expected: "Kitchen",
+      id: await legacyCopy("ra", { title: "Legacy rescoped RA", department_id: housekeepingDept }, "Kitchen") },
+  ];
+  await query(`DELETE FROM runtime_migration_progress WHERE name = 'doctrack_safetrack_copy_departments_v1' RETURNING name`);
+  await writeFile(STATE_FILE, JSON.stringify({ stamp, staff: { kim, hal, nia }, safeDocs, legacyCopies }));
 }
 
 console.log("sign-off access tests passed");

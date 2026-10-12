@@ -1262,6 +1262,7 @@ export async function runRuntimeMigrations() {
       )
     `);
     await migrateDoctrackSafetrackMerge();
+    await restoreDoctrackSafetrackCopyDepartments();
     await migrateLegionellaOutlets();
     await migrateComplianceHub();
     await migrateTrackActions();
@@ -4614,6 +4615,67 @@ async function migrateDoctrackSafetrackMerge() {
       `);
     }
   }
+}
+
+/**
+ * One-off repair: DocTrack copies made by migrateDoctrackSafetrackMerge before
+ * it carried departments have department NULL, which the public sign-off link
+ * treats as "everyone". Give each such copy its source's current effective
+ * department (its own, else its site's). Only that column of copies still NULL
+ * is written; nothing is deleted, and copies whose source is global stay
+ * global. Runs once, recorded in runtime_migration_progress, so a manager who
+ * later makes a copy global on purpose is not overridden on the next boot.
+ * Returns the number of copies restored, or null when it had already run.
+ */
+const SAFETRACK_COPY_DEPARTMENTS = "doctrack_safetrack_copy_departments_v1";
+
+export async function restoreDoctrackSafetrackCopyDepartments(): Promise<number | null> {
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "runtime_migration_progress" (
+    "name" text PRIMARY KEY,
+    "last_id" integer NOT NULL DEFAULT 0,
+    "updated_at" timestamp NOT NULL DEFAULT now()
+  )`);
+  const restored = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`INSERT INTO runtime_migration_progress (name)
+      VALUES (${SAFETRACK_COPY_DEPARTMENTS}) ON CONFLICT (name) DO NOTHING RETURNING name`);
+    if (claimed.rows.length === 0) return null;
+    const updated = await tx.execute(sql`
+      WITH sources AS (
+        SELECT d.migrated_doc_id AS copy_id, d.client_id, 'risk_assessment'::text AS category,
+               COALESCE(dep.name, site_dep.name) AS department
+        FROM safe_risk_assessments d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'sop'::text, COALESCE(dep.name, site_dep.name)
+        FROM safe_sops d
+        LEFT JOIN departments dep ON dep.id = d.department_id AND dep.client_id = d.client_id
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+        UNION ALL
+        SELECT d.migrated_doc_id, d.client_id, 'handbook'::text, site_dep.name
+        FROM safe_handbook d
+        LEFT JOIN sites site ON site.id = d.site_id AND site.client_id = d.client_id
+        LEFT JOIN departments site_dep ON site_dep.id = site.department_id AND site_dep.client_id = d.client_id
+        WHERE d.migrated_doc_id IS NOT NULL
+      )
+      UPDATE doc_track_documents c
+      SET department = sources.department
+      FROM sources
+      WHERE c.id = sources.copy_id
+        AND c.client_id = sources.client_id
+        AND c.category = sources.category
+        AND c.department IS NULL
+        AND sources.department IS NOT NULL
+      RETURNING c.id
+    `);
+    return updated.rows.length;
+  });
+  if (restored !== null) logger.info({ restored }, "Restored departments on SafeTrack copies in DocTrack");
+  return restored;
 }
 
 /**
