@@ -106,9 +106,11 @@ const runnerLocked = new Set([
   "test:contractor-draft-tamper", "test:contractor-key-preflight",
   "test:contractor-queue-migration-bounds", "test:staff-invitations",
   "test:welcome-email", "test:csv-imports-portfolio",
+  "test:schema:parity", // private initdb cluster; bundles and boots the API twice
+  "test:csrf-enforced:ci",
 ]);
 const freshSchema = new Set([
-  "test:schema:fresh", "test:kitchen-mobile-replay",
+  "test:schema:fresh", "test:schema:pushed", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
   "test:inspection-pack-calendar",
@@ -129,6 +131,7 @@ const freshSchema = new Set([
   "test:retention-clock",
   "test:train-track-roster-identity",
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
+  "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
 const pure = new Set([
@@ -209,7 +212,8 @@ for (const [name, command] of scripts) {
     }
     mjsRefs(read(runner)).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (freshSchema.has(name)) {
-    const direct = command.match(/^bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
+    // FRESH_SCHEMA_BASE=push only changes how the private cluster's base schema is built.
+    const direct = command.match(/^(?:FRESH_SCHEMA_BASE=push )?bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
     if (direct) {
       mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry));
       continue;

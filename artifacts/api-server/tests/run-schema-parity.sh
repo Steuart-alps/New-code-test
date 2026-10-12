@@ -8,6 +8,8 @@
 # Never uses DATABASE_URL from the caller.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The database is private, but API bundling and startup still compete for RAM.
+source tests/api-integration-lock.sh
 for binary in initdb pg_ctl psql node curl; do
   command -v "$binary" >/dev/null || { echo "Required test tool missing: $binary" >&2; exit 1; }
 done
