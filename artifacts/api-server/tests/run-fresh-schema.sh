@@ -29,6 +29,15 @@ psql -h "$temp" -U schema_test -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABAS
 url="postgresql://schema_test@/schema_test?host=$temp"
 count="$(psql "$url" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
 [ "$count" = "0" ] || { echo "Disposable database is not empty" >&2; exit 1; }
+# FRESH_SCHEMA_BASE=push builds the base schema the way production's deploy
+# does (lib/db/bootstrap.mjs: drizzle-kit push on the empty database) before
+# the runtime migrations run. The default stays runtime migrations only.
+schema_base="runtime migrations only"
+if [ "${FRESH_SCHEMA_BASE:-}" = "push" ]; then
+  env -i PATH="$PATH" HOME="$HOME" DATABASE_URL="$url" node ../../lib/db/bootstrap.mjs >"$temp/bootstrap.log" 2>&1 \
+    || { cat "$temp/bootstrap.log" >&2; echo "drizzle-kit push bootstrap failed" >&2; exit 1; }
+  schema_base="drizzle-kit push base, then runtime migrations"
+fi
 : > "$temp/contractor-outbox.jsonl"
 # Synthetic, test-only key: no workspace encryption key or mail credentials.
 test_token_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -81,4 +90,4 @@ if grep -Eq '42P01|42703|relation .* does not exist|column .* does not exist|Run
   echo "Missing database table/column detected in API logs" >&2
   exit 1
 fi
-echo "Fresh-schema validation passed (runtime migrations only, including second boot)."
+echo "Fresh-schema validation passed ($schema_base, including second boot)."
