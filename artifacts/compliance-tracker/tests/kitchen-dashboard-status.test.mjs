@@ -121,13 +121,13 @@ try {
   const dashboardSource = await readFile(new URL("../src/pages/dashboard.tsx", import.meta.url), "utf8");
   assert.match(
     dashboardSource,
-    /track\.trackId === "kitchen" \? <KitchenTrackStatusPill \/>/,
+    /track\.trackId === "kitchen" \? <KitchenTrackStatusPill siteId=\{siteId\} \/>/,
     "KitchenTrack status pill must be mounted on the actual kitchen dashboard row",
   );
   assert.match(
     dashboardSource,
-    /apiFetch\("\/food-safety\/status"\)/,
-    "KitchenTrack status pill must fetch the food-safety status endpoint",
+    /apiFetch\(`\/food-safety\/status\$\{siteId !== "all" \? `\?siteId=\$\{siteId\}` : ""\}`\)/,
+    "KitchenTrack status pill must fetch the food-safety status endpoint for the selected site",
   );
   assert.match(
     dashboardSource,
