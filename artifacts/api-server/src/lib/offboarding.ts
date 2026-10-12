@@ -1082,12 +1082,12 @@ export async function deleteAllClientData(
         updated_at    = NOW()
       WHERE id IN (${sql.join(userIds.map((id) => sql`${id}`), sql`, `)})
     `);
+    // The verification columns always exist (runtime migrations). No .catch:
+    // a swallowed error would leave this transaction aborted.
     await tx.execute(sql`
       UPDATE users SET email_verification_token = NULL, email_verification_expires_at = NULL
       WHERE id IN (${sql.join(userIds.map((id) => sql`${id}`), sql`, `)})
-    `).catch(() => {
-      // Older databases without the verification columns: nothing to clear.
-    });
+    `);
   }
 
   // Fail closed if anything is left behind (e.g. a new table whose rows a
