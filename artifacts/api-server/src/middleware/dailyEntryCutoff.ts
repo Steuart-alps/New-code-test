@@ -179,6 +179,43 @@ export const STORED_DATE_LOOKUPS: Array<{ path: RegExp; table: string; date: str
   { path: /^\/safe-track\/competency\/\d+$/, table: "safe_competency_signoffs", date: "signed_off_at" },
 ];
 
+/**
+ * Checks whose due status comes from the latest recorded date. A future date
+ * (for example a 2027 typo) would keep the check "up to date" for a year, so
+ * these routes accept a check date of at most today in the account's
+ * timezone, for every role. The field is named explicitly because other date
+ * fields on these routes (due or review dates) may legitimately be future.
+ */
+export const NO_FUTURE_CHECK_DATE_ROUTES: Array<{ method: "POST" | "PUT"; path: RegExp; field: string }> = [
+  { method: "POST", path: /^\/fire-safety\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/fire-safety\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/legionella\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/legionella\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/hot-tub\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/hot-tub\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/pool-track\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/pool-track\/\d+$/, field: "checkDate" },
+  { method: "POST", path: /^\/tree-track\/?$/, field: "checkDate" },
+  { method: "PUT", path: /^\/tree-track\/\d+$/, field: "checkDate" },
+];
+
+/**
+ * Pure decision: the submitted check date when it is after the account's
+ * local today, otherwise null.
+ */
+export function futureCheckDate(
+  req: Pick<Request, "method" | "path" | "body">,
+  now = new Date(),
+  timeZone = DEFAULT_ACCOUNT_TIMEZONE,
+): { date: string; today: string } | null {
+  const rule = NO_FUTURE_CHECK_DATE_ROUTES.find(route => route.method === req.method && route.path.test(req.path));
+  if (!rule || !req.body || typeof req.body !== "object") return null;
+  const value = (req.body as Record<string, unknown>)[rule.field];
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}/.test(value)) return null;
+  const today = localClock(now, normalizeAccountTimezone(timeZone)).date;
+  return value.slice(0, 10) > today ? { date: value.slice(0, 10), today } : null;
+}
+
 function storedDateLookup(path: string) {
   return STORED_DATE_LOOKUPS.find(lookup => lookup.path.test(path));
 }
@@ -309,6 +346,25 @@ export function getDailyEntryCutoffDecision(
 }
 
 export async function enforceDailyEntryCutoff(req: Request, res: Response, next: NextFunction) {
+  if (req.currentUser && NO_FUTURE_CHECK_DATE_ROUTES.some(route => route.method === req.method && route.path.test(req.path))) {
+    // Judge the date on the account's own calendar (default Europe/London).
+    let accountTimezone = DEFAULT_ACCOUNT_TIMEZONE;
+    try {
+      accountTimezone = await findAccountTimezone(req);
+    } catch {
+      res.status(500).json({ error: "Unable to verify account timezone" });
+      return;
+    }
+    const future = futureCheckDate(req, new Date(), accountTimezone);
+    if (future) {
+      res.status(400).json({
+        error: "The check date cannot be in the future",
+        code: "CHECK_DATE_IN_FUTURE",
+        today: future.today,
+      });
+      return;
+    }
+  }
   const lookup = storedDateLookup(req.path);
   const staffTrackWrite = isTrackWrite(req) && req.currentUser
     && req.currentUser.role !== "client_admin"
