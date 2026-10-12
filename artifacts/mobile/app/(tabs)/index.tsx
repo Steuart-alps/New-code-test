@@ -100,7 +100,7 @@ export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isOffline } = useAuth();
   const [selectedSiteId, setSelectedSiteId] = useState<number | undefined>();
 
   const { data: sites } = useQuery<Site[]>({
@@ -224,6 +224,15 @@ export default function TodayScreen() {
             <Feather name="plus" size={18} color={colors.navy} />
           </TouchableOpacity>
         </View>
+
+        {isOffline && (
+          <View testID="offline-notice" style={styles.offlineNotice}>
+            <Feather name="wifi-off" size={14} color="#ffffff" />
+            <Text style={styles.offlineText}>
+              Offline — using your saved sign-in. Saved checks are sent when you reconnect.
+            </Text>
+          </View>
+        )}
 
         {/* Site selector */}
         {(sites?.length ?? 0) > 1 && (
@@ -403,6 +412,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   siteScroll: { marginTop: 4 },
+  offlineNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  offlineText: { flex: 1, color: '#ffffff', fontSize: 12, fontFamily: 'Inter_500Medium' },
   siteChip: {
     borderWidth: 1,
     borderRadius: 20,

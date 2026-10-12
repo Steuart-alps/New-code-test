@@ -1,0 +1,227 @@
+/**
+ * Device outbox for check submissions other than KitchenTrack temperatures
+ * (currently the AM/PM daily checklist). Same contract as kitchenOutboxCore:
+ * the submission and a stable entry ID are written to device storage before
+ * the first HTTP attempt, replays send the identical body, and the server
+ * recognises a replay of an entry it already applied (clientEntryId).
+ *
+ * Import-free so tests can load it directly with Node.
+ */
+export interface CheckOwner { clientId: number; userId: number }
+export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
+export type CheckKind = 'daily-checklist';
+export interface CheckEntry {
+  entryId: string;
+  owner: CheckOwner;
+  kind: CheckKind;
+  /** API path the body is POSTed to. Only allowlisted shapes are accepted. */
+  path: string;
+  /** One unsent entry per scope (e.g. one AM checklist per site and day). */
+  scopeKey: string;
+  label: string;
+  body: Record<string, unknown>;
+  state: CheckDeliveryState;
+  createdAt: string;
+  error?: string;
+}
+export interface CheckOutboxSnapshot {
+  owner: CheckOwner | null;
+  entries: CheckEntry[];
+  error: string | null;
+}
+interface OutboxDependencies {
+  storage: {
+    getItem(key: string): Promise<string | null>;
+    setItem(key: string, value: string): Promise<void>;
+  };
+  send(entry: CheckEntry, token: string): Promise<void>;
+  onSent(entry: CheckEntry): Promise<void>;
+}
+
+const PATHS: Record<CheckKind, RegExp> = {
+  'daily-checklist': /^\/api\/daily-checklists\/\d{1,9}\/\d{4}-\d{2}-\d{2}\/(am|pm)$/,
+};
+const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
+const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
+
+export const checkOutboxKey = (owner: CheckOwner) =>
+  `complytrack:check-outbox:v1:${owner.clientId}:${owner.userId}`;
+const sameOwner = (a: CheckOwner, b: CheckOwner) =>
+  a.clientId === b.clientId && a.userId === b.userId;
+
+/** Network failures, an expired session, timeouts, rate limits and server
+ *  errors keep the entry queued; any other rejection needs the user. */
+export function isRetryableStatus(status: number): boolean {
+  return !status || status === 401 || status === 408 || status === 429 || status >= 500;
+}
+
+/** Credentials stay in memory. Disk writes finish before the first HTTP attempt. */
+export class CheckOutbox {
+  private session: { owner: CheckOwner; token: string; generation: number } | null = null;
+  private generation = 0;
+  private lock: Promise<unknown> = Promise.resolve();
+  private replaying: Promise<void> | null = null;
+  private listeners = new Set<() => void>();
+  private snapshot: CheckOutboxSnapshot = { owner: null, entries: [], error: null };
+  constructor(private deps: OutboxDependencies) {}
+
+  getSnapshot = () => this.snapshot;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  private publish(owner: CheckOwner, entries: CheckEntry[], error: string | null = null) {
+    if (!this.session || !sameOwner(owner, this.session.owner)) return;
+    this.snapshot = { owner, entries, error };
+    this.listeners.forEach(listener => listener());
+  }
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const operation = this.lock.then(fn, fn);
+    this.lock = operation.catch(() => {});
+    return operation;
+  }
+  private async read(owner: CheckOwner): Promise<CheckEntry[]> {
+    const raw = await this.deps.storage.getItem(checkOutboxKey(owner));
+    if (!raw) return [];
+    let value: unknown;
+    try { value = JSON.parse(raw); } catch { throw new Error(READ_ERROR); }
+    if (!Array.isArray(value) || value.some(entry =>
+      !entry || typeof entry !== 'object'
+      || !entry.owner || !sameOwner(entry.owner, owner)
+      || typeof entry.entryId !== 'string' || !ENTRY_ID.test(entry.entryId)
+      || !(entry.kind in PATHS) || typeof entry.path !== 'string' || !PATHS[entry.kind as CheckKind].test(entry.path)
+      || typeof entry.scopeKey !== 'string' || typeof entry.label !== 'string'
+      || !entry.body || typeof entry.body !== 'object' || Array.isArray(entry.body)
+      || entry.body.clientEntryId !== entry.entryId
+      || !['queued', 'sending', 'sent', 'failed'].includes(entry.state)
+      || typeof entry.createdAt !== 'string'
+    )) throw new Error(READ_ERROR);
+    return value as CheckEntry[];
+  }
+  private async write(owner: CheckOwner, entries: CheckEntry[]) {
+    const sent = entries.filter(entry => entry.state === 'sent').slice(-20);
+    const kept = entries.filter(entry => entry.state !== 'sent').concat(sent);
+    await this.deps.storage.setItem(checkOutboxKey(owner), JSON.stringify(kept));
+    this.publish(owner, kept);
+  }
+  suspend = () => {
+    this.generation += 1;
+    this.session = null;
+    this.snapshot = { owner: null, entries: [], error: null };
+    this.listeners.forEach(listener => listener());
+  };
+  updateToken(token: string) {
+    if (this.session) this.session = { ...this.session, token };
+  }
+  async activate(owner: CheckOwner, token: string) {
+    this.suspend();
+    const session = { owner: { ...owner }, token, generation: this.generation };
+    this.session = session;
+    try {
+      const entries = await this.serial(() => this.read(owner));
+      if (this.session?.generation !== session.generation) return;
+      this.publish(owner, entries);
+      void this.replay();
+    } catch (error) {
+      if (this.session?.generation === session.generation) {
+        this.publish(owner, [], error instanceof Error ? error.message : 'Could not read saved checks.');
+      }
+    }
+  }
+  async enqueue(input: Pick<CheckEntry, 'entryId' | 'kind' | 'path' | 'scopeKey' | 'label' | 'body'>) {
+    const session = this.session;
+    if (!session) throw new Error('Sign in to save checks on this device.');
+    if (!ENTRY_ID.test(input.entryId)) throw new Error('Invalid entry identifier.');
+    if (!PATHS[input.kind]?.test(input.path)) throw new Error('This check cannot be saved on the device.');
+    const entry: CheckEntry = {
+      ...input, owner: { ...session.owner }, state: 'queued', createdAt: new Date().toISOString(),
+      body: JSON.parse(JSON.stringify({ ...input.body, clientEntryId: input.entryId })),
+    };
+    const persisted = await this.serial(async () => {
+      if (this.session?.generation !== session.generation) throw new Error('The signed-in account changed. Save again after signing in.');
+      const entries = await this.read(session.owner);
+      const existing = entries.find(row => row.entryId === entry.entryId);
+      if (existing) {
+        if (JSON.stringify(existing.body) !== JSON.stringify(entry.body) || existing.path !== entry.path) {
+          throw new Error('A saved entry identifier cannot be reused for a different check.');
+        }
+        return existing;
+      }
+      if (entries.some(row => row.state !== 'sent' && row.scopeKey === entry.scopeKey)) {
+        throw new Error('This check already has a saved device entry. Review its delivery state before saving again.');
+      }
+      await this.write(session.owner, entries.concat(entry));
+      return entry;
+    });
+    void this.replay();
+    return persisted;
+  }
+  async retry(entryId: string) {
+    const owner = this.session?.owner;
+    if (!owner) return;
+    await this.serial(async () => {
+      const entries = await this.read(owner);
+      await this.write(owner, entries.map(entry =>
+        entry.entryId === entryId && entry.state === 'failed'
+          ? { ...entry, state: 'queued', error: undefined } : entry));
+    });
+    void this.replay();
+  }
+  async removeFailed(entryId: string) {
+    const owner = this.session?.owner;
+    if (!owner) return;
+    await this.serial(async () => {
+      const entries = await this.read(owner);
+      await this.write(owner, entries.filter(entry => entry.entryId !== entryId || entry.state !== 'failed'));
+    });
+  }
+  replay = (): Promise<void> => {
+    if (this.replaying) return this.replaying;
+    const session = this.session;
+    this.replaying = this.drain().catch(error => {
+      if (session && this.session?.generation === session.generation) this.publish(session.owner, this.snapshot.entries,
+        error instanceof Error ? error.message : 'Could not update saved checks.');
+    }).finally(() => {
+      this.replaying = null;
+      if (this.session && this.session.generation !== session?.generation) void this.replay();
+    });
+    return this.replaying;
+  };
+  private async drain() {
+    const session = this.session;
+    if (!session) return;
+    while (this.session?.generation === session.generation) {
+      const entry = await this.serial(async () => {
+        if (this.session?.generation !== session.generation) return undefined;
+        const entries = await this.read(session.owner);
+        const next = entries.find(row => row.state === 'queued' || row.state === 'sending');
+        if (!next) return undefined;
+        next.state = 'sending';
+        await this.write(session.owner, entries);
+        return { ...next };
+      });
+      if (!entry || this.session?.generation !== session.generation) return;
+      let state: CheckDeliveryState = 'sent';
+      let message: string | undefined;
+      try {
+        // Bind every attempt to the original validated session, never a later login.
+        await this.deps.send(entry, this.session.token);
+      } catch (error) {
+        const status = typeof error === 'object' && error !== null && 'status' in error
+          ? Number(error.status) : 0;
+        state = isRetryableStatus(status) ? 'queued' : 'failed';
+        message = status === 401 ? 'Sign in again to send this saved check.'
+          : error instanceof Error ? error.message.slice(0, 240) : 'Could not send this check.';
+      }
+      if (state === 'sent' && this.session?.generation === session.generation) {
+        await this.deps.onSent(entry).catch(() => {});
+      }
+      await this.serial(async () => {
+        const entries = await this.read(session.owner);
+        await this.write(session.owner, entries.map(row =>
+          row.entryId === entry.entryId ? { ...row, state, error: message } : row));
+      });
+      if (state === 'queued') return;
+    }
+  }
+}
