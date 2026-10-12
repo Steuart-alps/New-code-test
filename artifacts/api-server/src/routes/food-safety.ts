@@ -9,6 +9,7 @@ import { foodSafetyRecordsTable, appSettingsTable, sitesTable } from "@workspace
 import { eq, and, or, sql, inArray, isNull } from "drizzle-orm";
 import { requireAuth, getActiveDepartmentId, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { defaultFoodJurisdiction } from "../lib/foodJurisdiction";
 
 const router = Router();
 
@@ -122,12 +123,14 @@ const CONFIG_KEYS = [
 const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_num_fridges: "2",
   food_num_freezers: "2",
-  // Keep the historical 82°C default for existing accounts. Administrators
-  // can select England/Wales to use the 75°C limit.
-  food_jurisdiction: "scotland",
-  food_cooking_limit: "Above 75°C (10 seconds)",
+  // Fallback only: when no jurisdiction is saved, GET /config uses the
+  // Compliance Hub nation (Scotland), else England/Wales (defaultFoodJurisdiction).
+  food_jurisdiction: "england_wales",
+  // No hold time is enforced by default, so the label states only the core
+  // temperature.
+  food_cooking_limit: "75°C or above (core)",
   food_cooling_limit: "8°C within 90 minutes",
-  food_reheating_limit: "Above 82°C",
+  food_reheating_limit: "Above 75°C",
   food_hot_holding_limit: "Above 63°C",
   food_temperature_rules: JSON.stringify(DEFAULT_KITCHEN_TEMPERATURE_RULES),
   food_cold_units: "",
@@ -443,7 +446,10 @@ router.get("/config", requireAuth, async (req, res) => {
     if (!clientStored.has("food_show_cooling")) config.food_show_cooling = config.food_show_hot_temperature;
     if (!clientStored.has("food_show_reheating")) config.food_show_reheating = config.food_show_hot_temperature;
   }
-  if (clientStored.has("food_jurisdiction") && !clientStored.has("food_reheating_limit")) {
+  if (!clientStored.has("food_jurisdiction")) {
+    config.food_jurisdiction = await defaultFoodJurisdiction(clientId);
+  }
+  if (!clientStored.has("food_reheating_limit")) {
     config.food_reheating_limit = reheatingLimitForJurisdiction(config.food_jurisdiction);
   }
 
@@ -597,7 +603,7 @@ async function resolveReheatingLimit(
   const siteJurisdiction = siteId === null
     ? undefined
     : rows.find((row) => row.key === siteKeyFor(siteId, "food_jurisdiction"))?.value;
-  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction);
+  return reheatingLimitForJurisdiction(siteJurisdiction ?? clientJurisdiction ?? await defaultFoodJurisdiction(clientId));
 }
 
 // Drizzle condition selecting the right diary scope: a specific site when
@@ -867,7 +873,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
       reheating: data.reheating ?? [],
       hotHolding: data.hotHolding ?? [],
       sousVide: data.sousVide ?? [],
-      cookingLimit: data.cookingLimit ?? "Above 75°C (10 seconds)",
+      cookingLimit: data.cookingLimit ?? "75°C or above (core)",
       coolingLimit: data.coolingLimit ?? "8°C within 90 minutes",
       reheatingLimit,
       hotHoldingLimit: data.hotHoldingLimit ?? "Above 63°C",

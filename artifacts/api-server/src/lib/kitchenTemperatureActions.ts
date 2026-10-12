@@ -3,6 +3,7 @@ import { db } from '@workspace/db';
 import { appSettingsTable, auditEventsTable, trackActionsTable } from '@workspace/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { assessKitchenTemperatures, kitchenFailureValue, parseKitchenTemperatureRules } from '@workspace/api-zod/kitchen-temperature';
+import { defaultFoodJurisdiction } from './foodJurisdiction';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export class KitchenTemperatureError extends Error {}
@@ -21,7 +22,8 @@ export async function recordKitchenTemperatureActions(
   const rawRules = value('food_temperature_rules');
   let failures;
   try {
-    failures = assessKitchenTemperatures(before, after, parseKitchenTemperatureRules(rawRules, value('food_jurisdiction')),
+    const jurisdiction = value('food_jurisdiction') ?? await defaultFoodJurisdiction(clientId, tx);
+    failures = assessKitchenTemperatures(before, after, parseKitchenTemperatureRules(rawRules, jurisdiction),
       JSON.parse(value('food_cold_units') || '[]'));
   } catch (error) {
     throw new KitchenTemperatureError(error instanceof Error ? error.message : 'Temperature rules could not be evaluated');
