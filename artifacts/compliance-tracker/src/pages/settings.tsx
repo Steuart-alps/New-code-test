@@ -1865,6 +1865,39 @@ function InvoicesCard() {
 }
 
 
+// ── Account timezone choices ─────────────────────────────────────────────────
+// Common IANA zones for UK businesses, UK first. A stored zone that is not
+// listed is still offered so saving the form never changes it unasked.
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Europe/London", label: "UK — London (GMT/BST)" },
+  { value: "Europe/Jersey", label: "Jersey" },
+  { value: "Europe/Guernsey", label: "Guernsey" },
+  { value: "Europe/Isle_of_Man", label: "Isle of Man" },
+  { value: "Europe/Gibraltar", label: "Gibraltar" },
+  { value: "Europe/Dublin", label: "Ireland — Dublin" },
+  { value: "Europe/Lisbon", label: "Portugal — Lisbon" },
+  { value: "Atlantic/Canary", label: "Canary Islands" },
+  { value: "Europe/Paris", label: "France — Paris" },
+  { value: "Europe/Madrid", label: "Spain — Madrid" },
+  { value: "Europe/Amsterdam", label: "Netherlands — Amsterdam" },
+  { value: "Europe/Brussels", label: "Belgium — Brussels" },
+  { value: "Europe/Berlin", label: "Germany — Berlin" },
+  { value: "Europe/Zurich", label: "Switzerland — Zurich" },
+  { value: "Europe/Rome", label: "Italy — Rome" },
+  { value: "Europe/Athens", label: "Greece — Athens" },
+  { value: "America/New_York", label: "US — Eastern (New York)" },
+  { value: "America/Chicago", label: "US — Central (Chicago)" },
+  { value: "America/Denver", label: "US — Mountain (Denver)" },
+  { value: "America/Los_Angeles", label: "US — Pacific (Los Angeles)" },
+  { value: "America/Toronto", label: "Canada — Toronto" },
+  { value: "Asia/Dubai", label: "UAE — Dubai" },
+  { value: "Asia/Singapore", label: "Singapore" },
+  { value: "Asia/Hong_Kong", label: "Hong Kong" },
+  { value: "Australia/Sydney", label: "Australia — Sydney" },
+  { value: "Pacific/Auckland", label: "New Zealand — Auckland" },
+  { value: "UTC", label: "UTC" },
+];
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
@@ -2251,15 +2284,22 @@ export default function SettingsPage() {
                 <div className="space-y-1.5 col-span-2">
                   <Label>Account Timezone</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
+                    Used for daily entry dates and the staff correction cutoff. Existing accounts default to UK time (Europe/London).
                   </p>
-                  <Input
-                    name="accountTimezone"
-                    value={formData.accountTimezone}
-                    onChange={handleChange}
-                    placeholder="Europe/London"
-                    autoComplete="off"
-                  />
+                  <Select
+                    value={formData.accountTimezone || "Europe/London"}
+                    onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                  >
+                    <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
+                        <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
+                      )}
+                      {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>
