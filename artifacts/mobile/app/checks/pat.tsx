@@ -22,9 +22,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { isRetryableFailure } from '@/components/unsent-submission-logic';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -130,10 +133,16 @@ export default function PatScreen() {
     enabled: serviceEnabled,
   });
 
+  // Tests that could not be sent (e.g. no signal) are kept on the device.
+  const unsent = useUnsentSubmissions('pat-test');
+  const applianceName = (id: unknown) =>
+    appliances.find((appliance) => appliance.id === id)?.name ?? `Appliance ${String(id)}`;
+
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch('/api/pat-track/tests', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async () => {
+    onSuccess: async (_response, body) => {
+      void unsent.resolve(body);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['pat-tests'] });
       qc.invalidateQueries({ queryKey: ['pat-appliances'] });
@@ -147,8 +156,15 @@ export default function PatScreen() {
       setShowForm(false);
       Alert.alert('Logged', 'PAT test recorded successfully.');
     },
-    onError: (err: Error) => {
+    onError: (err: Error, body) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (isRetryableFailure(err)) {
+        void unsent.record({
+          body,
+          label: `PAT test · ${applianceName(body.applianceId)} · ${String(body.testDate)}`,
+          error: err.message || 'Could not send.',
+        });
+      }
       Alert.alert('Error', err.message || 'Something went wrong.');
     },
   });
@@ -251,6 +267,14 @@ export default function PatScreen() {
           <View style={{ width: 22 }} />
         </View>
       </View>
+
+      <UnsentSubmissions
+        drafts={unsent.drafts}
+        disabled={isPending}
+        onRetry={(draft) => mutate(draft.body)}
+        onDiscard={(draft) => { void unsent.discard(draft.id); }}
+        note="Retry sends the test exactly as it was saved, with its original date."
+      />
 
       {/* Appliance status list */}
       <View style={styles.section}>

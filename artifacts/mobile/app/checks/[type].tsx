@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,8 +14,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
+import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { KitchenTemperatureForm } from '@/components/KitchenTemperatureForm';
+import { DateStepper } from '@/components/DateStepper';
+import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { isIsoDate, localIsoDate } from '@/components/date-stepper-logic';
+import { isRetryableFailure } from '@/components/unsent-submission-logic';
 
 // ─── Fire check types ────────────────────────────────────────────────────────
 const FIRE_TYPES = [
@@ -68,17 +73,19 @@ interface HotTubConfig {
 type FireResult = 'pass' | 'fail';
 type WaterResult = 'pass' | 'fail';
 
+// Device-local calendar date, not UTC (which is the wrong day near midnight).
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localIsoDate();
 }
 
+// No result is preselected: the person must choose Pass or Fail explicitly.
 function ResultPicker<T extends string>({
   options,
   value,
   onChange,
 }: {
   options: { value: T; label: string; color: string }[];
-  value: T;
+  value: T | null;
   onChange: (v: T) => void;
 }) {
   const colors = useColors();
@@ -87,6 +94,8 @@ function ResultPicker<T extends string>({
       {options.map((opt) => (
         <TouchableOpacity
           key={opt.value}
+          testID={`check-result-${opt.value}`}
+          accessibilityState={{ selected: value === opt.value }}
           style={[
             styles.resultBtn,
             {
@@ -119,6 +128,7 @@ export default function CheckFormScreen() {
   const colors = useColors();
   const router = useRouter();
   const qc = useQueryClient();
+  const { user } = useAuth();
 
   const isFire = type === 'fire';
   const isWater = type === 'water';
@@ -129,16 +139,23 @@ export default function CheckFormScreen() {
 
   const [checkType, setCheckType] = useState(checkTypes[0]?.value ?? '');
   const [checkDate, setCheckDate] = useState(today());
-  const [fireResult, setFireResult] = useState<FireResult>('pass');
-  const [waterResult, setWaterResult] = useState<WaterResult>('pass');
-  const [hotResult, setHotResult] = useState<FireResult>('pass');
+  const [fireResult, setFireResult] = useState<FireResult | null>(null);
+  const [waterResult, setWaterResult] = useState<WaterResult | null>(null);
+  const [hotResult, setHotResult] = useState<FireResult | null>(null);
   const [temperature, setTemperature] = useState('');
   const [ph, setPh] = useState('');
   const [sanitiser, setSanitiser] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
-  const [performedBy, setPerformedBy] = useState('');
+  // Prefilled with the signed-in person; editable when someone else did it.
+  const [performedBy, setPerformedBy] = useState(user?.name ?? '');
+  const [performedByEdited, setPerformedByEdited] = useState(false);
   const [siteId, setSiteId] = useState<number | null>(null);
+  const unsent = useUnsentSubmissions(`check:${type ?? ''}`);
+
+  useEffect(() => {
+    if (!performedByEdited && user?.name) setPerformedBy(user.name);
+  }, [performedByEdited, user?.name]);
 
   const { data: sites = [] } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -157,24 +174,53 @@ export default function CheckFormScreen() {
 
   const endpoint = isFire ? '/api/fire-safety' : isHotTub ? '/api/hot-tub' : '/api/legionella';
 
+  const moduleTitle = isFire
+    ? 'FireTrack'
+    : isWater
+    ? 'LegionellaTrack'
+    : isHotTub
+    ? 'HotTubTrack'
+    : 'KitchenTrack';
+  const checkTypeLabel = (value: unknown) =>
+    checkTypes.find((ct) => ct.value === value)?.label ?? String(value ?? '');
+
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async (response: any) => {
+    onSuccess: async (response: any, body) => {
+      void unsent.resolve(body);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['fire-status'] });
       qc.invalidateQueries({ queryKey: ['water-status'] });
       qc.invalidateQueries({ queryKey: ['hot-tub-status'] });
       qc.invalidateQueries({ queryKey: ['track-controls'] });
       qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
-      Alert.alert('Logged', `Server outcome: ${response?.result ?? (isFire ? fireResult : isHotTub ? hotResult : waterResult)}.`, [
+      // The next check needs its own explicit Pass/Fail choice.
+      setFireResult(null);
+      setWaterResult(null);
+      setHotResult(null);
+      Alert.alert('Logged', `Server outcome: ${response?.result ?? body.result}.`, [
         { text: 'Done', onPress: () => router.back() },
         { text: 'Log another', style: 'default' },
       ]);
     },
-    onError: (err: Error) => {
+    onError: (err: Error, body) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', err.message);
+      if (!isRetryableFailure(err)) {
+        // Rejected data: the form keeps it so it can be corrected.
+        Alert.alert('Error', err.message);
+        return;
+      }
+      // Keep a device copy so closing this screen cannot lose the typed check.
+      void unsent.record({
+        body,
+        label: `${moduleTitle} · ${checkTypeLabel(body.checkType)} · ${String(body.checkDate)}`,
+        error: err.message || 'Could not send.',
+      });
+      Alert.alert(
+        'Not sent',
+        `${err.message || 'Something went wrong.'}\n\nYour check is saved on this device. Retry it from this screen when you are back online.`,
+      );
     },
   });
 
@@ -186,8 +232,17 @@ export default function CheckFormScreen() {
       );
       return;
     }
-    if (!checkDate || !/^\d{4}-\d{2}-\d{2}$/.test(checkDate)) {
-      Alert.alert('Check date required', 'Enter the date as YYYY-MM-DD.');
+    if (!checkDate || !isIsoDate(checkDate)) {
+      Alert.alert('Check date required', 'Choose the date the check was done.');
+      return;
+    }
+    if (checkDate > today()) {
+      Alert.alert('Check date', 'A check cannot be logged for a future date.');
+      return;
+    }
+    const result = isFire ? fireResult : isHotTub ? hotResult : waterResult;
+    if (result === null) {
+      Alert.alert('Result required', 'Choose Pass or Fail for this check.');
       return;
     }
     if (isHotTub && checkType === 'water_chemistry' && (!ph || !sanitiser)) {
@@ -201,11 +256,11 @@ export default function CheckFormScreen() {
     const body: Record<string, unknown> = {
       checkType,
       checkDate,
-      result: isFire ? fireResult : isHotTub ? hotResult : waterResult,
+      result,
       ...(siteId ? { siteId } : {}),
       ...(location ? { location } : {}),
       ...(notes ? { notes } : {}),
-      ...(performedBy ? { performedBy } : {}),
+      ...(performedBy.trim() ? { performedBy: performedBy.trim() } : {}),
       ...(isWater && temperature ? { temperature: parseFloat(temperature) } : {}),
       ...(isHotTub && ph ? { phValue: Number(ph) } : {}),
       ...(isHotTub && sanitiser ? { sanitiserLevel: Number(sanitiser) } : {}),
@@ -232,14 +287,7 @@ export default function CheckFormScreen() {
     mutate(body);
   }
 
-  const moduleTitle = isFire
-    ? 'FireTrack'
-    : isWater
-    ? 'LegionellaTrack'
-    : isHotTub
-    ? 'HotTubTrack'
-    : 'KitchenTrack';
-  const moduleColor = isFire ? '#f97316' : isWater ? '#0ea5e9' : isHotTub ? '#06b6d4' : '#eab308';
+  const moduleColor =isFire ? '#f97316' : isWater ? '#0ea5e9' : isHotTub ? '#06b6d4' : '#eab308';
 
   if (isKitchen) {
     return <KitchenTemperatureForm />;
@@ -267,6 +315,13 @@ export default function CheckFormScreen() {
           {moduleTitle}
         </Text>
       </View>
+      <UnsentSubmissions
+        drafts={unsent.drafts}
+        disabled={isPending}
+        onRetry={(draft) => mutate(draft.body)}
+        onDiscard={(draft) => { void unsent.discard(draft.id); }}
+        note="Retry sends the check exactly as it was saved, with its original date."
+      />
       {(isFire || isWater) && (
         <TouchableOpacity
           style={[styles.controlsLink, { borderColor: colors.border, backgroundColor: colors.card }]}
@@ -330,16 +385,7 @@ export default function CheckFormScreen() {
         <Text style={[styles.label, { color: colors.foreground }]}>
           Check date
         </Text>
-        <TextInput
-          style={[
-            styles.input,
-            { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card },
-          ]}
-          value={checkDate}
-          onChangeText={setCheckDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={colors.mutedForeground}
-        />
+        <DateStepper value={checkDate} onChange={setCheckDate} testID="check-date" />
       </View>
 
       {/* Result */}
@@ -521,7 +567,10 @@ export default function CheckFormScreen() {
             { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.card },
           ]}
           value={performedBy}
-          onChangeText={setPerformedBy}
+          onChangeText={(value) => {
+            setPerformedByEdited(true);
+            setPerformedBy(value);
+          }}
           placeholder="Name of person who completed the check"
           placeholderTextColor={colors.mutedForeground}
         />
