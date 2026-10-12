@@ -990,7 +990,10 @@ function DailyDiaryTab() {
     }
   };
 
-  const isSubmitted = !!record?.submittedAt;
+  const isFiled = !!record?.submittedAt;
+  // Viewers are read-only: they see the diary locked like a filed one, with no
+  // Add/Save/File actions (the server would refuse them).
+  const isSubmitted = isFiled || user?.role === "client_viewer";
 
   return (
     <div className="space-y-6">
@@ -1004,7 +1007,7 @@ function DailyDiaryTab() {
         <CardHeader className="border-b border-border/50 pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-display">Select Date</CardTitle>
-            {isSubmitted && (
+            {isFiled && (
               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Submitted
@@ -1049,7 +1052,7 @@ function DailyDiaryTab() {
       ) : (
         <>
           {/* Filed banner */}
-          {isSubmitted && record?.submittedAt && (
+          {isFiled && record?.submittedAt && (
             <Card className="border-emerald-200 bg-emerald-50">
               <CardContent className="py-4 px-6 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">

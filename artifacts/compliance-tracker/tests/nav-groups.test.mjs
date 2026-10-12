@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { getNavGroups } from "../src/lib/nav-groups.ts";
 
 function flattenGroups(groups) {
@@ -14,6 +15,7 @@ assert.ok(adminItems.includes("Users"), "Admin should see Users");
 assert.ok(adminItems.includes("Staff Roster"), "Admin should see Staff Roster");
 assert.ok(adminItems.includes("Sites"), "Admin should see Sites");
 assert.ok(adminItems.includes("Feedback inbox"), "Admin should see the feedback inbox");
+assert.ok(adminItems.includes("Categories"), "Admin should see Categories");
 
 // Non-admin user
 const userGroups = getNavGroups({ isConsultant: false, canAdmin: false });
@@ -24,6 +26,26 @@ assert.ok(!userItems.includes("Users"), "User should not see Users");
 assert.ok(!userItems.includes("Staff Roster"), "User should not see Staff Roster");
 assert.ok(!userItems.includes("Sites"), "User should not see Sites");
 assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
+assert.ok(!userItems.includes("Categories"), "Staff and viewers should not see the admin-only Categories page");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
+
+// Every nav link must lead to a route the role can open: App.tsx registers
+// some routes only for admins or consultants, and a link to one is a 404.
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const guardedRoutes = new Map();
+for (const match of appSource.matchAll(/\{(\w+) && <Route path="([^"]+)"/g)) {
+  guardedRoutes.set(match[2], match[1]);
+}
+assert.ok(guardedRoutes.get("/categories") === "canAdmin", "App.tsx should still register /categories for admins only");
+const hrefs = (groups) => groups.flatMap(g => g.items.map(i => i.href));
+for (const href of hrefs(userGroups)) {
+  assert.ok(!guardedRoutes.has(href), `Non-admin nav links to ${href}, which App.tsx only registers when ${guardedRoutes.get(href)}`);
+}
+const clientAdminHrefs = hrefs(getNavGroups({ isConsultant: false, canAdmin: true }));
+for (const href of clientAdminHrefs) {
+  const guard = guardedRoutes.get(href);
+  assert.ok(guard === undefined || guard === "canAdmin" || guard === "canManageContractorEmails",
+    `Client admin nav links to ${href}, which App.tsx only registers when ${guard}`);
+}
 
 console.log("Nav groups visibility regression tests passed.");

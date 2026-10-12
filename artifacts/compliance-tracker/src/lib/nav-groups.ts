@@ -53,7 +53,6 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
-        { href: "/categories", label: "Categories", icon: Tags },
       ],
     },
     {
@@ -120,6 +119,8 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   ];
 
   if (canAdmin) {
+    // The /categories routes are only registered for admins.
+    groups.find(g => g.id === "core")?.items.push({ href: "/categories", label: "Categories", icon: Tags });
     const peopleGroup = groups.find(g => g.id === "people-training");
     if (peopleGroup) {
       peopleGroup.items.push(
