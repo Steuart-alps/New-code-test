@@ -76,7 +76,13 @@ async function main() {
   }
 
   if (SCENARIO === "success") {
-    const invitation = capturedEmails().find((entry) => entry.to === email);
+    // The email is sent in the background after the response, so allow the
+    // capture write a moment to land instead of racing it.
+    let invitation;
+    for (let waitedMs = 0; waitedMs <= 5000 && !invitation; waitedMs += 100) {
+      invitation = capturedEmails().find((entry) => entry.to === email);
+      if (!invitation) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     const appUrl = publicAppUrl();
     check("welcome email is sent to the new account", !!invitation);
     check("welcome email includes the account name", invitation?.html?.includes(`Hi ${name}`));
