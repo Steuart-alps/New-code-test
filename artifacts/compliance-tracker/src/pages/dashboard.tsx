@@ -46,6 +46,8 @@ interface TrackSummary {
   health: TrackHealth;
   badge: string;
   items: TrackItem[];
+  /** Not picked in the setup wizard and not started: listed under "Other modules". */
+  otherModule?: boolean;
 }
 
 interface ChecklistTotals {
@@ -549,7 +551,8 @@ export default function Dashboard() {
     return () => controller.abort();
   }, [load]);
 
-  const enabledTracks   = tracks.filter((t) => t.enabled);
+  const enabledTracks   = tracks.filter((t) => t.enabled && !t.otherModule);
+  const otherTracks     = tracks.filter((t) => t.enabled && t.otherModule);
   const disabledTracks  = tracks.filter((t) => !t.enabled);
 
   // Put actionable modules first; due-soon modules stay visible but follow
@@ -659,7 +662,7 @@ export default function Dashboard() {
 
         {/* Summary bar */}
         {!loading && !error && tracks.length > 0 && (
-          <SummaryBar tracks={tracks} />
+          <SummaryBar tracks={tracks.filter((t) => !t.otherModule)} />
         )}
 
         {/* Track list */}
@@ -673,6 +676,21 @@ export default function Dashboard() {
               />
             ))}
           </div>
+        )}
+
+        {/* Modules not picked in setup and not started yet (collapsed section) */}
+        {!loading && !error && otherTracks.length > 0 && (
+          <details className="group">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground select-none list-none flex items-center gap-1">
+              <ChevronRight className="w-3.5 h-3.5 group-open:rotate-90 transition-transform" />
+              Other modules ({otherTracks.length})
+            </summary>
+            <div className="mt-2 space-y-2">
+              {otherTracks.map((track) => (
+                <TrackRow key={track.trackId} track={track} />
+              ))}
+            </div>
+          </details>
         )}
 
         {/* Disabled tracks (collapsed section) */}

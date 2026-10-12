@@ -114,6 +114,20 @@ async function setupWizard(a, b, viewer) {
   check("setup: save picked modules", (await a("PUT", "/setup/modules", { modules: ["firetrack", "kitchentrack"] })).status === 200);
   check("setup: reject unknown modules", (await a("PUT", "/setup/modules", { modules: ["notatrack"] })).status === 400);
   check("setup: picked modules persist", JSON.stringify((await a("GET", "/setup/state")).data?.modules?.picked) === JSON.stringify(["firetrack", "kitchentrack"]));
+  // Dashboard: modules not picked (and not started) are flagged for the
+  // collapsed "Other modules" section; picked ones and started ones are not.
+  const dashTracks = (await a("GET", "/dashboard/summary")).data?.tracks ?? [];
+  const dashTrack = (id) => dashTracks.find((t) => t.trackId === id);
+  check("setup: picked modules stay in the dashboard list",
+    dashTrack("kitchen")?.otherModule !== true && dashTrack("fire")?.otherModule !== true && dashTrack("daily_am")?.otherModule !== true,
+    JSON.stringify(dashTracks.map((t) => [t.trackId, t.health, t.otherModule])));
+  const unpicked = dashTracks.filter((t) => t.enabled && t.health === "not_started"
+    && !["kitchen", "fire", "daily_am", "daily_pm", "safe"].includes(t.trackId));
+  check("setup: unpicked, not-started modules go under Other modules",
+    unpicked.length > 0 && unpicked.every((t) => t.otherModule === true),
+    JSON.stringify(dashTracks.map((t) => [t.trackId, t.health, t.otherModule])));
+  check("setup: started or failing modules are never moved",
+    dashTracks.filter((t) => t.health !== "not_started" || !t.enabled).every((t) => t.otherModule !== true));
 
   // Step 4: starter checks. Edit one seeded check first: it must be left alone.
   const items = (await a("GET", "/compliance-items")).data ?? [];
