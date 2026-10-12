@@ -7,7 +7,7 @@ import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react"
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { apiFetch as authenticatedApiFetch, withCsrfToken } from "@/lib/api";
+import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -47,7 +47,10 @@ interface DomainState {
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, await withCsrfToken({
+  // Business settings follow the selected business. Billing calls keep their
+  // existing scoping, and account (/auth) calls are not business-scoped.
+  const scoped = path.startsWith("/billing") || path.startsWith("/auth/") ? path : withActiveClient(path, init?.body);
+  const res = await fetch(`${apiBase}${scoped}`, await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,

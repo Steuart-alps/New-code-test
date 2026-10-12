@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { useCanAdmin, useCanEdit } from "@/context/auth-context";
 import { AlertTriangle, CheckCircle2, ClipboardList, FileText, Library, Loader2, Pencil, Plus, Trash2, Wrench, Zap } from "lucide-react";
-import { beginApiMutation, withCsrfToken } from "@/lib/api";
+import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 const baseUrl = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -28,7 +28,8 @@ type Overdue = { id?: number; roomId?: number; roomNumber?: string; area?: strin
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const mutationSucceeded = beginApiMutation(init?.method, `/pat-track${path}`);
-  const response = await fetch(`${baseUrl}/api/pat-track${path}`, await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
+  const response = await fetch(withActiveClient(`${baseUrl}/api/pat-track${path}`, init?.body), await withCsrfToken({ credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } }));
+  notifyAuthStatus(response);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error ?? body?.message ?? `Request failed (${response.status})`);
@@ -37,7 +38,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 async function rootApi<T>(path: string): Promise<T> {
-  const response = await fetch(`${baseUrl}/api${path}`, { credentials: "include" });
+  const response = await fetch(withActiveClient(`${baseUrl}/api${path}`), { credentials: "include" });
+  notifyAuthStatus(response);
   if (!response.ok) throw new Error(`Request failed (${response.status})`);
   return response.json();
 }
