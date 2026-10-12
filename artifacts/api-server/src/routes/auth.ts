@@ -794,7 +794,9 @@ router.post("/auth/register", registrationRateLimit, async (req, res) => {
     return;
   }
 
-  const { name, orgName, email, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  const { name, orgName, email: rawEmail, password, businessType, promoCode, services: requestedServices, bundle } = body.data;
+  // Store addresses in lower case so sign-in and duplicate checks match.
+  const email = rawEmail.trim().toLowerCase();
   // Use the explicitly provided organisation name for the client record; fall
   // back to the user's own name if omitted (e.g. API callers / older clients).
   const clientName = (orgName ?? "").trim() || name;
