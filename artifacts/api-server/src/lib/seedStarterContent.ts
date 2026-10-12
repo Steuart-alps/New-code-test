@@ -154,7 +154,7 @@ function starterFrequency(check: StarterCheck, businessType: string | null | und
   return check.frequencyMonths ?? null;
 }
 
-function starterItemValues(check: StarterCheck, businessType: string | null | undefined) {
+export function starterItemValues(check: StarterCheck, businessType: string | null | undefined) {
   return {
     title: check.title,
     description: check.description,

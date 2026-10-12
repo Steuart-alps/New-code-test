@@ -91,7 +91,7 @@ const runnerLocked = new Set([
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
   "test:track-action-templates", "test:room-track", "test:doc-track-object-acl",
   "test:bike-hire-export", "test:riddor-audit-history",
-  "test:compliance-audit-history", "test:compliance-content", "test:twofa-recovery", "test:fix-track-history",
+  "test:compliance-audit-history", "test:compliance-content", "test:setup-tasks", "test:twofa-recovery", "test:fix-track-history",
   "test:contractor-portal", "test:premises-inspection-date-range",
   "test:pat-dept-isolation", "test:data-deletion-request",
   "test:daily-track-month-history", "test:stored-track-lock",
@@ -146,6 +146,7 @@ const pure = new Set([
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:task-schedule", // run-bundled-unit.sh: pure date arithmetic
   "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
