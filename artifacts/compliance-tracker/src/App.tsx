@@ -35,6 +35,9 @@ const SchedulePage = lazy(() => import("@/pages/schedule"));
 const ItemDetailPage = lazy(() => import("@/pages/item-detail"));
 const FireSafetyPage = lazy(() => import("@/pages/fire-safety"));
 const KitchenPage = lazy(() => import("@/pages/kitchen"));
+const AllergensPage = lazy(() => import("@/pages/allergens"));
+const CoshhRegisterPage = lazy(() => import("@/pages/coshh-register"));
+const AsbestosRegisterPage = lazy(() => import("@/pages/asbestos-register"));
 const LegionellaPage = lazy(() => import("@/pages/legionella"));
 const FixTrackPage = lazy(() => import("@/pages/fix-track"));
 const FixTrackDetailPage = lazy(() => import("@/pages/fix-track-detail"));
@@ -193,6 +196,9 @@ function ProtectedRoutes() {
       <Route path="/items/:id" component={ItemDetailPage} />
       <Route path="/fire-safety" component={FireSafetyPage} />
       <Route path="/kitchen" component={KitchenPage} />
+      <Route path="/allergens" component={AllergensPage} />
+      <Route path="/coshh" component={CoshhRegisterPage} />
+      <Route path="/asbestos" component={AsbestosRegisterPage} />
       <Route path="/legionella" component={LegionellaPage} />
       <Route path="/safe-track">{() => <Redirect to="/doc-track" />}</Route>
       <Route path="/fix-track" component={FixTrackPage} />

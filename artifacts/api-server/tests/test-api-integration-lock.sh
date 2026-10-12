@@ -127,6 +127,7 @@ const freshSchema = new Set([
   "test:client-data-deletion-feedback",
   "test:retention-clock",
   "test:train-track-roster-identity",
+  "test:registers", // allergen, COSHH and asbestos registers on the private cluster
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
 const pure = new Set([

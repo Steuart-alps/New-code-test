@@ -28,6 +28,9 @@ assert.ok(!userItems.includes("Sites"), "User should not see Sites");
 assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
 assert.ok(!userItems.includes("Categories"), "Staff and viewers should not see the admin-only Categories page");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
+assert.ok(userItems.includes("COSHH Register") && userItems.includes("Asbestos Register"), "Core registers are visible to every role");
+const allergens = userGroups.flatMap(g => g.items).find(i => i.label === "Allergens");
+assert.equal(allergens?.serviceKey, "kitchentrack", "Allergen records sit under the KitchenTrack entitlement");
 
 // Every nav link must lead to a route the role can open: App.tsx registers
 // some routes only for admins or consultants, and a link to one is a 404.

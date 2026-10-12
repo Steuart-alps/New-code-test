@@ -121,3 +121,5 @@ export * from "./two-factor-reset-notifications";
 export * from "./train-track";
 export * from "./analytics-events";
 export * from "./scheduled-jobs";
+
+export * from "./registers";

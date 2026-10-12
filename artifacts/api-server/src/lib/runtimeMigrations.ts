@@ -1823,6 +1823,111 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "trial_ended_email_sent_at" timestamp`);
 
+    // ---- Site registers (Oct 2026): allergens, COSHH, asbestos ----
+    // Schema: lib/db/src/schema/registers.ts. Rows are soft-deleted
+    // (deleted_at); allergen_item_changes is the append-only tick change log.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_items" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "name" text NOT NULL,
+        "description" text,
+        "allergens" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "ppds" boolean NOT NULL DEFAULT false,
+        "last_reviewed_at" date,
+        "reviewed_by" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_items_client_site_idx" ON "allergen_items" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "allergen_item_changes" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "item_id" integer NOT NULL REFERENCES "allergen_items"("id") ON DELETE CASCADE,
+        "change_type" text NOT NULL,
+        "allergens_before" jsonb,
+        "allergens_after" jsonb,
+        "reason" text,
+        "changed_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "changed_by_name" text,
+        "created_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "allergen_item_changes_item_idx" ON "allergen_item_changes" ("client_id", "item_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "coshh_substances" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "product_name" text NOT NULL,
+        "supplier" text,
+        "hazard_pictograms" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "where_used" text,
+        "sds_object_path" text,
+        "sds_file_name" text,
+        "sds_file_size" bigint,
+        "sds_mime_type" text,
+        "assessment_date" date,
+        "review_due" date,
+        "controls" text,
+        "status" text NOT NULL DEFAULT 'in_use',
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "coshh_substances_client_site_idx" ON "coshh_substances" ("client_id", "site_id")`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_records" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+        "built_before_2000" text NOT NULL DEFAULT 'unknown',
+        "no_asbestos_expected" boolean NOT NULL DEFAULT false,
+        "survey_type" text,
+        "survey_date" date,
+        "surveyor" text,
+        "report_object_path" text,
+        "report_file_name" text,
+        "report_file_size" bigint,
+        "report_mime_type" text,
+        "plan_review_due" date,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    // One current (not deleted) asbestos record per site.
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "asbestos_records_current_site_uq" ON "asbestos_records" ("client_id", "site_id") WHERE "deleted_at" IS NULL AND "site_id" IS NOT NULL`);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_register_entries" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_id" integer NOT NULL REFERENCES "asbestos_records"("id") ON DELETE CASCADE,
+        "location" text NOT NULL,
+        "material" text NOT NULL,
+        "condition" text NOT NULL DEFAULT 'good',
+        "risk_score" integer,
+        "priority" text NOT NULL DEFAULT 'low',
+        "action" text NOT NULL DEFAULT 'manage',
+        "last_inspected" date,
+        "notes" text,
+        "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now(),
+        "deleted_at" timestamp
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_register_entries_record_idx" ON "asbestos_register_entries" ("client_id", "record_id")`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

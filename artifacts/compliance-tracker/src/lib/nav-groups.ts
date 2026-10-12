@@ -27,7 +27,10 @@ import {
   FileCheck2,
   BedDouble,
   Tractor,
-  Inbox
+  Inbox,
+  Wheat,
+  FlaskConical,
+  ShieldAlert
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -64,6 +67,8 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
+        { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical },
+        { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
       ],
     },
     {
@@ -72,6 +77,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       defaultOpen: false,
       items: [
         { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+        { href: "/allergens",      label: "Allergens",       icon: Wheat,           serviceKey: "kitchentrack" },
         { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
         { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
       ],
