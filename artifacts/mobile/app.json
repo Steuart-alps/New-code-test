@@ -1,16 +1,21 @@
 {
   "expo": {
-    "name": "ComplyTrack Mobile",
-    "slug": "mobile",
+    "name": "ComplyTrack",
+    "slug": "complytrack",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "complytrack",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "uk.co.alpsconsultancy.complytrack",
+      "buildNumber": "1"
     },
-    "android": {},
+    "android": {
+      "package": "uk.co.alpsconsultancy.complytrack",
+      "versionCode": 1
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },

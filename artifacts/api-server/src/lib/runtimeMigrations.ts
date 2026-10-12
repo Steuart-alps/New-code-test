@@ -1619,6 +1619,18 @@ export async function runRuntimeMigrations() {
       await db.execute(statement);
     }
 
+    // ---- Daily checklist mobile outbox replays ----
+    // The mobile app queues AM/PM checklist submissions offline under a stable
+    // device entry ID. Storing it lets POST recognise a replay of a submission
+    // it already applied (after a lost response) instead of answering 409.
+    // Nullable: web submissions carry none.
+    await db.execute(sql`ALTER TABLE "daily_checklist_submissions" ADD COLUMN IF NOT EXISTS "client_entry_id" text`);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_daily_checklist_submissions_client_entry_id"
+      ON "daily_checklist_submissions" ("client_id", "client_entry_id")
+      WHERE "client_entry_id" IS NOT NULL
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

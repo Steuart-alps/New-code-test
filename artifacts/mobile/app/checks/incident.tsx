@@ -23,8 +23,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { useUnsentSubmissions } from '@/hooks/useUnsentSubmissions';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { isRetryableFailure } from '@/components/unsent-submission-logic';
 
 const MODULE_COLOR = '#ef4444';
 
@@ -164,10 +167,14 @@ export default function IncidentScreen() {
     ? severity
     : (severities[0] ?? 'minor');
 
+  // Reports that could not be sent (e.g. no signal) are kept on the device.
+  const unsent = useUnsentSubmissions('incident');
+
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch('/api/incidents', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async () => {
+    onSuccess: async (_response, body) => {
+      void unsent.resolve(body);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['incidents', user?.clientId] });
       // Reset form
@@ -192,8 +199,20 @@ export default function IncidentScreen() {
       setShowForm(false);
       Alert.alert('Logged', 'Incident recorded successfully.');
     },
-    onError: (err: Error) => {
+    onError: (err: Error, body) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (isRetryableFailure(err)) {
+        void unsent.record({
+          body,
+          label: `Incident · ${optionLabel(String(body.incidentType ?? ''))} · ${String(body.location ?? '')} · ${String(body.incidentDate)}`,
+          error: err.message || 'Could not send.',
+        });
+        Alert.alert(
+          'Not sent',
+          `${err.message || 'Something went wrong.'}\n\nThe report is saved on this device. Retry it from this screen when you are back online.`,
+        );
+        return;
+      }
       Alert.alert('Error', err.message || 'Something went wrong.');
     },
   });
@@ -292,6 +311,14 @@ export default function IncidentScreen() {
           <View style={{ width: 22 }} />
         </View>
       </View>
+
+      <UnsentSubmissions
+        drafts={unsent.drafts}
+        disabled={isPending}
+        onRetry={(draft) => mutate(draft.body)}
+        onDiscard={(draft) => { void unsent.discard(draft.id); }}
+        note="Retry sends the report exactly as it was saved."
+      />
 
       {/* Log button */}
       <View style={styles.section}>

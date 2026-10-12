@@ -1,4 +1,5 @@
 import { pgTable, serial, text, timestamp, integer, date, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -65,6 +66,9 @@ export const dailyChecklistSubmissionsTable = pgTable("daily_checklist_submissio
   signedOffByName: text("signed_off_by_name"),
   signedOffAt: timestamp("signed_off_at"),
   signOffNotes: text("sign_off_notes"),
+  // Device entry ID sent by the mobile outbox; lets a replayed submission be
+  // recognised as already applied. Not a credential.
+  clientEntryId: text("client_entry_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => [
@@ -74,6 +78,9 @@ export const dailyChecklistSubmissionsTable = pgTable("daily_checklist_submissio
     table.checklistDate,
     table.type,
   ),
+  uniqueIndex("UQ_daily_checklist_submissions_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
 ]);
 
 export type DailyChecklistSubmission = typeof dailyChecklistSubmissionsTable.$inferSelect;
