@@ -18,7 +18,10 @@ const FREQUENCY_DAYS: Record<HotTubCheckType, number> = {
   filter_clean:          7,    // Weekly: filter rinse; deep-clean monthly
   cover_inspection:      7,    // Weekly: check cover condition and seals
   drain_refill:          91,   // Quarterly: full drain, clean and disinfect
-  microbiological_test:  91,   // Quarterly: water sample bacteria test
+  // HSG282: microbiological sampling at least monthly (bacteria), with
+  // Legionella sampling at least quarterly. One check type covers both, so
+  // the default follows the monthly bacteria test.
+  microbiological_test:  30,   // Monthly
   risk_assessment:       365,  // Annual: HSG282 risk assessment review
 };
 router.use("/monitoring-plan", createMonitoringPlanRouter("hot_tub", HOT_TUB_CHECK_TYPES, "frequencyDays"));

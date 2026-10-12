@@ -12,9 +12,9 @@ const router = Router();
 // HSG274 Part 2 Table 2.1 — recommended monitoring, inspection and testing activities
 const CHECK_TYPES = [
   // Temperature monitoring — hot water system
-  "calorifier_temp",       // Weekly:     Calorifier flow/return (≥60°C)
-  "hot_sentinel_temp",     // Monthly:    Hot water sentinel outlets (≥50°C after 1 min)
-  "hot_nonsent_temp",      // Quarterly:  Hot water representative outlets (≥50°C after 1 min)
+  "calorifier_temp",       // Monthly:    Calorifier flow (≥60°C) / return (≥50°C)
+  "hot_sentinel_temp",     // Monthly:    Hot water sentinel outlets (≥50°C after 1 min; ≥55°C in healthcare)
+  "hot_nonsent_temp",      // Quarterly:  Hot water representative outlets (≥50°C after 1 min; ≥55°C in healthcare)
   // Temperature monitoring — cold water system
   "cold_tank_temp",        // Monthly:    Cold water storage temperature (≤20°C)
   "cold_sentinel_temp",    // Monthly:    Cold water sentinel outlets (≤20°C after 2 min)
@@ -29,9 +29,9 @@ const CHECK_TYPES = [
   "outlet_flush",          // Weekly:     Little-used outlet 5-minute flush
 ] as const;
 
-// Frequencies per HSG274 Part 2 Table 2.1
+// Default frequencies, based on HSG274 Part 2 Table 2.1 except where noted
 const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
-  calorifier_temp:       7,    // Weekly
+  calorifier_temp:       7,    // Weekly product default; HSG274 Table 2.1 benchmark is monthly
   hot_sentinel_temp:     30,   // Monthly
   hot_nonsent_temp:      90,   // Quarterly
   cold_tank_temp:        30,   // Monthly
@@ -48,10 +48,39 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
 router.use("/monitoring-plan", createMonitoringPlanRouter("legionella", CHECK_TYPES, "frequencyDays"));
 
 const LEGIONELLA_PROFILE_MODULE = "legionella";
+// calorifier_temp is the flow minimum; readings recorded against a return
+// use CALORIFIER_RETURN_MIN_C (HSG274 Part 2: flow ≥60°C, return ≥50°C).
 const DEFAULT_TEMPERATURE_LIMITS: Record<string, { min?: number; max?: number }> = {
   calorifier_temp: { min: 60 }, hot_sentinel_temp: { min: 50 }, hot_nonsent_temp: { min: 50 },
   cold_tank_temp: { max: 20 }, cold_sentinel_temp: { max: 20 }, cold_nonsent_temp: { max: 20 },
 };
+const CALORIFIER_RETURN_MIN_C = 50;
+// HSG274 Part 2: hot outlets should reach 50°C within a minute, or 55°C in
+// healthcare premises.
+const HEALTHCARE_HOT_OUTLET_MIN_C = 55;
+const HEALTHCARE_BUSINESS_TYPES = new Set(["care_home_healthcare"]);
+
+/** Product default limits for this business: healthcare raises hot outlets to 55°C. */
+function defaultTemperatureLimits(healthcare: boolean): Record<string, { min?: number; max?: number }> {
+  if (!healthcare) return DEFAULT_TEMPERATURE_LIMITS;
+  return {
+    ...DEFAULT_TEMPERATURE_LIMITS,
+    hot_sentinel_temp: { min: HEALTHCARE_HOT_OUTLET_MIN_C },
+    hot_nonsent_temp: { min: HEALTHCARE_HOT_OUTLET_MIN_C },
+  };
+}
+
+/** The business type chosen at signup decides the healthcare hot-water default. */
+async function isHealthcareClient(clientId: number): Promise<boolean> {
+  const result = await db.execute(sql`SELECT business_type FROM clients WHERE id = ${clientId} LIMIT 1`);
+  const businessType = (result.rows as Array<{ business_type: string | null }>)[0]?.business_type;
+  return businessType != null && HEALTHCARE_BUSINESS_TYPES.has(businessType);
+}
+
+/** A calorifier reading is a return reading when its location names the return. */
+function isCalorifierReturn(location: string | null | undefined): boolean {
+  return typeof location === "string" && /\breturn\b/i.test(location);
+}
 const legionellaProfileSchema = z.object({
   systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
   writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
@@ -267,7 +296,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
   const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
-  const breach = legionellaBreach(data.checkType, data.temperature, profile);
+  const breach = legionellaBreach(data.checkType, data.temperature, profile,
+    { healthcare: await isHealthcareClient(clientId), location: data.location });
   const inserted = await db.transaction(async tx => {
     const [row] = await tx.insert(legionellaChecksTable).values({
       clientId, checkType: data.checkType, checkDate: data.checkDate,
@@ -503,7 +533,10 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
   if (existing.checkType.endsWith("_temp") && nextTemperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
-  const breach = legionellaBreach(existing.checkType, nextTemperature, profile);
+  const breach = legionellaBreach(existing.checkType, nextTemperature, profile, {
+    healthcare: await isHealthcareClient(clientId),
+    location: parsed.data.location !== undefined ? parsed.data.location : existing.location,
+  });
   updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
@@ -580,19 +613,23 @@ async function getLegionellaProfile(clientId: number, siteId: number) {
   return row?.profile ?? null;
 }
 
-function legionellaLimits(profile: unknown, checkType: string) {
+function legionellaLimits(profile: unknown, checkType: string, opts: LimitOptions) {
   const configured = profile && typeof profile === "object"
     ? (profile as any).temperatureLimits?.[checkType] : undefined;
-  const limits = DEFAULT_TEMPERATURE_LIMITS[checkType];
+  const limits = checkType === "calorifier_temp" && isCalorifierReturn(opts.location)
+    ? { min: CALORIFIER_RETURN_MIN_C }
+    : defaultTemperatureLimits(opts.healthcare)[checkType];
   return configured && typeof configured === "object"
     ? { min: typeof configured.min === "number" && Number.isFinite(configured.min) ? configured.min : limits?.min,
         max: typeof configured.max === "number" && Number.isFinite(configured.max) ? configured.max : limits?.max }
     : limits;
 }
 
-function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown) {
+type LimitOptions = { healthcare: boolean; location?: string | null };
+
+function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown, opts: LimitOptions) {
   if (temperature == null || !Number.isFinite(temperature)) return null;
-  const limits = legionellaLimits(profile, checkType);
+  const limits = legionellaLimits(profile, checkType, opts);
   if (!limits || (limits.min == null && limits.max == null)) return null;
   if ((limits.min != null && temperature < limits.min) || (limits.max != null && temperature > limits.max)) {
     return { temperature, limits };
@@ -631,7 +668,7 @@ router.get("/config", requireAuth, async (req, res) => {
   }
   const profile = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
   const effectiveTemperatureLimits = Object.fromEntries(
-    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+    Object.entries(defaultTemperatureLimits(await isHealthcareClient(clientId))).map(([checkType, defaults]) => [
       checkType,
       { ...defaults, ...((profile as any)?.temperatureLimits?.[checkType] ?? {}) },
     ]),
@@ -694,7 +731,7 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
   }
   const after = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
   const effectiveTemperatureLimits = Object.fromEntries(
-    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+    Object.entries(defaultTemperatureLimits(await isHealthcareClient(clientId))).map(([checkType, defaults]) => [
       checkType,
       { ...defaults, ...((after as any)?.temperatureLimits?.[checkType] ?? {}) },
     ]),
