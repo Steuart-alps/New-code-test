@@ -2006,6 +2006,56 @@ async function runRuntimeMigrationsOnce() {
     // Existing rows keep the limit they were recorded against.
     await db.execute(sql`ALTER TABLE "food_safety_records" ALTER COLUMN "cooking_limit" SET DEFAULT '75°C or above (core)'`);
 
+    // ---- Push/runtime column parity (Oct 2026) ----
+    // Production's base schema comes from drizzle-kit push, so these tables
+    // already have the Drizzle columns there and the older CREATE TABLE text
+    // above never runs. A database built by runtime migrations alone got the
+    // older column set instead and lacked the columns the routes write
+    // (hot_tubs.description, hot_tub_checks.ph_value, SafeTrack description,
+    // scope, version...). Add them so both paths end with the Drizzle columns.
+    // The older runtime-only columns are left in place; no code reads them.
+    await db.execute(sql`
+      ALTER TABLE "hot_tubs"
+        ADD COLUMN IF NOT EXISTS "description" text
+    `);
+    await db.execute(sql`
+      ALTER TABLE "hot_tub_checks"
+        ADD COLUMN IF NOT EXISTS "ph_value" numeric(4, 2),
+        ADD COLUMN IF NOT EXISTS "sanitiser_level" numeric(6, 2),
+        ADD COLUMN IF NOT EXISTS "temperature" numeric(5, 2)
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_risk_assessments"
+        ADD COLUMN IF NOT EXISTS "description" text,
+        ADD COLUMN IF NOT EXISTS "assessed_by" text,
+        ADD COLUMN IF NOT EXISTS "version" text NOT NULL DEFAULT '1.0',
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_sops"
+        ADD COLUMN IF NOT EXISTS "scope" text,
+        ADD COLUMN IF NOT EXISTS "published_at" timestamp,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    await db.execute(sql`
+      ALTER TABLE "safe_handbook"
+        ADD COLUMN IF NOT EXISTS "section" text,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+    // The runtime CREATE TABLE gave these no default; Drizzle inserts rely on it.
+    await db.execute(sql`ALTER TABLE "safe_sops" ALTER COLUMN "version" SET DEFAULT '1.0'`);
+    await db.execute(sql`ALTER TABLE "safe_handbook" ALTER COLUMN "version" SET DEFAULT '1.0'`);
+    // bike_services has no Drizzle table and was created with performed_by and
+    // cost (pounds), but the BikeTrack service routes and web app have always
+    // used serviced_by, cost_pence (as GreenTrack does) and created_by, so every
+    // service log failed on every database. The old columns are never written.
+    await db.execute(sql`
+      ALTER TABLE "bike_services"
+        ADD COLUMN IF NOT EXISTS "serviced_by" text,
+        ADD COLUMN IF NOT EXISTS "cost_pence" integer,
+        ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

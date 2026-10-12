@@ -789,33 +789,33 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
     if (enabled) {
       try {
         const siteClause = protectedSiteClause;
-        const reviewList = (table: string, overdue: boolean) => db.execute(sql`
-          SELECT id, title, next_review_date FROM ${sql.raw(table)}
-          WHERE client_id = ${clientId} AND next_review_date IS NOT NULL
-            ${overdue ? sql`AND next_review_date < ${today}` : sql`AND next_review_date >= ${today} AND next_review_date <= ${in30}`}
+        // Risk assessments carry one "Review Date" (review_date), the date the
+        // assessment is next due for review. SOPs have no review date, so they
+        // only count towards whether SafeTrack has any records.
+        const reviewList = (overdue: boolean) => db.execute(sql`
+          SELECT id, title, review_date FROM safe_risk_assessments
+          WHERE client_id = ${clientId} AND review_date IS NOT NULL
+            ${overdue ? sql`AND review_date < ${today}` : sql`AND review_date >= ${today} AND review_date <= ${in30}`}
             ${siteClause}
-          ORDER BY next_review_date ASC LIMIT 5
+          ORDER BY review_date ASC LIMIT 5
         `);
-        const reviewCounts = (table: string) => db.execute(sql`
-          SELECT
-            count(*)::int AS total,
-            count(*) FILTER (WHERE next_review_date < ${today})::int AS overdue,
-            count(*) FILTER (WHERE next_review_date >= ${today} AND next_review_date <= ${in30})::int AS due_soon
-          FROM ${sql.raw(table)}
-          WHERE client_id = ${clientId} ${siteClause}
-        `);
-        const [overdueRA, overdueSOPs, dueSoonRA, dueSoonSOPs, raCounts, sopCounts] = await Promise.all([
-          reviewList("safe_risk_assessments", true),
-          reviewList("safe_sops", true),
-          reviewList("safe_risk_assessments", false),
-          reviewList("safe_sops", false),
-          reviewCounts("safe_risk_assessments"),
-          reviewCounts("safe_sops"),
+        const [overdueRA, dueSoonRA, raCounts, sopCounts] = await Promise.all([
+          reviewList(true),
+          reviewList(false),
+          db.execute(sql`
+            SELECT
+              count(*)::int AS total,
+              count(*) FILTER (WHERE review_date < ${today})::int AS overdue,
+              count(*) FILTER (WHERE review_date >= ${today} AND review_date <= ${in30})::int AS due_soon
+            FROM safe_risk_assessments
+            WHERE client_id = ${clientId} ${siteClause}
+          `),
+          db.execute(sql`SELECT count(*)::int AS total FROM safe_sops WHERE client_id = ${clientId} ${siteClause}`),
         ]);
         const ra = rows(raCounts)[0] ?? {};
         const sop = rows(sopCounts)[0] ?? {};
-        const overdueCount = Number(ra.overdue ?? 0) + Number(sop.overdue ?? 0);
-        const dueSoonCount = Number(ra.due_soon ?? 0) + Number(sop.due_soon ?? 0);
+        const overdueCount = Number(ra.overdue ?? 0);
+        const dueSoonCount = Number(ra.due_soon ?? 0);
 
         if (overdueCount > 0) {
           status = "overdue";
@@ -830,16 +830,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
         }
 
         for (const d of rows(overdueRA)) {
-          items.push({ label: d.title, detail: `Risk assessment review overdue since ${d.next_review_date}`, path: "/safe-track" });
-        }
-        for (const d of rows(overdueSOPs)) {
-          items.push({ label: d.title, detail: `SOP review overdue since ${d.next_review_date}`, path: "/safe-track" });
+          items.push({ label: d.title, detail: `Risk assessment review overdue since ${d.review_date}`, path: "/safe-track" });
         }
         for (const d of rows(dueSoonRA)) {
-          items.push({ label: d.title, detail: `Risk assessment review due ${d.next_review_date}`, path: "/safe-track" });
-        }
-        for (const d of rows(dueSoonSOPs)) {
-          items.push({ label: d.title, detail: `SOP review due ${d.next_review_date}`, path: "/safe-track" });
+          items.push({ label: d.title, detail: `Risk assessment review due ${d.review_date}`, path: "/safe-track" });
         }
       } catch (error) {
         ({ status, badge } = unavailable("safe", error));

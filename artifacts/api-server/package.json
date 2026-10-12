@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test:schema:fresh": "bash tests/run-fresh-schema.sh",
+    "test:schema:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh",
+    "test:schema:parity": "bash tests/run-schema-parity.sh",
     "test:train-track-roster-identity": "bash tests/run-fresh-schema.sh tests/train-track-roster-identity.mjs",
     "test:kitchen-mobile-replay": "bash tests/run-fresh-schema.sh tests/kitchen-mobile-replay.mjs",
     "test:kitchen-temperature-actions": "bash tests/run-fresh-schema.sh tests/kitchen-temperature-actions.mjs",
@@ -12,6 +14,7 @@
     "test:kitchen-inspection-export": "bash tests/run-fresh-schema.sh tests/kitchen-inspection-export.mjs",
     "test:kitchen-status-site-scope": "bash tests/run-fresh-schema.sh tests/kitchen-status-site-scope.mjs",
     "test:dashboard-accuracy": "bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",
+    "test:dashboard-accuracy:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/dashboard-accuracy.mjs",
     "test:cleaning-schedule-export": "bash tests/run-fresh-schema.sh tests/cleaning-schedule-export.mjs",
     "test:inspection-pack-calendar": "bash tests/run-fresh-schema.sh tests/inspection-pack-calendar.mjs",
     "test:kitchen-cleaning-export": "bash tests/run-fresh-schema.sh tests/kitchen-cleaning-export.mjs",
