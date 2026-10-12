@@ -57,6 +57,7 @@
     "test:passkey-webauthn": "bash tests/run-passkey-webauthn.sh",
     "test:safe-track-ack-reminders": "bash tests/run-db-workflow.sh tests/safe-track-ack-reminders.mjs",
     "test:doc-track-status": "bash tests/run-doc-track-signoff-status.sh",
+    "test:sign-off-access": "bash tests/run-sign-off-access.sh",
     "test:generic-document-object-acl": "bash tests/run-generic-document-object-acl.sh",
     "test:discounts": "bash tests/run-db-workflow.sh tests/discount-codes.mjs",
     "test:discounts:ci": "bash tests/run-discount-codes.sh",
