@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, dailyManagerSignoffsTable, sitesTable } from "@workspace/db/schema";
-import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, requireAnyEntitlement, SERVICES } from "../lib/services";
 import {
@@ -104,13 +104,45 @@ router.post("/signoffs", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (!(await verifySite(data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
-  const [row] = await db.insert(dailyManagerSignoffsTable).values({
-    clientId, siteId: data.siteId ?? null, signoffDate: data.signoffDate,
-    managerName: data.managerName, notes: data.notes ?? null,
-    submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
-    createdBy: req.currentUser!.id,
-  }).returning();
-  res.status(201).json(row);
+  const siteId = data.siteId ?? null;
+  // One sign-off per client/site/date, so a double submit or retry never adds
+  // a second row. As for checklists (lib/dailyChecklistWrite.ts) there is no
+  // unique index — older databases may hold duplicates — so writers for the
+  // slot are serialised with a transaction-scoped advisory lock. A submitted
+  // row is returned unchanged; an existing draft is updated in place.
+  const result = await db.transaction(async (tx) => {
+    const slot = `daily_manager_signoffs:${clientId}:${siteId ?? "none"}:${data.signoffDate}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${slot}, 0))`);
+    const [existing] = await tx.select().from(dailyManagerSignoffsTable)
+      .where(and(
+        eq(dailyManagerSignoffsTable.clientId, clientId),
+        siteId == null ? isNull(dailyManagerSignoffsTable.siteId) : eq(dailyManagerSignoffsTable.siteId, siteId),
+        eq(dailyManagerSignoffsTable.signoffDate, data.signoffDate),
+      ))
+      .orderBy(sql`${dailyManagerSignoffsTable.submittedAt} IS NULL`, desc(dailyManagerSignoffsTable.id))
+      .limit(1);
+    if (existing?.submittedAt) return { status: 200, row: existing };
+    if (existing) {
+      const [row] = await tx.update(dailyManagerSignoffsTable)
+        .set({
+          managerName: data.managerName,
+          ...(data.notes !== undefined ? { notes: data.notes } : {}),
+          ...(data.submittedAt ? { submittedAt: new Date(data.submittedAt) } : {}),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(dailyManagerSignoffsTable.id, existing.id), eq(dailyManagerSignoffsTable.clientId, clientId)))
+        .returning();
+      return { status: 200, row };
+    }
+    const [row] = await tx.insert(dailyManagerSignoffsTable).values({
+      clientId, siteId, signoffDate: data.signoffDate,
+      managerName: data.managerName, notes: data.notes ?? null,
+      submittedAt: data.submittedAt ? new Date(data.submittedAt) : null,
+      createdBy: req.currentUser!.id,
+    }).returning();
+    return { status: 201, row };
+  });
+  res.status(result.status).json(result.row);
 });
 
 router.put("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
