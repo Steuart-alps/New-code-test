@@ -108,7 +108,9 @@ async function main() {
   const certificateBody = {
     siteId: alphaSite.id,
     roomIds: [alphaRoom.data.id],
-    visitDate: "2025-01-10",
+    // The certificate is updated below; keep its visit inside the correction
+    // window rather than on a fixed day that ages into locked evidence.
+    visitDate: new Date().toISOString().slice(0, 10),
     certificateRef: `ATTACH-${stamp}`,
   };
   const certificate = await owner("POST", "/pat-track/certificates", certificateBody);

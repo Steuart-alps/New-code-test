@@ -16,6 +16,8 @@ const { getDailyEntryCutoffDecision, TRACK_WRITE_PREFIXES } = await import(
 const staff = { role: 'client_staff' };
 const clientAdmin = { role: 'client_admin' };
 const consultant = { role: 'consultant' };
+// Intentionally fixed dates: every decision below passes an explicit clock
+// (this `now` or its own), so the lock boundaries never depend on today's date.
 const now = new Date('2026-09-23T12:00:00.000Z');
 const request = (body, overrides = {}) => ({
   method: 'PUT',

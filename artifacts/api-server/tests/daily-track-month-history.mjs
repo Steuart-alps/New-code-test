@@ -62,6 +62,10 @@ const betaDept = await first.request("POST", "/departments", { name: `Beta ${suf
 const alphaSite = await first.request("POST", "/sites", { name: `Alpha ${suffix}`, departmentId: alphaDept.id });
 const betaSite = await first.request("POST", "/sites", { name: `Beta ${suffix}`, departmentId: betaDept.id });
 const otherSite = await second.request("POST", "/sites", { name: `Other ${suffix}` });
+// Intentionally historical: the month-history view over a past date range is
+// what this suite tests. The owner (a client admin, exempt from the 24-hour
+// record lock) creates every record and staff only read them, so these fixed
+// dates never age into lock results. Do not make them relative to today.
 const submittedAt = "2025-04-10T12:00:00.000Z";
 const checklist = (siteId, checkDate, checklistType, submitted = false) => ({
   siteId, checkDate, checklistType, items: [],

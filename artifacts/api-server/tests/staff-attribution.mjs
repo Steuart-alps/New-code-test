@@ -23,7 +23,11 @@ const main = async () => {
   const roster = await a("POST", "/staff-roster", { name: "Server Snapshot", active: true });
   const other = await b("POST", "/staff-roster", { name: "Other Tenant", active: true });
   const inactive = await a("POST", "/staff-roster", { name: "Inactive Worker", active: false });
-  const base = { checkType: "alarm", checkDate: "2025-01-02", result: "pass", performedBy: "client supplied" };
+  // These records are edited after creation, so date them inside the 24-hour
+  // correction window instead of a fixed day that later ages into a locked one.
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const base = { checkType: "alarm", checkDate: today, result: "pass", performedBy: "client supplied" };
   const created = await a("POST", "/fire-safety", { ...base, staffRosterId: roster.data?.id });
   check("same-tenant create", created.status === 201, `got ${created.status}`);
   check("roster id persists", created.data?.staffRosterId === roster.data?.id, JSON.stringify(created.data));
@@ -39,16 +43,16 @@ const main = async () => {
   const replacement = await a("POST", "/staff-roster", { name: "Replacement Worker", active: true });
   const reassigned = await a("PUT", `/fire-safety/${created.data?.id}`, { staffRosterId: replacement.data?.id });
   check("active reassignment updates snapshot", reassigned.status === 200 && reassigned.data?.staffRosterId === replacement.data?.id && reassigned.data?.performedBy === "Replacement Worker", JSON.stringify(reassigned.data));
-  const cross = await a("POST", "/fire-safety", { ...base, checkDate: "2025-01-03", staffRosterId: other.data?.id });
+  const cross = await a("POST", "/fire-safety", { ...base, staffRosterId: other.data?.id });
   check("cross-tenant roster rejected", cross.status === 400, `got ${cross.status}`);
-  const off = await a("POST", "/fire-safety", { ...base, checkDate: "2025-01-04", staffRosterId: inactive.data?.id });
+  const off = await a("POST", "/fire-safety", { ...base, staffRosterId: inactive.data?.id });
   check("inactive roster rejected", off.status === 400, `got ${off.status}`);
 
   // First-aid create/update coverage: the create route must not depend on a
   // path parameter, and updates must retain immutable historical snapshots.
   const swimRoster = await a("POST", "/staff-roster", { name: "Lifeguard Snapshot", active: true });
   const swimCreated = await a("POST", "/swim-track/first-aid", {
-    checkDate: "2025-01-05",
+    checkDate: today,
     aedOk: false,
     checkedBy: "client supplied",
     checkedByRosterId: swimRoster.data?.id,
@@ -66,7 +70,7 @@ const main = async () => {
     (swimOmitted.data?.checkedByRosterId ?? swimOmitted.data?.checked_by_roster_id) === swimRoster.data?.id &&
     (swimOmitted.data?.checkedBy ?? swimOmitted.data?.checked_by) === "Lifeguard Snapshot", JSON.stringify(swimOmitted.data));
   check("first-aid partial update preserves omitted fields",
-    (swimOmitted.data?.checkDate ?? swimOmitted.data?.check_date) === "2025-01-05" &&
+    (swimOmitted.data?.checkDate ?? swimOmitted.data?.check_date) === today &&
     (swimOmitted.data?.aedOk ?? swimOmitted.data?.aed_ok) === false &&
     swimOmitted.data?.result === "fail", JSON.stringify(swimOmitted.data));
 
@@ -87,12 +91,12 @@ const main = async () => {
     (swimCleared.data?.checkedByRosterId ?? swimCleared.data?.checked_by_roster_id) == null &&
     (swimCleared.data?.checkedBy ?? swimCleared.data?.checked_by) == null, JSON.stringify(swimCleared.data));
   const swimCrossTenant = await a("POST", "/swim-track/first-aid", {
-    checkDate: "2025-01-06",
+    checkDate: today,
     checkedByRosterId: other.data?.id,
   });
   check("first-aid cross-tenant roster rejected", swimCrossTenant.status === 400, `got ${swimCrossTenant.status}`);
   const swimOff = await a("POST", "/swim-track/first-aid", {
-    checkDate: "2025-01-07",
+    checkDate: today,
     checkedByRosterId: inactive.data?.id,
   });
   check("first-aid inactive roster rejected", swimOff.status === 400, `got ${swimOff.status}`);
@@ -102,7 +106,7 @@ const main = async () => {
   const greenReplacement = await a("POST", "/staff-roster", { name: "Green Replacement", active: true });
   const greenMachine = await a("POST", "/green-track/machines", { name: "Attribution Mower", type: "walk_behind" });
   const machineId = greenMachine.data?.id;
-  const preUseBody = { machineId, checkDate: "2025-01-31", operator: "client supplied", operatorRosterId: greenRoster.data?.id };
+  const preUseBody = { machineId, checkDate: today, operator: "client supplied", operatorRosterId: greenRoster.data?.id };
   const preUse = await a("POST", "/green-track/pre-use-checks", preUseBody);
   check("GreenTrack pre-use create stores roster snapshot",
     preUse.status === 201 && (preUse.data?.operator_roster_id ?? preUse.data?.operatorRosterId) === greenRoster.data?.id &&
@@ -129,16 +133,16 @@ const main = async () => {
   });
   const greenCases = [
     ["service", "/green-track/service-records",
-      { machineId, serviceDate: "2025-02-01", serviceType: "scheduled", servicedBy: "client supplied", servicedByRosterId: greenRoster.data?.id },
+      { machineId, serviceDate: today, serviceType: "scheduled", servicedBy: "client supplied", servicedByRosterId: greenRoster.data?.id },
       "servicedByRosterId", "servicedBy"],
     ["defect", "/green-track/defects",
-      { machineId, reportDate: "2025-02-02", description: "Loose guard", reportedBy: "client supplied", reportedByRosterId: greenRoster.data?.id },
+      { machineId, reportDate: today, description: "Loose guard", reportedBy: "client supplied", reportedByRosterId: greenRoster.data?.id },
       "reportedByRosterId", "reportedBy"],
     ["PUWER", "/green-track/puwer-inspections",
-      { machineId, inspectionDate: "2025-02-03", inspectorName: "client supplied", inspectorRosterId: greenRoster.data?.id },
+      { machineId, inspectionDate: today, inspectorName: "client supplied", inspectorRosterId: greenRoster.data?.id },
       "inspectorRosterId", "inspectorName"],
     ["fuel", "/green-track/fuel-logs",
-      { machineId, logDate: "2025-02-04", fuelType: "diesel", filledBy: "client supplied", filledByRosterId: greenRoster.data?.id },
+      { machineId, logDate: today, fuelType: "diesel", filledBy: "client supplied", filledByRosterId: greenRoster.data?.id },
       "filledByRosterId", "filledBy"],
   ];
   for (const [label, path, body, idKey, nameKey] of greenCases) {
@@ -180,34 +184,34 @@ const main = async () => {
     }
   };
   await customCreate("Daily AM", "/daily-track-am", [
-    ["omitted roster", { checklistType: "kitchen_opening", checkDate: "2025-03-01", completedBy: "AM Custom Omitted", items: [] }],
-    ["null roster", { checklistType: "premises_opening", checkDate: "2025-03-02", completedBy: "AM Custom Null", staffRosterId: null, items: [] }],
+    ["omitted roster", { checklistType: "kitchen_opening", checkDate: today, completedBy: "AM Custom Omitted", items: [] }],
+    ["null roster", { checklistType: "premises_opening", checkDate: today, completedBy: "AM Custom Null", staffRosterId: null, items: [] }],
   ], "staffRosterId", "completedBy");
   await customCreate("Daily PM", "/daily-track-pm", [
-    ["omitted roster", { checklistType: "kitchen_closing", checkDate: "2025-03-03", completedBy: "PM Custom Omitted", items: [] }],
-    ["null roster", { checklistType: "premises_closing", checkDate: "2025-03-04", completedBy: "PM Custom Null", staffRosterId: null, items: [] }],
+    ["omitted roster", { checklistType: "kitchen_closing", checkDate: today, completedBy: "PM Custom Omitted", items: [] }],
+    ["null roster", { checklistType: "premises_closing", checkDate: today, completedBy: "PM Custom Null", staffRosterId: null, items: [] }],
   ], "staffRosterId", "completedBy");
   await customCreate("Kitchen probe", "/kitchen-weekly/probe", [
-    ["omitted roster", { checkDate: "2025-03-05", checkedBy: "Probe Custom Omitted", probes: [] }],
-    ["null roster", { checkDate: "2025-03-06", checkedBy: "Probe Custom Null", checkedByRosterId: null, probes: [] }],
+    ["omitted roster", { checkDate: today, checkedBy: "Probe Custom Omitted", probes: [] }],
+    ["null roster", { checkDate: yesterday, checkedBy: "Probe Custom Null", checkedByRosterId: null, probes: [] }],
   ], "checkedByRosterId", "checkedBy");
   const room = await a("POST", "/room-track/rooms", { roomNumber: `ATTR-${Date.now()}` });
   check("room fixture creates", room.status === 201, `got ${room.status}: ${JSON.stringify(room.data)}`);
   await customCreate("Room check", "/room-track/checks", [
-    ["omitted roster", { roomId: room.data?.id, checkDate: "2025-03-07", checkedBy: "Room Custom Omitted" }],
-    ["null roster", { roomId: room.data?.id, checkDate: "2025-03-08", checkedBy: "Room Custom Null", checkedByRosterId: null }],
+    ["omitted roster", { roomId: room.data?.id, checkDate: today, checkedBy: "Room Custom Omitted" }],
+    ["null roster", { roomId: room.data?.id, checkDate: yesterday, checkedBy: "Room Custom Null", checkedByRosterId: null }],
   ], "checkedByRosterId", "checkedBy");
   await customCreate("Pest visit", "/pest-track/visits", [
-    ["omitted roster", { visitDate: "2025-03-09", signedOffBy: "Visit Custom Omitted" }],
-    ["null roster", { visitDate: "2025-03-10", signedOffBy: "Visit Custom Null", signedOffByRosterId: null }],
+    ["omitted roster", { visitDate: today, signedOffBy: "Visit Custom Omitted" }],
+    ["null roster", { visitDate: today, signedOffBy: "Visit Custom Null", signedOffByRosterId: null }],
   ], "signedOffByRosterId", "signedOffBy");
   await customCreate("Pest activity", "/pest-track/activity", [
-    ["omitted roster", { recordedDate: "2025-03-11", recordedBy: "Activity Custom Omitted" }],
-    ["null roster", { recordedDate: "2025-03-12", recordedBy: "Activity Custom Null", recordedByRosterId: null }],
+    ["omitted roster", { recordedDate: today, recordedBy: "Activity Custom Omitted" }],
+    ["null roster", { recordedDate: today, recordedBy: "Activity Custom Null", recordedByRosterId: null }],
   ], "recordedByRosterId", "recordedBy");
   await customCreate("Fire safety", "/fire-safety", [
-    ["omitted roster", { ...base, checkDate: "2025-03-13", performedBy: "Fire Custom Omitted" }],
-    ["null roster", { ...base, checkDate: "2025-03-14", performedBy: "Fire Custom Null", staffRosterId: null }],
+    ["omitted roster", { ...base, performedBy: "Fire Custom Omitted" }],
+    ["null roster", { ...base, performedBy: "Fire Custom Null", staffRosterId: null }],
   ], "staffRosterId", "performedBy");
 
   console.log(`staff attribution: ${passed} passed${failures.length ? `, ${failures.length} failed` : ""}`);
