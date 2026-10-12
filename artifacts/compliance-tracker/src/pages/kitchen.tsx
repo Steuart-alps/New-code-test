@@ -2068,7 +2068,12 @@ export default function KitchenPage() {
             </div>
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          <div className="flex items-center gap-2">
+            <Link href="/allergens">
+              <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>
+            </Link>
+            {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          </div>
         </div>
 
         {/* Check status cards */}

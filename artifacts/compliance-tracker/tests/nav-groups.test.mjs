@@ -25,5 +25,8 @@ assert.ok(!userItems.includes("Staff Roster"), "User should not see Staff Roster
 assert.ok(!userItems.includes("Sites"), "User should not see Sites");
 assert.ok(!userItems.includes("Feedback inbox"), "Staff and viewers should not see internal feedback");
 assert.ok(userItems.includes("FireTrack"), "User should see FireTrack");
+assert.ok(userItems.includes("COSHH Register") && userItems.includes("Asbestos Register"), "Core registers are visible to every role");
+const allergens = userGroups.flatMap(g => g.items).find(i => i.label === "Allergens");
+assert.equal(allergens?.serviceKey, "kitchentrack", "Allergen records sit under the KitchenTrack entitlement");
 
 console.log("Nav groups visibility regression tests passed.");
