@@ -31,7 +31,8 @@ import {
   Wheat,
   FlaskConical,
   ShieldAlert,
-  LayoutGrid
+  LayoutGrid,
+  CalendarDays
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -56,6 +57,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/tasks", label: "Tasks", icon: ClipboardList },
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
       ],

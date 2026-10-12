@@ -76,6 +76,7 @@ const LockedClientsPage = lazy(() => import("@/pages/clients").then(m => ({ defa
 const PortfolioPage = lazy(() => import("@/pages/portfolio"));
 const SetupPage = lazy(() => import("@/pages/setup"));
 const TasksPage = lazy(() => import("@/pages/tasks"));
+const CalendarPage = lazy(() => import("@/pages/calendar"));
 const WaterSafetyPage = lazy(() => import("@/pages/safety-summary").then(m => ({ default: m.WaterSafetyPage })));
 const KioskPage = lazy(() => import("@/pages/staff-kiosk"));
 const StaffSetPinPage = lazy(() => import("@/pages/staff-kiosk").then(m => ({ default: m.StaffSetPinPage })));
@@ -227,6 +228,7 @@ function ProtectedRoutes() {
       <Route path="/premises-track" component={PremisesTrackPage} />
       <Route path="/room-track" component={RoomTrackPage} />
       <Route path="/reports" component={ReportsPage} />
+      <Route path="/calendar" component={CalendarPage} />
       <Route path="/compliance-hub" component={ComplianceHubPage} />
       {canAdmin && <Route path="/setup" component={SetupPage} />}
       <Route path="/tasks" component={TasksPage} />

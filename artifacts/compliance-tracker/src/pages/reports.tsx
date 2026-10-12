@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, ShieldAlert, CheckCircle2, XCircle, Clock, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InspectionPackCard } from "@/components/inspection-pack-card";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1083,6 +1084,7 @@ export default function ReportsPage() {
 
   return (
     <AppLayout title="Reports">
+      <InspectionPackCard />
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="mb-6 flex gap-1 border-b print:hidden">
         {([

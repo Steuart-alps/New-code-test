@@ -51,4 +51,6 @@ for (const href of clientAdminHrefs) {
     `Client admin nav links to ${href}, which App.tsx only registers when ${guard}`);
 }
 
+assert.ok(userItems.includes("Calendar") && adminItems.includes("Calendar"), "Everyone should see the Calendar");
+
 console.log("Nav groups visibility regression tests passed.");
