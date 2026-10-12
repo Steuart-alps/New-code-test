@@ -164,6 +164,9 @@ async function pricingBoundaries({ user, clientId }) {
     if (usedBytes > 0) t.putObject(`${prefix}stored.bin`, { size: usedBytes, owner: String(clientId) });
     for (const name of PRICING_ENV) delete process.env[name];
     Object.assign(process.env, env);
+    // Usage totals come from a reconciled snapshot (storageUsageSnapshot.ts);
+    // the bucket was changed directly, so make this view reconcile it again.
+    await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [clientId]);
     try {
       const response = await user("GET", "/storage/usage");
       if (response.status !== 200) throw new Error(`usage ${response.status} ${JSON.stringify(response.data)}`);
@@ -494,6 +497,8 @@ async function downloadsDisplayedNotBilled(tenantA, pricing, month) {
   const prefix = `private/finalized/tenant-${pricing.clientId}/`;
   t.clearObjects(prefix);
   t.putObject(`${prefix}stored.bin`, { size: 101 * GIB, owner: String(pricing.clientId) });
+  // The bucket was changed directly, so make the next view reconcile it.
+  await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [pricing.clientId]);
   const before = await pricing.user("GET", "/storage/usage");
   await t.recordDownloadBytes(pricing.clientId, 500 * GIB, `heavy-${stamp()}`);
   const after = await pricing.user("GET", "/storage/usage");
@@ -502,6 +507,7 @@ async function downloadsDisplayedNotBilled(tenantA, pricing, month) {
   same("downloads add nothing to the total", [after.data?.estimatedCost?.downloadMinorUnits, after.data?.estimatedCost?.totalMinorUnits], [0, 180]);
 
   t.clearObjects(prefix);
+  await query("DELETE FROM storage_usage_snapshots WHERE client_id = $1", [pricing.clientId]);
   const withinAllowance = await pricing.user("GET", "/storage/usage");
   same("within the allowance, downloads alone cost nothing", [withinAllowance.data?.monthlyDownloadBytes >= 500 * GIB, withinAllowance.data?.estimatedCost?.totalMinorUnits], [true, 0]);
 }

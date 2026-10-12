@@ -332,7 +332,7 @@ export async function reconcileStorageUsage(
           object_count = ${after.objectCount},
           drift_bytes = ${driftBytes},
           drift_objects = ${driftObjects},
-          last_drift_at = CASE WHEN ${driftBytes} <> 0 OR ${driftObjects} <> 0 THEN now() ELSE last_drift_at END,
+          last_drift_at = CASE WHEN ${driftBytes}::bigint <> 0 OR ${driftObjects}::bigint <> 0 THEN now() ELSE last_drift_at END,
           last_failed_at = NULL,
           refresh_lease_token = CASE WHEN refresh_lease_token = ${leaseToken} THEN NULL ELSE refresh_lease_token END,
           refresh_lease_until = CASE WHEN refresh_lease_token = ${leaseToken} THEN NULL ELSE refresh_lease_until END,
