@@ -2698,6 +2698,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notificationSentAt:
           type: string
           format: date-time
@@ -2758,6 +2764,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true
@@ -2797,6 +2809,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true

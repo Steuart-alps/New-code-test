@@ -615,7 +615,7 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Ready to get compliant?</h2>
+          <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Ready to stay on top of your compliance?</h2>
           <p className="text-muted-foreground text-xl font-light mb-12">
             Start your 14-day free trial. No credit card required. Add your team, invite your H&S consultant, and start logging on day one.
           </p>

@@ -4,6 +4,7 @@ import { useListSites } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
 import { type KitchenCheckState } from "@/lib/kitchen-dashboard-status";
 import { KitchenStatusPill } from "@/components/kitchen-status-pill";
+import { ComplianceChecksDue } from "@/components/compliance-checks-due";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import {
@@ -570,6 +571,8 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        <ComplianceChecksDue siteId={siteId === "all" ? null : Number(siteId)} />
 
         {canAdmin && (
           <SetupChecklist

@@ -33,7 +33,7 @@ interface FormState {
   seedStarterChecks: boolean;
   departmentId: number | null;
 }
-const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: true, departmentId: null };
+const empty: FormState = { name: "", responsiblePerson: "", address: "", phone: "", seedStarterChecks: false, departmentId: null };
 
 export default function SitesPage() {
   const { data: sites = [], isLoading } = useListSites();
@@ -264,9 +264,9 @@ export default function SitesPage() {
                   onChange={e => setForm({ ...form, seedStarterChecks: e.target.checked })}
                 />
                 <span className="text-sm">
-                  <span className="font-medium">Pre-populate with starter compliance checks</span>
+                  <span className="font-medium">Add starter compliance checks to this site</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    Adds the standard Fire Safety, Electrical, Staff Training and Premises checks to this site. You can edit or remove any of them afterwards.
+                    Adds example gas, fire, electrical, lifting equipment (LOLER), legionella, asbestos, pressure system, air conditioning and insurance checks, without due dates. Starter checks your business already has that aren't assigned to a site are moved to this site instead of copied. Set each due date from your last service and remove any that don't apply.
                   </span>
                 </span>
               </label>

@@ -25,6 +25,12 @@ export interface ComplianceItem {
   assignedTo?: string | null;
   dueDate?: Date | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notificationSentAt?: Date | null;
   completedAt?: Date | null;
   notes?: string | null;

@@ -17,6 +17,9 @@ export const clientsTable = pgTable("clients", {
   // Module keys picked on the pricing page at signup — used to pre-tick the
   // post-trial checkout. `["bundle"]` marks a full-bundle selection.
   selectedServices: jsonb("selected_services").$type<string[]>(),
+  // Business type chosen at signup (e.g. "care_home_healthcare"); drives
+  // business-specific starter checks and healthcare water temperature defaults.
+  businessType: text("business_type"),
   trialReminderSentAt: timestamp("trial_reminder_sent_at"),
   // Claimed before cancellation cutoff warnings are delivered. Kept separate
   // from trial reminders because paid access can end independently of a trial.

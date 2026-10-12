@@ -38,6 +38,33 @@ function coerceDates<T extends Record<string, unknown>>(body: T, fields: (keyof 
 }
 const DATE_FIELDS = ["dueDate", "completedAt", "notificationSentAt"] as const;
 
+/** Calendar months after a date (UTC), clamped to the month's last day. */
+function addMonthsUtc(date: Date, months: number): Date {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = start.getUTCDate();
+  start.setUTCDate(1);
+  start.setUTCMonth(start.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+  start.setUTCDate(Math.min(day, lastDay));
+  return start;
+}
+
+/**
+ * Completing a check that has a repeat interval records the completion
+ * (completedAt, plus the audit event written by the caller) and reopens the
+ * check as pending, due the interval after the completion date. A check with
+ * no interval simply stays completed, as before.
+ */
+function completionFields(frequencyMonths: number | null | undefined, completedAt: Date) {
+  if (!frequencyMonths || frequencyMonths < 1) {
+    return { recurring: false as const, fields: { status: "completed" as const, completedAt } };
+  }
+  return {
+    recurring: true as const,
+    fields: { status: "pending" as const, completedAt, dueDate: addMonthsUtc(completedAt, frequencyMonths) },
+  };
+}
+
 function buildItemResponse(
   item: typeof complianceItemsTable.$inferSelect,
   site: typeof sitesTable.$inferSelect | null,
@@ -171,6 +198,10 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     return;
   }
 
+  if (body.frequencyMonths != null && !Number.isInteger(body.frequencyMonths)) {
+    res.status(400).json({ error: "Repeat interval must be a whole number of months" });
+    return;
+  }
   const titleCheck = filterName(body.title);
   if (!titleCheck.ok) {
     res.status(400).json({ error: titleCheck.message });
@@ -206,6 +237,9 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     }
   }
 
+  // A check created as already completed is a completion like any other.
+  const createCompletion = body.status === "completed" ? completionFields(body.frequencyMonths, new Date()).fields : {};
+
   // "All Sites" mode: create one independent compliance check per site so each
   // can have its own certificate, due date, contractor etc.
   if (applyToAllSites) {
@@ -217,7 +251,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
     const { siteId: _ignored, ...rest } = body;
     const inserted = await db
       .insert(complianceItemsTable)
-      .values(sites.map(s => ({ ...rest, siteId: s.id, clientId, updatedAt: new Date() })))
+      .values(sites.map(s => ({ ...rest, ...createCompletion, siteId: s.id, clientId, updatedAt: new Date() })))
       .returning();
 
     const joined = await Promise.all(inserted.map(i => fetchJoinedItem(i.id)));
@@ -233,7 +267,7 @@ router.post("/compliance-items", requireAuth, requireClientAdmin, async (req, re
 
   const [item] = await db
     .insert(complianceItemsTable)
-    .values({ ...body, clientId, updatedAt: new Date() })
+    .values({ ...body, ...createCompletion, clientId, updatedAt: new Date() })
     .returning();
 
   const joined = await fetchJoinedItem(item.id);
@@ -278,6 +312,10 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   const body = UpdateComplianceItemBody.parse(coerceDates(req.body, [...DATE_FIELDS]));
   const user = req.currentUser!;
 
+  if (body.frequencyMonths != null && !Number.isInteger(body.frequencyMonths)) {
+    res.status(400).json({ error: "Repeat interval must be a whole number of months" });
+    return;
+  }
   if (body.title !== undefined) {
     const titleCheck = filterName(body.title);
     if (!titleCheck.ok) {
@@ -322,12 +360,23 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   }
 
   const updateData: Record<string, unknown> = { ...body, updatedAt: new Date() };
-  if (body.status === "completed") updateData.completedAt = new Date();
+  let recurrence: { completedAt: Date; nextDueDate: Date } | null = null;
+  if (body.status === "completed") {
+    // Setting an interval on an already-completed check counts from its
+    // recorded completion rather than from today.
+    const completedAt = existing[0].status === "completed" && existing[0].completedAt
+      ? new Date(existing[0].completedAt) : new Date();
+    const frequency = body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths;
+    const completion = completionFields(frequency, completedAt);
+    Object.assign(updateData, completion.fields);
+    if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
+  }
   else if (body.status) updateData.completedAt = null;
   // A reminder delivered for the old due date does not cover the new one, so
   // the scheduler may remind again for the new cycle.
+  const nextDueDate = updateData.dueDate as Date | null | undefined;
   const previousCycle = existing[0].dueDate ? reminderCycleOf(new Date(existing[0].dueDate)) : null;
-  const nextCycle = body.dueDate === undefined ? previousCycle : body.dueDate ? reminderCycleOf(new Date(body.dueDate)) : null;
+  const nextCycle = nextDueDate === undefined ? previousCycle : nextDueDate ? reminderCycleOf(new Date(nextDueDate)) : null;
   if (nextCycle !== previousCycle) updateData.notificationSentAt = null;
 
   // The item row is updated (and locked) first, then obsolete pending
@@ -341,6 +390,7 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
   await appendAuditEvent(req, {
     clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
     action: "updated", before: existing[0], after: joined!.item,
+    ...(recurrence ? { metadata: { recurringCompletion: recurrence } } : {}),
   });
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });
@@ -401,10 +451,18 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
     }
   }
 
+  const completion = status === "completed" ? completionFields(existing[0].frequencyMonths, new Date()) : null;
+  const statusFields = completion
+    ? {
+        ...completion.fields,
+        // The next due date starts a new reminder cycle.
+        ...(completion.recurring ? { notificationSentAt: null } : {}),
+      }
+    : { status, completedAt: null };
   await db.transaction(async (tx) => {
     await tx
       .update(complianceItemsTable)
-      .set({ status, updatedAt: new Date(), completedAt: status === "completed" ? new Date() : null })
+      .set({ ...statusFields, updatedAt: new Date() })
       .where(eq(complianceItemsTable.id, id));
     await supersedeStaleReminderCycles(tx, existing[0].clientId, id);
   });
@@ -413,6 +471,9 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
   await appendAuditEvent(req, {
     clientId: existing[0].clientId, entityType: "compliance_item", entityId: id,
     action: "status_changed", before: existing[0], after: joined!.item,
+    ...(completion?.recurring
+      ? { metadata: { recurringCompletion: { completedAt: completion.fields.completedAt, nextDueDate: completion.fields.dueDate } } }
+      : {}),
   });
   res.json(buildItemResponse(joined!.item, joined!.site, joined!.category, joined!.contractor));
 });

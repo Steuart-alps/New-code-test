@@ -176,7 +176,7 @@ function ConfigDialog() {
   const resetConfig = useResetFoodSafetyConfig();
 
   // Limits tab
-  const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
+  const [cookingLimit, setCookingLimit] = useState("75°C or above (core)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
   const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("scotland");
   const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
@@ -202,7 +202,7 @@ function ConfigDialog() {
 
   useEffect(() => {
     if (!config) return;
-    setCookingLimit(config.food_cooking_limit || "Above 75°C (10 seconds)");
+    setCookingLimit(config.food_cooking_limit || "75°C or above (core)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
     setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "scotland");
     setReheatingLimit(config.food_reheating_limit || "Above 82°C");
@@ -486,7 +486,7 @@ function ConfigDialog() {
             </p>
             <div className="space-y-1.5">
               <Label>Cooking temperature limit</Label>
-              <Input value={cookingLimit} placeholder="Above 75°C (10 seconds)"
+              <Input value={cookingLimit} placeholder="75°C or above (core)"
                 onChange={e => setCookingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Example guidance varies by process and nation; use the critical limit in your documented HACCP system.</p>
             </div>
@@ -733,7 +733,7 @@ function DailyDiaryTab() {
   const updateRecord = useUpdateFoodSafetyRecord();
 
   // ── Derived template values from config ─────────────────────────────────────
-  const cookingLimit = config?.food_cooking_limit || "Above 75°C (10 seconds)";
+  const cookingLimit = config?.food_cooking_limit || "75°C or above (core)";
   const coolingLimit = config?.food_cooling_limit || "8°C within 90 minutes";
   const reheatingLimit = config?.food_reheating_limit || "Above 82°C";
   const hotHoldingLimit = config?.food_hot_holding_limit || "Above 63°C";

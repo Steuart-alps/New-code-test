@@ -264,6 +264,7 @@ export default function ExternalChecksPage() {
                 <div className="flex flex-col">
                   <span className="font-medium">{format(new Date(item.dueDate), "MMM d, yyyy")}</span>
                   {item.leadTimeDays && <span className="text-xs text-muted-foreground flex items-center mt-0.5"><Calendar className="w-3 h-3 mr-1" /> Alert {item.leadTimeDays}d before</span>}
+                  {item.frequencyMonths && <span className="text-xs text-muted-foreground mt-0.5">Repeats every {item.frequencyMonths} month{item.frequencyMonths === 1 ? "" : "s"}</span>}
                   {filterParam === "expired-certs" && item.latestCertExpiryDate && (
                     <span className="text-xs text-red-600 mt-0.5">Cert expired {format(new Date(item.latestCertExpiryDate), "MMM d, yyyy")}</span>
                   )}
@@ -271,6 +272,8 @@ export default function ExternalChecksPage() {
               ) : (
                 filterParam === "expired-certs" && item.latestCertExpiryDate ? (
                   <span className="text-xs text-red-600">Cert expired {format(new Date(item.latestCertExpiryDate), "MMM d, yyyy")}</span>
+                ) : item.status !== "completed" ? (
+                  <span className="text-xs text-muted-foreground italic">Due date not set</span>
                 ) : "-"
               )}
             </td>

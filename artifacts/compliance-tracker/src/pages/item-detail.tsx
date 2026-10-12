@@ -22,7 +22,7 @@ import { apiFetch } from "@/lib/api";
 import { format } from "date-fns";
 import {
   ArrowLeft, Pencil, Trash2, FileText, Plus, ExternalLink,
-  Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User,
+  Briefcase, MapPin, Calendar, Clock, ClipboardList, Mail, User, Repeat,
 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -147,7 +147,18 @@ export default function ItemDetailPage() {
                 <Calendar className="w-4 h-4 mt-0.5 text-muted-foreground" />
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Due Date</p>
-                  <p className="text-sm font-medium">{fmt(item.dueDate)}</p>
+                  <p className="text-sm font-medium">{item.dueDate ? fmt(item.dueDate) : "Not set — enter it from your last service date"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Repeat className="w-4 h-4 mt-0.5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Repeats</p>
+                  <p className="text-sm font-medium">
+                    {item.frequencyMonths
+                      ? `Every ${item.frequencyMonths} month${item.frequencyMonths === 1 ? "" : "s"}`
+                      : "One-off"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -292,7 +303,7 @@ export default function ItemDetailPage() {
               )}
               {item.completedAt && (
                 <div>
-                  <p className="text-xs text-emerald-700">Completed</p>
+                  <p className="text-xs text-emerald-700">{item.status === "completed" ? "Completed" : "Last completed"}</p>
                   <p className="font-medium">{fmt(item.completedAt)}</p>
                 </div>
               )}

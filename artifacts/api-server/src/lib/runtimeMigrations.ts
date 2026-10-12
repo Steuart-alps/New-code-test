@@ -1582,6 +1582,15 @@ export async function runRuntimeMigrations() {
       )
     `);
 
+    // ---- Compliance content fixes (Oct 2026) ----
+    // Optional repeat interval on compliance checks: completing a check with
+    // an interval reopens it, due that many months after completion.
+    await db.execute(sql`ALTER TABLE "compliance_items" ADD COLUMN IF NOT EXISTS "frequency_months" integer`);
+    // Optional RIDDOR 2013 category on incidents (sets the reporting deadline),
+    // snapshotted on each append-only RIDDOR decision event.
+    await db.execute(sql`ALTER TABLE "incidents" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
+    await db.execute(sql`ALTER TABLE "incident_riddor_events" ADD COLUMN IF NOT EXISTS "riddor_category" text`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

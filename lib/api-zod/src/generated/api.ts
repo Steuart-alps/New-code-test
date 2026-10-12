@@ -632,6 +632,10 @@ export const ListComplianceItemsQueryParams = zod.object({
   "contractorId": zod.coerce.number().optional()
 })
 
+export const listComplianceItemsResponseFrequencyMonthsMax = 120;
+
+
+
 export const ListComplianceItemsResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
@@ -649,6 +653,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -663,6 +668,9 @@ export const ListComplianceItemsResponse = zod.array(ListComplianceItemsResponse
  */
 export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
+export const createComplianceItemBodyFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemBody = zod.object({
   "title": zod.string(),
@@ -675,8 +683,13 @@ export const CreateComplianceItemBody = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const createComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -695,6 +708,7 @@ export const CreateComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -709,6 +723,10 @@ export const CreateComplianceItemResponse = zod.object({
 export const GetComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
+
+export const getComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const GetComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -727,6 +745,7 @@ export const GetComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -742,6 +761,10 @@ export const UpdateComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateComplianceItemBodyFrequencyMonthsMax = 120;
+
+
+
 export const UpdateComplianceItemBody = zod.object({
   "title": zod.string().optional(),
   "description": zod.string().nullish(),
@@ -753,8 +776,13 @@ export const UpdateComplianceItemBody = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const updateComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const UpdateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -773,6 +801,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -802,6 +831,10 @@ export const UpdateComplianceItemStatusBody = zod.object({
   "status": zod.enum(['pending', 'in_progress', 'completed', 'overdue'])
 })
 
+export const updateComplianceItemStatusResponseFrequencyMonthsMax = 120;
+
+
+
 export const UpdateComplianceItemStatusResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
@@ -819,6 +852,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),

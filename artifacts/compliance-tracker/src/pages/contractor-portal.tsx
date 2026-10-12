@@ -443,6 +443,12 @@ export default function ContractorPortalPage() {
                 <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png"
                   onChange={e => setCertFile(e.target.files?.[0] ?? null)}
                   className="block w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300" />
+                {/^dbs\b/i.test(certName.trim()) && (
+                  <p className="mt-2 text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2">
+                    DBS certificates contain criminal record information and DBS guidance advises against keeping copies.
+                    Please record the issue date, check type and certificate number instead of uploading a copy.
+                  </p>
+                )}
               </div>
               <button onClick={handleAddCert} disabled={certSaving || !certName.trim()}
                 className="w-full bg-slate-900 text-white rounded-xl py-2.5 font-semibold text-sm hover:bg-slate-800 transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
