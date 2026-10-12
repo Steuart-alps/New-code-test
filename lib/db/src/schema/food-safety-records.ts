@@ -23,7 +23,7 @@ export const foodSafetyRecordsTable = pgTable("food_safety_records", {
   mobileSubmissionReceipts: jsonb("mobile_submission_receipts")
     .$type<{ entryId: string; userId: number; fingerprint: string }[]>()
     .notNull().default([]),
-  cookingLimit: text("cooking_limit").notNull().default("Above 75°C (10 seconds)"),
+  cookingLimit: text("cooking_limit").notNull().default("75°C or above (core)"),
   coolingLimit: text("cooling_limit").notNull().default("8°C within 90 minutes"),
   reheatingLimit: text("reheating_limit").notNull().default("Above 82°C"),
   hotHoldingLimit: text("hot_holding_limit").notNull().default("Above 63°C"),

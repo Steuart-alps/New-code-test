@@ -1054,6 +1054,14 @@ export interface FireSafetyStatus {
   lastResult: FireSafetyStatusLastResult;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
+  /** The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible. */
+  siteId?: number | null;
+  /** Name of the site in siteId. */
+  siteName?: string | null;
+  /** How many visible sites were assessed for this check type. */
+  siteCount?: number;
+  /** How many of those sites are overdue or have never recorded the check. */
+  sitesAffected?: number;
 }
 
 export type FireControlProfileUkNation = typeof FireControlProfileUkNation[keyof typeof FireControlProfileUkNation] | null;

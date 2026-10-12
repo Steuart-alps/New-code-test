@@ -14,6 +14,7 @@ import { requireAuth, getActiveDepartmentId, getClientId } from "../middleware/r
 import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
+import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
 
 const router = Router();
 
@@ -189,22 +190,10 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
   checklistTotals.available = checklistTotalsAvailable;
   if (allSites.length > 0) {
     try {
-      const completed = await db.execute(sql`
-        SELECT
-          site_id,
-          BOOL_OR(checklist_type IN ('kitchen_opening', 'premises_opening')) FILTER (WHERE submitted_at IS NOT NULL) AS am_submitted,
-          BOOL_OR(checklist_type IN ('kitchen_closing', 'premises_closing')) FILTER (WHERE submitted_at IS NOT NULL) AS pm_submitted
-        FROM daily_checklists
-        WHERE client_id = ${clientId}
-          AND check_date = ${today}
-          AND site_id IN (${sql.join(allSites.map((site) => sql`${site.id}`), sql`, `)})
-        GROUP BY site_id
-      `);
-      for (const row of rows(completed)) {
-        checklistCompletionBySite.set(Number(row.site_id), {
-          am: row.am_submitted === true || row.am_submitted === "true",
-          pm: row.pm_submitted === true || row.pm_submitted === "true",
-        });
+      // Web (daily_checklists) and mobile (daily_checklist_submissions) both count.
+      const completed = await getDailyChecklistCompletionBySite(clientId, today, allSites.map((site) => site.id));
+      for (const [completedSiteId, complete] of completed) {
+        checklistCompletionBySite.set(completedSiteId, complete);
       }
       checklistTotalsAvailable = true;
       checklistTotals.available = true;
@@ -1183,7 +1172,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       }
     }
 
-    return { trackId: "swim", label: "AquaTrack", path: "/swim-track", enabled, status, badge, items };
+    return { trackId: "swim", label: "AquaTrack sessions", path: "/swim-track", enabled, status, badge, items };
   };
 
   // ── IncidentTrack ─────────────────────────────────────────────────────────────
@@ -1243,7 +1232,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       enabled: entitled("firetrack"), daysDetail: true }),
     checkAlertTrack({ trackId: "legionella", module: "legionella", label: "LegionellaTrack", path: "/legionella",
       enabled: entitled("legionellatrack"), daysDetail: true }),
-    checkAlertTrack({ trackId: "pool", module: "pool", label: "AquaTrack", path: "/aqua-track",
+    checkAlertTrack({ trackId: "pool", module: "pool", label: "AquaTrack water quality", path: "/aqua-track",
       enabled: entitled("pooltrack"), daysDetail: false }),
     patTrack(),
     pestTrack(),

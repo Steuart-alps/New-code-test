@@ -179,8 +179,8 @@ function ConfigDialog() {
   // Limits tab
   const [cookingLimit, setCookingLimit] = useState("75°C or above (core)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
-  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("scotland");
-  const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
+  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("england_wales");
+  const [reheatingLimit, setReheatingLimit] = useState<string>(REHEATING_LIMITS.england_wales);
   const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
 
   // Sections tab
@@ -205,8 +205,8 @@ function ConfigDialog() {
     if (!config) return;
     setCookingLimit(config.food_cooking_limit || "75°C or above (core)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
-    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "scotland");
-    setReheatingLimit(config.food_reheating_limit || "Above 82°C");
+    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "england_wales");
+    setReheatingLimit(config.food_reheating_limit || REHEATING_LIMITS.england_wales);
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
     setShowColdFood(config.food_show_cold_food !== "false");

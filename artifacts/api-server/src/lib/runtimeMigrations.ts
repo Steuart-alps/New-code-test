@@ -2001,6 +2001,11 @@ async function runRuntimeMigrationsOnce() {
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "UQ_task_completions_task_date" ON "task_completions" ("task_id", "occurrence_date")`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_task_completions_client" ON "task_completions" ("client_id")`);
 
+    // KitchenTrack cooking limit: the column default still held the old
+    // "Above 75°C (10 seconds)" text; match the app's default for new rows.
+    // Existing rows keep the limit they were recorded against.
+    await db.execute(sql`ALTER TABLE "food_safety_records" ALTER COLUMN "cooking_limit" SET DEFAULT '75°C or above (core)'`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

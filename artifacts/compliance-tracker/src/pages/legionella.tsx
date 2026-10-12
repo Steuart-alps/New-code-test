@@ -93,7 +93,7 @@ const TEMPERATURE_TYPES = new Set<LegionellaCheckType>([
 ]);
 
 const TEMP_PLACEHOLDER: Partial<Record<LegionellaCheckType, string>> = {
-  calorifier_temp:    "e.g. 62.0  (target ≥60°C)",
+  calorifier_temp:    "e.g. 62.0  (flow ≥60°C, return ≥50°C)",
   hot_sentinel_temp:  "e.g. 52.0  (target ≥50°C)",
   hot_nonsent_temp:   "e.g. 51.5  (target ≥50°C)",
   cold_tank_temp:     "e.g. 16.0  (target ≤20°C)",

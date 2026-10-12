@@ -241,6 +241,18 @@ try {
   const unavailable = Object.values(allSeeded).filter(track => track.badge === 'Status unavailable');
   assert.deepEqual(unavailable.map(track => track.trackId), [], 'no track query fails');
 
+  // ── Mobile app checklists (daily_checklist_submissions) count too ──────────
+  assert.match(allSeeded.daily_am.badge, /^3 sites not submitted$/, JSON.stringify(allSeeded.daily_am));
+  await q(`INSERT INTO daily_checklist_submissions (client_id, site_id, checklist_date, type, submitted_at)
+           VALUES ($1, $2, $3, 'am', now())`, [c, siteB.id, today]);
+  const mobileSite = await summary(`?siteId=${siteB.id}`);
+  assert.equal(mobileSite.daily_am.status, 'ok', `a mobile-only AM checklist counts: ${JSON.stringify(mobileSite.daily_am)}`);
+  assert.equal(mobileSite.daily_am.badge, 'All submitted');
+  assert.match(mobileSite.daily_pm.badge, /^1 site not submitted$/, 'the PM period is still open');
+  const mobileAll = await summary();
+  assert.match(mobileAll.daily_am.badge, /^2 sites not submitted$/, JSON.stringify(mobileAll.daily_am));
+  assert.ok(!mobileAll.daily_am.items.some(item => item.label === 'B & Co'), JSON.stringify(mobileAll.daily_am.items));
+
   console.log('Dashboard accuracy tests passed');
 } finally {
   await runtime?.pool?.end().catch(() => {});

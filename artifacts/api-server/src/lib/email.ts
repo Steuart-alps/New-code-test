@@ -74,14 +74,31 @@ export function sanitizeSenderName(name: string | null | undefined): string {
   return (name ?? "").replace(/[\r\n"<>\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
 }
 
-function buildFrom(settings: Record<string, string>): string {
+function senderAddress(settings: Record<string, string>): string {
   // A stored address that is not on the business's own domain (e.g. saved
   // before this check existed) falls back to the platform sender.
-  const email = isAllowedTenantSender(settings["smtpFrom"], settings)
+  return isAllowedTenantSender(settings["smtpFrom"], settings)
     ? settings["smtpFrom"].trim()
     : process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+}
+
+function buildFrom(settings: Record<string, string>): string {
   const name = sanitizeSenderName(settings["smtpFromName"]) || "ComplyTrack";
-  return `${name} <${email}>`;
+  return `${name} <${senderAddress(settings)}>`;
+}
+
+/**
+ * The bare address a business's email is sent from (the same validated
+ * sender as sendEmail's From header), e.g. for a calendar invite organiser.
+ * Never the raw stored smtpFrom.
+ */
+export function getSenderEmail(settings: Record<string, string>): string {
+  const address = senderAddress(settings);
+  return address.match(/<([^>]+)>/)?.[1]?.trim() ?? address.trim();
+}
+
+export async function getClientSenderEmail(clientId: number): Promise<string> {
+  return getSenderEmail(await getEmailSettings(clientId));
 }
 
 /**
