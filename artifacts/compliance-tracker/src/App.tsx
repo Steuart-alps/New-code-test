@@ -73,6 +73,7 @@ const DailyHistoryPage = lazy(() => import("@/pages/daily-history"));
 const StaffTrainingPage = lazy(() => import("@/pages/staff-training"));
 const ClientsPage = lazy(() => import("@/pages/clients"));
 const LockedClientsPage = lazy(() => import("@/pages/clients").then(m => ({ default: m.LockedClientsPage })));
+const PortfolioPage = lazy(() => import("@/pages/portfolio"));
 const WaterSafetyPage = lazy(() => import("@/pages/safety-summary").then(m => ({ default: m.WaterSafetyPage })));
 const KioskPage = lazy(() => import("@/pages/staff-kiosk"));
 const StaffSetPinPage = lazy(() => import("@/pages/staff-kiosk").then(m => ({ default: m.StaffSetPinPage })));
@@ -178,7 +179,9 @@ function ProtectedRoutes() {
 
   // Logged in — redirect away from public pages
   if (location === "/login" || location === "/") {
-    return <Redirect to="/dashboard" />;
+    // Consultants land on their portfolio, which forwards to the dashboard
+    // unless they manage two or more businesses.
+    return <Redirect to={user.role === "consultant" ? "/portfolio?from=landing" : "/dashboard"} />;
   }
 
   const canAdmin = user.role === "consultant" || user.role === "client_admin";
@@ -234,6 +237,7 @@ function ProtectedRoutes() {
       <Route path="/account-security" component={AccountSecurityPage} />
       {canAdmin && <Route path="/privacy-governance" component={PrivacyGovernancePage} />}
       {isConsultant && <Route path="/clients" component={ClientsPage} />}
+      {isConsultant && <Route path="/portfolio" component={PortfolioPage} />}
       {canAdmin && <Route path="/daily/overview" component={DailyOverviewPage} />}
       <Route path="/daily/am">{() => <DailyChecklistPage type="am" />}</Route>
       <Route path="/daily/pm">{() => <DailyChecklistPage type="pm" />}</Route>

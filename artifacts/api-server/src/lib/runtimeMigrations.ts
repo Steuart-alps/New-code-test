@@ -1928,6 +1928,20 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_register_entries_record_idx" ON "asbestos_register_entries" ("client_id", "record_id")`);
 
+    // ---- Consultant practice branding (Oct 2026) ----
+    // One row per consultant user: practice name and a finalised private logo
+    // object, shown as "Managed by" to the businesses linked to them.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "consultant_branding" (
+        "consultant_user_id" integer PRIMARY KEY REFERENCES "users"("id") ON DELETE CASCADE,
+        "practice_name" text,
+        "logo_object_path" text,
+        "logo_content_type" text,
+        "created_at" timestamp NOT NULL DEFAULT now(),
+        "updated_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

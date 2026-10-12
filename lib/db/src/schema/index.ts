@@ -123,3 +123,5 @@ export * from "./analytics-events";
 export * from "./scheduled-jobs";
 
 export * from "./registers";
+
+export * from "./consultant-branding";

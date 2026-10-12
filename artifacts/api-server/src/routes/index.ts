@@ -58,6 +58,9 @@ import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
 import analyticsRouter from "./analytics";
 import registersRouter from "./registers";
+
+import csvImportsRouter from "./csv-imports";
+import consultantPortfolioRouter from "./consultant-portfolio";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
@@ -146,6 +149,8 @@ router.use(reportsRouter);
 router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
 router.use(feedbackRouter);
+router.use(csvImportsRouter);
+router.use(consultantPortfolioRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
 router.use("/track-actions", trackActionsRouter);

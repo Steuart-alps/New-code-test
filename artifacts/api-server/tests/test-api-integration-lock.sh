@@ -105,7 +105,7 @@ const runnerLocked = new Set([
   "test:compliance-schedule-tokens", "test:compliance-reminder-cycles",
   "test:contractor-draft-tamper", "test:contractor-key-preflight",
   "test:contractor-queue-migration-bounds", "test:staff-invitations",
-  "test:welcome-email",
+  "test:welcome-email", "test:csv-imports-portfolio",
 ]);
 const freshSchema = new Set([
   "test:schema:fresh", "test:kitchen-mobile-replay",
@@ -143,6 +143,7 @@ const pure = new Set([
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
   "test:pattrack-billing", // static catalogue assertions; unique temp bundle
   "test:track-record-lock", // transpiles one middleware module in memory
+  "test:csv-import-lib", // unique temp bundle; pure CSV import helpers
   "test:passkey-mandatory-2fa", // read-only source assertions
   "test:viewer-route-policy", // read-only route source analysis
   "test:storage-usage", // fake storage file objects; unique temp bundle

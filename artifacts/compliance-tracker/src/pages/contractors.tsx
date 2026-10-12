@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { ContractorFormDialog } from "@/components/contractor-form-dialog";
+import { ImportCsvButton } from "@/components/import-csv-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Building, Mail, Phone, ChevronRight, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
@@ -85,6 +86,7 @@ export default function ContractorsPage() {
             <AlertTriangle className="w-4 h-4 mr-2" />
             Missing or expired ({nonCompliantCount})
           </Button>
+          <ImportCsvButton type="contractors" className="h-10" />
         </div>
         {canAdmin && (
           <Button onClick={() => setIsFormOpen(true)} className="shadow-lg shadow-primary/20 w-full sm:w-auto">

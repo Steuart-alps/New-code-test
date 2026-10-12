@@ -178,6 +178,8 @@ app.post(
   }
 );
 
+// Register CSV imports send up to 1,000 rows; every other route keeps the default limit.
+app.use("/api/imports", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
