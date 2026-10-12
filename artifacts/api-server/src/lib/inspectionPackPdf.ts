@@ -1,10 +1,11 @@
 import PDFDocument from "pdfkit";
 import type { Writable } from "node:stream";
 import type { Capped, InspectionPackData, SummaryRow } from "./inspectionPack";
+import { PDF_BOLD_FONT, PDF_REGULAR_FONT } from "./pdfFonts";
 
 // Same fonts and palette as the pest-control and cleaning-schedule registers.
-const REGULAR_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-const BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const REGULAR_FONT = PDF_REGULAR_FONT;
+const BOLD_FONT = PDF_BOLD_FONT;
 const INK = "#111827";
 const MUTED = "#4b5563";
 const RULE = "#9ca3af";
