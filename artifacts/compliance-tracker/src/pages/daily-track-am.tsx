@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
+import { fetchMobileChecklistSubmission, MobileChecklistSubmissionCard, type MobileChecklistSubmission } from "@/components/mobile-checklist-submission-card";
 import { CheckPhotoUploader } from "@/components/check-photo-uploader";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
@@ -11,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckSquare, Square, Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
+import { Sunrise, UtensilsCrossed, Building2, Loader2, Lock, RotateCcw, Settings2 } from "lucide-react";
 import { ChecklistTemplateEditor, type TemplateItem } from "./checklist-template-editor";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -145,7 +148,7 @@ const CHECKLIST_LABELS: Record<string, string> = {
 
 // ── Checklist card ────────────────────────────────────────────────────────────
 
-function ChecklistCard({
+export function ChecklistCard({
   type, siteId, siteName, date, existing, onSaved, canAdmin,
 }: {
   type: string;
@@ -181,6 +184,7 @@ function ChecklistCard({
     : (TEMPLATES[type] ?? []);
 
   const { user } = useAuth();
+  const { toast } = useToast();
   const [items, setItems] = useState<ChecklistItem[]>(existing?.items ?? effectiveDefault);
   const [completedBy, setCompletedBy] = useState(existing?.completedBy ?? user?.name ?? "");
   const [staffRosterId, setStaffRosterId] = useState<number | null>((existing as any)?.staffRosterId ?? null);
@@ -211,13 +215,22 @@ function ChecklistCard({
        items, completedBy: completedBy || null, staffRosterId, managerNote: managerNote || null,
     };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) {
-        await apiFetch(`/daily-track-am/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) });
-      } else {
-        await apiFetch(`/daily-track-am`, { method: "POST", body: JSON.stringify(payload) });
+      const res = existing
+        ? await apiFetch(`/daily-track-am/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(`/daily-track-am`, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
       }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -260,26 +273,7 @@ function ChecklistCard({
                     {item.section}
                   </p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked
-                      ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-                      : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input
-                        value={item.notes ?? ""}
-                        onChange={e => setNote(i, e.target.value)}
-                        placeholder="Optional note…"
-                        className="h-7 text-xs bg-white"
-                        onClick={e => e.stopPropagation()}
-                      />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onToggle={() => toggle(i)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -354,6 +348,7 @@ export default function DailyTrackAmPage() {
   const [date, setDate] = useState(_qs.get("date") ?? today);
   const [siteId, setSiteId] = useState<string>(_qs.get("siteId") ?? "__none__");
   const [checklists, setChecklists] = useState<Checklist[]>([]);
+  const [mobileSubmission, setMobileSubmission] = useState<MobileChecklistSubmission | null>(null);
   const [loading, setLoading] = useState(false);
 
   const selectedSiteId = siteId === "__none__" ? null : Number(siteId);
@@ -368,14 +363,20 @@ export default function DailyTrackAmPage() {
     setLoading(true);
     const params = new URLSearchParams({ date });
     if (selectedSiteId) params.set("siteId", String(selectedSiteId));
-    const r = await apiFetch(`/daily-track-am?${params}`);
+    const [r, mobile] = await Promise.all([
+      apiFetch(`/daily-track-am?${params}`),
+      hasStandaloneDailyTrack ? fetchMobileChecklistSubmission(selectedSiteId, date, "am") : Promise.resolve(null),
+    ]);
     if (r.ok) setChecklists(await r.json());
+    setMobileSubmission(mobile);
     setLoading(false);
-  }, [date, selectedSiteId, activeClientId]);
+  }, [date, selectedSiteId, activeClientId, hasStandaloneDailyTrack]);
 
   useEffect(() => { load(); }, [load]);
 
-  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type);
+  // Without a site filter the list holds every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getChecklist = (type: string) => checklists.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <AppLayout title="DailyTrack AM">
@@ -414,6 +415,7 @@ export default function DailyTrackAmPage() {
         <div className="flex justify-center py-12"><div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full" /></div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {mobileSubmission && <MobileChecklistSubmissionCard submission={mobileSubmission} />}
           {visibleTypes.map(type => (
             <ChecklistCard
               key={type}
