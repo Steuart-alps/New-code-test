@@ -298,7 +298,7 @@ export default function IncidentScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -819,7 +819,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 6,
     gap: 8,
   },
@@ -881,14 +881,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   resultBtn: {
     flexGrow: 1,
     flexBasis: '22%',
@@ -899,7 +899,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

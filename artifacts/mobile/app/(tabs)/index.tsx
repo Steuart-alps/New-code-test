@@ -222,6 +222,8 @@ export default function TodayScreen() {
           <TouchableOpacity
             style={styles.logCheckBtn}
             onPress={() => router.push('/checks' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Log a check"
           >
             <Feather name="plus" size={18} color={colors.navy} />
           </TouchableOpacity>
@@ -503,7 +505,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 4,
     gap: 8,
   },

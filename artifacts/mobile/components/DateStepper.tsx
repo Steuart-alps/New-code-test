@@ -51,7 +51,7 @@ export function DateStepper({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, height: 52 },
+  row: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 6, minHeight: 52 },
   step: { width: 48, height: '100%', alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center' },
   label: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },

@@ -203,6 +203,8 @@ export default function LoginScreen() {
               <TouchableOpacity
                 style={styles.eyeBtn}
                 onPress={() => setShowPw((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={showPw ? 'Hide password' : 'Show password'}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Feather
@@ -400,7 +402,7 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   input: {
-    height: 48,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: 4,
     paddingHorizontal: 14,
@@ -408,7 +410,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
   passwordWrap: {
-    height: 48,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
@@ -442,7 +444,7 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
   btn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',

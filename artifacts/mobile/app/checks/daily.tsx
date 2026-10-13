@@ -105,7 +105,7 @@ export default function DailyChecklistScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <View style={[styles.hero, { backgroundColor: colors.navy }]}>
-        <TouchableOpacity testID="daily-checklist-back" onPress={() => router.back()}><Feather name="arrow-left" size={22} color="#fff" /></TouchableOpacity>
+        <TouchableOpacity testID="daily-checklist-back" accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}><Feather name="arrow-left" size={22} color="#fff" /></TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.heroTitle}>{type === 'am' ? 'Morning' : 'Evening'} checklist</Text>
           <Text style={styles.heroSub}>{new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
@@ -191,8 +191,8 @@ const styles = StyleSheet.create({
   answerCard: { borderWidth: 1, borderRadius: 8, overflow: 'hidden' },
   answerRow: { flexDirection: 'row', padding: 14, gap: 12, alignItems: 'flex-start' },
   question: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20 },
-  note: { borderTopWidth: 1, paddingHorizontal: 14, height: 42, fontFamily: 'Inter_400Regular', fontSize: 13 },
+  note: { borderTopWidth: 1, paddingHorizontal: 14, minHeight: 42, fontFamily: 'Inter_400Regular', fontSize: 13 },
   lockedNote: { borderTopWidth: 1, paddingHorizontal: 14, paddingVertical: 10, fontFamily: 'Inter_400Regular', fontSize: 13 },
-  submit: { height: 52, borderRadius: 6, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 6 },
+  submit: { minHeight: 52, borderRadius: 6, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginTop: 6 },
   submitText: { color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 15 },
 });

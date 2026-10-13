@@ -663,14 +663,14 @@ const styles = StyleSheet.create({
   field: { paddingHorizontal: 16, marginBottom: 20 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 8 },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   typeChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

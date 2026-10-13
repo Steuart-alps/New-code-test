@@ -260,7 +260,7 @@ export default function PatScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -359,7 +359,7 @@ export default function PatScreen() {
                 {appliances.find((item) => item.id === applianceId)?.name}
               </Text>
             </View>
-            <TouchableOpacity testID="pat-close-form" onPress={() => setShowForm(false)}>
+            <TouchableOpacity testID="pat-close-form" accessibilityRole="button" accessibilityLabel="Close test form" onPress={() => setShowForm(false)}>
               <Feather name="x" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 6,
     gap: 8,
   },
@@ -710,14 +710,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   resultBtn: {
     flex: 1,
     paddingVertical: 12,
@@ -727,7 +727,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',
