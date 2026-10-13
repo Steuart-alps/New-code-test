@@ -17,4 +17,6 @@ export interface DashboardStats {
   completionRate: number;
   contractorsCount: number;
   certificatesExpiringSoon: number;
+  /** Checks whose newest certificate is unsatisfactory or has open C1/C2/FI/ID/AR defects (counted as out of compliance). */
+  actionRequired?: number;
 }
