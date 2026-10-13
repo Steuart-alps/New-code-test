@@ -24,6 +24,8 @@ export interface AuthUser {
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
   isDepartmentManager?: boolean;
+  /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
+  platformOperator?: boolean;
 }
 
 export type PasskeyOptions = Record<string, unknown>;

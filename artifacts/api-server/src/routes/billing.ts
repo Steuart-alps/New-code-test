@@ -33,6 +33,7 @@ import {
   hashDiscountCode,
   issueClientDiscountCode,
   normaliseAlpsDiscountCode,
+  redeemAlpsDiscountOnSubscription,
   releaseAlpsDiscountReservation,
   reserveAlpsDiscount,
   verifyClientDiscountCode,
@@ -495,6 +496,45 @@ router.post("/discount-code", requireAuth, requireRole("consultant"), requirePla
     res.status(201).json({ code: result.code, hint: result.hint });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/discount-code/redeem — an existing client that already
+// pays enters the code it was given; the 50% coupon is added to its live
+// subscription from the next invoice (no proration, no refund).
+router.post("/discount-code/redeem", requireAuth, requireRole("consultant", "client_admin"), async (req, res) => {
+  const clientId = getClientId(req);
+  if (!clientId) return res.status(400).json({ error: "No client context" });
+  const discountCode = normaliseAlpsDiscountCode((req.body as { discountCode?: unknown } | undefined)?.discountCode);
+  if (!discountCode || !(await verifyClientDiscountCode(clientId, discountCode))) {
+    return res.status(400).json({ error: "That discount code is not valid for this account." });
+  }
+  if (!isBillingActivationAllowed()) {
+    return res.status(503).json({ error: BILLING_UNVERIFIED_ERROR, billingState: getBillingReadiness().phase });
+  }
+  try {
+    const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId)).limit(1);
+    const subscription = client?.stripeCustomerId ? await findLiveSubscription(client.stripeCustomerId) : null;
+    if (!subscription) {
+      return res.status(409).json({
+        error: "This account has no active subscription yet. Enter the code when you subscribe instead.",
+        hasSubscription: false,
+      });
+    }
+    const stripe = await getUncachableStripeClient();
+    const result = await redeemAlpsDiscountOnSubscription(clientId, hashDiscountCode(discountCode), stripe, subscription);
+    if (result === "invalid") return res.status(400).json({ error: "That discount code is not valid for this account." });
+    if (result !== "applied") {
+      return res.status(409).json({
+        error: result === "pending"
+          ? "A checkout using this account's discount code is in progress. Try again once it completes or expires."
+          : "This account has already used its discount.",
+      });
+    }
+    res.json({ applied: true });
+  } catch (err) {
+    logger.error({ err, clientId }, "Could not apply the ALPS discount to an existing subscription");
+    res.status(502).json({ error: "The discount could not be applied. Nothing was charged; please try again." });
   }
 });
 

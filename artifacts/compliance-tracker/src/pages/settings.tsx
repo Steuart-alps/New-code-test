@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
@@ -1370,6 +1370,52 @@ interface BillingConfig {
   };
 }
 
+// Existing clients who already pay redeem the ALPS discount code they were
+// given here; it takes 50% off from the next invoice.
+function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (path: string) => string; onApplied: () => void }) {
+  const { toast } = useToast();
+  const [code, setCode] = useState("");
+  const [saving, setSaving] = useState(false);
+  const apply = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!code.trim() || saving) return;
+    setSaving(true);
+    try {
+      await apiFetch(billingPath("/billing/discount-code/redeem"), {
+        method: "POST",
+        body: JSON.stringify({ discountCode: code.trim() }),
+      });
+      setCode("");
+      toast({ title: "Discount applied", description: "50% off your subscription from your next invoice." });
+      onApplied();
+    } catch (err: any) {
+      toast({ title: "Couldn't apply the discount", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <form onSubmit={apply} className="rounded-lg border border-border p-4 space-y-2">
+      <label htmlFor="subscription-discount-code" className="block text-sm font-medium">ALPS client discount code</label>
+      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off your subscription from your next invoice.</p>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Input
+          id="subscription-discount-code"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder="ALPS-XXXX-XXXX-XXXX-XXXX"
+          autoComplete="off"
+          spellCheck={false}
+          className="sm:max-w-xs font-mono"
+        />
+        <Button type="submit" variant="outline" disabled={saving || !code.trim()}>
+          {saving ? "Applying…" : "Apply code"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function BillingCard() {
   const { toast } = useToast();
   const { refresh: refreshAuth, activeClientId } = useAuth();
@@ -1601,6 +1647,10 @@ function BillingCard() {
                   </Button>
                 ) : null}
               </div>
+
+              {hasSubscription && canAdmin && billingAvailable && (
+                <SubscriptionDiscountForm billingPath={billingPath} onApplied={fetchConfig} />
+              )}
 
               {!billingAvailable && !hasSubscription && (
                 <div role="status" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">

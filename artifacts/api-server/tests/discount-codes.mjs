@@ -149,6 +149,26 @@ async function main() {
   const legacy = await a.session("POST", "/billing/checkout", { discountCode: "ALPS50" });
   check("checkout: legacy ALPS50 → 400", legacy.status === 400, `got ${legacy.status}`);
 
+  console.log("\n── Existing subscription redemption ──");
+
+  const redeemWrong = await a.session("POST", "/billing/discount-code/redeem", { discountCode: "ALPS-XXXX-XXXX-XXXX-XXXX" });
+  check("redeem: wrong code → 400", redeemWrong.status === 400, `got ${redeemWrong.status}`);
+  const redeemOld = await a.session("POST", "/billing/discount-code/redeem", { discountCode: code1 });
+  check("redeem: replaced code → 400", redeemOld.status === 400, `got ${redeemOld.status}`);
+  const redeemCross = await b.session("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+  check("redeem: other client's code → 400", redeemCross.status === 400, `got ${redeemCross.status}`);
+  // A valid code never reaches Stripe without a live subscription (or while
+  // billing is unverified, as in this Stripe-free test server).
+  const redeemValid = await a.session("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+  check("redeem: valid code without a subscription → 409/503", [409, 503].includes(redeemValid.status), `got ${redeemValid.status}`);
+  const stillAvailable = await a.session("GET", "/billing/discount-code");
+  check("redeem: failed attempt leaves the code available", stillAvailable.data?.status === "available", `got ${stillAvailable.data?.status}`);
+
+  const operatorMe = await a.session("GET", "/auth/me");
+  check("me: operator flagged", operatorMe.data?.user?.platformOperator === true, `got ${operatorMe.data?.user?.platformOperator}`);
+  const ownerMe = await b.session("GET", "/auth/me");
+  check("me: ordinary owner not flagged", ownerMe.data?.user?.platformOperator === false, `got ${ownerMe.data?.user?.platformOperator}`);
+
   console.log("\n── Authorization boundaries ──");
 
   // Client-side roles cannot read or manage codes
@@ -158,6 +178,10 @@ async function main() {
     check(`${role}: GET blocked`, get.status === 403, `got ${get.status}`);
     const post = await sub("POST", "/billing/discount-code");
     check(`${role}: POST blocked`, post.status === 403, `got ${post.status}`);
+    if (role !== "client_admin") {
+      const redeem = await sub("POST", "/billing/discount-code/redeem", { discountCode: code2 });
+      check(`${role}: redeem blocked`, redeem.status === 403, `got ${redeem.status}`);
+    }
   }
 
   // Self-signup owners hold the consultant role but are not platform operators.

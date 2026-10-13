@@ -6,7 +6,7 @@ import { generateSecret, generateToken, verifyToken, keyUri } from "../lib/totp"
 import { getUserWithClientByEmail } from "../lib/auth";
 import { verifyPassword, hashPassword } from "../lib/auth";
 import { getUserById } from "../lib/auth";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, isPlatformOperator } from "../middleware/requireAuth";
 import {
   configureProductionLoginRateLimitStore,
   forgotPasswordEmailRateLimit,
@@ -683,11 +683,11 @@ router.get("/auth/me", async (req, res) => {
   const twoFactorRequired = await isTwoFactorRequired(user);
   if (!user.totpEnabled) {
     if (twoFactorRequired) {
-      res.json({ requires2faSetup: true, user: safeUser });
+      res.json({ requires2faSetup: true, user: { ...safeUser, platformOperator: isPlatformOperator(user) } });
       return;
     }
     res.json({
-      user: { ...safeUser, recoveryCodesRemaining: 0 },
+      user: { ...safeUser, recoveryCodesRemaining: 0, platformOperator: isPlatformOperator(user) },
       client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
     });
     return;
@@ -702,7 +702,7 @@ router.get("/auth/me", async (req, res) => {
     throw new Error("Could not determine remaining recovery codes");
   }
   res.json({
-    user: { ...safeUser, recoveryCodesRemaining },
+    user: { ...safeUser, recoveryCodesRemaining, platformOperator: isPlatformOperator(user) },
     client, billingLocked, services, passkeyCount: passkeys.length, twoFactorRequired,
   });
 });
