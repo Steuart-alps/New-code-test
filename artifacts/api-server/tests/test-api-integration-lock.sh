@@ -161,6 +161,7 @@ const pure = new Set([
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
   "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
   "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
+  "test:trial-lock-allowlist", // unique mkdtemp bundle; stubbed lock lookup, no database
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -191,7 +192,7 @@ const freshRunner = "tests/run-fresh-schema.sh";
 {
   const text = read(freshRunner);
   if (!sourcesLock(freshRunner)) fail(`${freshRunner} must source api-integration-lock.sh`);
-  if (!/^initdb /m.test(text) || !/env -i /.test(text)) {
+  if (!/^(?:pg_as )?initdb /m.test(text) || !/env -i /.test(text)) {
     fail(`${freshRunner} must use a private initdb cluster and scrub the caller's environment`);
   }
 }
@@ -257,6 +258,7 @@ const pureEntrypoints = new Set([
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
   "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
+  "trial-lock-allowlist.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

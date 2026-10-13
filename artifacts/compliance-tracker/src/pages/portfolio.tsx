@@ -163,7 +163,7 @@ function BrandingCard() {
 }
 
 export default function PortfolioPage() {
-  const { setActiveClientId } = useAuth();
+  const { setActiveClientId, billingLocked } = useAuth();
   const [, navigate] = useLocation();
   const search = useSearch();
   const fromLanding = new URLSearchParams(search).get("from") === "landing";
@@ -272,7 +272,7 @@ export default function PortfolioPage() {
           </>
         )}
 
-        <BrandingCard />
+        {!billingLocked && <BrandingCard />}
       </div>
     </AppLayout>
   );

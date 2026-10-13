@@ -177,6 +177,11 @@ function ProtectedRoutes() {
     if (location === "/clients" && user.role === "consultant") {
       return <LockedClientsPage />;
     }
+    // The portfolio read stays open on the server so a consultant can still
+    // see and switch between the businesses they manage.
+    if (location === "/portfolio" && user.role === "consultant") {
+      return <PortfolioPage />;
+    }
     return <TrialEndedPage />;
   }
 
