@@ -1,17 +1,28 @@
 import { Router, type Request } from "express";
 import { db } from "@workspace/db";
 import { appSettingsTable, consultantClientsTable, sitesTable, taskCompletionsTable, tasksTable, usersTable } from "@workspace/db/schema";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { denyViewers, getActiveDepartmentId, getClientId, requireAuth } from "../middleware/requireAuth";
 import { ACCOUNT_TIMEZONE_SETTING, normalizeAccountTimezone } from "../middleware/dailyEntryCutoff";
 import { addDays, isCalendarDay, occursOn, todayIn } from "../lib/taskSchedule";
+import { submittedDailyChecklists } from "../lib/dailyChecklistCompletion";
 
 // Staff tasks: "My tasks today" for staff and task assignment for managers.
 // Managers (consultants, client admins, department managers for their own
 // department's sites) create, assign and edit; staff complete tasks assigned
 // to them or their role group; viewers read only.
+//
+// A task linked to a module whose own record unambiguously covers the task's
+// site and date is done automatically once that record exists (read-time, so
+// web and mobile records both count): dailytrack_am / dailytrack_pm when that
+// site's AM / PM checklist for the day is submitted. Other modules hold many
+// different checks per site and day (fire, water, kitchen...), so their tasks
+// are still ticked by hand.
 const router = Router();
+
+const AUTO_COMPLETE_PERIOD: Partial<Record<string, "am" | "pm">> = { dailytrack_am: "am", dailytrack_pm: "pm" };
+const AUTO_COMPLETE_NOTE = { am: "Done automatically: AM checklist submitted", pm: "Done automatically: PM checklist submitted" } as const;
 
 /** Module keys a task can link to (service keys plus compliance checks). */
 export const TASK_MODULES = [
@@ -37,6 +48,7 @@ const patchSchema = z.object({
   active: z.boolean().optional(),
 }).strict();
 const completeSchema = z.object({ date: day, note: z.string().trim().max(1000).nullable().optional() }).strict();
+const undoSchema = z.object({ date: day }).strict();
 
 type Viewer = NonNullable<Request["currentUser"]>;
 
@@ -53,10 +65,27 @@ function inRoleGroup(user: Viewer, role: string | null): boolean {
   return false;
 }
 
-async function accountToday(clientId: number): Promise<string> {
+async function accountTimezone(clientId: number): Promise<string> {
   const [row] = await db.select({ value: appSettingsTable.value }).from(appSettingsTable)
     .where(and(eq(appSettingsTable.clientId, clientId), eq(appSettingsTable.key, ACCOUNT_TIMEZONE_SETTING)));
-  return todayIn(normalizeAccountTimezone(row?.value));
+  return normalizeAccountTimezone(row?.value);
+}
+
+async function accountToday(clientId: number): Promise<string> {
+  return todayIn(await accountTimezone(clientId));
+}
+
+type ShownCompletion = { completedBy: number | null; completedByName: string; completedAt: Date; note: string | null; automatic: boolean };
+
+/**
+ * Undo a mistaken "Mark done": managers any manual completion of a task they
+ * can see; staff only their own, made today (account time zone). Automatic
+ * completions follow the module record and cannot be undone.
+ */
+function canUndo(user: Viewer, completion: ShownCompletion | null, today: string, timeZone: string): boolean {
+  if (!completion || completion.automatic || user.role === "client_viewer") return false;
+  if (managerScope(user) !== null) return true;
+  return completion.completedBy === user.id && todayIn(timeZone, completion.completedAt) === today;
 }
 
 /** Tasks the user may see: business-wide ones plus sites in their department scope. */
@@ -118,7 +147,7 @@ async function validateScope(user: Viewer, clientId: number, value: { siteId: nu
   return null;
 }
 
-function present(row: VisibleRow, user: Viewer, date: string, completions: Map<string, typeof taskCompletionsTable.$inferSelect>, today: string) {
+function present(row: VisibleRow, user: Viewer, date: string, completions: Map<string, ShownCompletion>, today: string, timeZone: string) {
   const { task } = row;
   // An open one-off task stays on the list after its due date until done.
   const occurrenceDate = task.recurrence === "once" ? task.startsOn : date;
@@ -140,19 +169,52 @@ function present(row: VisibleRow, user: Viewer, date: string, completions: Map<s
     occurrenceDate,
     dueOnDate,
     overdue: task.recurrence === "once" && !completion && task.startsOn < today,
-    completion: completion ? { completedByName: completion.completedByName, completedAt: completion.completedAt, note: completion.note } : null,
+    completion: completion ? { completedByName: completion.completedByName, completedAt: completion.completedAt, note: completion.note, automatic: completion.automatic } : null,
+    canUndo: canUndo(user, completion, today, timeZone),
     assignedToMe: isAssignedTo(user, task),
     canManage: canManageRow(user, row),
     canComplete: user.role !== "client_viewer" && task.active && (isAssignedTo(user, task) || managerScope(user) !== null),
   };
 }
 
-async function completionsFor(taskIds: number[], dates: string[]) {
-  const map = new Map<string, typeof taskCompletionsTable.$inferSelect>();
-  if (!taskIds.length || !dates.length) return map;
-  const rows = await db.select().from(taskCompletionsTable)
-    .where(and(inArray(taskCompletionsTable.taskId, taskIds), inArray(taskCompletionsTable.occurrenceDate, [...new Set(dates)])));
-  for (const row of rows) map.set(`${row.taskId}:${row.occurrenceDate}`, row);
+/** Ticked completions, then automatic ones for occurrences not ticked. */
+async function completionsFor(clientId: number, rows: VisibleRow[], date: string) {
+  const map = new Map<string, ShownCompletion>();
+  const occurrence = (row: VisibleRow) => row.task.recurrence === "once" ? row.task.startsOn : date;
+  const taskIds = rows.map((r) => r.task.id);
+  if (!taskIds.length) return map;
+  const dates = [...new Set(rows.map(occurrence))];
+  const ticked = await db.select().from(taskCompletionsTable)
+    .where(and(inArray(taskCompletionsTable.taskId, taskIds), inArray(taskCompletionsTable.occurrenceDate, dates)));
+  for (const row of ticked) map.set(`${row.taskId}:${row.occurrenceDate}`, { ...row, automatic: false });
+
+  const linked = rows.filter((r) => r.task.module && AUTO_COMPLETE_PERIOD[r.task.module] && r.task.siteId != null
+    && !map.has(`${r.task.id}:${occurrence(r)}`));
+  if (!linked.length) return map;
+  const linkedDates = linked.map(occurrence).sort();
+  const siteIds = [...new Set(linked.map((r) => r.task.siteId!))];
+  const records = (await db.execute(sql`
+    SELECT c.site_id, c.check_date, c.period, min(c.submitted_at) AS submitted_at,
+           (array_agg(u.name ORDER BY c.submitted_at) FILTER (WHERE u.name IS NOT NULL))[1] AS author_name,
+           (array_agg(c.author_id ORDER BY c.submitted_at))[1] AS author_id
+    FROM ${submittedDailyChecklists(clientId, linkedDates[0]!, linkedDates[linkedDates.length - 1]!)} c
+    LEFT JOIN users u ON u.id = c.author_id
+    WHERE c.site_id IN (${sql.join(siteIds.map((id) => sql`${id}`), sql`, `)})
+    GROUP BY c.site_id, c.check_date, c.period
+  `)).rows as Array<{ site_id: number; check_date: string; period: "am" | "pm"; submitted_at: Date | string | null; author_name: string | null; author_id: number | null }>;
+  const byKey = new Map(records.map((r) => [`${r.site_id}:${r.check_date}:${r.period}`, r]));
+  for (const r of linked) {
+    const period = AUTO_COMPLETE_PERIOD[r.task.module!]!;
+    const record = byKey.get(`${r.task.siteId}:${occurrence(r)}:${period}`);
+    if (!record) continue;
+    map.set(`${r.task.id}:${occurrence(r)}`, {
+      completedBy: record.author_id == null ? null : Number(record.author_id),
+      completedByName: record.author_name ?? "Checklist submitted",
+      completedAt: record.submitted_at ? new Date(record.submitted_at) : new Date(),
+      note: AUTO_COMPLETE_NOTE[period],
+      automatic: true,
+    });
+  }
   return map;
 }
 
@@ -165,7 +227,8 @@ router.get("/tasks", requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: "No client context" });
   const query = z.object({ scope: z.enum(["mine", "all"]).default("mine"), date: day.optional() }).safeParse(req.query);
   if (!query.success) return res.status(400).json({ error: query.error.flatten() });
-  const today = await accountToday(clientId);
+  const timeZone = await accountTimezone(clientId);
+  const today = todayIn(timeZone);
   const date = query.data.date ?? today;
   const canManage = managerScope(user) !== null;
   if (query.data.scope === "all" && !canManage && user.role !== "client_viewer") {
@@ -177,8 +240,8 @@ router.get("/tasks", requireAuth, async (req, res) => {
     rows = rows.filter((row) => row.task.active && isAssignedTo(user, row.task)
       && (occursOn(row.task, date) || (row.task.recurrence === "once" && row.task.startsOn < date)));
   }
-  const completions = await completionsFor(rows.map((r) => r.task.id), [date, ...rows.filter((r) => r.task.recurrence === "once").map((r) => r.task.startsOn)]);
-  let tasks = rows.map((row) => present(row, user, date, completions, today));
+  const completions = await completionsFor(clientId, rows, date);
+  let tasks = rows.map((row) => present(row, user, date, completions, today, timeZone));
   // Overdue one-off tasks that were done before the date drop off "mine".
   if (query.data.scope === "mine") tasks = tasks.filter((t) => t.dueOnDate || !t.completion);
   res.json({ date, today, canManage, tasks });
@@ -272,6 +335,29 @@ router.post("/tasks/:id/complete", requireAuth, denyViewers, async (req, res) =>
   }).onConflictDoNothing().returning();
   if (!created) return res.status(409).json({ error: "This task is already marked done" });
   res.status(201).json(created);
+});
+
+// Undo a mistaken "Mark done" for one occurrence (see canUndo).
+router.delete("/tasks/:id/complete", requireAuth, denyViewers, async (req, res) => {
+  const user = req.currentUser!;
+  const clientId = getClientId(req);
+  const id = Number(req.params.id);
+  if (!clientId || !Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid request" });
+  const { clientId: _ignored, ...query } = req.query ?? {};
+  const parsed = undoSchema.safeParse(query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const row = (await visibleTasks(clientId, req)).find((r) => r.task.id === id);
+  if (!row) return res.status(404).json({ error: "Task not found" });
+  const [completion] = await db.select().from(taskCompletionsTable).where(and(
+    eq(taskCompletionsTable.clientId, clientId), eq(taskCompletionsTable.taskId, id),
+    eq(taskCompletionsTable.occurrenceDate, parsed.data.date)));
+  if (!completion) return res.status(404).json({ error: "This task is not marked done" });
+  const timeZone = await accountTimezone(clientId);
+  if (!canUndo(user, { ...completion, automatic: false }, todayIn(timeZone), timeZone)) {
+    return res.status(403).json({ error: "You can only undo your own tasks marked done today. Ask a manager to undo older ones." });
+  }
+  await db.delete(taskCompletionsTable).where(and(eq(taskCompletionsTable.id, completion.id), eq(taskCompletionsTable.clientId, clientId)));
+  res.json({ undone: true, taskId: id, date: parsed.data.date });
 });
 
 export default router;
