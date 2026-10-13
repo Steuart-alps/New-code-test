@@ -113,7 +113,7 @@ const freshSchema = new Set([
   "test:schema:fresh", "test:schema:pushed", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
   "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
-  "test:inspection-pack-calendar", "test:certificate-outcomes",
+  "test:inspection-pack-calendar", "test:certificate-outcomes", "test:checklist-results-fixtrack",
   "test:kitchen-cleaning-export", "test:pat-register-access",
   "test:storage-metering", "test:storage-usage-snapshot",
   "test:content-filter",
