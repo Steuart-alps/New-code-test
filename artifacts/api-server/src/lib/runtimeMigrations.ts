@@ -2093,6 +2093,9 @@ async function runRuntimeMigrationsOnce() {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
 
+    // ---- Track owners and in-app notifications (Oct 2026) ----
+    await migrateTrackOwnersAndNotifications();
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");
@@ -5255,4 +5258,55 @@ export async function migrateComplianceScheduleTokens(): Promise<number> {
     WHERE "schedule_token" IS NOT NULL
     RETURNING id`);
   return migrated.rows.length;
+}
+
+/**
+ * Track owners (who receives a module's reminders) and in-app notifications
+ * (header bell / mobile push). Mirrors lib/db/src/schema/track-notifications.ts
+ * column for column, so pushed and runtime-only databases match.
+ */
+async function migrateTrackOwnersAndNotifications() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "track_owners" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "module" text NOT NULL,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "updated_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_site"
+    ON "track_owners" ("client_id", "module", "site_id") WHERE "site_id" IS NOT NULL
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_track_owners_client_module_all_sites"
+    ON "track_owners" ("client_id", "module") WHERE "site_id" IS NULL
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "user_notifications" (
+      "id" serial PRIMARY KEY,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+      "module" text,
+      "site_id" integer REFERENCES "sites"("id") ON DELETE SET NULL,
+      "kind" text NOT NULL,
+      "title" text NOT NULL,
+      "body" text,
+      "link_path" text,
+      "dedupe_key" text NOT NULL,
+      "created_at" timestamp NOT NULL DEFAULT now(),
+      "read_at" timestamp
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "UQ_user_notifications_user_dedupe"
+    ON "user_notifications" ("user_id", "dedupe_key")
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "IDX_user_notifications_user_client_created"
+    ON "user_notifications" ("user_id", "client_id", "created_at")
+  `);
 }

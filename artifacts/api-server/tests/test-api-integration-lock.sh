@@ -133,6 +133,7 @@ const freshSchema = new Set([
   "test:registers", // allergen, COSHH and asbestos registers on the private cluster
   "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
+  "test:track-notifications", "test:track-notifications:pushed", // in-process app + reminder job (injected clock) on the private cluster
 ]);
 const pure = new Set([
   "test:api-runner-lock", // validates this lock without application resources

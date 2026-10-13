@@ -27,6 +27,7 @@ import {
   type ServiceActionResponseBody,
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
+import { TrackOwnersCard } from "@/components/track-owners-card";
 import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
   record?: string;
@@ -2432,6 +2433,7 @@ export default function SettingsPage() {
         <DataDeletionRequestCard />
         <DepartmentsCard />
         {canAdmin && <RequiredActionTemplatesCard />}
+        <TrackOwnersCard />
         <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
         {canAdmin && <BusinessTypeCard />}

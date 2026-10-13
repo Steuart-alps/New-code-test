@@ -22,6 +22,8 @@
     "test:content-filter": "bash tests/run-fresh-schema.sh tests/content-filter-endpoints.mjs",
     "test:feedback-triage": "bash tests/run-fresh-schema.sh tests/feedback-triage.mjs",
     "test:analytics": "bash tests/run-fresh-schema.sh tests/analytics.mjs",
+    "test:track-notifications": "bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
+    "test:track-notifications:pushed": "FRESH_SCHEMA_BASE=push bash tests/run-fresh-schema.sh tests/track-notifications.mjs",
     "test:client-data-deletion-feedback": "bash tests/run-fresh-schema.sh tests/client-data-deletion-feedback.mjs",
     "test:retention-clock": "bash tests/run-fresh-schema.sh tests/retention-clock.mjs",
     "test:password-reset-fresh-schema": "bash tests/run-fresh-schema.sh tests/password-reset-fresh-schema.mjs",
