@@ -11,7 +11,7 @@ export const checkOutbox = new CheckOutbox({
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
     try {
-      await apiFetch(entry.path, {
+      return await apiFetch(entry.path, {
         method: 'POST',
         body: JSON.stringify(entry.body),
         headers: { Authorization: `Bearer ${token}` },

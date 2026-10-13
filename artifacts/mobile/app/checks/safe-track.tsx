@@ -279,7 +279,7 @@ export default function SafeTrackScreen() {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 16 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>

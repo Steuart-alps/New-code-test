@@ -438,7 +438,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   transitionBtn: {
-    height: 50,
+    minHeight: 50,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

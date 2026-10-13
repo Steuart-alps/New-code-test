@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
@@ -20,8 +20,9 @@ import { useAuth } from '@/lib/auth';
 import { KitchenTemperatureForm } from '@/components/KitchenTemperatureForm';
 import { DateStepper } from '@/components/DateStepper';
 import { UnsentSubmissions } from '@/components/UnsentSubmissions';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
 import { isIsoDate, localIsoDate } from '@/components/date-stepper-logic';
-import { isRetryableFailure } from '@/components/unsent-submission-logic';
 
 // ─── Fire check types ────────────────────────────────────────────────────────
 const FIRE_TYPES = [
@@ -127,7 +128,6 @@ export default function CheckFormScreen() {
   const { type } = useLocalSearchParams<{ type: string }>();
   const colors = useColors();
   const router = useRouter();
-  const qc = useQueryClient();
   const { user } = useAuth();
 
   const isFire = type === 'fire';
@@ -172,7 +172,7 @@ export default function CheckFormScreen() {
     enabled: isHotTub,
   });
 
-  const endpoint = isFire ? '/api/fire-safety' : isHotTub ? '/api/hot-tub' : '/api/legionella';
+  const outboxKind = isFire ? 'fire-check' : isHotTub ? 'hot-tub-check' : 'legionella-check';
 
   const moduleTitle = isFire
     ? 'FireTrack'
@@ -184,43 +184,47 @@ export default function CheckFormScreen() {
   const checkTypeLabel = (value: unknown) =>
     checkTypes.find((ct) => ct.value === value)?.label ?? String(value ?? '');
 
+  // Every check is saved on the device first, then sent; a lost connection
+  // leaves it queued and it is resent automatically under the same entry ID,
+  // which the server recognises (no duplicate check).
+  const outbox = useRecordOutbox(outboxKind);
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async (response: any, body) => {
-      void unsent.resolve(body);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['fire-status'] });
-      qc.invalidateQueries({ queryKey: ['water-status'] });
-      qc.invalidateQueries({ queryKey: ['hot-tub-status'] });
-      qc.invalidateQueries({ queryKey: ['track-controls'] });
-      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      outbox.send(body, `${moduleTitle} · ${checkTypeLabel(body.checkType)} · ${String(body.checkDate)}`),
+    onSuccess: async (outcome, body) => {
+      if (outcome.state === 'rejected') {
+        // Rejected data: the form keeps it so it can be corrected.
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Not accepted', outcome.error);
+        return;
+      }
       // The next check needs its own explicit Pass/Fail choice.
       setFireResult(null);
       setWaterResult(null);
       setHotResult(null);
-      Alert.alert('Logged', `Server outcome: ${response?.result ?? body.result}.`, [
+      if (outcome.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert(
+          'Saved on this device',
+          'No connection right now. The check is saved on this device and will be sent automatically when you are back online.',
+          [
+            { text: 'Done', onPress: () => router.back() },
+            { text: 'Log another', style: 'default' },
+          ],
+        );
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const response = outcome.response as { result?: unknown } | undefined;
+      Alert.alert('Logged', `Server outcome: ${String(response?.result ?? body.result)}.`, [
         { text: 'Done', onPress: () => router.back() },
         { text: 'Log another', style: 'default' },
       ]);
     },
-    onError: (err: Error, body) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      if (!isRetryableFailure(err)) {
-        // Rejected data: the form keeps it so it can be corrected.
-        Alert.alert('Error', err.message);
-        return;
-      }
-      // Keep a device copy so closing this screen cannot lose the typed check.
-      void unsent.record({
-        body,
-        label: `${moduleTitle} · ${checkTypeLabel(body.checkType)} · ${String(body.checkDate)}`,
-        error: err.message || 'Could not send.',
-      });
-      Alert.alert(
-        'Not sent',
-        `${err.message || 'Something went wrong.'}\n\nYour check is saved on this device. Retry it from this screen when you are back online.`,
-      );
+    onError: (err: Error) => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // Nothing was saved (e.g. device storage failed or the account changed).
+      Alert.alert('Not saved', err.message || 'Something went wrong.');
     },
   });
 
@@ -315,12 +319,19 @@ export default function CheckFormScreen() {
           {moduleTitle}
         </Text>
       </View>
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+      {/* Copies saved by earlier app versions: "Send" moves each into the
+          outbox once, so it is then delivered without duplicates. */}
       <UnsentSubmissions
         drafts={unsent.drafts}
         disabled={isPending}
-        onRetry={(draft) => mutate(draft.body)}
+        primaryLabel="Send"
+        onRetry={(draft) => {
+          outbox.adoptLegacy(draft, unsent.discard).catch((err: unknown) =>
+            Alert.alert('Not saved', err instanceof Error ? err.message : 'Try again.'));
+        }}
         onDiscard={(draft) => { void unsent.discard(draft.id); }}
-        note="Retry sends the check exactly as it was saved, with its original date."
+        note="Sends the check exactly as it was saved, with its original date."
       />
       {(isFire || isWater) && (
         <TouchableOpacity
@@ -652,14 +663,14 @@ const styles = StyleSheet.create({
   field: { paddingHorizontal: 16, marginBottom: 20 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 8 },
   input: {
-    height: 46,
+    minHeight: 46,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 14,
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
   },
-  textArea: { height: 88, paddingTop: 12 },
+  textArea: { minHeight: 88, paddingTop: 12 },
   typeChip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -677,7 +688,7 @@ const styles = StyleSheet.create({
   },
   resultBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   submitBtn: {
-    height: 52,
+    minHeight: 52,
     borderRadius: 6,
     flexDirection: 'row',
     alignItems: 'center',

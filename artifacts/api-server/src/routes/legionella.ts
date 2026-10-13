@@ -5,6 +5,7 @@ import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfil
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
 import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
 import { getAccountToday } from "../lib/accountClock";
@@ -148,6 +149,8 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 /** Returns the site row if it belongs to the tenant, or null. */
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
@@ -300,7 +303,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (data.checkType.endsWith("_temp") && data.temperature == null)
@@ -313,21 +316,38 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(legionellaChecksTable)
+    .where(and(eq(legionellaChecksTable.clientId, clientId), eq(legionellaChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
   const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
   const breach = legionellaBreach(data.checkType, data.temperature, profile,
     { healthcare: await isHealthcareClient(clientId), location: data.location, tmvOutlet: await isTmvOutlet(clientId, data.outletId) });
-  const inserted = await db.transaction(async tx => {
-    const [row] = await tx.insert(legionellaChecksTable).values({
-      clientId, checkType: data.checkType, checkDate: data.checkDate,
-      result: breach ? "fail" : data.result,
-      temperature: data.temperature != null ? String(data.temperature) : null,
-      siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
-      performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
-      createdBy: req.currentUser!.id,
-    }).returning();
-    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
-    return row;
-  });
+  let inserted;
+  try {
+    inserted = await db.transaction(async tx => {
+      const [row] = await tx.insert(legionellaChecksTable).values({
+        clientId, checkType: data.checkType, checkDate: data.checkDate,
+        result: breach ? "fail" : data.result,
+        temperature: data.temperature != null ? String(data.temperature) : null,
+        siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
+        performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
+      }).returning();
+      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      return row;
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   // Link to sentinel outlet if provided (column added via runtime migration).
   if (inserted && data.outletId) {

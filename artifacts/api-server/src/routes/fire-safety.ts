@@ -5,6 +5,7 @@ import { fireSafetyChecksTable, sitesTable, appSettingsTable, trackControlProfil
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
 
@@ -40,6 +41,8 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 /** Returns the site row if it belongs to the tenant, or null. */
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
@@ -151,7 +154,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
@@ -162,21 +165,39 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const [inserted] = await db
-    .insert(fireSafetyChecksTable)
-    .values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: data.result,
-      siteId: data.siteId ?? null,
-      location: data.location ?? null,
-      notes: data.notes ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      createdBy: req.currentUser!.id,
-    })
-    .returning();
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
+  let inserted;
+  try {
+    [inserted] = await db
+      .insert(fireSafetyChecksTable)
+      .values({
+        clientId,
+        checkType: data.checkType,
+        checkDate: data.checkDate,
+        result: data.result,
+        siteId: data.siteId ?? null,
+        location: data.location ?? null,
+        notes: data.notes ?? null,
+         performedBy: performer.performedBy,
+         staffRosterId: performer.staffRosterId,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
+      })
+      .returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
   res.status(201).json(inserted);

@@ -555,7 +555,7 @@ export default function GreenTrackScreen() {
     >
       <View style={[styles.header, { backgroundColor: colors.navy, paddingTop: topPad + 14 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity testID="green-back" onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity testID="green-back" accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.backButton}>
             <Feather name="arrow-left" size={22} color="#ffffff" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -925,11 +925,11 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', gap: 7 },
   statusButton: { flex: 1, minHeight: 38, borderWidth: 1, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   statusText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
-  failNote: { height: 43, borderWidth: 1, borderRadius: 8, paddingHorizontal: 11, fontSize: 13, fontFamily: 'Inter_400Regular' },
+  failNote: { minHeight: 43, borderWidth: 1, borderRadius: 8, paddingHorizontal: 11, fontSize: 13, fontFamily: 'Inter_400Regular' },
   fieldLabel: { fontSize: 13, fontFamily: 'Inter_700Bold', marginTop: 6 },
   optional: { color: '#809080', fontFamily: 'Inter_400Regular' },
   fuelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  fuelButton: { minWidth: 72, flexGrow: 1, height: 41, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  fuelButton: { minWidth: 72, flexGrow: 1, minHeight: 41, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   fuelText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   notesInput: { minHeight: 82, borderWidth: 1, borderRadius: 9, paddingHorizontal: 12, paddingTop: 11, fontSize: 13, fontFamily: 'Inter_400Regular' },
   operatorRow: { minHeight: 59, borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
   operatorName: { fontSize: 13, fontFamily: 'Inter_700Bold' },
   operatorMeta: { fontSize: 11, fontFamily: 'Inter_400Regular' },
   signoffHint: { fontSize: 11, lineHeight: 16, fontFamily: 'Inter_400Regular', marginTop: -2 },
-  submitButton: { height: 54, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 5 },
+  submitButton: { minHeight: 54, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 5 },
   submitText: { color: '#ffffff', fontSize: 15, fontFamily: 'Inter_700Bold' },
   submitHint: { textAlign: 'center', fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: -2 },
   disabled: { opacity: 0.48 },

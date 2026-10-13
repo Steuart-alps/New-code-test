@@ -18,6 +18,7 @@ import {
 } from './api';
 import { kitchenOutbox, startKitchenReplay } from './kitchenOutbox';
 import { checkOutbox, startCheckReplay } from './checkOutbox';
+import { deliveredQueryKeys } from './checkOutboxCore';
 import {
   clearOtherPendingIssueUploadRecovery,
   clearPendingIssueUploadRecovery,
@@ -193,11 +194,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await queryClient.invalidateQueries({ queryKey: ['food-safety'] });
   }), [queryClient]);
 
-  useEffect(() => startCheckReplay(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['daily-checklist'] }),
-      queryClient.invalidateQueries({ queryKey: ['daily-overview'] }),
-    ]);
+  useEffect(() => startCheckReplay(async (entry) => {
+    await Promise.all(deliveredQueryKeys(entry.kind).map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey })));
   }), [queryClient]);
 
   useEffect(() => {
