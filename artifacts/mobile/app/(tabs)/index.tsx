@@ -12,12 +12,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
+import { TodayTasks } from '@/components/TodayTasks';
 
 interface Site {
   id: number;
@@ -102,6 +103,7 @@ export default function TodayScreen() {
   const router = useRouter();
   const { user, isOffline } = useAuth();
   const [selectedSiteId, setSelectedSiteId] = useState<number | undefined>();
+  const queryClient = useQueryClient();
 
   const { data: sites } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -163,7 +165,7 @@ export default function TodayScreen() {
   const [refreshing, setRefreshing] = useState(false);
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([refetchFire(), refetchWater(), refetchHotTub(), refetchIssues()]);
+    await Promise.all([refetchFire(), refetchWater(), refetchHotTub(), refetchIssues(), queryClient.invalidateQueries({ queryKey: ['tasks'] })]);
     setRefreshing(false);
   }
 
@@ -286,6 +288,8 @@ export default function TodayScreen() {
           </ScrollView>
         )}
       </View>
+
+      <TodayTasks />
 
       {/* Module status cards */}
       <View style={styles.section}>

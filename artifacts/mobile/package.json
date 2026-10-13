@@ -33,6 +33,7 @@
     "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
     "test:auth-offline": "node tests/auth-offline.mjs",
     "test:store-compliance": "node tests/store-compliance.mjs",
+    "test:today-tasks": "node tests/today-tasks-logic.mjs",
     "export:ios": "node scripts/require-domain.js && rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
     "export:android": "node scripts/require-domain.js && rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
     "validate:production": "node scripts/validate-production.js"
