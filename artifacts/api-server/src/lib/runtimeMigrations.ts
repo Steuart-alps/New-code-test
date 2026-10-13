@@ -2095,6 +2095,7 @@ async function runRuntimeMigrationsOnce() {
 
     // ---- Track owners and in-app notifications (Oct 2026) ----
     await migrateTrackOwnersAndNotifications();
+    await migrateCertificateOutcomes();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
@@ -5379,4 +5380,28 @@ async function migrateTrackOwnersAndNotifications() {
     CREATE INDEX IF NOT EXISTS "IDX_user_notifications_user_client_created"
     ON "user_notifications" ("user_id", "client_id", "created_at")
   `);
+}
+
+// ---- Certificate outcomes and defects (Oct 2026) ----
+// An item certificate records its overall outcome; existing rows are
+// "not_stated" and keep behaving as satisfactory. Defects listed on a
+// certificate open FixTrack jobs and keep the check needing action until they
+// are closed. Mirrors lib/db/src/schema/certificates.ts.
+async function migrateCertificateOutcomes() {
+  await db.execute(sql`ALTER TABLE "certificates" ADD COLUMN IF NOT EXISTS "outcome" text NOT NULL DEFAULT 'not_stated'`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "certificate_defects" (
+      "id" serial PRIMARY KEY,
+      "certificate_id" integer NOT NULL REFERENCES "certificates"("id") ON DELETE CASCADE,
+      "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+      "code" text NOT NULL,
+      "description" text NOT NULL,
+      "location" text,
+      "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL,
+      "resolved_at" timestamp,
+      "created_at" timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_certificate" ON "certificate_defects" ("client_id", "certificate_id")`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "IDX_certificate_defects_fix_track_issue" ON "certificate_defects" ("fix_track_issue_id")`);
 }

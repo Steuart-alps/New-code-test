@@ -5,7 +5,8 @@ import { useListComplianceItems, useSendReminderForItem, useListSites } from "@w
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { toast } from "sonner";
-import { StatusBadge, PriorityBadge } from "@/components/badges";
+import { StatusBadge, PriorityBadge, NeedsActionBadge } from "@/components/badges";
+import { CompleteCheckDialog } from "@/components/complete-check-dialog";
 import { ItemFormDialog } from "@/components/item-form-dialog";
 import { format } from "date-fns";
 import { Plus, Briefcase, Mail, Send, Calendar, X, Building2, Sparkles } from "lucide-react";
@@ -30,7 +31,7 @@ type FilterKey =
 
 const FILTER_LABELS: Record<FilterKey, { label: string; description: string }> = {
   "due-soon": { label: "Due in next 30 days", description: "Compliance checks with a due date in the next 30 days." },
-  "action-needed": { label: "Action needed", description: "Overdue checks and any critical-priority checks that aren't yet completed." },
+  "action-needed": { label: "Action needed", description: "Overdue checks, critical-priority checks that aren't yet completed, and checks whose latest certificate is unsatisfactory or has open remedial defects." },
   "overdue": { label: "Overdue", description: "Checks past their due date or marked overdue." },
   "expired-certs": { label: "Expired certificates", description: "Checks whose latest related contractor certificate is past its expiry date." },
   "status-pending": { label: "Pending", description: "Checks waiting to be started." },
@@ -43,6 +44,7 @@ export default function ExternalChecksPage() {
   const search = useSearch();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [completingItem, setCompletingItem] = useState<any>(null);
 
   const filterParam = useMemo(() => {
     const v = new URLSearchParams(search).get("filter");
@@ -111,6 +113,7 @@ export default function ExternalChecksPage() {
           return i.status === "overdue" || (i.dueDate && new Date(i.dueDate) < now && i.status !== "completed");
         case "action-needed":
           return (
+            i.needsAction === true ||
             i.status === "overdue" ||
             (i.priority === "critical" && i.status !== "completed") ||
             (i.dueDate && new Date(i.dueDate) < now && i.status !== "completed")
@@ -267,6 +270,7 @@ export default function ExternalChecksPage() {
             <td className="px-6 py-4">
               <div className="flex flex-col gap-1.5 items-start">
                 <StatusBadge status={item.status} />
+                <NeedsActionBadge item={item} />
                 <PriorityBadge priority={item.priority} />
               </div>
             </td>
@@ -314,7 +318,7 @@ export default function ExternalChecksPage() {
                     <DropdownMenuSubContent>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "pending" }})}>Pending</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "in_progress" }})}>In Progress</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "completed" }})}>Completed</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setCompletingItem(item)}>Completed…</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => updateItemStatus.mutate({ id: item.id, data: { status: "overdue" }})}>Overdue</DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
@@ -415,6 +419,13 @@ export default function ExternalChecksPage() {
         isOpen={isFormOpen} 
         onClose={() => setIsFormOpen(false)} 
         item={editingItem}
+      />
+      <CompleteCheckDialog
+        item={completingItem}
+        onClose={() => setCompletingItem(null)}
+        onAddCertificate={canAdmin && completingItem
+          ? (date) => navigate(`/items/${completingItem.id}?certificate=new&issued=${date}`)
+          : undefined}
       />
     </AppLayout>
   );
