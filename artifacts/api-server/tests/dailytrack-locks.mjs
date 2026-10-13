@@ -81,6 +81,7 @@ async function testAmLocks(req) {
   // 3. Submit the checklist
   const submittedAt = new Date().toISOString();
   const submitRes = await req("PUT", `/daily-track-am/${draftId}`, {
+    items: [{ label: "Hands washed", checked: true, result: "pass" }],
     submittedAt,
     completedBy: "Final Staff",
   });
@@ -148,7 +149,7 @@ async function testPmChecklistLocks(req) {
 
   // 3. Submit
   const submittedAt = new Date().toISOString();
-  const submitRes = await req("PUT", `/daily-track-pm/${draftId}`, { submittedAt, completedBy: "Final PM Staff" });
+  const submitRes = await req("PUT", `/daily-track-pm/${draftId}`, { items: [{ label: "Ovens off", checked: true, result: "pass" }], submittedAt, completedBy: "Final PM Staff" });
   check("pm-checklist: PUT to submit → 200", submitRes.status === 200, `status=${submitRes.status}`);
   check("pm-checklist: submitted record has submittedAt", submitRes.data?.submittedAt != null, `submittedAt=${submitRes.data?.submittedAt}`);
 

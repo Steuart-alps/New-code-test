@@ -292,14 +292,14 @@ async function main() {
     ["/daily-track-pm", "kitchen_closing"],
   ]) {
     const prior = await admin("POST", path, {
-      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [],
+      siteId: siteBetaId, checklistType, checkDate: yesterday, items: [{ label: "Checked", checked: true, result: "pass" }],
       submittedAt: new Date().toISOString(),
     });
     expectOk("prior-day checklist does not count today", prior.status, [201]);
   }
   assertDashboardChecklists("before submissions", await admin("GET", "/dashboard/summary"), 2, 0, 0);
   const submitChecklist = (siteId, path, checklistType) => admin("POST", path, {
-    siteId, checklistType, checkDate: today, items: [], submittedAt: new Date().toISOString(),
+    siteId, checklistType, checkDate: today, items: [{ label: "Checked", checked: true, result: "pass" }], submittedAt: new Date().toISOString(),
   });
   const alphaAm = await submitChecklist(siteAlphaId, "/daily-track-am", "kitchen_opening");
   const alphaPm = await submitChecklist(siteAlphaId, "/daily-track-pm", "kitchen_closing");
@@ -422,7 +422,7 @@ async function main() {
     replayed.data?.id === firstSend.data?.id && replayed.data?.submittedById === firstSend.data?.submittedById,
     `first=${firstSend.data?.id} replay=${replayed.data?.id}`);
   expectOk("staff: reused device entry with different answers is rejected", (await staff("POST", replayPath, {
-    ...replayBody, answers: [{ question: "Closing check", checked: false }],
+    ...replayBody, answers: [{ question: "Closing check", checked: false, result: "fail", notes: "Doors open" }],
   })).status, [409]);
   expectOk("staff: another device entry for a submitted checklist is rejected", (await staff("POST", replayPath, {
     ...replayBody, clientEntryId: `daily-${Date.now().toString(36)}-other-entry`,
@@ -433,7 +433,7 @@ async function main() {
     siteId: siteAlphaId,
     checklistType: "kitchen_opening",
     checkDate: uniqueDate(1),
-    items: [],
+    items: [{ label: "Checked", checked: true, result: "pass" }],
     submittedAt: new Date().toISOString(),
   });
   expectOk("staff: submit legacy AM checklist", staffLegacyDaily.status, [201]);

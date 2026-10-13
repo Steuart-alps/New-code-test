@@ -335,6 +335,25 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     const [row] = await tx.update(trackActionsTable).set(updates as any).where(and(eq(trackActionsTable.id, id), eq(trackActionsTable.clientId, clientId), ne(trackActionsTable.status, "resolved"))).returning();
     if (!row) return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
+    // Signing off an action in its track also finishes its automatically
+    // raised FixTrack job, unless a contractor email is mid-send.
+    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition === "parallel") {
+      const [job] = await tx.update(fixTrackIssuesTable).set({
+        status: "resolved",
+        resolvedDate: sql`(now() AT TIME ZONE 'Europe/London')::date` as any,
+        resolvedByName: row.resolvedByName,
+        resolverSignature: row.resolverSignature,
+        solutionNotes: sql`coalesce(nullif(trim(${fixTrackIssuesTable.solutionNotes}), ''), ${`Completed in the originating track: ${row.resolutionNotes ?? row.remedialAction ?? ""}`.trim()})` as any,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(fixTrackIssuesTable.id, current.fixTrackIssueId), eq(fixTrackIssuesTable.clientId, clientId),
+        inArray(fixTrackIssuesTable.status, ["reported", "in_progress"]),
+        or(isNull(fixTrackIssuesTable.emailRequestStatus), ne(fixTrackIssuesTable.emailRequestStatus, "sending")),
+      )).returning({ id: fixTrackIssuesTable.id });
+      if (job) await tx.insert(fixTrackIssueActivityTable).values({
+        clientId, issueId: job.id, eventType: "status", status: "resolved", createdBy: req.currentUser!.id,
+      });
+    }
     if (kitchenFailure) await tx.insert(auditEventsTable).values({
       clientId, actorId: req.currentUser!.id, entityType: "track_action", entityId: id,
       action: nextStatus === "resolved" ? "manager_verified_and_resolved" : "updated",

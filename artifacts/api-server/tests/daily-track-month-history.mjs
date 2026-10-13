@@ -68,7 +68,7 @@ const otherSite = await second.request("POST", "/sites", { name: `Other ${suffix
 // dates never age into lock results. Do not make them relative to today.
 const submittedAt = "2025-04-10T12:00:00.000Z";
 const checklist = (siteId, checkDate, checklistType, submitted = false) => ({
-  siteId, checkDate, checklistType, items: [],
+  siteId, checkDate, checklistType, items: [{ label: "Checked", checked: true, result: "pass" }],
   ...(submitted ? { submittedAt } : {}),
 });
 const signoff = (siteId, signoffDate, submitted = false) => ({

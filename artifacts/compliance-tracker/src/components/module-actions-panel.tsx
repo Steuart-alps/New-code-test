@@ -294,7 +294,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 }
 
 function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
-  if (action.fixTrackIssueId && action.fixTrackDisposition === "parallel") return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Repair job raised as <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. A manager still verifies and resolves this action here.</div>;
+  if (action.fixTrackIssueId && action.fixTrackDisposition === "parallel") return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Work is tracked as <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. {action.sourceKind?.startsWith("kitchen_temperature_") ? "A manager still verifies and resolves this action here." : "Resolving this action here also resolves the FixTrack issue; completing the issue closes this action unless evidence is still needed here."}</div>;
   if (action.sourceKind?.startsWith("kitchen_temperature_")) return null;
   if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
   if (!canMutate) return null;
