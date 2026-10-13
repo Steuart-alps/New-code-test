@@ -27,6 +27,7 @@ import { ModuleActionsPanel } from "@/components/module-actions-panel";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { CancellationBanner } from "@/components/cancellation-banner";
 import { ManagedByBadge } from "@/components/managed-by-badge";
+import { NotificationBell } from "@/components/notification-bell";
 
 const moduleActionRoutes: { prefix: string; moduleKey: string }[] = [
   { prefix: "/daily-track-am", moduleKey: "daily_am" },
@@ -430,6 +431,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title: str
                 <span className="font-medium uppercase tracking-wider">Owner</span>
               </div>
             )}
+            <NotificationBell />
             {/* On phones, account actions live in the avatar menu so the header fits. */}
             <div className="md:hidden">
               <DropdownMenu>
