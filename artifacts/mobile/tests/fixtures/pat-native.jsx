@@ -43,6 +43,7 @@ export async function apiFetch(path, options = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-only-token', ...(options.headers ?? {}) },
   });
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.error ?? `Request failed (${response.status})`);
+  // Like lib/api.ts ApiError: the status tells the outbox a rejection from a lost connection.
+  if (!response.ok) throw Object.assign(new Error(data?.error ?? `Request failed (${response.status})`), { status: response.status });
   return data;
 }

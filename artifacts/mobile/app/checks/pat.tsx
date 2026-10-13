@@ -27,7 +27,8 @@ import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { UnsentSubmissions } from '@/components/UnsentSubmissions';
-import { isRetryableFailure } from '@/components/unsent-submission-logic';
+import { OutboxEntries } from '@/components/OutboxEntries';
+import { useRecordOutbox } from '@/hooks/useRecordOutbox';
 
 const MODULE_COLOR = '#6366f1';
 
@@ -138,14 +139,18 @@ export default function PatScreen() {
   const applianceName = (id: unknown) =>
     appliances.find((appliance) => appliance.id === id)?.name ?? `Appliance ${String(id)}`;
 
+  // Saved on the device first, then sent; resent automatically under the
+  // same entry ID after a lost connection (the server never duplicates it).
+  const outbox = useRecordOutbox('pat-test');
   const { mutate, isPending } = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch('/api/pat-track/tests', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: async (_response, body) => {
-      void unsent.resolve(body);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      qc.invalidateQueries({ queryKey: ['pat-tests'] });
-      qc.invalidateQueries({ queryKey: ['pat-appliances'] });
+      outbox.send(body, `PAT test · ${applianceName(body.applianceId)} · ${String(body.testDate)}`),
+    onSuccess: async (outcome) => {
+      if (outcome.state === 'rejected') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Not accepted', outcome.error);
+        return;
+      }
       // Reset form
       setApplianceId(null);
       setResult('pass');
@@ -154,18 +159,19 @@ export default function PatScreen() {
       setTestedBy(user?.name ?? '');
       setNotes('');
       setShowForm(false);
+      if (outcome.state === 'queued') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Saved on this device', 'No connection right now. The PAT test is saved on this device and will be sent automatically when you are back online.');
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      qc.invalidateQueries({ queryKey: ['pat-tests'] });
+      qc.invalidateQueries({ queryKey: ['pat-appliances'] });
       Alert.alert('Logged', 'PAT test recorded successfully.');
     },
-    onError: (err: Error, body) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      if (isRetryableFailure(err)) {
-        void unsent.record({
-          body,
-          label: `PAT test · ${applianceName(body.applianceId)} · ${String(body.testDate)}`,
-          error: err.message || 'Could not send.',
-        });
-      }
-      Alert.alert('Error', err.message || 'Something went wrong.');
+    onError: (err: Error) => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Not saved', err.message || 'Something went wrong.');
     },
   });
 
@@ -268,12 +274,18 @@ export default function PatScreen() {
         </View>
       </View>
 
+      <OutboxEntries entries={outbox.entries} readError={outbox.readError} />
+      {/* Copies saved by earlier app versions move into the outbox once. */}
       <UnsentSubmissions
         drafts={unsent.drafts}
         disabled={isPending}
-        onRetry={(draft) => mutate(draft.body)}
+        primaryLabel="Send"
+        onRetry={(draft) => {
+          outbox.adoptLegacy(draft, unsent.discard).catch((err: unknown) =>
+            Alert.alert('Not saved', err instanceof Error ? err.message : 'Try again.'));
+        }}
         onDiscard={(draft) => { void unsent.discard(draft.id); }}
-        note="Retry sends the test exactly as it was saved, with its original date."
+        note="Sends the test exactly as it was saved, with its original date."
       />
 
       {/* Appliance status list */}

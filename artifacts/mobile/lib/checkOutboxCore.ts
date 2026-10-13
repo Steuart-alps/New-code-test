@@ -1,15 +1,42 @@
 /**
- * Device outbox for check submissions other than KitchenTrack temperatures
- * (currently the AM/PM daily checklist). Same contract as kitchenOutboxCore:
- * the submission and a stable entry ID are written to device storage before
- * the first HTTP attempt, replays send the identical body, and the server
- * recognises a replay of an entry it already applied (clientEntryId).
+ * Device outbox for check submissions other than KitchenTrack temperatures:
+ * the AM/PM daily checklist and the fire, legionella, hot tub, PAT and
+ * incident forms. Same contract as kitchenOutboxCore: the submission and a
+ * stable entry ID are written to device storage before the first HTTP
+ * attempt, replays send the identical body, and the server recognises a
+ * replay of an entry it already applied (clientEntryId), so automatic and
+ * manual retries can never create a duplicate record.
+ *
+ * Photos are not part of these bodies; forms with photo evidence keep the
+ * upload as a separate stage (see mobile-staged-photo-evidence).
  *
  * Import-free so tests can load it directly with Node.
  */
 export interface CheckOwner { clientId: number; userId: number }
 export type CheckDeliveryState = 'queued' | 'sending' | 'sent' | 'failed';
-export type CheckKind = 'daily-checklist';
+export type CheckKind = 'daily-checklist' | 'fire-check' | 'legionella-check' | 'hot-tub-check' | 'pat-test' | 'incident';
+
+/** Kinds whose entries are independent records (each gets its own scope). */
+export const RECORD_KINDS: readonly CheckKind[] = ['fire-check', 'legionella-check', 'hot-tub-check', 'pat-test', 'incident'];
+export const RECORD_PATHS: Record<Exclude<CheckKind, 'daily-checklist'>, string> = {
+  'fire-check': '/api/fire-safety',
+  'legionella-check': '/api/legionella',
+  'hot-tub-check': '/api/hot-tub',
+  'pat-test': '/api/pat-track/tests',
+  incident: '/api/incidents',
+};
+
+/** Query keys to refresh once an entry of this kind has been delivered. */
+export function deliveredQueryKeys(kind: CheckKind): string[][] {
+  switch (kind) {
+    case 'daily-checklist': return [['daily-checklist'], ['daily-overview']];
+    case 'fire-check': return [['fire-status'], ['track-controls'], ['dashboard-summary']];
+    case 'legionella-check': return [['water-status'], ['track-controls'], ['dashboard-summary']];
+    case 'hot-tub-check': return [['hot-tub-status'], ['track-controls'], ['dashboard-summary']];
+    case 'pat-test': return [['pat-tests'], ['pat-appliances'], ['dashboard-summary']];
+    case 'incident': return [['incidents'], ['dashboard-summary']];
+  }
+}
 export interface CheckEntry {
   entryId: string;
   owner: CheckOwner;
@@ -34,12 +61,18 @@ interface OutboxDependencies {
     getItem(key: string): Promise<string | null>;
     setItem(key: string, value: string): Promise<void>;
   };
-  send(entry: CheckEntry, token: string): Promise<void>;
+  /** Resolves with the server response body (kept briefly for the screen that sent it). */
+  send(entry: CheckEntry, token: string): Promise<unknown>;
   onSent(entry: CheckEntry): Promise<void>;
 }
 
 const PATHS: Record<CheckKind, RegExp> = {
   'daily-checklist': /^\/api\/daily-checklists\/\d{1,9}\/\d{4}-\d{2}-\d{2}\/(am|pm)$/,
+  'fire-check': /^\/api\/fire-safety$/,
+  'legionella-check': /^\/api\/legionella$/,
+  'hot-tub-check': /^\/api\/hot-tub$/,
+  'pat-test': /^\/api\/pat-track\/tests$/,
+  incident: /^\/api\/incidents$/,
 };
 const ENTRY_ID = /^[A-Za-z0-9_-]{12,100}$/;
 const READ_ERROR = 'Saved checks on this device could not be read. The device copy has not been removed.';
@@ -63,9 +96,17 @@ export class CheckOutbox {
   private replaying: Promise<void> | null = null;
   private listeners = new Set<() => void>();
   private snapshot: CheckOutboxSnapshot = { owner: null, entries: [], error: null };
+  // Server responses of recent deliveries, in memory only (e.g. the result the
+  // server recorded), for the screen that is waiting on that entry.
+  private responses = new Map<string, unknown>();
   constructor(private deps: OutboxDependencies) {}
 
   getSnapshot = () => this.snapshot;
+  takeResponse = (entryId: string): unknown => {
+    const response = this.responses.get(entryId);
+    this.responses.delete(entryId);
+    return response;
+  };
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -107,6 +148,7 @@ export class CheckOutbox {
   suspend = () => {
     this.generation += 1;
     this.session = null;
+    this.responses.clear();
     this.snapshot = { owner: null, entries: [], error: null };
     this.listeners.forEach(listener => listener());
   };
@@ -205,7 +247,9 @@ export class CheckOutbox {
       let message: string | undefined;
       try {
         // Bind every attempt to the original validated session, never a later login.
-        await this.deps.send(entry, this.session.token);
+        const response = await this.deps.send(entry, this.session.token);
+        this.responses.set(entry.entryId, response);
+        while (this.responses.size > 20) this.responses.delete(this.responses.keys().next().value as string);
       } catch (error) {
         const status = typeof error === 'object' && error !== null && 'status' in error
           ? Number(error.status) : 0;

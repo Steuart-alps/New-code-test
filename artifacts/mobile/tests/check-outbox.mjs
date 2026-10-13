@@ -9,7 +9,7 @@ const source = await readFile(new URL('../lib/checkOutboxCore.ts', import.meta.u
 const js = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { CheckOutbox, checkOutboxKey, isRetryableStatus } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+const { CheckOutbox, checkOutboxKey, isRetryableStatus, RECORD_KINDS, RECORD_PATHS, deliveredQueryKeys } = await import(`data:text/javascript,${encodeURIComponent(js)}`);
 
 const A = { clientId: 301, userId: 401 };
 const B = { clientId: 301, userId: 402 };
@@ -142,4 +142,49 @@ assert.equal(isRetryableStatus(400), false);
   assert.ok(store.get(checkOutboxKey(A)).includes('evil.test'), 'device copy is kept');
 }
 
-console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection.');
+// Record forms (fire, legionella, hot tub, PAT, incident): each record is its
+// own scope, so several can wait offline; every retry (automatic or manual)
+// resends the identical body with the same entry ID; only the allowlisted
+// create path per kind is accepted; the server response is handed to the
+// screen once.
+{
+  const store = new Map();
+  const sent = [];
+  let online = false;
+  const records = new CheckOutbox({
+    storage: { async getItem(k) { return store.get(k) ?? null; }, async setItem(k, v) { store.set(k, v); } },
+    async send(entry) {
+      sent.push(structuredClone(entry.body));
+      if (!online) throw new TypeError('Network request failed');
+      return { id: 9, result: 'fail' };
+    },
+    async onSent() {},
+  });
+  await records.activate(A, 'token-A');
+  const record = (kind, entryId, body) => ({
+    entryId, kind, path: RECORD_PATHS[kind], scopeKey: `${kind}:${entryId}`, label: kind, body,
+  });
+  for (const kind of RECORD_KINDS) assert.ok(RECORD_PATHS[kind], `${kind} has a create path`);
+  await records.enqueue(record('fire-check', 'fire-entry-00001', { checkType: 'alarm', checkDate: '2026-10-12', result: 'pass' }));
+  await records.enqueue(record('fire-check', 'fire-entry-00002', { checkType: 'alarm', checkDate: '2026-10-12', result: 'pass' }));
+  await records.enqueue(record('incident', 'incident-entry-01', { location: 'Kitchen' }));
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['queued', 'queued', 'queued'],
+    'several records of one kind can wait offline');
+  await assert.rejects(records.enqueue({ ...record('pat-test', 'pat-entry-000001', {}), path: '/api/pat-track/appliances' }), /cannot be saved/);
+  await assert.rejects(records.enqueue({ ...record('incident', 'incident-entry-02', {}), path: '/api/incidents/5' }), /cannot be saved/);
+  online = true;
+  await records.replay();
+  assert.deepEqual(records.getSnapshot().entries.map((entry) => entry.state), ['sent', 'sent', 'sent']);
+  const fireAttempts = sent.filter((body) => body.clientEntryId === 'fire-entry-00001');
+  assert.ok(fireAttempts.length >= 2, 'offline attempts then automatic resend');
+  for (const attempt of fireAttempts) assert.deepEqual(attempt, fireAttempts[0], 'every resend is identical, with the same entry ID');
+  assert.deepEqual(records.takeResponse('fire-entry-00001'), { id: 9, result: 'fail' }, 'the server outcome reaches the screen');
+  assert.equal(records.takeResponse('fire-entry-00001'), undefined, 'and is handed over once');
+  records.suspend();
+  assert.equal(records.takeResponse('incident-entry-01'), undefined, 'responses are dropped when the account changes');
+}
+assert.deepEqual(deliveredQueryKeys('pat-test'), [['pat-tests'], ['pat-appliances'], ['dashboard-summary']]);
+assert.deepEqual(deliveredQueryKeys('daily-checklist'), [['daily-checklist'], ['daily-overview']]);
+
+console.log('Check outbox tests passed: persist-before-send, offline replay of identical body, scope/ID guards, path allowlist, owner isolation, retry classification, tamper detection, record-form kinds.');
