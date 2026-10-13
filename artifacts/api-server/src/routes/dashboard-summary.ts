@@ -15,6 +15,7 @@ import { getCheckAlerts, type CheckAlert } from "../lib/checkReminders";
 import { getEntitledServices, isEntitled } from "../lib/services";
 import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 import { getDailyChecklistCompletionBySite } from "../lib/dailyChecklistCompletion";
+import { getPickedModules } from "./setup";
 
 const router = Router();
 
@@ -41,7 +42,39 @@ export interface TrackSummary {
   health: "action_required" | "not_started" | "clear";
   badge: string;
   items: TrackItem[];
+  /**
+   * True when the business picked its modules in the setup wizard, did not
+   * pick this one, and nothing is recorded for it yet: the dashboard lists it
+   * under "Other modules". Entitlement is unaffected.
+   */
+  otherModule?: boolean;
 }
+
+/**
+ * Setup-wizard module keys that count as picking each track. Tracks of
+ * superseded modules the wizard never offers (SafeTrack) are never moved.
+ */
+const TRACK_PICK_KEYS: Record<string, readonly string[]> = {
+  daily_am: ["dailytrack_am", "kitchentrack", "premisestrack"],
+  daily_pm: ["dailytrack_pm", "kitchentrack", "premisestrack"],
+  kitchen: ["kitchentrack"],
+  fire: ["firetrack"],
+  legionella: ["legionellatrack"],
+  pool: ["aquatrack"],
+  swim: ["aquatrack"],
+  hot_tub: ["hottubtrack"],
+  pat: ["pattrack"],
+  pest: ["pesttrack"],
+  fix: ["fixtrack"],
+  premises: ["premisestrack"],
+  room: ["roomtrack"],
+  doc: ["doctrack"],
+  train: ["traintrack"],
+  tree: ["treetrack"],
+  bike: ["biketrack"],
+  green: ["greentrack"],
+  incident: ["incidenttrack"],
+};
 
 export interface ChecklistTotals {
   date: string;
@@ -1468,6 +1501,17 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
       : "clear";
     return { ...track, health };
   });
+
+  // Modules the business did not pick in setup move to "Other modules" while
+  // they are not started; once used or needing action they stay in the list.
+  const picked = new Set(await getPickedModules(clientId).catch(() => [] as string[]));
+  if (picked.size > 0) {
+    for (const summary of summaries) {
+      const keys = TRACK_PICK_KEYS[summary.trackId];
+      summary.otherModule = summary.enabled && summary.health === "not_started"
+        && !!keys && !keys.some((key) => picked.has(key));
+    }
+  }
 
   res.json({ tracks: summaries, checklistTotals });
 });

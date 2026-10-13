@@ -4,7 +4,9 @@
 //    edited), completion, tenant isolation and viewer read-only.
 //  - Tasks: one-off and recurring occurrences, "mine" vs "all", staff can only
 //    complete their own or their role's tasks (today/yesterday), managers
-//    manage, department scoping, tenant isolation and viewer read-only.
+//    manage, department scoping, tenant isolation and viewer read-only;
+//    undoing a mistaken "Mark done"; DailyTrack-linked tasks done automatically
+//    when the site's checklist is submitted.
 import { createFixtureOwnership, resolveRunId } from "./fixture-ownership.mjs";
 
 const BASE = process.env.API_BASE;
@@ -114,6 +116,20 @@ async function setupWizard(a, b, viewer) {
   check("setup: save picked modules", (await a("PUT", "/setup/modules", { modules: ["firetrack", "kitchentrack"] })).status === 200);
   check("setup: reject unknown modules", (await a("PUT", "/setup/modules", { modules: ["notatrack"] })).status === 400);
   check("setup: picked modules persist", JSON.stringify((await a("GET", "/setup/state")).data?.modules?.picked) === JSON.stringify(["firetrack", "kitchentrack"]));
+  // Dashboard: modules not picked (and not started) are flagged for the
+  // collapsed "Other modules" section; picked ones and started ones are not.
+  const dashTracks = (await a("GET", "/dashboard/summary")).data?.tracks ?? [];
+  const dashTrack = (id) => dashTracks.find((t) => t.trackId === id);
+  check("setup: picked modules stay in the dashboard list",
+    dashTrack("kitchen")?.otherModule !== true && dashTrack("fire")?.otherModule !== true && dashTrack("daily_am")?.otherModule !== true,
+    JSON.stringify(dashTracks.map((t) => [t.trackId, t.health, t.otherModule])));
+  const unpicked = dashTracks.filter((t) => t.enabled && t.health === "not_started"
+    && !["kitchen", "fire", "daily_am", "daily_pm", "safe"].includes(t.trackId));
+  check("setup: unpicked, not-started modules go under Other modules",
+    unpicked.length > 0 && unpicked.every((t) => t.otherModule === true),
+    JSON.stringify(dashTracks.map((t) => [t.trackId, t.health, t.otherModule])));
+  check("setup: started or failing modules are never moved",
+    dashTracks.filter((t) => t.health !== "not_started" || !t.enabled).every((t) => t.otherModule !== true));
 
   // Step 4: starter checks. Edit one seeded check first: it must be left alone.
   const items = (await a("GET", "/compliance-items")).data ?? [];
@@ -222,6 +238,46 @@ async function tasks(a, b, siteId) {
   check("tasks: staff complete their overdue one-off task", (await staff2("POST", `/tasks/${oneOff.data?.id}/complete`, { date: plusDays(today, -2) })).status === 201);
   check("tasks: a completed overdue task leaves the list",
     !((await staff2("GET", "/tasks?scope=mine")).data?.tasks ?? []).some((t) => t.id === oneOff.data?.id));
+
+  // Undo a mistaken "Mark done": staff only their own completion made today;
+  // managers any. Viewers and other tenants cannot.
+  const undo = (call, taskId, date) => call("DELETE", `/tasks/${taskId}/complete?date=${date}`);
+  const staff1Mine = (await staff1("GET", `/tasks?scope=mine&date=${today}`)).data?.tasks ?? [];
+  check("tasks undo: own completion from today offers Undo", staff1Mine.find((t) => t.id === daily.data?.id)?.canUndo === true, JSON.stringify(staff1Mine));
+  const staff2Mine = (await staff2("GET", `/tasks?scope=mine&date=${today}`)).data?.tasks ?? [];
+  check("tasks undo: someone else's completion offers no Undo to staff", staff2Mine.find((t) => t.id === daily.data?.id)?.canUndo === false);
+  check("tasks undo: staff cannot undo someone else's completion", (await undo(staff2, daily.data?.id, today)).status === 403);
+  check("tasks undo: staff cannot undo a manager's completion", (await undo(staff1, daily.data?.id, plusDays(today, -2))).status === 403);
+  check("tasks undo: viewer cannot undo", (await undo(viewer, daily.data?.id, today)).status === 403);
+  check("tasks undo: other tenant cannot undo", (await undo(b, daily.data?.id, today)).status === 404);
+  const undone = await undo(staff1, daily.data?.id, today);
+  check("tasks undo: staff undo their own completion from today", undone.status === 200 && undone.data?.undone === true, JSON.stringify(undone.data));
+  check("tasks undo: the occurrence is open again",
+    ((await staff1("GET", `/tasks?scope=mine&date=${today}`)).data?.tasks ?? []).find((t) => t.id === daily.data?.id)?.completion === null);
+  check("tasks undo: nothing to undo once undone", (await undo(staff1, daily.data?.id, today)).status === 404);
+  check("tasks undo: managers undo any completion", (await undo(a, daily.data?.id, plusDays(today, -2))).status === 200);
+  check("tasks undo: the occurrence can be ticked again", (await staff1("POST", `/tasks/${daily.data?.id}/complete`, { date: today })).status === 201);
+
+  // Automatic completion: a dailytrack_am task for a site is done once that
+  // site's AM checklist for the day is submitted; PM and site-less tasks are not.
+  const amTask = await a("POST", "/tasks", { title: "Opening checks", recurrence: "daily", startsOn: plusDays(today, -1), assigneeRole: "client_staff", siteId, module: "dailytrack_am" });
+  const pmTask = await a("POST", "/tasks", { title: "Closing checks", recurrence: "daily", startsOn: plusDays(today, -1), assigneeRole: "client_staff", siteId, module: "dailytrack_pm" });
+  const anySite = await a("POST", "/tasks", { title: "Opening checks anywhere", recurrence: "daily", startsOn: plusDays(today, -1), assigneeRole: "client_staff", module: "dailytrack_am" });
+  check("tasks auto: create linked tasks", amTask.status === 201 && pmTask.status === 201 && anySite.status === 201);
+  const beforeAm = (await staff1("GET", `/tasks?scope=mine&date=${today}`)).data?.tasks ?? [];
+  check("tasks auto: not done before the checklist", beforeAm.find((t) => t.id === amTask.data?.id)?.completion === null);
+  const submitted = await staff1("POST", `/daily-checklists/${siteId}/${today}/am`, { answers: [{ question: "Doors unlocked", checked: true }] });
+  check("tasks auto: AM checklist submitted", submitted.status === 201, `${submitted.status} ${JSON.stringify(submitted.data)}`);
+  const afterAm = (await staff2("GET", `/tasks?scope=mine&date=${today}`)).data?.tasks ?? [];
+  const autoDone = afterAm.find((t) => t.id === amTask.data?.id);
+  check("tasks auto: AM task done automatically by the checklist author",
+    autoDone?.completion?.automatic === true && autoDone?.completion?.completedByName === "staff1 person" && autoDone?.canUndo === false,
+    JSON.stringify(autoDone));
+  check("tasks auto: PM task still open", afterAm.find((t) => t.id === pmTask.data?.id)?.completion === null);
+  check("tasks auto: a task without a site is not completed automatically", afterAm.find((t) => t.id === anySite.data?.id)?.completion === null);
+  check("tasks auto: yesterday's occurrence is not completed by today's checklist",
+    (((await a("GET", `/tasks?scope=all&date=${plusDays(today, -1)}`)).data?.tasks ?? []).find((t) => t.id === amTask.data?.id))?.completion === null);
+  check("tasks auto: an automatic completion cannot be undone", (await undo(a, amTask.data?.id, today)).status === 404);
 
   // Viewers: read-only.
   const viewerAll = await viewer("GET", "/tasks?scope=all");

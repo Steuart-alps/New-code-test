@@ -77,6 +77,19 @@ export default function TasksPage() {
     }
   }
 
+  async function undo(task: TaskRow) {
+    setBusyId(task.id);
+    try {
+      await onboardingRequest(`/tasks/${task.id}/complete?date=${task.occurrenceDate}`, clientId, { method: "DELETE" });
+      toast({ title: "Marked not done", description: task.title });
+      await refresh();
+    } catch (err) {
+      toast({ title: "Could not undo", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function save() {
     if (!draft) return;
     setSaving(true);
@@ -208,7 +221,7 @@ export default function TasksPage() {
             </p>
             {mine.error && <ErrorNote error={mine.error} />}
             <ul className="space-y-2">
-              {myTasks.map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} busy={busyId === t.id} />)}
+              {myTasks.map((t) => <TaskItem key={`${t.id}:${t.occurrenceDate}`} task={t} onDone={complete} onUndo={undo} busy={busyId === t.id} />)}
             </ul>
           </section>
         )}
@@ -240,7 +253,7 @@ export default function TasksPage() {
                         {[assigneeLabel(t), t.siteName ?? "All sites", describeRecurrence(t), moduleLabel(t.module)].filter(Boolean).join(" · ")}
                       </p>
                       <p className="text-xs mt-0.5">
-                        {t.completion ? <span className="text-emerald-700">Done by {t.completion.completedByName}</span>
+                        {t.completion ? <span className="text-emerald-700">{t.completion.automatic ? `${t.completion.note ?? "Done automatically"} (${t.completion.completedByName})` : `Done by ${t.completion.completedByName}`}</span>
                           : t.overdue ? <span className="text-rose-700">Overdue</span>
                             : t.dueOnDate ? <span className="text-amber-700">Due today</span>
                               : <span className="text-muted-foreground">Not due today</span>}
@@ -250,6 +263,9 @@ export default function TasksPage() {
                       <div className="flex shrink-0 gap-1">
                         {t.active && !t.completion && (t.dueOnDate || t.overdue) && (
                           <Button size="sm" variant="outline" disabled={busyId === t.id} onClick={() => complete(t)}>Mark done</Button>
+                        )}
+                        {t.completion && t.canUndo && (
+                          <Button size="sm" variant="ghost" disabled={busyId === t.id} onClick={() => undo(t)}>Undo</Button>
                         )}
                         <Button size="icon" variant="ghost" aria-label={`Edit ${t.title}`} onClick={() => setDraft({
                           id: t.id, title: t.title, instruction: t.instruction ?? "", module: t.module ?? "", siteId: t.siteId ? String(t.siteId) : "",

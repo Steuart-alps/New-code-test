@@ -44,6 +44,16 @@ interface Entry {
   notes: string | null;
 }
 
+/** An earlier survey whose report was replaced or detached. */
+interface PastSurvey {
+  id: number;
+  surveyType: SurveyType | null;
+  surveyDate: string | null;
+  surveyor: string | null;
+  reportFileName: string | null;
+  replacedAt: string;
+}
+
 interface AsbestosRecord {
   id: number;
   siteId: number | null;
@@ -58,6 +68,7 @@ interface AsbestosRecord {
   planReviewOverdue: boolean;
   notes: string | null;
   entries: Entry[];
+  surveyHistory?: PastSurvey[];
 }
 
 interface RecordForm {
@@ -261,6 +272,14 @@ export default function AsbestosRegisterPage() {
     }
   }
 
+  async function downloadPastReport(record: AsbestosRecord, survey: PastSurvey) {
+    try {
+      await downloadRegisterDocument(api, `${LIST_PATH}/${record.id}/history/${survey.id}/report-url`, "asbestos-survey");
+    } catch (err) {
+      toast({ title: "Download failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    }
+  }
+
   function exportCsv() {
     const rows: string[][] = [];
     for (const record of visible) {
@@ -387,6 +406,26 @@ export default function AsbestosRegisterPage() {
                 : record.noAsbestosExpected ? "No survey recorded" : "No survey recorded yet"}
             </p>
             {record.notes && <p className="text-xs whitespace-pre-wrap">{record.notes}</p>}
+            {(record.surveyHistory?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <h3 className="text-xs font-medium text-muted-foreground">Previous surveys</h3>
+                <ul className="space-y-1">
+                  {record.surveyHistory!.map((survey) => (
+                    <li key={survey.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 break-words text-muted-foreground">
+                        {survey.surveyType ? SURVEY_LABELS[survey.surveyType] : "Survey"}
+                        {survey.surveyDate ? ` on ${fmtDate(survey.surveyDate)}` : ""}
+                        {survey.surveyor ? ` by ${survey.surveyor}` : ""}
+                        {` (replaced ${fmtDate(survey.replacedAt)})`}
+                      </span>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => downloadPastReport(record, survey)}>
+                        <FileText className="w-3 h-3" /> {survey.reportFileName ?? "Report"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">

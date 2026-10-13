@@ -10,8 +10,10 @@ export type TaskRow = {
   siteId: number | null; siteName: string | null; assigneeUserId: number | null; assigneeName: string | null;
   assigneeRole: "client_staff" | "managers" | null; recurrence: "once" | "daily" | "weekly" | "monthly";
   startsOn: string; active: boolean; occurrenceDate: string; dueOnDate: boolean; overdue: boolean;
-  completion: { completedByName: string; completedAt: string; note: string | null } | null;
+  completion: { completedByName: string; completedAt: string; note: string | null; automatic?: boolean } | null;
   assignedToMe: boolean; canManage: boolean; canComplete: boolean;
+  /** A manual completion this user may take back (mistaken "Mark done"). */
+  canUndo?: boolean;
 };
 export type TaskList = { date: string; today: string; canManage: boolean; tasks: TaskRow[] };
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -37,7 +39,9 @@ export function useTaskClientId() {
   return user?.role === "consultant" ? activeClientId : null;
 }
 
-export function TaskItem({ task, onDone, busy, readOnly }: { task: TaskRow; onDone: (t: TaskRow) => void; busy: boolean; readOnly?: boolean }) {
+export function TaskItem({ task, onDone, onUndo, busy, readOnly }: {
+  task: TaskRow; onDone: (t: TaskRow) => void; onUndo?: (t: TaskRow) => void; busy: boolean; readOnly?: boolean;
+}) {
   const done = !!task.completion;
   const module = task.module ? MODULE_INFO[task.module] : null;
   return (
@@ -62,6 +66,9 @@ export function TaskItem({ task, onDone, busy, readOnly }: { task: TaskRow; onDo
       </div>
       {!done && !readOnly && task.canComplete && (
         <Button size="sm" variant="outline" className="shrink-0" disabled={busy} onClick={() => onDone(task)}>Mark done</Button>
+      )}
+      {done && !readOnly && task.canUndo && onUndo && (
+        <Button size="sm" variant="ghost" className="shrink-0" disabled={busy} onClick={() => onUndo(task)}>Undo</Button>
       )}
     </li>
   );

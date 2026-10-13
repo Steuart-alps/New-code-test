@@ -117,7 +117,17 @@ async function seedBusiness(clientId, siteId, tag) {
   await pool.query(
     `INSERT INTO daily_checklists (client_id, site_id, checklist_type, check_date, submitted_at)
      VALUES ($1, $2, 'am', '2026-09-02', '2026-09-02T09:00:00Z')`, [clientId, siteId]);
-  return { itemId: item.id, contractorId: contractor.id, issueId: issue.id };
+  const coshh = await one(
+    `INSERT INTO coshh_substances (client_id, site_id, product_name, review_due, status)
+     VALUES ($1, $2, $3, '2026-09-12', 'in_use') RETURNING id`, [clientId, siteId, `${tag} bleach`]);
+  // Archived substances and deleted records never fall due.
+  await pool.query(
+    `INSERT INTO coshh_substances (client_id, site_id, product_name, review_due, status)
+     VALUES ($1, $2, $3, '2026-09-12', 'archived')`, [clientId, siteId, `${tag} old descaler`]);
+  const asbestos = await one(
+    `INSERT INTO asbestos_records (client_id, site_id, built_before_2000, plan_review_due)
+     VALUES ($1, $2, 'yes', '2026-09-25') RETURNING id`, [clientId, siteId]);
+  return { itemId: item.id, contractorId: contractor.id, issueId: issue.id, coshhId: coshh.id, asbestosId: asbestos.id };
 }
 
 const range = 'from=2026-09-01&to=2026-09-30';
@@ -230,6 +240,9 @@ try {
   expectEntry(`fix-${seededA.issueId}`, { date: '2026-09-22', kind: 'fix_visit', href: `/fix-track/${seededA.issueId}` });
   assert.ok(ownerCalendar.entries.some(entry => entry.kind === 'contractor_accreditation' && entry.title === 'SiteA Gas Safe card expires'));
   assert.ok(ownerCalendar.entries.some(entry => entry.kind === 'pest_visit' && entry.date === '2026-09-18' && entry.href === '/pest-track'));
+  expectEntry(`coshh-${seededA.coshhId}`, { date: '2026-09-12', kind: 'coshh_review', status: 'overdue', href: '/coshh', siteName: 'Harbour Hotel' });
+  expectEntry(`asbestos-${seededA.asbestosId}`, { date: '2026-09-25', kind: 'asbestos_plan_review', href: '/asbestos', siteName: 'Harbour Hotel' });
+  assert.ok(!ownerCalendar.entries.some(entry => entry.title.includes('old descaler')), 'archived COSHH substances are not due');
   const training = ownerCalendar.entries.filter(entry => entry.kind === 'training_expiry').map(entry => entry.detail);
   assert.deepEqual(training.sort(), ['SiteA Trainee', 'SiteB Trainee'], 'renewed training is not shown as expiring');
   assert.ok(!JSON.stringify(ownerCalendar).includes('Foreign'), 'calendar never shows another business');

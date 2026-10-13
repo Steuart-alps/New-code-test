@@ -126,7 +126,7 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_num_fridges: "2",
   food_num_freezers: "2",
   // Fallback only: when no jurisdiction is saved, GET /config uses the
-  // Compliance Hub nation (Scotland), else England/Wales (defaultFoodJurisdiction).
+  // Compliance Hub nation (Scotland/Northern Ireland), else England/Wales (defaultFoodJurisdiction).
   food_jurisdiction: "england_wales",
   // No hold time is enforced by default, so the label states only the core
   // temperature.
@@ -149,11 +149,14 @@ const DEFAULT_CONFIG: Record<(typeof CONFIG_KEYS)[number], string> = {
   food_show_sous_vide: "true",
 };
 
-const FOOD_JURISDICTIONS = ["scotland", "england_wales"] as const;
+// Northern Ireland follows FSA guidance: the same 75°C cook/reheat, 63°C hot
+// holding and 8°C cold holding limits as England/Wales.
+const FOOD_JURISDICTIONS = ["scotland", "england_wales", "northern_ireland"] as const;
 type FoodJurisdiction = (typeof FOOD_JURISDICTIONS)[number];
 const REHEATING_LIMIT_BY_JURISDICTION: Record<FoodJurisdiction, string> = {
   scotland: "Above 82°C",
   england_wales: "Above 75°C",
+  northern_ireland: "Above 75°C",
 };
 
 const DIARY_MERGE_FIELDS = [
@@ -382,7 +385,7 @@ function validateConfigPatch(
       } catch { return { error: "Temperature rules must be valid JSON" }; }
     } else if (key === "food_jurisdiction") {
       if (!(FOOD_JURISDICTIONS as readonly string[]).includes(raw)) {
-        return { error: `${key} must be "scotland" or "england_wales"` };
+        return { error: `${key} must be "scotland", "england_wales" or "northern_ireland"` };
       }
       out[key] = raw;
     } else if (key === "food_cold_units") {

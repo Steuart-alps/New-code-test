@@ -82,6 +82,11 @@ function parsePicked(raw: string | null): string[] {
   }
 }
 
+/** Modules picked in the setup wizard; empty when none were picked. */
+export async function getPickedModules(clientId: number): Promise<string[]> {
+  return parsePicked(await setting(clientId, PICKED_MODULES_SETTING));
+}
+
 router.get("/setup/state", requireAuth, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });

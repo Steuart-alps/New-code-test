@@ -317,6 +317,10 @@ test("injury details are only returned to managers", async () => {
     const list = await reader.request("GET", "/incidents");
     assert.equal(list.status, 200);
     assert.equal(list.data.find((row) => row.id === reported.data.id).injuriesSustained, null);
+    // Exports carry the unredacted incident rows (incidents/records.csv) and
+    // audit history, so they stay limited to roles that can read injuries.
+    assert.equal((await reader.request("GET", "/export")).status, 403, "full data export is management-only");
+    assert.equal((await reader.request("GET", "/audit-log")).status, 403, "audit history is management-only");
   }
   // Staff saving the form with the redacted (empty) field keeps the record.
   const edited = await staff.request("PUT", `/incidents/${reported.data.id}`, { location: "Kitchen store", injuriesSustained: null });

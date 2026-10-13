@@ -15,4 +15,5 @@ export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisd
 export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
+  northern_ireland: 'northern_ireland',
 } as const;

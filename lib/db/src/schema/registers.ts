@@ -85,6 +85,24 @@ export const asbestosRecordsTable = pgTable("asbestos_records", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// Earlier surveys of an asbestos record: when the survey report is replaced
+// or detached, the previous survey and its file are kept here (append-only),
+// so the old report stays listed, downloadable and in the data export.
+export const asbestosSurveyHistoryTable = pgTable("asbestos_survey_history", {
+  id: serial("id").primaryKey(),
+  clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
+  recordId: integer("record_id").notNull().references(() => asbestosRecordsTable.id, { onDelete: "cascade" }),
+  surveyType: text("survey_type"),
+  surveyDate: date("survey_date"),
+  surveyor: text("surveyor"),
+  reportObjectPath: text("report_object_path").notNull(),
+  reportFileName: text("report_file_name"),
+  reportFileSize: bigint("report_file_size", { mode: "number" }),
+  reportMimeType: text("report_mime_type"),
+  replacedBy: integer("replaced_by").references(() => usersTable.id, { onDelete: "set null" }),
+  replacedAt: timestamp("replaced_at").notNull().defaultNow(),
+});
+
 export const asbestosRegisterEntriesTable = pgTable("asbestos_register_entries", {
   id: serial("id").primaryKey(),
   clientId: integer("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),

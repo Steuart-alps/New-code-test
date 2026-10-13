@@ -2056,6 +2056,27 @@ async function runRuntimeMigrationsOnce() {
         ADD COLUMN IF NOT EXISTS "created_by" integer REFERENCES "users"("id") ON DELETE SET NULL
     `);
 
+    // ---- Asbestos survey history (Oct 2026) ----
+    // Replacing (or detaching) an asbestos survey report keeps the previous
+    // survey and its file listed: one append-only row per replaced report.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "asbestos_survey_history" (
+        "id" serial PRIMARY KEY,
+        "client_id" integer NOT NULL REFERENCES "clients"("id") ON DELETE CASCADE,
+        "record_id" integer NOT NULL REFERENCES "asbestos_records"("id") ON DELETE CASCADE,
+        "survey_type" text,
+        "survey_date" date,
+        "surveyor" text,
+        "report_object_path" text NOT NULL,
+        "report_file_name" text,
+        "report_file_size" bigint,
+        "report_mime_type" text,
+        "replaced_by" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "replaced_at" timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
+
     logger.info("Runtime migrations complete");
   } catch (err) {
     logger.error({ err }, "Runtime migrations failed");

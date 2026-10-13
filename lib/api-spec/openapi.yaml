@@ -4444,6 +4444,7 @@ components:
           enum:
             - scotland
             - england_wales
+            - northern_ireland
           nullable: true
         food_cooking_limit:
           type: string

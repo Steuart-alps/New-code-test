@@ -6,7 +6,7 @@
  *    sheet, assessment and review dates, controls/PPE and status.
  *  - Asbestos (core): one current record per site (build age, survey, report,
  *    management plan review) plus its register of asbestos-containing
- *    materials.
+ *    materials; replaced survey reports stay listed in its survey history.
  *
  * Every row belongs to the caller's client (getClientId) and to a site the
  * caller can see: client_staff/client_viewer are limited to sites in their
@@ -24,6 +24,7 @@ import {
   coshhSubstancesTable,
   asbestosRecordsTable,
   asbestosRegisterEntriesTable,
+  asbestosSurveyHistoryTable,
   sitesTable,
 } from "@workspace/db/schema";
 import { and, asc, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
@@ -610,9 +611,16 @@ router.get("/asbestos", requireAuth, async (req, res) => {
       inArray(asbestosRegisterEntriesTable.recordId, records.map((record) => record.id)),
     ))
     .orderBy(asc(asbestosRegisterEntriesTable.location), asc(asbestosRegisterEntriesTable.id));
+  const history = records.length === 0 ? [] : await db.select().from(asbestosSurveyHistoryTable)
+    .where(and(
+      eq(asbestosSurveyHistoryTable.clientId, clientId),
+      inArray(asbestosSurveyHistoryTable.recordId, records.map((record) => record.id)),
+    ))
+    .orderBy(desc(asbestosSurveyHistoryTable.replacedAt), desc(asbestosSurveyHistoryTable.id));
   res.json(records.map((record) => ({
     ...withPlanStatus(record),
     entries: entries.filter((entry) => entry.recordId === record.id),
+    surveyHistory: history.filter((survey) => survey.recordId === record.id),
   })));
 });
 
@@ -644,7 +652,7 @@ router.post("/asbestos", requireAuth, denyViewers, async (req, res) => {
       notes: d.notes,
       createdBy: req.currentUser!.id,
     }).returning();
-    res.status(201).json({ ...withPlanStatus(row), entries: [] });
+    res.status(201).json({ ...withPlanStatus(row), entries: [], surveyHistory: [] });
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: "This site already has an asbestos record; edit that one instead" });
     throw err;
@@ -668,23 +676,48 @@ router.put("/asbestos/:id", requireAuth, denyViewers, async (req, res) => {
   });
   if (!document) return;
   try {
-    const [row] = await db.update(asbestosRecordsTable).set({
-      siteId: d.siteId,
-      builtBefore2000: d.builtBefore2000,
-      noAsbestosExpected: d.noAsbestosExpected,
-      surveyType: d.surveyType ?? null,
-      surveyDate: d.surveyDate ?? null,
-      surveyor: d.surveyor,
-      ...(document === "kept" ? {} : {
-        reportObjectPath: document.objectPath,
-        reportFileName: document.fileName,
-        reportFileSize: document.fileSize,
-        reportMimeType: document.mimeType,
-      }),
-      ...(d.planReviewDue !== undefined ? { planReviewDue: d.planReviewDue } : {}),
-      notes: d.notes,
-      updatedAt: new Date(),
-    }).where(and(eq(asbestosRecordsTable.id, id), eq(asbestosRecordsTable.clientId, clientId), isNull(asbestosRecordsTable.deletedAt))).returning();
+    const row = await db.transaction(async (tx) => {
+      // Lock the record so concurrent replacements each archive the report
+      // they actually replaced.
+      const [current] = await tx.select().from(asbestosRecordsTable)
+        .where(and(eq(asbestosRecordsTable.id, id), eq(asbestosRecordsTable.clientId, clientId), isNull(asbestosRecordsTable.deletedAt)))
+        .for("update");
+      if (!current) return null;
+      // A replaced or detached report moves to the survey history with the
+      // survey details it was recorded against, so the old file stays listed.
+      if (document !== "kept" && current.reportObjectPath && document.objectPath !== current.reportObjectPath) {
+        await tx.insert(asbestosSurveyHistoryTable).values({
+          clientId,
+          recordId: id,
+          surveyType: current.surveyType,
+          surveyDate: current.surveyDate,
+          surveyor: current.surveyor,
+          reportObjectPath: current.reportObjectPath,
+          reportFileName: current.reportFileName,
+          reportFileSize: current.reportFileSize,
+          reportMimeType: current.reportMimeType,
+          replacedBy: req.currentUser!.id,
+        });
+      }
+      const [updated] = await tx.update(asbestosRecordsTable).set({
+        siteId: d.siteId,
+        builtBefore2000: d.builtBefore2000,
+        noAsbestosExpected: d.noAsbestosExpected,
+        surveyType: d.surveyType ?? null,
+        surveyDate: d.surveyDate ?? null,
+        surveyor: d.surveyor,
+        ...(document === "kept" ? {} : {
+          reportObjectPath: document.objectPath,
+          reportFileName: document.fileName,
+          reportFileSize: document.fileSize,
+          reportMimeType: document.mimeType,
+        }),
+        ...(d.planReviewDue !== undefined ? { planReviewDue: d.planReviewDue } : {}),
+        notes: d.notes,
+        updatedAt: new Date(),
+      }).where(and(eq(asbestosRecordsTable.id, id), eq(asbestosRecordsTable.clientId, clientId))).returning();
+      return updated ?? null;
+    });
     if (!row) return res.status(404).json({ error: "Not found" });
     res.json(withPlanStatus(row));
   } catch (err) {
@@ -712,6 +745,24 @@ router.get("/asbestos/:id/report-url", requireAuth, async (req, res) => {
   const row = await findAsbestosRecord(req, clientId, id);
   if (!row) return res.status(404).json({ error: "Not found" });
   return sendDownloadUrl(req, res, row.reportObjectPath, row.reportFileName, clientId, id);
+});
+
+router.get("/asbestos/:id/history/:historyId/report-url", requireAuth, async (req, res) => {
+  const clientId = requireClient(req, res);
+  if (!clientId) return;
+  const id = parseId(req.params.id);
+  const historyId = parseId(req.params.historyId);
+  if (id === null || historyId === null) return res.status(400).json({ error: "Invalid id" });
+  if (!(await findAsbestosRecord(req, clientId, id))) return res.status(404).json({ error: "Not found" });
+  const [survey] = await db.select().from(asbestosSurveyHistoryTable)
+    .where(and(
+      eq(asbestosSurveyHistoryTable.id, historyId),
+      eq(asbestosSurveyHistoryTable.recordId, id),
+      eq(asbestosSurveyHistoryTable.clientId, clientId),
+    ))
+    .limit(1);
+  if (!survey) return res.status(404).json({ error: "Not found" });
+  return sendDownloadUrl(req, res, survey.reportObjectPath, survey.reportFileName, clientId, id);
 });
 
 router.post("/asbestos/:id/entries", requireAuth, denyViewers, async (req, res) => {
