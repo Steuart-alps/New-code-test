@@ -39,7 +39,7 @@ export interface TrackAction {
   sourceKind?: string | null;
   sourceRecordId?: number | null;
   fixTrackIssueId?: number | null;
-  fixTrackDisposition?: "linked" | "not_needed" | null;
+  fixTrackDisposition?: "linked" | "not_needed" | "parallel" | null;
   provenance?: "product_default" | "template" | "one_off" | null;
   templateId?: number | null;
   createdAt?: string | null;
@@ -266,7 +266,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
           <div className="space-y-3" aria-live="polite">
             {loading ? <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading actions…</div> : unresolved.length === 0 ? <p className="rounded-sm border border-dashed py-4 text-center text-sm text-muted-foreground">No unresolved actions for this module.</p> : unresolved.map(action => (
               <div key={action.id}>
-                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
+                <ActionRow action={action} sites={sites} siteName={sites.find(site => site.id === action.siteId)?.name} canMutate={canMutate} submitting={submitting} resolution={resolution[String(action.id)]} onResolutionChange={value => setResolution({ ...resolution, [String(action.id)]: value })} onStart={() => updateAction(action, { status: "in_progress" })} onUpdate={patch => updateAction(action, patch)} onResolve={values => action.fixTrackIssueId && action.fixTrackDisposition !== "parallel" ? toast({ title: "Complete this action in FixTrack", description: `Resolve FixTrack issue #${action.fixTrackIssueId} to update this module automatically.` }) : setPendingSignature({ action, values })} />
                 {moduleKey !== "green" && <FixTrackChoice action={action} canMutate={canMutate} submitting={submitting} onDecision={create => decideFixTrack(action, create)} />}
               </div>
             ))}
@@ -294,6 +294,7 @@ export function ModuleActionsPanel({ moduleKey }: { moduleKey: string }) {
 }
 
 function FixTrackChoice({ action, canMutate, submitting, onDecision }: { action: TrackAction; canMutate: boolean; submitting: boolean; onDecision: (create: boolean) => void }) {
+  if (action.fixTrackIssueId && action.fixTrackDisposition === "parallel") return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Repair job raised as <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. A manager still verifies and resolves this action here.</div>;
   if (action.sourceKind?.startsWith("kitchen_temperature_")) return null;
   if (action.fixTrackIssueId) return <div className="-mt-3 rounded-b-sm border-x border-b bg-blue-50 px-4 pb-3 pt-2 text-xs text-blue-900">Linked to <a className="font-semibold underline" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a>. Resolving it will complete this action.</div>;
   if (!canMutate) return null;

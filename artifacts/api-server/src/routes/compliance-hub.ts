@@ -174,18 +174,20 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
     return;
   }
   const departmentId = getActiveDepartmentId(req);
+  let incidentSite: { id: number | null; name: string | null } = { id: null, name: null };
   const inserted = await db.transaction(async tx => {
     if (incidentId !== null) {
       // Closing an incident updates (and locks) this same row. Holding its lock
       // through the insert prevents a new unverified action racing with closure.
       const incident = await tx.execute(sql`
-        SELECT i.status FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
+        SELECT i.status, i.site_id, s.name AS site_name FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
         WHERE i.client_id = ${clientId} AND i.id = ${incidentId}
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
         FOR UPDATE OF i
       `);
       if (!incident.rows.length || incident.rows[0].status === "closed") return null;
+      incidentSite = { id: (incident.rows[0].site_id as number | null) ?? null, name: (incident.rows[0].site_name as string | null) ?? null };
     }
     const result = await tx.execute(sql`
       INSERT INTO compliance_actions (
@@ -202,7 +204,32 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
         verification_notes AS "verificationNotes", verified_by AS "verifiedBy", verified_at AS "verifiedAt",
         created_at AS "createdAt", updated_at AS "updatedAt"
     `);
-    return rows(result)[0];
+    const action = rows<Record<string, unknown> & { id: number }>(result)[0];
+    // Actions from every track except GreenTrack also raise a FixTrack job.
+    // The action keeps its own verification here; the job tracks the work.
+    if (!/green/i.test(a.sourceTrack)) {
+      const issue = await tx.execute(sql`
+        INSERT INTO fix_track_issues (
+          client_id, site_id, title, issue_type, location, description, priority, status,
+          reported_by, reported_date, target_date, assigned_to, created_by
+        ) VALUES (
+          ${clientId}, ${incidentSite.id}, ${a.title}, 'general',
+          ${incidentSite.name ?? "See Compliance Hub action"},
+          ${[a.correctiveAction, a.interimControl ? `Interim control: ${a.interimControl}` : null, `Originating module: ${a.sourceTrack}`, `Compliance Hub action: ${action.id}`].filter(Boolean).join("\n")},
+          ${a.severity === "critical" ? "urgent" : a.severity}, 'reported',
+          ${req.currentUser!.name?.trim() || "ComplyTrack (automatic)"}, (now() AT TIME ZONE 'Europe/London')::date,
+          ${a.dueDate ?? null}::date, ${a.ownerName}, ${req.currentUser!.id}
+        ) RETURNING id
+      `);
+      const issueId = rows<{ id: number }>(issue)[0].id;
+      await tx.execute(sql`
+        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
+        VALUES (${clientId}, ${issueId}, 'status', 'reported', ${req.currentUser!.id})
+      `);
+      await tx.execute(sql`UPDATE compliance_actions SET fix_track_issue_id = ${issueId} WHERE id = ${action.id} AND client_id = ${clientId}`);
+      action.fixTrackIssueId = issueId;
+    }
+    return action;
   });
   if (!inserted) {
     res.status(404).json({ error: "Incident not found, closed, or inaccessible; reopen it before linking a new action" });

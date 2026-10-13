@@ -1225,7 +1225,9 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
 
 // ── Status — due/overdue per check type ───────────────────────────────────────
 // GET /api/food-safety/status[?siteId=N]
-// Only submitted diaries count; a draft is not a completed day.
+// Only finished records count: a submitted diary, a submitted weekly review, a
+// submitted probe check that passed, and a submitted cleaning log with every
+// task done. A draft or a part-done log is not a completed check.
 // With siteId: the diary counts only that site's diary, matching the dashboard
 // summary; weekly reviews, probe checks and cleaning logs count that site's
 // records plus client-wide ones (site_id IS NULL), which cover every site, as
@@ -1280,13 +1282,18 @@ router.get("/status", requireAuth, async (req, res) => {
     GROUP BY site_id
   `);
 
+  // Only finished records count: a draft, or a cleaning log with tasks not
+  // done, leaves the check red.
+  const cleaningComplete = sql`AND submitted_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(completions) AS c WHERE COALESCE((c->>'done')::boolean, false) = false)`;
   const [diary, weekly, probe, cleanDaily, cleanWeekly, cleanMonthly, taskCountsRes] = await Promise.all([
     latestBySite("food_safety_records", "record_date", sql`AND submitted_at IS NOT NULL`, diaryScope),
-    latestBySite("kitchen_weekly_records", "week_commencing"),
-    latestBySite("kitchen_probe_checks", "check_date"),
-    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'daily'`),
-    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'weekly'`),
-    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'monthly'`),
+    latestBySite("kitchen_weekly_records", "week_commencing", sql`AND submitted_at IS NOT NULL`),
+    // A failed probe check raises an action; the check stays due until a probe passes.
+    latestBySite("kitchen_probe_checks", "check_date", sql`AND submitted_at IS NOT NULL AND overall_result = 'pass'`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'daily' ${cleaningComplete}`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'weekly' ${cleaningComplete}`),
+    latestBySite("kitchen_cleaning_logs", "log_date", sql`AND frequency = 'monthly' ${cleaningComplete}`),
     db.execute(sql`
       SELECT site_id, frequency, COUNT(*)::int AS task_count
       FROM kitchen_cleaning_tasks

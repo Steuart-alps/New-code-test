@@ -2486,6 +2486,76 @@ async function migrateTrackActions() {
       END LOOP;
     END $$
   `);
+  await migrateTrackActionFixTrackJobs();
+}
+
+// Every new action outside GreenTrack raises a FixTrack job straight away, so
+// repairs and follow-ups from all tracks are worked in one place. Resolving
+// the job completes the action (routes/fix-track.ts). Failed-temperature
+// actions keep KitchenTrack's manager verification ("parallel"): the job is
+// raised but the action is resolved in KitchenTrack. AFTER INSERT, so rows an
+// ON CONFLICT DO NOTHING skips never raise a job. Existing actions are left
+// as they are.
+async function migrateTrackActionFixTrackJobs() {
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION raise_fix_track_job_for_track_action()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      new_issue_id integer;
+      site_name text;
+      reporter text;
+      module_label text;
+      kept_in_module boolean;
+    BEGIN
+      IF NEW.module = 'green' OR NEW.fix_track_issue_id IS NOT NULL
+        OR NEW.fix_track_disposition IS NOT NULL OR NEW.status = 'resolved' THEN
+        RETURN NULL;
+      END IF;
+      SELECT s.name INTO site_name FROM sites s WHERE s.id = NEW.site_id AND s.client_id = NEW.client_id;
+      SELECT nullif(trim(u.name), '') INTO reporter FROM users u WHERE u.id = NEW.created_by;
+      module_label := CASE NEW.module
+        WHEN 'daily_am' THEN 'Morning checks' WHEN 'daily_pm' THEN 'Evening checks'
+        WHEN 'kitchen' THEN 'KitchenTrack' WHEN 'fire' THEN 'FireTrack'
+        WHEN 'legionella' THEN 'LegionellaTrack' WHEN 'pool' THEN 'PoolTrack'
+        WHEN 'pat' THEN 'PATTrack' WHEN 'pest' THEN 'PestTrack'
+        WHEN 'premises' THEN 'PremisesTrack' WHEN 'doc' THEN 'DocTrack'
+        WHEN 'safe' THEN 'SafeTrack' WHEN 'train' THEN 'TrainTrack'
+        WHEN 'hot_tub' THEN 'HotTubTrack' WHEN 'tree' THEN 'TreeTrack'
+        WHEN 'bike' THEN 'BikeTrack' WHEN 'swim' THEN 'SwimTrack'
+        WHEN 'incident' THEN 'Incidents' WHEN 'room' THEN 'RoomTrack'
+        ELSE NEW.module END;
+      kept_in_module := NEW.module = 'kitchen' AND NEW.source_kind LIKE 'kitchen\_temperature\_%';
+      INSERT INTO fix_track_issues (
+        client_id, site_id, title, issue_type, location, description, priority, status,
+        reported_by, reported_date, target_date, assigned_to, created_by
+      ) VALUES (
+        NEW.client_id, NEW.site_id, NEW.title, 'general',
+        coalesce(site_name, 'See originating module action'),
+        concat_ws(E'\n', NEW.instruction, 'Originating module: ' || module_label, 'Module action: ' || NEW.id),
+        CASE NEW.severity WHEN 'urgent' THEN 'urgent' WHEN 'action_required' THEN 'high' ELSE 'medium' END,
+        'reported',
+        coalesce(reporter, 'ComplyTrack (automatic)'),
+        (now() AT TIME ZONE 'Europe/London')::date,
+        NEW.due_date, NEW.owner_name, NEW.created_by
+      ) RETURNING id INTO new_issue_id;
+      INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
+      VALUES (NEW.client_id, new_issue_id, 'status', 'reported', NEW.created_by);
+      UPDATE track_actions
+      SET fix_track_issue_id = new_issue_id,
+          fix_track_disposition = CASE WHEN kept_in_module THEN 'parallel' ELSE 'linked' END
+      WHERE id = NEW.id;
+      RETURN NULL;
+    END;
+    $$
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_fix_track_job ON "track_actions"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_fix_track_job
+    AFTER INSERT ON "track_actions"
+    FOR EACH ROW EXECUTE FUNCTION raise_fix_track_job_for_track_action()
+  `);
 }
 
 // ---- 2026-08 audit fixes: schema drift between routes and migrations ----
@@ -4572,6 +4642,8 @@ async function migrateComplianceHub() {
       CONSTRAINT "CK_compliance_action_severity" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'))
     )
   `);
+  // Set when the action raised a FixTrack job (every track except GreenTrack).
+  await db.execute(sql`ALTER TABLE "compliance_actions" ADD COLUMN IF NOT EXISTS "fix_track_issue_id" integer REFERENCES "fix_track_issues"("id") ON DELETE SET NULL`);
   // Older generic action forms accepted free-form incident references. Preserve
   // ambiguous/orphaned values for admin review; normalize only references that
   // unambiguously identify an incident belonging to the same tenant.

@@ -733,15 +733,20 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
         createdBy: (req.session as any).userId ?? null,
       });
     }
-    if (data.status === "resolved" && isStatusChange) {
+    // The linked module action completes with the repair. A job a contractor
+    // finished from the email link is resolved without a signed-in user, so
+    // its action completes when a manager closes the job. Actions kept in
+    // their own track for manager verification ("parallel") are left alone.
+    const syncsAction = linkedAction && linkedAction.status !== "resolved" && linkedAction.fixTrackDisposition !== "parallel";
+    if (syncsAction && isStatusChange && (data.status === "resolved" || data.status === "closed")) {
       await tx.update(trackActionsTable).set({
         status: "resolved",
         remedialAction: updated[0].solutionNotes?.trim() || `Repair completed through FixTrack issue #${id}`,
         evidenceReference: `FixTrack issue #${id}${updated[0].mediaUrls?.length ? " with attached media evidence" : ""}`,
         resolutionNotes: `Resolved automatically when linked FixTrack issue #${id} was signed off.`,
         resolvedBy: req.currentUser!.id,
-        resolvedByName: updateData.resolvedByName,
-        resolverSignature: data.resolverSignature,
+        resolvedByName: updateData.resolvedByName ?? (current.resolvedByName?.trim() || req.currentUser!.name?.trim() || "FixTrack"),
+        resolverSignature: data.resolverSignature ?? current.resolverSignature,
         resolvedAt: new Date(),
         updatedAt: new Date(),
       }).where(and(

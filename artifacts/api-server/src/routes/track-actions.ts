@@ -282,7 +282,7 @@ router.patch("/:id", requireAuth, denyViewers, async (req, res) => {
     }
     if (current.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be edited or reopened" };
     const nextStatus = parsed.data.status ?? current.status; const filled = (v: string | null | undefined) => !!v?.trim();
-    if (nextStatus === "resolved" && current.fixTrackIssueId) return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
+    if (nextStatus === "resolved" && current.fixTrackIssueId && current.fixTrackDisposition !== "parallel") return { status: 409 as const, error: "Resolve the linked FixTrack issue to complete this action" };
     if (nextStatus === "resolved" && (!filled(parsed.data.remedialAction ?? current.remedialAction) || !filled(parsed.data.evidenceReference ?? current.evidenceReference) || !filled(parsed.data.resolutionNotes ?? current.resolutionNotes) || !parsed.data.resolverSignature)) {
       return { status: 400 as const, error: "remedialAction, evidenceReference, resolutionNotes and a drawn signature are required to resolve an action" };
     }

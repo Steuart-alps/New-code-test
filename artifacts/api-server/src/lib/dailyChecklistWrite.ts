@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { dailyChecklistsTable, type DailyChecklist } from "@workspace/db/schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { checklistIncompleteReason, createFailedChecklistItemActions } from "./dailyChecklistItems";
 
 type ChecklistValues = {
   clientId: number;
@@ -17,7 +18,8 @@ type Performer = { staffRosterId?: number | null; performedBy: string | null };
 
 export type SaveDailyChecklistResult =
   | { outcome: "created" | "updated" | "already_submitted"; row: DailyChecklist }
-  | { outcome: "invalid_performer" };
+  | { outcome: "invalid_performer" }
+  | { outcome: "incomplete"; reason: string };
 
 /**
  * Creates the checklist for a client/site/type/date, or updates its existing
@@ -30,6 +32,9 @@ export type SaveDailyChecklistResult =
  * When duplicates already exist, a submitted row wins, else the newest draft.
  * `resolvePerformer` receives that draft (if any) and returns null for an
  * invalid staff roster member.
+ * A submit is refused ("incomplete") unless every item is answered and every
+ * failed item has a note; failed items become open actions in the same
+ * transaction.
  */
 export async function saveDailyChecklist(
   values: ChecklistValues,
@@ -50,6 +55,10 @@ export async function saveDailyChecklist(
       .limit(1);
 
     if (existing?.submittedAt) return { outcome: "already_submitted", row: existing };
+    if (values.submittedAt) {
+      const reason = checklistIncompleteReason(values.items ?? existing?.items);
+      if (reason) return { outcome: "incomplete", reason };
+    }
     const performer = await resolvePerformer(existing);
     if (!performer) return { outcome: "invalid_performer" };
 
@@ -66,6 +75,7 @@ export async function saveDailyChecklist(
         submittedAt: values.submittedAt,
         createdBy: values.createdBy,
       } as any).returning();
+      if (row.submittedAt) await createFailedChecklistItemActions(tx, row, values.createdBy);
       return { outcome: "created", row };
     }
 
@@ -81,6 +91,7 @@ export async function saveDailyChecklist(
       } as any)
       .where(and(eq(dailyChecklistsTable.id, existing.id), eq(dailyChecklistsTable.clientId, values.clientId)))
       .returning();
+    if (row.submittedAt) await createFailedChecklistItemActions(tx, row, values.createdBy);
     return { outcome: "updated", row };
   });
 }
