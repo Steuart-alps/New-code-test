@@ -59,6 +59,10 @@ services:
         sync: false
       - key: ADMIN_EMAIL
         sync: false
+      # In-app "Submit feedback" reports are emailed here (unset = saved only
+      # in the business's own feedback inbox).
+      - key: FEEDBACK_RECIPIENT_EMAIL
+        value: info@alpsconsultancy.co.uk
       # Sign-in emails of platform operators (comma-separated), who may repair
       # the Stripe price catalogue, issue ALPS discount codes and create
       # businesses without a trial. Unset means nobody.
