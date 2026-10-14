@@ -224,6 +224,18 @@ async function routeApi(route, url) {
     return jsonResponse(route, { tracks: [], checklistTotals: null });
   }
   if (pathname === "/api/food-safety/status" && method === "GET") return jsonResponse(route, []);
+  if (pathname === "/api/compliance-items" && method === "GET") return jsonResponse(route, []);
+  // Neither business has consultant branding, and both finished the setup
+  // wizard, so the dashboard does not redirect to /setup.
+  if (pathname === "/api/managed-by" && method === "GET") return jsonResponse(route, null);
+  if (pathname === "/api/setup/state" && method === "GET") {
+    return jsonResponse(route, {
+      setupCompletedAt: "2026-09-01T09:00:00.000Z",
+      needsSetup: false,
+      canManage: currentRole === "consultant" || currentRole === "client_admin",
+      businessType: null,
+    });
+  }
 
   if (pathname === "/api/feedback" && method === "GET") {
     const clientId = searchParams.get("clientId");

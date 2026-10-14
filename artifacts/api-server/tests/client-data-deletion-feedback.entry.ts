@@ -1,1 +1,6 @@
-export { deleteAllClientData } from "../src/lib/offboarding";
+export {
+  deleteAllClientData,
+  runDataDeletionJob,
+  runCancellationDetectionJob,
+  RETAINED_CLIENT_TABLES,
+} from "../src/lib/offboarding";

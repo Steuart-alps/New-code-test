@@ -13,8 +13,10 @@ try {
   const today = isoDay();
   const lastWeek = isoDay(-6);
   const c = owner.clientId;
-  await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date) VALUES ($1, $2, $3)', [c, siteA.id, today]);
-  await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date) VALUES ($1, NULL, $2)', [c, lastWeek]);
+  await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date, submitted_at) VALUES ($1, $2, $3, now())', [c, siteA.id, today]);
+  await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date, submitted_at) VALUES ($1, NULL, $2, now())', [c, lastWeek]);
+  // A draft diary (never submitted) is not a completed day.
+  await pool.query('INSERT INTO food_safety_records (client_id, site_id, record_date) VALUES ($1, $2, $3)', [c, siteB.id, today]);
   await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing) VALUES ($1, NULL, $2)', [c, lastWeek]);
   await pool.query('INSERT INTO kitchen_weekly_records (client_id, site_id, week_commencing) VALUES ($1, $2, $3)', [c, siteA.id, today]);
   await pool.query(
@@ -33,12 +35,17 @@ try {
     return Object.fromEntries(response.data.map(row => [row.checkType, row]));
   };
 
-  // All sites: unchanged client-wide aggregation.
+  // All sites: each site is evaluated on its own and the worst site is shown,
+  // so site A's diary cannot make site B look up to date.
   const all = await status(owner);
   assert.deepEqual(Object.keys(all).sort(), ['cleaning_daily', 'cleaning_monthly', 'daily_diary', 'probe_check', 'weekly_review']);
-  assert.equal(all.daily_diary.lastDate, today);
-  assert.equal(all.weekly_review.lastDate, today);
-  assert.equal(all.cleaning_daily.lastDate, today);
+  assert.equal(all.daily_diary.status, 'never', "site B's draft diary does not count");
+  assert.equal(all.daily_diary.siteId, siteB.id);
+  assert.equal(all.daily_diary.sitesAffected, 1);
+  assert.equal(all.daily_diary.siteCount, 2);
+  assert.equal(all.weekly_review.lastDate, lastWeek, "site B's latest review is the client-wide one");
+  assert.equal(all.cleaning_daily.lastDate, today, "only site A has daily tasks");
+  assert.equal(all.cleaning_daily.siteCount, 1);
   assert.equal(all.probe_check.status, 'never');
 
   // Site A sees its own diary, review and cleaning.
@@ -51,7 +58,7 @@ try {
   // Site B: no diary of its own; the client-wide review still covers it; site A's
   // daily task and log do not leak across.
   const b = await status(owner, `?siteId=${siteB.id}`);
-  assert.equal(b.daily_diary.status, 'never', 'the diary counts only the selected site');
+  assert.equal(b.daily_diary.status, 'never', 'the diary counts only the selected site, and only once submitted');
   assert.equal(b.weekly_review.lastDate, lastWeek, 'client-wide weekly reviews cover every site');
   assert.equal(b.cleaning_daily, undefined, "another site's cleaning task is not counted");
   assert.ok(b.cleaning_monthly, 'client-wide cleaning tasks are counted');
@@ -71,6 +78,9 @@ try {
   const staff = await createUser(owner, { role: 'client_staff', departmentId: department.id });
   assert.equal((await status(staff, `?siteId=${siteA.id}`)).daily_diary.lastDate, today);
   assert.equal((await staff.request('GET', `/food-safety/status?siteId=${siteB.id}`)).status, 400, "another department's site is rejected");
+  const staffAll = await status(staff);
+  assert.equal(staffAll.daily_diary.lastDate, today, "a department's all-sites view covers only its own sites");
+  assert.equal(staffAll.daily_diary.siteCount, 1);
 
   console.log('Kitchen status site scope tests passed');
 } finally {

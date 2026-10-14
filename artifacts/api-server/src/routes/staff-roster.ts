@@ -332,6 +332,30 @@ const normalizeIdentifier = (value: string) => value.trim().toUpperCase();
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 const normalizeEmail = (value: string | null | undefined) => value?.trim().toLocaleLowerCase() || null;
 
+// Columns returned for roster rows. PIN hashes and lockout counters are
+// never sent to the browser.
+const ROSTER_COLUMNS = sql.raw(`sr.id, sr.client_id, sr.site_id, sr.name, sr.first_name, sr.last_name,
+  sr.external_payroll_id, sr.last_reconciled_at, sr.job_title, sr.department, sr.email, sr.active,
+  sr.created_at, sr.updated_at`);
+
+async function loadRosterRow(id: number, clientId: number) {
+  const result = await db.execute(sql`
+    SELECT ${ROSTER_COLUMNS}, s.name AS site_name
+    FROM staff_roster sr
+    LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = sr.client_id
+    WHERE sr.id = ${id} AND sr.client_id = ${clientId}
+    LIMIT 1
+  `);
+  return (result.rows ?? [])[0];
+}
+
+/** A roster entry may only be placed on one of the business's own sites. */
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const result = await db.execute(sql`SELECT id FROM sites WHERE id = ${siteId} AND client_id = ${clientId} LIMIT 1`);
+  return (result.rows ?? []).length > 0;
+}
+
 // ── List staff ────────────────────────────────────────────────────────────────
 
 router.get("/staff-roster", requireAuth, async (req, res) => {
@@ -345,7 +369,7 @@ router.get("/staff-roster", requireAuth, async (req, res) => {
            sr.email, sr.active, sr.created_at, sr.updated_at,
            s.name AS site_name
     FROM staff_roster sr
-    LEFT JOIN sites s ON sr.site_id = s.id
+    LEFT JOIN sites s ON s.id = sr.site_id AND s.client_id = sr.client_id
     WHERE sr.client_id = ${clientId}
       ${includeInactive !== "true" ? sql`AND sr.active = true` : sql``}
     ORDER BY sr.name ASC
@@ -367,14 +391,17 @@ router.post("/staff-roster", requireRole("client_admin", "consultant"), async (r
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
+  if (!await siteBelongsToClient(siteId, clientId)) {
+    return res.status(403).json({ error: "Selected site does not belong to this client" });
+  }
   const displayName = canonicalName(name);
   const [firstName, lastName] = splitName(displayName);
 
   const result = await db.execute(sql`
-    INSERT INTO staff_roster (client_id, site_id, name, first_name, last_name, external_payroll_id, job_title, department, email, active)
+    INSERT INTO staff_roster AS sr (client_id, site_id, name, first_name, last_name, external_payroll_id, job_title, department, email, active)
     VALUES (${clientId}, ${siteId ?? null}, ${displayName}, ${firstName}, ${lastName}, ${externalPayrollId ? normalizeIdentifier(externalPayrollId) : null}, ${jobTitle ?? null},
             ${department ?? null}, ${email ?? null}, ${active ?? true})
-    RETURNING *
+    RETURNING ${ROSTER_COLUMNS}
   `);
 
   res.status(201).json((result.rows ?? [])[0]);
@@ -506,6 +533,9 @@ router.patch("/staff-roster/:id", requireRole("client_admin", "consultant"), asy
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { name, externalPayrollId, jobTitle, department, email, siteId, active } = parsed.data;
+  if (!await siteBelongsToClient(siteId, clientId)) {
+    return res.status(403).json({ error: "Selected site does not belong to this client" });
+  }
   const nameChanged = name !== undefined;
   const [firstName, lastName] = nameChanged ? splitName(name!) : [null, null];
   const hasJobTitle  = jobTitle  !== undefined;
@@ -530,14 +560,7 @@ router.patch("/staff-roster/:id", requireRole("client_admin", "consultant"), asy
     WHERE id = ${id} AND client_id = ${clientId}
   `);
 
-  const result = await db.execute(sql`
-    SELECT sr.*, s.name AS site_name
-    FROM staff_roster sr
-    LEFT JOIN sites s ON sr.site_id = s.id
-    WHERE sr.id = ${id} AND sr.client_id = ${clientId}
-    LIMIT 1
-  `);
-  const row = (result.rows ?? [])[0];
+  const row = await loadRosterRow(id, clientId);
   if (!row) return res.status(404).json({ error: "Not found" });
   res.json(row);
 });

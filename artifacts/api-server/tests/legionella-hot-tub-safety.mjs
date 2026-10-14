@@ -39,6 +39,21 @@ const run = async () => {
   check("tub temperature checks require a reading", missingHotTemperature.status === 400);
   const legConfig = await request("GET", `/legionella/config?siteId=${siteId}`);
   check("default calorifier threshold available", legConfig.status === 200 && legConfig.data?.effectiveTemperatureLimits?.calorifier_temp?.min === 60);
+  // TMV outlets: the hot check is a 44°C maximum instead of the 50°C minimum.
+  const tmv = await request("POST", "/legionella/outlets", { name: "Assisted bath TMV", type: "tmv", siteId });
+  check("TMV outlet type can be registered", tmv.status === 201 && tmv.data?.type === "tmv", tmv.status);
+  const tmvReading = (temperature) => request("POST", "/legionella", {
+    checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature, siteId, outletId: tmv.data?.id, performedBy: "Integration tester",
+  });
+  check("TMV outlet at 42°C passes (below the hot-outlet minimum)", (await tmvReading(42)).data?.result === "pass");
+  const tmvHot = await tmvReading(46);
+  check("TMV outlet above 44°C fails", tmvHot.status === 201 && tmvHot.data?.result === "fail", JSON.stringify(tmvHot.data));
+  const tmvEdit = await request("PUT", `/legionella/${tmvHot.data?.id}`, { temperature: 43, result: "pass" });
+  check("TMV reading corrected to 43°C passes on edit", tmvEdit.status === 200 && tmvEdit.data?.result === "pass", JSON.stringify(tmvEdit.data));
+  const plainHot = await request("POST", "/legionella", { checkType: "hot_sentinel_temp", checkDate: day, result: "pass", temperature: 42, siteId, performedBy: "Integration tester" });
+  check("ordinary hot outlet at 42°C still fails", plainHot.data?.result === "fail");
+  const outletStatus = await request("GET", "/legionella/outlet-status");
+  check("TMV outlet is logged as a hot check", (outletStatus.data ?? []).find(o => o.id === tmv.data?.id)?.checkTypeForOutlet === "hot_sentinel_temp");
   const legionella = await request("POST", "/legionella", { checkType: "calorifier_temp", checkDate: day, result: "pass", temperature: 55, siteId, performedBy: "Integration tester" });
   check("unsafe Legionella POST fails", legionella.status === 201 && legionella.data?.result === "fail", legionella.status);
   const hotTub = await request("POST", "/hot-tub", { checkType: "water_chemistry", checkDate: day, result: "pass", phValue: 8.2, sanitiserLevel: 2, temperature: 41, siteId, performedBy: "Integration tester" });

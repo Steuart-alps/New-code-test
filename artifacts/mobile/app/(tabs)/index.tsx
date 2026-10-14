@@ -12,12 +12,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
 import { IssueCard, type FixTrackIssue } from '@/components/IssueCard';
+import { TodayTasks } from '@/components/TodayTasks';
 
 interface Site {
   id: number;
@@ -100,8 +101,9 @@ export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isOffline } = useAuth();
   const [selectedSiteId, setSelectedSiteId] = useState<number | undefined>();
+  const queryClient = useQueryClient();
 
   const { data: sites } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -163,7 +165,7 @@ export default function TodayScreen() {
   const [refreshing, setRefreshing] = useState(false);
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([refetchFire(), refetchWater(), refetchHotTub(), refetchIssues()]);
+    await Promise.all([refetchFire(), refetchWater(), refetchHotTub(), refetchIssues(), queryClient.invalidateQueries({ queryKey: ['tasks'] })]);
     setRefreshing(false);
   }
 
@@ -220,10 +222,21 @@ export default function TodayScreen() {
           <TouchableOpacity
             style={styles.logCheckBtn}
             onPress={() => router.push('/checks' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Log a check"
           >
             <Feather name="plus" size={18} color={colors.navy} />
           </TouchableOpacity>
         </View>
+
+        {isOffline && (
+          <View testID="offline-notice" style={styles.offlineNotice}>
+            <Feather name="wifi-off" size={14} color="#ffffff" />
+            <Text style={styles.offlineText}>
+              Offline — using your saved sign-in. Saved checks are sent when you reconnect.
+            </Text>
+          </View>
+        )}
 
         {/* Site selector */}
         {(sites?.length ?? 0) > 1 && (
@@ -277,6 +290,8 @@ export default function TodayScreen() {
           </ScrollView>
         )}
       </View>
+
+      <TodayTasks />
 
       {/* Module status cards */}
       <View style={styles.section}>
@@ -403,6 +418,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   siteScroll: { marginTop: 4 },
+  offlineNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  offlineText: { flex: 1, color: '#ffffff', fontSize: 12, fontFamily: 'Inter_500Medium' },
   siteChip: {
     borderWidth: 1,
     borderRadius: 20,
@@ -479,7 +505,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    minHeight: 48,
     borderRadius: 4,
     gap: 8,
   },

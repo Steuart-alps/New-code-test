@@ -5,6 +5,7 @@ import { dailyChecklistSubmissionsTable, sitesTable } from "@workspace/db/schema
 import { eq, and, or, isNull, inArray, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEntitledServices, isEntitled, requireAnyEntitlement, SERVICES } from "../lib/services";
+import { addCalendarDays, getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
@@ -100,8 +101,8 @@ router.get("/daily-checklists/history", requireAuth, async (req, res) => {
     return;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const from = (req.query.from as string) || (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); })();
+  const today = await getAccountToday(clientId);
+  const from = (req.query.from as string) || addCalendarDays(today, -30);
   const to = (req.query.to as string) || today;
   const siteId = req.query.siteId ? Number(req.query.siteId) : null;
   const type = req.query.type as "am" | "pm" | undefined;
@@ -178,7 +179,7 @@ router.get("/daily-checklists/overview", requireAuth, async (req, res) => {
     return;
   }
 
-  const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
+  const date = (req.query.date as string) || await getAccountToday(clientId);
   if (!validateDate(date)) {
     res.status(400).json({ error: "Invalid date format, expected YYYY-MM-DD" });
     return;
@@ -397,7 +398,33 @@ const AnswerSchema = z.object({
 
 const SubmitBody = z.object({
   answers: z.array(AnswerSchema).min(1),
+  // Stable device entry ID from the mobile outbox (not a credential).
+  clientEntryId: z.string().regex(/^[A-Za-z0-9_-]{12,100}$/).optional(),
 });
+
+type SubmissionRow = typeof dailyChecklistSubmissionsTable.$inferSelect;
+type SubmittedAnswer = z.infer<typeof AnswerSchema>;
+
+// jsonb does not keep key order, so compare answers field by field.
+function sameAnswers(stored: SubmittedAnswer[], sent: SubmittedAnswer[]): boolean {
+  return stored.length === sent.length && stored.every((answer, index) =>
+    answer.question === sent[index].question
+    && answer.checked === sent[index].checked
+    && (answer.notes ?? null) === (sent[index].notes ?? null));
+}
+
+// A mobile outbox replay (same device entry, same user, same answers) of a
+// submission that was already applied — e.g. after its response was lost.
+function isOwnReplay(
+  row: SubmissionRow | undefined,
+  userId: number,
+  data: z.infer<typeof SubmitBody>,
+): boolean {
+  return !!data.clientEntryId && !!row?.submittedAt
+    && row.clientEntryId === data.clientEntryId
+    && row.submittedById === userId
+    && sameAnswers(row.answers, data.answers);
+}
 
 router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, async (req, res) => {
   const user = req.currentUser!;
@@ -445,6 +472,12 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, a
       ),
     );
 
+  // A replay of this user's own applied submission gets the stored row back.
+  if (isOwnReplay(existing, user.id, parsed.data)) {
+    res.status(200).json(existing);
+    return;
+  }
+
   // Once submitted, it's locked — sign-off is the only allowed subsequent action (PM only).
   if (existing?.submittedAt) {
     res.status(409).json({ error: "Checklist already submitted for this date" });
@@ -461,6 +494,28 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, a
     submittedByName: user.name,
     submittedAt: new Date(),
     updatedAt: new Date(),
+    ...(parsed.data.clientEntryId ? { clientEntryId: parsed.data.clientEntryId } : {}),
+  };
+
+  // Lost a race (or reused a device entry ID): answer a concurrent replay of
+  // the same submission with the stored row, anything else with 409.
+  const respondToConflict = async () => {
+    const [current] = await db
+      .select()
+      .from(dailyChecklistSubmissionsTable)
+      .where(
+        and(
+          eq(dailyChecklistSubmissionsTable.clientId, clientId),
+          eq(dailyChecklistSubmissionsTable.siteId, siteId),
+          eq(dailyChecklistSubmissionsTable.checklistDate, date),
+          eq(dailyChecklistSubmissionsTable.type, type),
+        ),
+      );
+    if (isOwnReplay(current, user.id, parsed.data)) {
+      res.status(200).json(current);
+      return;
+    }
+    res.status(409).json({ error: "Checklist already submitted for this date" });
   };
 
   let result;
@@ -474,24 +529,19 @@ router.post("/daily-checklists/:siteId/:date/:type", requireAuth, denyViewers, a
       ))
       .returning();
     if (!result) {
-      res.status(409).json({ error: "Checklist already submitted for this date" });
+      await respondToConflict();
       return;
     }
   } else {
+    // No conflict target: either unique index (site/date/type or device
+    // entry ID) turns a duplicate into "nothing inserted" rather than a 500.
     [result] = await db
       .insert(dailyChecklistSubmissionsTable)
       .values([values])
-      .onConflictDoNothing({
-        target: [
-          dailyChecklistSubmissionsTable.clientId,
-          dailyChecklistSubmissionsTable.siteId,
-          dailyChecklistSubmissionsTable.checklistDate,
-          dailyChecklistSubmissionsTable.type,
-        ],
-      })
+      .onConflictDoNothing()
       .returning();
     if (!result) {
-      res.status(409).json({ error: "Checklist already submitted for this date" });
+      await respondToConflict();
       return;
     }
   }

@@ -50,6 +50,13 @@ export class File {
     };
   }
   createReadStream() { return Readable.from([this.bytes]); }
+  // DocTrack registration reads the first bytes to check the file signature.
+  async download(options = {}) {
+    if (this.bytes === null) throw new Error("Object does not exist");
+    const start = options.start ?? 0;
+    const end = options.end ?? this.bytes.length - 1;
+    return [Buffer.from(this.bytes.subarray(start, end + 1))];
+  }
 }
 export class Storage {
   bucket(name) {

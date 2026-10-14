@@ -808,10 +808,10 @@ const styles = StyleSheet.create({
   compactField: { flex: 1, marginBottom: 12 },
   inputRow: { flexDirection: 'row', gap: 10 },
   label: { fontSize: 12, fontFamily: 'Inter_600SemiBold', marginBottom: 6 },
-  input: { height: 44, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
+  input: { minHeight: 44, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontSize: 15, fontFamily: 'Inter_400Regular' },
   helper: { fontSize: 12, lineHeight: 17, fontFamily: 'Inter_400Regular' },
   textArea: { minHeight: 96, borderWidth: 1, borderRadius: 8, padding: 12, fontSize: 14, fontFamily: 'Inter_400Regular', marginBottom: 18 },
-  submit: { height: 52, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  submit: { minHeight: 52, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   disabled: { opacity: 0.5 },
   submitText: { color: '#ffffff', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
 });

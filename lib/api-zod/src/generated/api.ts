@@ -632,6 +632,10 @@ export const ListComplianceItemsQueryParams = zod.object({
   "contractorId": zod.coerce.number().optional()
 })
 
+export const listComplianceItemsResponseFrequencyMonthsMax = 120;
+
+
+
 export const ListComplianceItemsResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
@@ -649,6 +653,7 @@ export const ListComplianceItemsResponseItem = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(listComplianceItemsResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -663,6 +668,9 @@ export const ListComplianceItemsResponse = zod.array(ListComplianceItemsResponse
  */
 export const createComplianceItemBodyStatusDefault = `pending`;
 export const createComplianceItemBodyPriorityDefault = `medium`;
+export const createComplianceItemBodyFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemBody = zod.object({
   "title": zod.string(),
@@ -675,8 +683,13 @@ export const CreateComplianceItemBody = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const createComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const CreateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -695,6 +708,7 @@ export const CreateComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(createComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -709,6 +723,10 @@ export const CreateComplianceItemResponse = zod.object({
 export const GetComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
+
+export const getComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const GetComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -727,6 +745,7 @@ export const GetComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(getComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -742,6 +761,10 @@ export const UpdateComplianceItemParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateComplianceItemBodyFrequencyMonthsMax = 120;
+
+
+
 export const UpdateComplianceItemBody = zod.object({
   "title": zod.string().optional(),
   "description": zod.string().nullish(),
@@ -753,8 +776,13 @@ export const UpdateComplianceItemBody = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemBodyFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notes": zod.string().nullish()
 })
+
+export const updateComplianceItemResponseFrequencyMonthsMax = 120;
+
+
 
 export const UpdateComplianceItemResponse = zod.object({
   "id": zod.number(),
@@ -773,6 +801,7 @@ export const UpdateComplianceItemResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -802,6 +831,10 @@ export const UpdateComplianceItemStatusBody = zod.object({
   "status": zod.enum(['pending', 'in_progress', 'completed', 'overdue'])
 })
 
+export const updateComplianceItemStatusResponseFrequencyMonthsMax = 120;
+
+
+
 export const UpdateComplianceItemStatusResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
@@ -819,6 +852,7 @@ export const UpdateComplianceItemStatusResponse = zod.object({
   "assignedTo": zod.string().nullish(),
   "dueDate": zod.date().nullish(),
   "leadTimeDays": zod.number().nullish(),
+  "frequencyMonths": zod.number().min(1).max(updateComplianceItemStatusResponseFrequencyMonthsMax).nullish().describe('Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.'),
   "notificationSentAt": zod.date().nullish(),
   "completedAt": zod.date().nullish(),
   "notes": zod.string().nullish(),
@@ -1968,7 +2002,11 @@ export const GetFireSafetyStatusResponseItem = zod.object({
   "lastDate": zod.string().nullish(),
   "lastResult": zod.enum(['pass', 'fail', 'action_required']).nullable(),
   "dueDate": zod.string().nullish(),
-  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never'])
+  "status": zod.enum(['ok', 'due_soon', 'overdue', 'never']),
+  "siteId": zod.number().nullish().describe('The site this row\'s status comes from; across all sites, the worst site for this check type. Null when no site is visible.'),
+  "siteName": zod.string().nullish().describe('Name of the site in siteId.'),
+  "siteCount": zod.number().optional().describe('How many visible sites were assessed for this check type.'),
+  "sitesAffected": zod.number().optional().describe('How many of those sites are overdue or have never recorded the check.')
 })
 export const GetFireSafetyStatusResponse = zod.array(GetFireSafetyStatusResponseItem)
 
@@ -2037,7 +2075,7 @@ export const GetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2070,7 +2108,7 @@ export const UpdateFoodSafetyConfigBody = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),
@@ -2106,7 +2144,7 @@ export const ResetFoodSafetyConfigResponse = zod.object({
   "food_show_sous_vide": zod.string().nullish(),
   "food_num_fridges": zod.string().nullish(),
   "food_num_freezers": zod.string().nullish(),
-  "food_jurisdiction": zod.enum(['scotland', 'england_wales']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
+  "food_jurisdiction": zod.enum(['scotland', 'england_wales', 'northern_ireland']).nullish().describe('Food-safety jurisdiction used to choose the standard reheating limit.'),
   "food_cooking_limit": zod.string().nullish(),
   "food_cooling_limit": zod.string().nullish(),
   "food_reheating_limit": zod.string().nullish(),

@@ -10,6 +10,7 @@ export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // ---------------------------------------------------------------------------
 // Module-level configuration
@@ -44,6 +45,24 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+export type CsrfTokenProvider = {
+  get: () => Promise<string | null> | string | null;
+  reset: () => void;
+};
+
+let _csrfTokenProvider: CsrfTokenProvider | null = null;
+
+/**
+ * Register a provider for the session-bound CSRF token that the API requires
+ * on cookie-authenticated POST/PUT/PATCH/DELETE requests in production. The
+ * token is sent as `X-CSRF-Token` on those requests unless an Authorization
+ * header is present (bearer requests are exempt). `reset` is called after a
+ * 401 or 403 so a stale token is not reused. Pass `null` to clear.
+ */
+export function setCsrfTokenProvider(provider: CsrfTokenProvider | null): void {
+  _csrfTokenProvider = provider;
 }
 
 let _unauthorizedHandler: (() => void) | null = null;
@@ -378,6 +397,34 @@ async function parseSuccessBody(
   }
 }
 
+/** Whether the URL query or a JSON object body already names a clientId. */
+export function callerChoseClientId(url: string, body: unknown): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart !== -1) {
+    const query = url.slice(queryStart + 1).split("#", 1)[0];
+    if (new URLSearchParams(query).has("clientId")) return true;
+  }
+  if (typeof body === "string" && looksLikeJson(body)) {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      return Boolean(parsed) && typeof parsed === "object" && !Array.isArray(parsed)
+        && Object.prototype.hasOwnProperty.call(parsed, "clientId");
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** Adds `clientId` to a URL's query string, before any fragment. */
+export function appendClientId(url: string, clientId: number): string {
+  const hashStart = url.indexOf("#");
+  const base = hashStart === -1 ? url : url.slice(0, hashStart);
+  const hash = hashStart === -1 ? "" : url.slice(hashStart);
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}clientId=${encodeURIComponent(String(clientId))}${hash}`;
+}
+
 export async function customFetch<T = unknown>(
   input: RequestInfo | URL,
   options: CustomFetchOptions = {},
@@ -414,13 +461,27 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  // Inject clientId into all GET-like requests so the API can scope results
-  if (_clientIdGetter && method === "GET") {
+  // Cookie-authenticated mutations must carry the session's CSRF token.
+  const sendsCsrfToken =
+    _csrfTokenProvider !== null &&
+    UNSAFE_METHODS.has(method) &&
+    !headers.has("authorization") &&
+    !headers.has("x-csrf-token");
+  if (sendsCsrfToken) {
+    const token = await _csrfTokenProvider!.get();
+    if (token) {
+      headers.set("x-csrf-token", token);
+    }
+  }
+
+  // Scope every request (reads and writes) to the selected business so a
+  // consultant working in another client never falls back to their home one.
+  // A clientId the caller already chose, in the URL or a JSON body, wins.
+  if (_clientIdGetter) {
     const clientId = _clientIdGetter();
-    if (clientId !== null) {
-      const rawUrl = resolveUrl(input);
-      const separator = rawUrl.includes("?") ? "&" : "?";
-      const patchedUrl = `${rawUrl}${separator}clientId=${clientId}`;
+    const rawUrl = resolveUrl(input);
+    if (clientId !== null && !callerChoseClientId(rawUrl, init.body)) {
+      const patchedUrl = appendClientId(rawUrl, clientId);
       if (typeof input === "string") input = patchedUrl;
       else if (isUrl(input)) input = new URL(patchedUrl);
       else input = new Request(patchedUrl, input as Request);
@@ -441,6 +502,13 @@ export async function customFetch<T = unknown>(
   const response = await fetch(input, { ...init, method, headers, credentials: "include" });
 
   if (!response.ok) {
+    if (sendsCsrfToken && (response.status === 401 || response.status === 403)) {
+      try {
+        _csrfTokenProvider?.reset();
+      } catch {
+        // never let the provider break error propagation
+      }
+    }
     if (response.status === 401 && _unauthorizedHandler) {
       try {
         _unauthorizedHandler();

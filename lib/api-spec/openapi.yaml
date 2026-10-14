@@ -2698,6 +2698,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notificationSentAt:
           type: string
           format: date-time
@@ -2758,6 +2764,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true
@@ -2797,6 +2809,12 @@ components:
         leadTimeDays:
           type: integer
           nullable: true
+        frequencyMonths:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 120
+          description: Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
         notes:
           type: string
           nullable: true
@@ -3754,6 +3772,20 @@ components:
         status:
           type: string
           enum: [ok, due_soon, overdue, never]
+        siteId:
+          type: integer
+          nullable: true
+          description: The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible.
+        siteName:
+          type: string
+          nullable: true
+          description: Name of the site in siteId.
+        siteCount:
+          type: integer
+          description: How many visible sites were assessed for this check type.
+        sitesAffected:
+          type: integer
+          description: How many of those sites are overdue or have never recorded the check.
       required:
         - checkType
         - frequencyDays
@@ -4412,6 +4444,7 @@ components:
           enum:
             - scotland
             - england_wales
+            - northern_ireland
           nullable: true
         food_cooking_limit:
           type: string

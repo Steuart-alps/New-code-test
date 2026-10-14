@@ -1,5 +1,13 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
-import { apiFetch, setApiFetchMutationObserver } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  apiFetch,
+  clearCsrfToken,
+  setApiFetchClientIdGetter,
+  setApiFetchMutationObserver,
+  setApiFetchPaymentRequiredHandler,
+  setApiFetchUnauthorizedHandler,
+} from "@/lib/api";
 import { setClientIdGetter, setUnauthorizedHandler, setPaymentRequiredHandler, setMutationObserver } from "@workspace/api-client-react";
 import { createCompletedWorkObserver } from "@/lib/analytics";
 
@@ -16,6 +24,8 @@ export interface AuthUser {
   totpEnabled?: boolean;
   isMaintenanceManager?: boolean;
   isDepartmentManager?: boolean;
+  /** Named in PLATFORM_ADMIN_EMAILS: may issue ALPS discount codes. */
+  platformOperator?: boolean;
 }
 
 export type PasskeyOptions = Record<string, unknown>;
@@ -49,6 +59,31 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// A consultant's selected business survives reloads in this tab. It is only a
+// hint: on load it is re-checked against the businesses the server lets this
+// user open, and the server re-authorises every request anyway.
+const ACTIVE_CLIENT_KEY = "complytrack:activeClient";
+
+function readStoredActiveClient(userId: number): number | null {
+  try {
+    const raw = window.sessionStorage.getItem(ACTIVE_CLIENT_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as { userId?: unknown; clientId?: unknown };
+    return stored.userId === userId && Number.isInteger(stored.clientId) ? stored.clientId as number : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredActiveClient(userId: number | null, clientId: number | null): void {
+  try {
+    if (userId === null || clientId === null) window.sessionStorage.removeItem(ACTIVE_CLIENT_KEY);
+    else window.sessionStorage.setItem(ACTIVE_CLIENT_KEY, JSON.stringify({ userId, clientId }));
+  } catch {
+    // Storage unavailable: the selection just won't survive a reload.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [client, setClient] = useState<AuthClient | null>(null);
@@ -59,10 +94,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [activeClientId, setActiveClientIdState] = useState<number | null>(null);
   const activeClientIdRef = useRef<number | null>(null);
+  const userRef = useRef<AuthUser | null>(null);
+  userRef.current = user;
+  const queryClient = useQueryClient();
 
+  // Cached queries are keyed without the business, so they must never outlive
+  // the session or business they were loaded for.
   function setActiveClientId(id: number | null) {
+    const previous = activeClientIdRef.current;
     activeClientIdRef.current = id;
     setActiveClientIdState(id);
+    if (previous !== id) {
+      // Reset (not just remove) so pages already on screen refetch for the
+      // new business instead of keeping the previous one's rows.
+      void queryClient.resetQueries().catch(() => {});
+    }
+    const current = userRef.current;
+    if (current?.role === "consultant") writeStoredActiveClient(current.id, id);
+  }
+
+  /** Signs the tab out locally and forgets everything loaded for that user. */
+  function clearSession() {
+    userRef.current = null;
+    setUser(null);
+    setClient(null);
+    setServices(null);
+    activeClientIdRef.current = null;
+    setActiveClientIdState(null);
+    writeStoredActiveClient(null, null);
+    void queryClient.cancelQueries().catch(() => {});
+    queryClient.clear();
   }
 
   function hasService(key: string): boolean {
@@ -73,8 +134,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Wire up the API client to inject clientId into all requests
   useEffect(() => {
-    setClientIdGetter(() => activeClientIdRef.current);
-    return () => setClientIdGetter(null);
+    const getter = () => activeClientIdRef.current;
+    setClientIdGetter(getter);
+    setApiFetchClientIdGetter(getter);
+    return () => {
+      setClientIdGetter(null);
+      setApiFetchClientIdGetter(null);
+    };
   }, []);
 
   // Record the first saved compliance record or completed check after a paid
@@ -94,22 +160,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the router sends the user back to the login page instead of leaving stale
   // pages showing errors like "Site not found".
   useEffect(() => {
-    setUnauthorizedHandler(() => {
-      setUser(null);
-      setClient(null);
-      setServices(null);
-      setActiveClientId(null);
-    });
-    return () => setUnauthorizedHandler(null);
+    const onUnauthorized = () => clearSession();
+    setUnauthorizedHandler(onUnauthorized);
+    setApiFetchUnauthorizedHandler(onUnauthorized);
+    return () => {
+      setUnauthorizedHandler(null);
+      setApiFetchUnauthorizedHandler(null);
+    };
   }, []);
 
   // If any API call returns 402 the client's trial has expired without a
   // subscription: flip to the billing-required screen mid-session.
   useEffect(() => {
-    setPaymentRequiredHandler(() => {
-      setBillingLocked(true);
-    });
-    return () => setPaymentRequiredHandler(null);
+    const onPaymentRequired = () => setBillingLocked(true);
+    setPaymentRequiredHandler(onPaymentRequired);
+    setApiFetchPaymentRequiredHandler(onPaymentRequired);
+    return () => {
+      setPaymentRequiredHandler(null);
+      setApiFetchPaymentRequiredHandler(null);
+    };
   }, []);
 
   // Auto log-out after 30 minutes of inactivity, matching the server-side
@@ -120,8 +189,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the source of truth; this timer just brings idle tabs to the login page
   // promptly and best-effort destroys the by-then-idle server session.
   const lastActivityRef = useRef<number>(Date.now());
-  const userRef = useRef<AuthUser | null>(null);
-  userRef.current = user;
   useEffect(() => {
     const IDLE_LIMIT_MS = 30 * 60 * 1000;
     const STORAGE_KEY = "complytrack:lastActivity";
@@ -156,11 +223,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!userRef.current) return;
       const lastAnywhere = Math.max(lastActivityRef.current, readShared());
       if (Date.now() - lastAnywhere >= IDLE_LIMIT_MS) {
-        apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
-        setUser(null);
-        setClient(null);
-        setServices(null);
-        setActiveClientId(null);
+        apiFetch("/auth/logout", { method: "POST" }).catch(() => {}).finally(clearCsrfToken);
+        clearSession();
       }
     }, 30_000);
 
@@ -181,21 +245,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setNeedsTwoFactorSetup(Boolean(data.requires2faSetup));
         setTwoFactorRequired(data.twoFactorRequired !== false);
         setBillingLocked(Boolean(data.billingLocked));
-        if (data.client && !activeClientId) {
-          setActiveClientId(data.client.id);
+        userRef.current = data.user;
+        if (activeClientIdRef.current === null) {
+          const restored = data.user?.role === "consultant"
+            ? await restoreActiveClient(data.user.id, data.client?.id ?? null)
+            : null;
+          const initial = restored ?? data.client?.id ?? null;
+          if (initial !== null) setActiveClientId(initial);
         }
       } else {
-        setUser(null);
-        setClient(null);
-        setServices(null);
+        clearSession();
         setNeedsTwoFactorSetup(false);
       }
     } catch {
-      setUser(null);
-      setClient(null);
-      setServices(null);
+      clearSession();
       setNeedsTwoFactorSetup(false);
     }
+  }
+
+  /** The consultant's remembered business, if they may still open it. */
+  async function restoreActiveClient(userId: number, homeClientId: number | null): Promise<number | null> {
+    const stored = readStoredActiveClient(userId);
+    if (stored === null || stored === homeClientId) return null;
+    try {
+      const res = await apiFetch(`/clients/${stored}`);
+      if (res.ok) return stored;
+    } catch {
+      // Fall through to the home business.
+    }
+    writeStoredActiveClient(null, null);
+    return null;
   }
 
   useEffect(() => {
@@ -221,6 +300,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNeedsTwoFactorSetup(true);
       return { requires2fa: false, requires2faSetup: true };
     }
+    // Another account may have used this tab: start from an empty cache.
+    queryClient.clear();
+    userRef.current = data.user;
+    clearCsrfToken(); // signing in issues a new session, so a new CSRF token
     setUser(data.user);
     setClient(data.client);
     setServices(data.services ?? null);
@@ -233,11 +316,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     await apiFetch("/auth/logout", { method: "POST" });
-    setUser(null);
-    setClient(null);
-    setServices(null);
+    // The session (and its CSRF token) is gone; the next sign-in gets a new one.
+    clearCsrfToken();
+    clearSession();
     setBillingLocked(false);
-    setActiveClientId(null);
     setNeedsTwoFactorSetup(false);
   }
 

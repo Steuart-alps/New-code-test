@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -123,6 +123,12 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // stripe-replit-sync is bundled, so its runMigrations() looks for its SQL
+  // next to the bundle (dist/migrations). Without this copy it silently skips
+  // them and the stripe.* tables billing reads are never created.
+  const stripeSyncDir = path.dirname(globalThis.require.resolve("stripe-replit-sync"));
+  await cp(path.join(stripeSyncDir, "migrations"), path.join(distDir, "migrations"), { recursive: true });
 }
 
 buildAll().catch((err) => {

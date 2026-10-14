@@ -32,7 +32,7 @@ import { format, parseISO, isValid, differenceInDays } from "date-fns";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,11 +62,12 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, `/pest-track${path}`);
-  const res = await fetch(`${baseUrl}/api/pest-track${path}`, {
+  const res = await fetch(withActiveClient(`${baseUrl}/api/pest-track${path}`, opts?.body), await withCsrfToken({
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     credentials: "include",
-  });
+  }));
+  notifyAuthStatus(res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body?.error ?? `Request failed (${res.status})`);
@@ -542,7 +543,7 @@ export default function PestTrackPage() {
   const { data: sites = [] } = useQuery<{ id: number; name: string }[]>({
     queryKey: ["/api/sites"],
     queryFn: async () => {
-      const res = await fetch(`${baseUrl}/api/sites`, { credentials: "include" });
+      const res = await fetch(withActiveClient(`${baseUrl}/api/sites`), { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },

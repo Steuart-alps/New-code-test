@@ -5,22 +5,16 @@ import { fireSafetyChecksTable, sitesTable, appSettingsTable, trackControlProfil
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { appendAuditEvent } from "../lib/audit";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { FIRE_CHECK_TYPES, FIRE_FREQUENCY_DAYS, getFireSiteStatuses, worstFireStatusByType } from "../lib/checkReminders";
 
 const router = Router();
 
-const CHECK_TYPES = ["alarm", "emergency_lights", "extinguishers", "fire_doors", "fire_drill", "fire_walk", "alarm_panel"] as const;
+const CHECK_TYPES = FIRE_CHECK_TYPES;
 
 // Default check frequencies, in days
-const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
-  alarm: 7,
-  emergency_lights: 30,
-  extinguishers: 7,
-  fire_doors: 90,
-  fire_drill: 180,
-  fire_walk: 7,
-  alarm_panel: 7,
-};
+const FREQUENCY_DAYS = FIRE_FREQUENCY_DAYS;
 
 const FIRE_PROFILE_MODULE = "fire";
 const fireProfileSchema = z.object({
@@ -35,22 +29,6 @@ const fireProfileSchema = z.object({
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
 }).strict();
 
-function effectiveFireFrequencies(raw: unknown, profile: unknown = null) {
-  const result = { ...FREQUENCY_DAYS };
-  const apply = (value: unknown) => {
-    if (!value || typeof value !== "object") return;
-    for (const key of CHECK_TYPES) {
-      const days = (value as Record<string, unknown>)[key];
-      if (typeof days === "number" && Number.isInteger(days) && days > 0 && days <= 3650) result[key] = days;
-    }
-  };
-  if (typeof raw === "string") {
-    try { apply(JSON.parse(raw)); } catch { /* use defaults */ }
-  }
-  if (profile && typeof profile === "object") apply((profile as Record<string, unknown>).frequencyDays);
-  return result;
-}
-
 const createSchema = z.object({
   checkType: z.enum(CHECK_TYPES),
   checkDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -63,6 +41,8 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 /** Returns the site row if it belongs to the tenant, or null. */
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
@@ -149,57 +129,23 @@ router.get("/status", requireAuth, async (req, res) => {
   const siteAccess = await checkSiteAccess(selectedSiteId, clientId, getActiveDepartmentId(req));
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
-  const conditions = [eq(fireSafetyChecksTable.clientId, clientId)];
-  if (selectedSiteId != null) {
-    conditions.push(eq(fireSafetyChecksTable.siteId, selectedSiteId));
-  }
 
-  // Department scoping: status should only reflect checks visible to this user.
+  // Each site is judged on its own checks and risk-assessed frequencies. The
+  // all-sites view shows the worst site per check type and how many sites are
+  // not up to date, so one site's check cannot make another look compliant.
   const deptId = getActiveDepartmentId(req);
-  if (deptId !== null) {
-    conditions.push(
-      or(isNull(fireSafetyChecksTable.siteId), inArray(fireSafetyChecksTable.siteId, allowedSitesSubquery(clientId, deptId))) as any,
-    );
+  const accessibleSiteIds = deptId === null ? null
+    : (await allowedSitesSubquery(clientId, deptId)).map(site => site.id);
+  const statuses = worstFireStatusByType(
+    await getFireSiteStatuses(clientId, { siteId: selectedSiteId, accessibleSiteIds }),
+  );
+  if (statuses.length === 0) {
+    // No site is visible to this user, so nothing has been recorded for them.
+    return res.json(CHECK_TYPES.map(checkType => ({
+      checkType, frequencyDays: FREQUENCY_DAYS[checkType], lastDate: null, lastResult: null, dueDate: null,
+      status: "never" as const, siteId: null, siteName: null, siteCount: 0, sitesAffected: 0,
+    })));
   }
-
-  // Latest check per type, including its result (DISTINCT ON keeps the newest row per check_type)
-  const lastChecks = await db
-    .selectDistinctOn([fireSafetyChecksTable.checkType], {
-      checkType: fireSafetyChecksTable.checkType,
-      lastDate: fireSafetyChecksTable.checkDate,
-      lastResult: fireSafetyChecksTable.result,
-    })
-    .from(fireSafetyChecksTable)
-    .where(and(...conditions))
-    .orderBy(fireSafetyChecksTable.checkType, desc(fireSafetyChecksTable.checkDate), desc(fireSafetyChecksTable.id));
-
-  const lastByType = new Map(lastChecks.map((r) => [r.checkType, { lastDate: r.lastDate, lastResult: r.lastResult }]));
-  const MS_DAY = 24 * 60 * 60 * 1000;
-  // Date-only arithmetic in UTC to avoid local-timezone drift
-  const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const todayDays = toUtcDays(todayIso);
-
-  const settings = await db.select({ key: appSettingsTable.key, value: appSettingsTable.value })
-    .from(appSettingsTable).where(eq(appSettingsTable.clientId, clientId));
-  const frequencySetting = settings.find(row => row.key === "fire_frequency_days")?.value;
-  const siteProfile = selectedSiteId == null ? null : await getFireProfile(clientId, selectedSiteId);
-  const frequencies = effectiveFireFrequencies(frequencySetting, siteProfile);
-  const statuses = CHECK_TYPES.map((checkType) => {
-    const frequencyDays = frequencies[checkType];
-    const last = lastByType.get(checkType) ?? null;
-    if (!last) {
-      return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
-    }
-    const dueDays = toUtcDays(last.lastDate) + frequencyDays;
-    const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
-    const daysUntilDue = dueDays - todayDays;
-    const dueSoonWindow = Math.max(1, Math.ceil(frequencyDays * 0.2));
-    const status = daysUntilDue < 0 ? "overdue" : daysUntilDue <= dueSoonWindow ? "due_soon" : "ok";
-    return { checkType, frequencyDays, lastDate: last.lastDate, lastResult: last.lastResult, dueDate, status };
-  });
-
   res.json(statuses);
 });
 
@@ -208,7 +154,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   const performer = await resolveStaffPerformer(clientId, data.staffRosterId, data.performedBy);
@@ -219,21 +165,39 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
-  const [inserted] = await db
-    .insert(fireSafetyChecksTable)
-    .values({
-      clientId,
-      checkType: data.checkType,
-      checkDate: data.checkDate,
-      result: data.result,
-      siteId: data.siteId ?? null,
-      location: data.location ?? null,
-      notes: data.notes ?? null,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      createdBy: req.currentUser!.id,
-    })
-    .returning();
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(fireSafetyChecksTable)
+    .where(and(eq(fireSafetyChecksTable.clientId, clientId), eq(fireSafetyChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
+  let inserted;
+  try {
+    [inserted] = await db
+      .insert(fireSafetyChecksTable)
+      .values({
+        clientId,
+        checkType: data.checkType,
+        checkDate: data.checkDate,
+        result: data.result,
+        siteId: data.siteId ?? null,
+        location: data.location ?? null,
+        notes: data.notes ?? null,
+         performedBy: performer.performedBy,
+         staffRosterId: performer.staffRosterId,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null,
+        clientEntryHash: entry?.hash ?? null,
+      })
+      .returning();
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   await appendAuditEvent(req, { clientId, entityType: "fire_safety_check", entityId: inserted.id, action: "created", after: inserted });
   res.status(201).json(inserted);

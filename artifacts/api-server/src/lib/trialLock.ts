@@ -3,6 +3,7 @@ import { clientsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { findLiveSubscription } from "./billing";
 import { logger } from "./logger";
+import { isBillingActivationAllowed } from "./stripeStartup";
 
 // How long a computed lock decision is trusted before re-checking Stripe.
 // Locked decisions expire quickly so that subscribing via checkout restores
@@ -29,8 +30,9 @@ export function invalidateTrialLock(clientId: number): void {
  * subscription (active, trialing or past_due — looked up dynamically, the
  * same definition used everywhere in billing).
  *
- * Fails open: if Stripe cannot be reached we do NOT lock the client, so a
- * Stripe outage can never lock out paying customers.
+ * Fails open: if Stripe cannot be reached, or billing activation is not
+ * available, we do NOT lock the client, so a Stripe outage can never lock out
+ * paying customers and nobody is locked out while they cannot pay.
  */
 export async function isClientBillingLocked(clientId: number): Promise<boolean> {
   const [client] = await db
@@ -45,6 +47,13 @@ export async function isClientBillingLocked(clientId: number): Promise<boolean> 
 
   // Trial still running (or no trial end recorded): never locked.
   if (!client.trialEndsAt || client.trialEndsAt.getTime() > Date.now()) {
+    return false;
+  }
+
+  // While billing is unavailable (Stripe unconfigured, initializing or its
+  // catalogue unverified) nobody can pay, so nobody is locked out for not
+  // paying: access is kept until checkout works again.
+  if (!isBillingActivationAllowed()) {
     return false;
   }
 

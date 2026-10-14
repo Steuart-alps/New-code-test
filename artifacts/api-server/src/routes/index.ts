@@ -49,6 +49,8 @@ import formOptionsRouter from "./form-options";
 import mobileRouter from "./mobile";
 import exportRouter from "./export";
 import reportsRouter from "./reports";
+import inspectionPackRouter from "./inspection-pack";
+import calendarRouter from "./calendar";
 import privacyGovernanceRouter from "./privacy-governance";
 import dashboardSummaryRouter from "./dashboard-summary";
 import complianceHubRouter from "./compliance-hub";
@@ -57,6 +59,13 @@ import trackEvidenceRouter from "./track-evidence";
 import auditEventsRouter from "./audit-events";
 import auditLogRouter from "./audit-log";
 import analyticsRouter from "./analytics";
+import registersRouter from "./registers";
+
+import csvImportsRouter from "./csv-imports";
+import consultantPortfolioRouter from "./consultant-portfolio";
+
+import setupRouter from "./setup";
+import tasksRouter from "./tasks";
 import { requireAuth } from "../middleware/requireAuth";
 import { requireService, requireAnyService } from "../lib/services";
 import documentsRouter from "./documents";
@@ -136,15 +145,22 @@ router.use("/pat-track",  requireAuth, requireService("pattrack"),  patTrackRout
 router.use("/pest-track", requireAuth, requireService("pesttrack"), pestTrackRouter);
 router.use("/premises-track", requireAuth, requireService("premisestrack"), premisesTrackRouter);
 router.use("/room-track", requireAuth, requireService("roomtrack"), roomTrackRouter);
+// Allergen (KitchenTrack-gated inside), COSHH and asbestos registers.
+router.use("/registers", requireAuth, registersRouter);
 router.use("/form-options", requireAuth, formOptionsRouter);
 router.use(mobileRouter);
 router.use(exportRouter);
 router.use(reportsRouter);
+router.use(inspectionPackRouter);
+router.use(calendarRouter);
 router.use(dashboardSummaryRouter);
 router.use(complianceHubRouter);
 router.use(feedbackRouter);
+router.use(csvImportsRouter);
+router.use(consultantPortfolioRouter);
 router.use("/audit-events", auditEventsRouter);
 router.use("/audit-log", auditLogRouter);
 router.use("/track-actions", trackActionsRouter);
 router.use("/track-evidence", trackEvidenceRouter);
+router.use(setupRouter, tasksRouter);
 export default router;

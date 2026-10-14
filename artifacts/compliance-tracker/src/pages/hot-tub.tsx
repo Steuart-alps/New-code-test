@@ -496,7 +496,7 @@ export default function HotTubPage() {
   const isTempCheck = form.checkType === "temperature" || form.checkType === "water_chemistry";
 
   return (
-    <AppLayout title="HotTubTrack">
+    <AppLayout title="TubTrack">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

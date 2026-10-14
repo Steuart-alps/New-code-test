@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   ShieldCheck, CheckCircle2, Users, Bell, FileText, ArrowRight, Star, Zap, Lock,
   BarChart3, Flame, UtensilsCrossed, Droplets, Building2, Wrench, Plus, Minus, BookOpen, Waves, TreePine, Bug,
@@ -615,7 +615,7 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-32 px-6 bg-[#F7F2E4] text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Ready to get compliant?</h2>
+          <h2 className="text-4xl sm:text-5xl font-display mb-6 text-[#162D42]">Ready to stay on top of your compliance?</h2>
           <p className="text-muted-foreground text-xl font-light mb-12">
             Start your 14-day free trial. No credit card required. Add your team, invite your H&S consultant, and start logging on day one.
           </p>
@@ -641,9 +641,9 @@ export default function LandingPage() {
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
           <div className="flex items-center gap-5">
-            <button onClick={() => navigate("/terms")} className="text-sm font-light hover:text-white transition-colors">Terms</button>
-            <button onClick={() => navigate("/privacy")} className="text-sm font-light hover:text-white transition-colors">Privacy</button>
-            <button onClick={() => navigate("/login")} className="text-sm font-light hover:text-white transition-colors">Sign in</button>
+            <Link href="/terms" className="text-sm font-light hover:text-white transition-colors">Terms</Link>
+            <Link href="/privacy" className="text-sm font-light hover:text-white transition-colors">Privacy</Link>
+            <Link href="/login" className="text-sm font-light hover:text-white transition-colors">Sign in</Link>
           </div>
         </div>
       </footer>

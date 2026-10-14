@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { Download, RefreshCw, BarChart2, TrendingUp, AlertCircle, FileCheck, ShieldAlert, CheckCircle2, XCircle, Clock, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InspectionPackCard } from "@/components/inspection-pack-card";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ function exportRiskCsv(data: RiskReportData) {
 
   for (const s of data.staff) {
     const pct = s.totals.relevant > 0 ? Math.round((s.totals.acknowledged / s.totals.relevant) * 100) : 0;
-    let overallStatus = "COMPLIANT";
+    let overallStatus = "ACKNOWLEDGED";
     if (s.totals.expired > 0) overallStatus = "EXPIRED";
     else if (s.totals.missing > 0) overallStatus = "MISSING";
     else if (s.totals.pending > 0) overallStatus = "PENDING";
@@ -1083,6 +1084,7 @@ export default function ReportsPage() {
 
   return (
     <AppLayout title="Reports">
+      <InspectionPackCard />
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="mb-6 flex gap-1 border-b print:hidden">
         {([

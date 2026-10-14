@@ -75,11 +75,15 @@ const CERT_EXPIRY_YEARS: Record<string, number> = {
   "Chainsaw (NPTC CS38)": 5,
   "Food Hygiene (Level 2)": 3,
   "Food Hygiene (Level 3)": 3,
+  // DBS certificates have no statutory expiry: this is a suggested recheck
+  // date for the business's own policy, and the date stays editable.
   "DBS Check (Basic)": 3,
   "DBS Check (Standard)": 3,
   "DBS Check (Enhanced)": 3,
   "PVG Scheme (Scotland)": 5,
 };
+
+const isDbsCertificate = (name: string) => name.startsWith("DBS Check");
 
 function suggestCertExpiry(name: string, completedDate: string): string {
   const years = CERT_EXPIRY_YEARS[name];
@@ -276,14 +280,15 @@ export default function ContractorDetailPage() {
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/60 text-primary-foreground flex items-center justify-center text-2xl font-bold shadow-lg shadow-primary/20">
                 {contractor.name.charAt(0).toUpperCase()}
               </div>
-              <div className="flex gap-2">
+              {/* Editing and deleting contractors is admin-only on the server. */}
+              {canResend && <div className="flex gap-2">
                 <Button variant="ghost" size="icon" onClick={() => setIsEditContractorOpen(true)}>
                   <Pencil className="w-4 h-4" />
                 </Button>
                 <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteContractorConfirm(true)}>
                   <Trash2 className="w-4 h-4" />
                 </Button>
-              </div>
+              </div>}
             </div>
 
             <h2 className="text-2xl font-display font-bold">{contractor.name}</h2>
@@ -359,7 +364,7 @@ export default function ContractorDetailPage() {
                   <p className="text-sm font-medium">{c.dbsType || "—"}</p>
                   {c.dbsExpiryDate && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Expires {format(new Date(c.dbsExpiryDate), "d MMM yyyy")}
+                      Recheck due {format(new Date(c.dbsExpiryDate), "d MMM yyyy")} (your policy)
                     </p>
                   )}
                 </div>
@@ -395,7 +400,7 @@ export default function ContractorDetailPage() {
                     <tr className="border-b border-border/40 bg-muted/10">
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground">Certificate</th>
                       <th className="text-left px-4 py-2 font-medium text-muted-foreground hidden sm:table-cell">Issuer</th>
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Expires</th>
+                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Expires / recheck</th>
                       <th className="px-4 py-2" />
                     </tr>
                   </thead>
@@ -436,9 +441,9 @@ export default function ContractorDetailPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">External requirements assigned to this contractor</p>
               </div>
-              <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
+              {canResend && <Button size="sm" onClick={() => { setEditingItem(null); setItemFormOpen(true); }} className="shadow-sm">
                 <Plus className="w-4 h-4 mr-1.5" /> Add Requirement
-              </Button>
+              </Button>}
             </div>
             <div>
               {items.length === 0 ? (
@@ -482,13 +487,13 @@ export default function ContractorDetailPage() {
                             <Send className="w-4 h-4" />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
+                        {canResend && <Button variant="ghost" size="icon" onClick={() => { setEditingItem(item); setItemFormOpen(true); }}>
                           <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive"
+                        </Button>}
+                        {canResend && <Button variant="ghost" size="icon" className="text-destructive"
                           onClick={() => deleteItem.mutate({ id: item.id })}>
                           <Trash2 className="w-4 h-4" />
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   ))}
@@ -544,12 +549,20 @@ export default function ContractorDetailPage() {
                   className="mt-1 rounded-sm" />
               </div>
               <div>
-                <Label>Expires</Label>
+                <Label>{isDbsCertificate(certForm.certificateName) ? "Recheck due (your policy)" : "Expires"}</Label>
                 <Input type="date" value={certForm.expiryDate}
                   onChange={e => setCertForm(f => ({ ...f, expiryDate: e.target.value }))}
                   className="mt-1 rounded-sm" />
               </div>
             </div>
+            {isDbsCertificate(certForm.certificateName) && (
+              <p className="text-xs rounded-sm border border-amber-200 bg-amber-50 text-amber-900 p-2.5">
+                DBS certificates have no expiry date; set when your policy requires a recheck (for example an
+                Update Service status check). DBS certificate details are criminal offence data and DBS guidance
+                advises against keeping copies: record the issue date, check type and certificate number here
+                instead of uploading a copy.
+              </p>
+            )}
             <div>
               <Label>Notes</Label>
               <Textarea placeholder="Certificate number, renewal notes…" value={certForm.notes}

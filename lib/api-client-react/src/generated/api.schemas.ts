@@ -272,6 +272,12 @@ export interface ComplianceItem {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notificationSentAt?: string | null;
   completedAt?: string | null;
   notes?: string | null;
@@ -310,6 +316,12 @@ export interface CreateComplianceItemRequest {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notes?: string | null;
 }
 
@@ -344,6 +356,12 @@ export interface UpdateComplianceItemRequest {
   assignedTo?: string | null;
   dueDate?: string | null;
   leadTimeDays?: number | null;
+  /**
+     * Optional repeat interval in months. Completing a check with an interval records the completion and reopens it as due on the completion date plus the interval.
+     * @minimum 1
+     * @maximum 120
+     */
+  frequencyMonths?: number | null;
   notes?: string | null;
 }
 
@@ -1036,6 +1054,14 @@ export interface FireSafetyStatus {
   lastResult: FireSafetyStatusLastResult;
   dueDate?: string | null;
   status: FireSafetyStatusStatus;
+  /** The site this row's status comes from; across all sites, the worst site for this check type. Null when no site is visible. */
+  siteId?: number | null;
+  /** Name of the site in siteId. */
+  siteName?: string | null;
+  /** How many visible sites were assessed for this check type. */
+  siteCount?: number;
+  /** How many of those sites are overdue or have never recorded the check. */
+  sitesAffected?: number;
 }
 
 export type FireControlProfileUkNation = typeof FireControlProfileUkNation[keyof typeof FireControlProfileUkNation] | null;
@@ -1517,6 +1543,7 @@ export type FoodSafetyConfigFoodJurisdiction = typeof FoodSafetyConfigFoodJurisd
 export const FoodSafetyConfigFoodJurisdiction = {
   scotland: 'scotland',
   england_wales: 'england_wales',
+  northern_ireland: 'northern_ireland',
 } as const;
 
 export interface FoodSafetyConfig {

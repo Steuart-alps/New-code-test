@@ -1300,7 +1300,9 @@ async function raceRecoveryCodeAcrossWebAndMobile({ email, password, userId, rec
   } finally {
     // Remove exactly the challenges and bearer sessions this race created.
     await pool.query("DELETE FROM mobile_login_challenges WHERE token_hash = ANY($1::text[])", [createdChallengeHashes]);
-    await pool.query("DELETE FROM mobile_sessions WHERE token = ANY($1::text[])", [issuedBearerTokens]);
+    // Bearer tokens are stored as digests (lib/sessionRevocation.ts).
+    await pool.query("DELETE FROM mobile_sessions WHERE token = ANY($1::text[])",
+      [issuedBearerTokens.map((token) => `sha256:${createHash("sha256").update(token).digest("hex")}`)]);
   }
 }
 

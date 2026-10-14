@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { PDF_BOLD_FONT, PDF_REGULAR_FONT } from "./pdfFonts";
 
 export type CleaningScheduleCompletion = {
   taskArea?: string;
@@ -28,8 +29,8 @@ export type CleaningScheduleRegister = {
   logs: CleaningScheduleLog[];
 };
 
-const REGULAR_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-const BOLD_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const REGULAR_FONT = PDF_REGULAR_FONT;
+const BOLD_FONT = PDF_BOLD_FONT;
 
 function value(value: string | undefined): string {
   return value?.trim() || "Not recorded";

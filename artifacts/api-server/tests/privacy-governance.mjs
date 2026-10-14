@@ -144,7 +144,7 @@ async function main() {
   });
   expectStatus("special category requires Article 9 condition", activityInvalid, 400);
 
-  const activity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+  const activityBody = {
     kind: "activity",
     name: `Staff records ${stamp}`,
     purpose: "Manage employee onboarding and employment records",
@@ -165,8 +165,14 @@ async function main() {
     owner: "People team",
     reviewDueAt: null,
     active: true,
+  };
+  // A body clientId naming another tenant than the URL is refused outright.
+  const smuggledActivity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+    ...activityBody,
     clientId: managerB.clientId,
   });
+  expectStatus("request body cannot select another tenant", smuggledActivity, 400);
+  const activity = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, activityBody);
   expectStatus("create processing activity", activity, 201);
   check("request body cannot select another tenant", activity.data?.clientId === managerA.clientId, `stored client=${activity.data?.clientId}`);
 
@@ -209,7 +215,6 @@ async function main() {
     decisionRationale: null,
     responseSentAt: null,
     responseEvidence: null,
-    clientId: managerB.clientId,
   };
   const equalDeadlineExtension = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
     ...requestBody,
@@ -218,11 +223,16 @@ async function main() {
   });
   expectStatus("extension must be after initial deadline", equalDeadlineExtension, 400);
 
+  const smuggledRequest = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, {
+    ...requestBody,
+    clientId: managerB.clientId,
+  });
+  expectStatus("rights request body cannot select another tenant", smuggledRequest, 400);
   const createdRequest = await managerA.session("POST", `/privacy-governance/records?clientId=${managerA.clientId}`, requestBody);
   expectStatus("create rights request", createdRequest, 201);
   const expectedDue = addCalendarMonth(new Date(requestBody.receivedAt)).toISOString();
   check("one-calendar-month deadline clamps at February month-end", createdRequest.data?.dueAt === expectedDue, `expected ${expectedDue}, got ${createdRequest.data?.dueAt}`);
-  check("rights request ignores clientId from request body", createdRequest.data?.clientId === managerA.clientId);
+  check("rights request is stored for the URL tenant", createdRequest.data?.clientId === managerA.clientId);
   const requestId = createdRequest.data?.id;
 
   const managerBRequest = await managerB.session("POST", `/privacy-governance/records?clientId=${managerB.clientId}`, {

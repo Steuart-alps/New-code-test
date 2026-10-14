@@ -91,10 +91,11 @@ const runnerLocked = new Set([
   "test:discounts:ci", "test:compliance-hub:ci", "test:track-actions-trigger",
   "test:track-action-templates", "test:room-track", "test:doc-track-object-acl",
   "test:bike-hire-export", "test:riddor-audit-history",
-  "test:compliance-audit-history", "test:twofa-recovery", "test:fix-track-history",
+  "test:compliance-audit-history", "test:compliance-content", "test:setup-tasks", "test:twofa-recovery", "test:fix-track-history",
   "test:contractor-portal", "test:premises-inspection-date-range",
   "test:pat-dept-isolation", "test:data-deletion-request",
   "test:daily-track-month-history", "test:stored-track-lock",
+  "test:daily-checklist-reports",
   "test:privacy-governance:ci", "test:staff-roster-reconciliation",
   "test:staff-pin", "test:staff-attribution", "test:mandatory-2fa",
   "test:generic-document-object-acl", "test:track-evidence",
@@ -104,12 +105,15 @@ const runnerLocked = new Set([
   "test:compliance-schedule-tokens", "test:compliance-reminder-cycles",
   "test:contractor-draft-tamper", "test:contractor-key-preflight",
   "test:contractor-queue-migration-bounds", "test:staff-invitations",
-  "test:welcome-email",
+  "test:welcome-email", "test:csv-imports-portfolio",
+  "test:schema:parity", // private initdb cluster; bundles and boots the API twice
+  "test:csrf-enforced:ci",
 ]);
 const freshSchema = new Set([
-  "test:schema:fresh", "test:kitchen-mobile-replay",
+  "test:schema:fresh", "test:schema:pushed", "test:dashboard-accuracy:pushed", "test:kitchen-mobile-replay", "test:mobile-check-replay",
   "test:kitchen-temperature-actions", "test:kitchen-hold-controls",
-  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:cleaning-schedule-export",
+  "test:kitchen-inspection-export", "test:kitchen-status-site-scope", "test:dashboard-accuracy", "test:cleaning-schedule-export",
+  "test:inspection-pack-calendar",
   "test:kitchen-cleaning-export", "test:pat-register-access",
   "test:storage-metering", "test:storage-usage-snapshot",
   "test:content-filter",
@@ -124,7 +128,10 @@ const freshSchema = new Set([
   "test:contractor-approval-inbox-browser", // wrapper: browser policy env, then run-fresh-schema.sh
   "test:fixture-cleanup-isolation", // concurrent per-run cleanup on the private cluster
   "test:client-data-deletion-feedback",
+  "test:retention-clock",
   "test:train-track-roster-identity",
+  "test:registers", // allergen, COSHH and asbestos registers on the private cluster
+  "test:security-hardening",
   "test:analytics", // in-process app (per-request CSRF/token env) on the private cluster; runs the analytics:report CLI against it
 ]);
 const pure = new Set([
@@ -140,16 +147,21 @@ const pure = new Set([
   "test:pesttrack-billing", // fake Stripe/static wiring assertions
   "test:pattrack-billing", // static catalogue assertions; unique temp bundle
   "test:track-record-lock", // transpiles one middleware module in memory
+  "test:csv-import-lib", // unique temp bundle; pure CSV import helpers
   "test:passkey-mandatory-2fa", // read-only source assertions
   "test:viewer-route-policy", // read-only route source analysis
   "test:storage-usage", // fake storage file objects; unique temp bundle
   "test:monthly-compliance-summary", // in-memory db/email fakes; unique temp dir
   "test:calendar-invite-compatibility", // run-bundled-unit.sh: unique bundle, placeholder DB URL
   "test:csrf-origin-policy", // run-bundled-unit.sh: in-memory middleware requests
+  "test:task-schedule", // run-bundled-unit.sh: pure date arithmetic
   "test:byte-range", // run-bundled-unit.sh: pure Range header parsing
   "test:stripe-startup-readiness", // fake Stripe/clock; unique mkdtemp bundle
   "test:photo-roundtrip-config", // config gate only: env parsing, no storage or database
   "test:email-escaping", // run-bundled-unit.sh: pure renderers, nothing sent
+  "test:billing-minimum-quantity", // run-bundled-unit.sh: pure added-site coverage rule
+  "test:upload-pixel-cap", // unique temp bundle; in-memory images, no database
+  "test:trial-lock-allowlist", // unique mkdtemp bundle; stubbed lock lookup, no database
 ]);
 // Runners allowed for pure scripts. They must not source the lock, boot the
 // API or read DATABASE_URL; each one writes only to a unique temp directory.
@@ -180,7 +192,7 @@ const freshRunner = "tests/run-fresh-schema.sh";
 {
   const text = read(freshRunner);
   if (!sourcesLock(freshRunner)) fail(`${freshRunner} must source api-integration-lock.sh`);
-  if (!/^initdb /m.test(text) || !/env -i /.test(text)) {
+  if (!/^(?:pg_as )?initdb /m.test(text) || !/env -i /.test(text)) {
     fail(`${freshRunner} must use a private initdb cluster and scrub the caller's environment`);
   }
 }
@@ -201,7 +213,8 @@ for (const [name, command] of scripts) {
     }
     mjsRefs(read(runner)).forEach((entry) => lockedEntrypoints.add(entry));
   } else if (freshSchema.has(name)) {
-    const direct = command.match(/^bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
+    // FRESH_SCHEMA_BASE=push only changes how the private cluster's base schema is built.
+    const direct = command.match(/^(?:FRESH_SCHEMA_BASE=push )?bash tests\/run-fresh-schema\.sh((?: tests\/[A-Za-z0-9._-]+\.mjs)*)$/);
     if (direct) {
       mjsRefs(direct[1]).forEach((entry) => lockedEntrypoints.add(entry));
       continue;
@@ -244,7 +257,8 @@ const pureEntrypoints = new Set([
   "private-file-acl.mjs", "staged-photo-creation.mjs", "pattrack-billing.mjs",
   "track-record-lock.mjs", "passkey-mandatory-2fa.mjs", "viewer-route-policy.mjs",
   "storage-usage.mjs", "monthly-compliance-summary.mjs",
-  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs",
+  "stripe-startup-readiness.mjs", "photo-roundtrip-config.test.mjs", "upload-pixel-cap.mjs",
+  "trial-lock-allowlist.mjs",
 ]);
 const helperModules = new Set([
   "pdf-text.mjs",

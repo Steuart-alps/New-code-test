@@ -15,7 +15,9 @@ import {
 import { getClientId, requireAuth, requireClientAdmin } from "../middleware/requireAuth";
 
 const router = Router();
-router.use(requireAuth);
+// Scoped to this router's own paths: a root-level guard here also caught
+// public routes mounted after it (the staff kiosk's GET /staff/public).
+router.use("/privacy-governance", requireAuth);
 
 const dateInput = z.string().refine((value) => Number.isFinite(Date.parse(value)), "Enter a valid date and time");
 const nullableDate = dateInput.nullable();

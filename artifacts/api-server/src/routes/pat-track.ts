@@ -5,6 +5,7 @@ import { patAppliancesTable, patTestsTable, appSettingsTable } from "@workspace/
 import { eq, and, desc, sql, type SQL } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, denyViewers, getActiveDepartmentId } from "../middleware/requireAuth";
 import { historicalTestDepartmentScope } from "../lib/patLegacyHistoryScope";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 
 const router = Router();
 
@@ -32,6 +33,8 @@ const testSchema = z.object({
   operatingCurrent:    z.string().max(50).nullable().optional(),
   notes:               z.string().max(2000).nullable().optional(),
 });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const testCreateSchema = testSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -325,35 +328,54 @@ router.get("/tests", requireAuth, async (req, res) => {
 router.post("/tests", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const parsed = testSchema.safeParse(req.body);
+  const parsed = testCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
   const applianceAccessResult = await applianceAccess(clientId, d.applianceId, getActiveDepartmentId(req));
   if (applianceAccessResult === "forbidden") return res.status(403).json({ error: "Forbidden" });
   if (applianceAccessResult === "missing") return res.status(400).json({ error: "Appliance not found" });
-  const response = await db.transaction(async (tx) => {
-    const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
-    if (!locked) return { status: 400, data: { error: "Appliance not found" } };
-    if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
-      return { status: 403, data: { error: "Forbidden" } };
-    }
-    if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
-    const [row] = await tx.insert(patTestsTable).values({
-    clientId,
-    applianceId:         d.applianceId,
-    testDate:            d.testDate,
-    result:              d.result,
-    nextTestDate:        d.nextTestDate ?? null,
-    testedBy:            d.testedBy ?? null,
-    visualInspection:    d.visualInspection ?? null,
-    earthContinuityOhms: d.earthContinuityOhms ?? null,
-    insulationMohms:     d.insulationMohms ?? null,
-    operatingCurrent:    d.operatingCurrent ?? null,
-    notes:               d.notes ?? null,
-    createdBy:            req.currentUser!.id,
-  }).returning();
-    return { status: 201, data: row };
-  });
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(d);
+  const storedEntry = async () => entry && (await db.select().from(patTestsTable)
+    .where(and(eq(patTestsTable.clientId, clientId), eq(patTestsTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  // Checked before the retired-appliance rule: a test applied before the
+  // appliance was retired is still recognised as already recorded.
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+  let response;
+  try {
+    response = await db.transaction(async (tx) => {
+      const locked = await lockLegacyAppliance(tx, clientId, d.applianceId);
+      if (!locked) return { status: 400, data: { error: "Appliance not found" } };
+      if (await siteAccess(clientId, locked.site_id, getActiveDepartmentId(req)) !== "allowed") {
+        return { status: 403, data: { error: "Forbidden" } };
+      }
+      if (!locked.active) return { status: 409, data: { error: "Retired appliances cannot receive new tests; reactivate the appliance first" } };
+      const [row] = await tx.insert(patTestsTable).values({
+      clientId,
+      applianceId:         d.applianceId,
+      testDate:            d.testDate,
+      result:              d.result,
+      nextTestDate:        d.nextTestDate ?? null,
+      testedBy:            d.testedBy ?? null,
+      visualInspection:    d.visualInspection ?? null,
+      earthContinuityOhms: d.earthContinuityOhms ?? null,
+      insulationMohms:     d.insulationMohms ?? null,
+      operatingCurrent:    d.operatingCurrent ?? null,
+      notes:               d.notes ?? null,
+      createdBy:            userId,
+      clientEntryId:        entry?.id ?? null,
+      clientEntryHash:      entry?.hash ?? null,
+    }).returning();
+      return { status: 201, data: row };
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
   res.status(response.status).json(response.data);
 });
 

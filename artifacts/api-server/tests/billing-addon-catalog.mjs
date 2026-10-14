@@ -181,6 +181,7 @@ const stubs = {
     export const requireRole = (..._roles) => (_req, _res, next) => next();
     export const requireClientAdmin = (_req, _res, next) => next();
     export const denyViewers = (_req, _res, next) => next();
+    export const requirePlatformOperator = (_req, _res, next) => next();
   `,
   trialLock: `
     export const invalidateTrialLock = () => {};
@@ -398,7 +399,25 @@ try {
     assert.equal(state.calls, before, "rejected service keys must not touch fake Stripe");
   }
 
+  // GreenTrack's module is not available yet ("Coming soon"): it stays in the
+  // catalogue but cannot be bought on its own.
+  const comingSoon = new Set(["greentrack"]);
+  assert.deepEqual(
+    config.data.services.catalog.filter(({ comingSoon: soon }) => soon === true).map(({ key }) => key),
+    [...comingSoon],
+    "GET /billing/config must mark coming-soon services",
+  );
+  for (const key of comingSoon) {
+    state.subscription = makeSubscription();
+    state.stripe = fakeStripe();
+    const response = await request("POST", "/services", { service: key, action: "add" }, { clientContext: true });
+    assert.equal(response.status, 400, `${key} is coming soon and must not be purchasable`);
+    assert.deepEqual(state.calls.subscriptionUpdate, [], `${key}: no Stripe mutation for a coming-soon service`);
+    assert.deepEqual(state.calls.invoiceCreate, [], `${key}: no charge for a coming-soon service`);
+  }
+
   for (const fixture of fixtures) {
+    if (comingSoon.has(fixture.key)) continue;
     state.subscription = makeSubscription();
     state.stripe = fakeStripe();
     state.queries.length = 0;

@@ -27,7 +27,12 @@ import {
   FileCheck2,
   BedDouble,
   Tractor,
-  Inbox
+  Inbox,
+  Wheat,
+  FlaskConical,
+  ShieldAlert,
+  LayoutGrid,
+  CalendarDays
 } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: any; serviceKey?: string; serviceKeys?: string[]; comingSoon?: boolean }
@@ -50,10 +55,11 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       defaultOpen: true,
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/tasks", label: "Tasks", icon: ClipboardList },
         { href: "/compliance-hub", label: "Compliance Hub", icon: FileCheck2 },
+        { href: "/calendar", label: "Calendar", icon: CalendarDays },
         { href: "/external", label: "Compliance Checks", icon: Briefcase },
         { href: "/contractors", label: "Contractors", icon: Building },
-        { href: "/categories", label: "Categories", icon: Tags },
       ],
     },
     {
@@ -65,6 +71,8 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
         { href: "/legionella",     label: "LegionellaTrack", icon: Droplets,        serviceKey: "legionellatrack" },
         { href: "/safe-track",     label: "SafeTrack",       icon: ShieldCheck,     serviceKey: "safetrack" },
         { href: "/incidents",      label: "IncidentTrack",   icon: AlertOctagon,    serviceKey: "incidenttrack" },
+        { href: "/coshh",          label: "COSHH Register",  icon: FlaskConical },
+        { href: "/asbestos",       label: "Asbestos Register", icon: ShieldAlert },
       ],
     },
     {
@@ -73,6 +81,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
       defaultOpen: false,
       items: [
         { href: "/kitchen",        label: "KitchenTrack",    icon: UtensilsCrossed, serviceKey: "kitchentrack" },
+        { href: "/allergens",      label: "Allergens",       icon: Wheat,           serviceKey: "kitchentrack" },
         { href: "/aqua-track",     label: "AquaTrack",       icon: Anchor,          serviceKey: "aquatrack" },
         { href: "/hot-tub",        label: "TubTrack",         icon: Waves,           serviceKey: "hottubtrack" },
       ],
@@ -120,6 +129,8 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   ];
 
   if (canAdmin) {
+    // The /categories routes are only registered for admins.
+    groups.find(g => g.id === "core")?.items.push({ href: "/categories", label: "Categories", icon: Tags });
     const peopleGroup = groups.find(g => g.id === "people-training");
     if (peopleGroup) {
       peopleGroup.items.push(
@@ -134,6 +145,7 @@ export function getNavGroups({ isConsultant, canAdmin }: { isConsultant: boolean
   }
 
   if (isConsultant) {
+    groups.find(g => g.id === "core")?.items.splice(1, 0, { href: "/portfolio", label: "Portfolio", icon: LayoutGrid });
     groups.find(g => g.id === "admin")?.items.push({ href: "/clients", label: "Clients", icon: Building2 });
   }
 

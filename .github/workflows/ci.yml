@@ -1,0 +1,118 @@
+name: CI
+
+# The required gate for every change: typecheck, both production builds, the
+# core API suites (tenant isolation, module routes, department isolation,
+# enforced CSRF) against a disposable Postgres, and the production schema-shape
+# checks (schema parity, dashboard accuracy on a drizzle-kit push base). The browser workflows next to
+# this file stay path-filtered; this one runs on every pull request.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request supersedes the running check.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: Typecheck, build and API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: complytrack
+          POSTGRES_PASSWORD: complytrack
+          POSTGRES_DB: complytrack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U complytrack -d complytrack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Disposable CI service only; never a real database or secret.
+      DATABASE_URL: postgresql://complytrack:complytrack@localhost:5432/complytrack
+      SESSION_SECRET: ci-only-session-secret-not-for-production
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # The pnpm version comes from "packageManager" in package.json
+      # (pnpm@10.28.0, matching render.yaml).
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build API
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Build web app
+        env:
+          PORT: "5173"
+          BASE_PATH: /
+        run: pnpm --filter @workspace/compliance-tracker run build
+
+      - name: Web client CSRF header test
+        run: pnpm --filter @workspace/api-client-react run test:custom-fetch-csrf
+
+      # Same as Render's pre-deploy step: base schema on the empty database.
+      # The API applies its runtime migrations when each suite boots it.
+      - name: Create base database schema
+        run: node lib/db/bootstrap.mjs
+
+      - name: Tenant isolation tests
+        run: pnpm --filter @workspace/api-server run test:isolation:ci
+
+      - name: Module route tests
+        run: pnpm --filter @workspace/api-server run test:modules:ci
+
+      - name: Department isolation tests
+        run: pnpm --filter @workspace/api-server run test:dept-isolation:ci
+
+      - name: Enforced CSRF tests
+        run: pnpm --filter @workspace/api-server run test:csrf-enforced:ci
+
+      # The schema-shape suites start their own private cluster with initdb and
+      # pg_ctl, which ubuntu-latest ships (PostgreSQL 16, service disabled) but
+      # not on PATH. Install the server package only if an image drops it.
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$bin" ] || [ ! -x "$bin/initdb" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql
+            bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)"
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/initdb" --version
+
+      # A drizzle-kit push database and a runtime-migrations-only one must end
+      # with the same columns (production is built the push way).
+      - name: Schema parity test
+        run: pnpm --filter @workspace/api-server run test:schema:parity
+
+      - name: Dashboard accuracy tests (production schema base)
+        run: pnpm --filter @workspace/api-server run test:dashboard-accuracy:pushed

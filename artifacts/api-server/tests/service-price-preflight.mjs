@@ -119,8 +119,8 @@ try {
   ]);
   assert.match(
     adminRoute,
-    /router\.get\("\/api\/admin\/service-price-preflight", requireAuth, requireConsultant/,
-    "the all-gap preflight must be consultant-only",
+    /router\.get\("\/admin\/service-price-preflight", requireAuth, requireConsultant, requirePlatformOperator/,
+    "the all-gap preflight is platform-operator only, under /api/admin (the router is mounted at /api)",
   );
   assert.match(
     adminRoute,
@@ -128,7 +128,7 @@ try {
     "the admin preflight must expose readiness and all missing keys",
   );
   assert.doesNotMatch(
-    adminRoute.slice(adminRoute.indexOf('router.get("/api/admin/service-price-preflight"'), adminRoute.indexOf("// One-shot demo")),
+    adminRoute.slice(adminRoute.indexOf('router.get("/admin/service-price-preflight"'), adminRoute.indexOf("// One-shot demo")),
     /ensureServicePrices/,
     "the preflight must remain read-only",
   );

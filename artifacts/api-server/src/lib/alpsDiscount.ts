@@ -356,3 +356,65 @@ export async function getAlpsDiscountCouponId(stripe: Stripe): Promise<string> {
   );
   return coupon.id;
 }
+export type SubscriptionDiscountResult = "applied" | "invalid" | "used" | "pending";
+
+/**
+ * Apply the client's discount code to the subscription it already pays for
+ * (existing clients never go through Checkout again). Runs under the same
+ * per-client lock as issue and reserve: the code is re-verified, the single
+ * lifetime redemption is recorded, and the coupon is added to the live
+ * subscription before the transaction commits, so a Stripe failure leaves
+ * nothing recorded. The discount applies from the next invoice; nothing is
+ * prorated or refunded.
+ */
+export async function redeemAlpsDiscountOnSubscription(
+  clientId: number,
+  codeHash: string,
+  stripe: Stripe,
+  subscription: Stripe.Subscription,
+): Promise<SubscriptionDiscountResult> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${DISCOUNT_LOCK_NS}, ${clientId})`);
+
+    const activeResult = await tx.execute(sql`
+      SELECT 1 FROM billing_discount_codes
+      WHERE client_id = ${clientId} AND code_hash = ${codeHash}
+      LIMIT 1
+    `);
+    if ((activeResult.rows ?? []).length === 0) return "invalid";
+
+    const existingResult = await tx.execute(sql`
+      SELECT status FROM billing_discount_redemptions
+      WHERE client_id = ${clientId}
+      LIMIT 1
+    `);
+    const existing = (existingResult.rows ?? [])[0] as { status: string } | undefined;
+    if (existing) return existing.status === "reserved" ? "pending" : "used";
+
+    await tx.execute(sql`
+      INSERT INTO billing_discount_redemptions (client_id, code, status, redeemed_at)
+      VALUES (${clientId}, ${codeHash}, 'redeemed', now())
+    `);
+
+    const couponId = await getAlpsDiscountCouponId(stripe);
+    const alreadyApplied = subscription.discounts.some((discount) =>
+      typeof discount !== "string" && discount.source?.coupon != null &&
+      (typeof discount.source.coupon === "string" ? discount.source.coupon : discount.source.coupon.id) === couponId,
+    );
+    if (!alreadyApplied) {
+      await stripe.subscriptions.update(
+        subscription.id,
+        {
+          // Keep any discount the subscription already carries.
+          discounts: [
+            ...subscription.discounts.map((discount) => ({ discount: typeof discount === "string" ? discount : discount.id })),
+            { coupon: couponId },
+          ],
+          proration_behavior: "none",
+        },
+        { idempotencyKey: `alps-discount-${clientId}-${subscription.id}` },
+      );
+    }
+    return "applied";
+  });
+}

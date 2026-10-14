@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, date, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, boolean, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -61,9 +62,17 @@ export const patTestsTable = pgTable("pat_tests", {
   operatingCurrent: text("operating_current"),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("UQ_pat_tests_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 // Certificate-level PAT register. The legacy appliance/test register above is
 // intentionally retained; these tables support room-template based testing.

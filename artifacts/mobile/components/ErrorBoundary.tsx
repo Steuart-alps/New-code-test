@@ -29,6 +29,8 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }): void {
+    // Release builds have no red screen: keep a trace in the device log.
+    console.error('[app] Render error caught by ErrorBoundary:', error);
     if (typeof this.props.onError === 'function') {
       this.props.onError(error, info.componentStack);
     }

@@ -14,7 +14,7 @@ const browserType = browserTypes[browserName];
 const port = 23000 + Math.floor(Math.random() * 1000);
 const baseUrl = `http://127.0.0.1:${port}`;
 const browserExecutablePath = browserName === "chromium"
-  ? process.env.CHROMIUM_PATH ?? "/repl/tools/bin/chromium"
+  ? process.env.CHROMIUM_PATH || undefined
   : process.env.HOT_TUB_BROWSER_EXECUTABLE_PATH;
 
 if (!browserType) {

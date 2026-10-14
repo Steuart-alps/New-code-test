@@ -126,9 +126,9 @@ router.post("/sites", requireAuth, requireClientAdmin, async (req, res) => {
     return created;
   });
 
-  // Pre-populate the new site with the starter pack of compliance checks,
-  // unless the caller explicitly opted out.
-  if (req.body.seedStarterChecks !== false) {
+  // Pre-populate the new site with the starter pack of compliance checks only
+  // when the caller explicitly opts in.
+  if (req.body.seedStarterChecks === true) {
     await seedSiteStarterChecks(clientId, site.id);
   }
 

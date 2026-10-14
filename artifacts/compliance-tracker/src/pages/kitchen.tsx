@@ -1,7 +1,8 @@
 import { KitchenTemperatureControls } from "@/components/kitchen-temperature-controls";
 import { assessKitchenTemperatures, kitchenFailureValue, kitchenHoldRequirement, parseKitchenTemperatureRules, type KitchenTemperatureFailure } from "@workspace/api-client-react";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
+import { ChecklistItemRow } from "@/components/checklist-item-row";
 import { AppLayout } from "@/components/layout";
 import { Link } from "wouter";
 import {
@@ -147,6 +148,7 @@ function coolingMins(start: string, finish: string): number | null {
 const REHEATING_LIMITS = {
   scotland: "Above 82°C",
   england_wales: "Above 75°C",
+  northern_ireland: "Above 75°C",
 } as const;
 
 type FoodJurisdiction = keyof typeof REHEATING_LIMITS;
@@ -176,10 +178,10 @@ function ConfigDialog() {
   const resetConfig = useResetFoodSafetyConfig();
 
   // Limits tab
-  const [cookingLimit, setCookingLimit] = useState("Above 75°C (10 seconds)");
+  const [cookingLimit, setCookingLimit] = useState("75°C or above (core)");
   const [coolingLimit, setCoolingLimit] = useState("8°C within 90 minutes");
-  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("scotland");
-  const [reheatingLimit, setReheatingLimit] = useState("Above 82°C");
+  const [foodJurisdiction, setFoodJurisdiction] = useState<FoodJurisdiction>("england_wales");
+  const [reheatingLimit, setReheatingLimit] = useState<string>(REHEATING_LIMITS.england_wales);
   const [hotHoldingLimit, setHotHoldingLimit] = useState("Above 63°C");
 
   // Sections tab
@@ -202,10 +204,10 @@ function ConfigDialog() {
 
   useEffect(() => {
     if (!config) return;
-    setCookingLimit(config.food_cooking_limit || "Above 75°C (10 seconds)");
+    setCookingLimit(config.food_cooking_limit || "75°C or above (core)");
     setCoolingLimit(config.food_cooling_limit || "8°C within 90 minutes");
-    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "scotland");
-    setReheatingLimit(config.food_reheating_limit || "Above 82°C");
+    setFoodJurisdiction((config.food_jurisdiction as FoodJurisdiction) || "england_wales");
+    setReheatingLimit(config.food_reheating_limit || REHEATING_LIMITS.england_wales);
     setHotHoldingLimit(config.food_hot_holding_limit || "Above 63°C");
     setShowDeliveries(config.food_show_deliveries !== "false");
     setShowColdFood(config.food_show_cold_food !== "false");
@@ -486,7 +488,7 @@ function ConfigDialog() {
             </p>
             <div className="space-y-1.5">
               <Label>Cooking temperature limit</Label>
-              <Input value={cookingLimit} placeholder="Above 75°C (10 seconds)"
+              <Input value={cookingLimit} placeholder="75°C or above (core)"
                 onChange={e => setCookingLimit(e.target.value)} />
               <p className="text-xs text-muted-foreground">Example guidance varies by process and nation; use the critical limit in your documented HACCP system.</p>
             </div>
@@ -509,6 +511,7 @@ function ConfigDialog() {
               >
                 <option value="scotland">Scotland — above 82°C</option>
                 <option value="england_wales">England / Wales — above 75°C</option>
+                <option value="northern_ireland">Northern Ireland — above 75°C</option>
               </select>
               <p className="text-xs text-muted-foreground">
                 Selecting a jurisdiction sets the standard reheating target used for new diary records.
@@ -733,7 +736,7 @@ function DailyDiaryTab() {
   const updateRecord = useUpdateFoodSafetyRecord();
 
   // ── Derived template values from config ─────────────────────────────────────
-  const cookingLimit = config?.food_cooking_limit || "Above 75°C (10 seconds)";
+  const cookingLimit = config?.food_cooking_limit || "75°C or above (core)";
   const coolingLimit = config?.food_cooling_limit || "8°C within 90 minutes";
   const reheatingLimit = config?.food_reheating_limit || "Above 82°C";
   const hotHoldingLimit = config?.food_hot_holding_limit || "Above 63°C";
@@ -990,7 +993,10 @@ function DailyDiaryTab() {
     }
   };
 
-  const isSubmitted = !!record?.submittedAt;
+  const isFiled = !!record?.submittedAt;
+  // Viewers are read-only: they see the diary locked like a filed one, with no
+  // Add/Save/File actions (the server would refuse them).
+  const isSubmitted = isFiled || user?.role === "client_viewer";
 
   return (
     <div className="space-y-6">
@@ -1004,7 +1010,7 @@ function DailyDiaryTab() {
         <CardHeader className="border-b border-border/50 pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-display">Select Date</CardTitle>
-            {isSubmitted && (
+            {isFiled && (
               <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Submitted
@@ -1049,7 +1055,7 @@ function DailyDiaryTab() {
       ) : (
         <>
           {/* Filed banner */}
-          {isSubmitted && record?.submittedAt && (
+          {isFiled && record?.submittedAt && (
             <Card className="border-emerald-200 bg-emerald-50">
               <CardContent className="py-4 px-6 flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
@@ -1789,12 +1795,22 @@ function KitchenChecklistCard({
     const endpoint = KCL_ENDPOINT[type];
     const payload: any = { checklistType: type, checkDate: date, siteId: siteId ?? null, items, completedBy: completedBy || null, staffRosterId: staffRosterId, managerNote: managerNote || null };
     if (submit) payload.submittedAt = new Date().toISOString();
+    const failedTitle = submit ? "Checklist not submitted" : "Draft not saved";
     try {
-      if (existing) { await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) }); }
-      else { await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) }); }
+      const res = existing
+        ? await apiFetch(`${endpoint}/${existing.id}`, { method: "PUT", body: JSON.stringify(payload) })
+        : await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
+      if (!res.ok) {
+        // Keep the user's ticks; only a 409 (already submitted elsewhere)
+        // reloads, to show the stored submitted copy.
+        toast({ title: failedTitle, description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        if (res.status === 409) onSaved();
+        return;
+      }
+      toast({ title: submit ? "Checklist submitted" : "Draft saved" });
       onSaved();
-    } catch (err: any) {
-      toast({ title: "Save failed", description: err?.message, variant: "destructive" });
+    } catch {
+      toast({ title: failedTitle, description: "Check your connection and try again.", variant: "destructive" });
     } finally { setSaving(false); }
   }
 
@@ -1833,18 +1849,7 @@ function KitchenChecklistCard({
                 {item.section && item.section !== items[i - 1]?.section && (
                   <p className={`text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 px-1 ${i > 0 ? "mt-3" : ""} mb-1`}>{item.section}</p>
                 )}
-                <div className={`rounded-lg border p-3 transition-colors ${submitted ? "bg-muted/20 opacity-80" : "hover:bg-muted/20 cursor-pointer"} ${item.checked ? "border-emerald-200 bg-emerald-50/50" : "border-border"}`}>
-                  <div className="flex items-start gap-3" onClick={() => toggle(i)}>
-                    {item.checked ? <CheckSquare className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" /> : <Square className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />}
-                    <span className={`text-sm ${item.checked ? "text-emerald-800 line-through decoration-emerald-400" : ""}`}>{item.label}</span>
-                  </div>
-                  {!submitted && item.checked && (
-                    <div className="mt-2 ml-7">
-                      <Input value={item.notes ?? ""} onChange={e => setNote(i, e.target.value)} placeholder="Optional note…" className="h-7 text-xs bg-white" onClick={e => e.stopPropagation()} />
-                    </div>
-                  )}
-                  {submitted && item.notes && <p className="ml-7 mt-1 text-xs text-muted-foreground italic">{item.notes}</p>}
-                </div>
+                <ChecklistItemRow item={item} submitted={submitted} onToggle={() => toggle(i)} onNote={note => setNote(i, note)} />
               </div>
             ))}
           </div>
@@ -1916,8 +1921,10 @@ function DailyChecksTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const getAm = (type: string) => amRows.find(c => c.checklistType === type);
-  const getPm = (type: string) => pmRows.find(c => c.checklistType === type);
+  // Without a site filter the lists hold every site's rows; match the card's
+  // own slot so it never edits another site's checklist.
+  const getAm = (type: string) => amRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
+  const getPm = (type: string) => pmRows.find(c => c.checklistType === type && (c.siteId ?? null) === selectedSiteId);
 
   return (
     <div className="space-y-4">
@@ -2068,7 +2075,13 @@ export default function KitchenPage() {
             </div>
             <p className="text-sm text-muted-foreground">{activeTabMeta.description}</p>
           </div>
-          {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/food-safety" className="text-sm font-medium text-primary underline underline-offset-2">Inspection register &amp; diary calendar</Link>
+            <Link href="/allergens">
+              <Button variant="outline" size="sm" className="gap-1.5">Allergen records</Button>
+            </Link>
+            {activeTab === "diary" && canAdmin && <ConfigDialog />}
+          </div>
         </div>
 
         {/* Check status cards */}

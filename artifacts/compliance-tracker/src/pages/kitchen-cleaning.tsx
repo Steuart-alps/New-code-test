@@ -5,7 +5,7 @@
  * Frequencies: Daily | Weekly | Monthly
  */
 import { useState, useEffect, useMemo } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiErrorMessage } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -157,17 +157,19 @@ function ManageTasksDialog({
         method: form.method.trim() || null, product: form.product.trim() || null,
         responsible: form.responsible.trim() || null,
       };
-      if (editTask) {
-        await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) });
-        toast({ title: "Task updated" });
-      } else {
-        await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
-        toast({ title: "Task added" });
+      const res = editTask
+        ? await apiFetch(`/kitchen-cleaning/tasks/${editTask.id}`, { method: "PUT", body: JSON.stringify(body) })
+        : await apiFetch("/kitchen-cleaning/tasks", { method: "POST", body: JSON.stringify(body) });
+      if (!res.ok) {
+        // Keep the form open with the user's input.
+        toast({ title: "Failed to save task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
       }
+      toast({ title: editTask ? "Task updated" : "Task added" });
       setShowForm(false);
       onChanged();
     } catch {
-      toast({ title: "Failed to save task", variant: "destructive" });
+      toast({ title: "Failed to save task", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -176,11 +178,15 @@ function ManageTasksDialog({
   async function handleDelete(t: CleaningTask) {
     if (!confirm(`Remove "${t.task}" from the cleaning schedule?`)) return;
     try {
-      await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      const res = await apiFetch(`/kitchen-cleaning/tasks/${t.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast({ title: "Failed to remove task", description: await getApiErrorMessage(res, "Please try again."), variant: "destructive" });
+        return;
+      }
       toast({ title: "Task removed" });
       onChanged();
     } catch {
-      toast({ title: "Failed to remove task", variant: "destructive" });
+      toast({ title: "Failed to remove task", description: "Check your connection and try again.", variant: "destructive" });
     }
   }
 
@@ -490,13 +496,16 @@ export default function CleaningScheduleTab() {
         submittedAt: submit ? new Date().toISOString() : (log?.submitted_at ?? null),
       };
       const r = await apiFetch("/kitchen-cleaning/logs", { method: "POST", body: JSON.stringify(body) });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        toast({ title: "Failed to save", description: await getApiErrorMessage(r, "Please try again."), variant: "destructive" });
+        return;
+      }
       const saved = await r.json();
       setLog(saved);
       toast({ title: submit ? "Schedule signed off" : "Draft saved" });
       loadHistory();
     } catch {
-      toast({ title: "Failed to save", variant: "destructive" });
+      toast({ title: "Failed to save", description: "Check your connection and try again.", variant: "destructive" });
     } finally {
       setSaving(false);
     }

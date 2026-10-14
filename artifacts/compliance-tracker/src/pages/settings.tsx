@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startRegistration } from "@simplewebauthn/browser";
 import { cn } from "@/lib/utils";
 import { AppLayout } from "@/components/layout";
-import { useGetSettings, useGetStorageUsage } from "@workspace/api-client-react";
+import { useGetSettings, useGetStorageUsage, type AppSettings } from "@workspace/api-client-react";
 import { useAppMutations } from "@/hooks/use-app-data";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, useCanAdmin } from "@/context/auth-context";
-import { apiFetch as authenticatedApiFetch } from "@/lib/api";
+import { apiFetch as authenticatedApiFetch, withActiveClient, withCsrfToken } from "@/lib/api";
+import { BusinessTypeCard } from "@/components/business-type-card";
 import { useActiveClientApi } from "@/hooks/use-active-client-api";
 import { usePhotoRequirements } from "@/hooks/use-photo-requirements";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import {
   type ServiceActionResponseBody,
 } from "@/lib/service-action-outcome";
 import { DataDeletionRequestCard } from "@/components/data-deletion-request-card";
+import { CHECKOUT_ADDONS, checkoutPerSiteTotal } from "@/lib/addon-catalog";
 interface DomainRecord {
   record?: string;
   name: string;
@@ -47,15 +49,24 @@ interface DomainState {
 const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
 async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${apiBase}${path}`, {
+  // Business settings follow the selected business. Billing calls keep their
+  // existing scoping, and account (/auth) calls are not business-scoped.
+  const scoped = path.startsWith("/billing") || path.startsWith("/auth/") ? path : withActiveClient(path, init?.body);
+  const res = await fetch(`${apiBase}${scoped}`, await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
-  });
+  }));
   const ct = res.headers.get("content-type") ?? "";
   const data = ct.includes("application/json") ? await res.json() : null;
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
   return data as T;
+}
+
+/** Add the selected business to a billing API path (unless one is already set). */
+function withBillingClient(path: string, clientId: number | null | undefined): string {
+  if (clientId === null || clientId === undefined || /[?&]clientId=/.test(path)) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}clientId=${encodeURIComponent(clientId)}`;
 }
 
 function StatusBadge({ status }: { status: string | null }) {
@@ -151,12 +162,24 @@ function StorageUsageCard() {
     }
   };
 
+  // Only offer to buy storage when the storage add-on is configured.
+  const [storageAddonAvailable, setStorageAddonAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ storageAddonAvailable?: boolean; billingAvailable?: boolean }>(withBillingClient("/billing/config", activeClientId))
+      .then((config) => {
+        if (!cancelled) setStorageAddonAvailable(config.storageAddonAvailable === true && config.billingAvailable !== false);
+      })
+      .catch(() => { if (!cancelled) setStorageAddonAvailable(false); });
+    return () => { cancelled = true; };
+  }, [activeClientId]);
+
   const buyAdditionalStorage = async () => {
     const excessBytes = usage?.estimatedCost?.excessStorageBytes ?? 0;
     const gib = Math.max(1, Math.ceil(excessBytes / (1024 ** 3)));
     setStoragePurchaseBusy(true);
     try {
-      const response = await authenticatedApiFetch("/billing/storage", {
+      const response = await authenticatedApiFetch(withBillingClient("/billing/storage", activeClientId), {
         method: "POST",
         body: JSON.stringify({ gib, requestId: crypto.randomUUID() }),
       });
@@ -233,7 +256,7 @@ function StorageUsageCard() {
                 <p className="mt-2 text-sm font-medium">
                   {usage.estimatedCost
                     ? (usage.estimatedCost.excessStorageBytes ?? 0) > 0
-                      ? `Estimated excess storage charge: $${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month`
+                      ? `Estimated excess storage charge: US$${(usage.estimatedCost.totalMinorUnits / 100).toFixed(2)} / month (USD)`
                       : `Within the included ${formatBytes(usage.estimatedCost.includedStorageBytes)} storage allowance`
                     : "Storage pricing is currently unavailable for this subscription."}
                 </p>
@@ -243,17 +266,19 @@ function StorageUsageCard() {
                     Downloads are measured separately and are not charged here.
                   </p>
                 )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={buyAdditionalStorage}
-                  disabled={storagePurchaseBusy}
-                >
-                  {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
-                  {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
-                </Button>
+                {storageAddonAvailable && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3"
+                    onClick={buyAdditionalStorage}
+                    disabled={storagePurchaseBusy}
+                  >
+                    {storagePurchaseBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <CreditCard className="mr-1.5 h-4 w-4" />}
+                    {storagePurchaseBusy ? "Adding storage to Stripe…" : "Buy additional storage"}
+                  </Button>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -739,7 +764,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "kitchen", label: "KitchenTrack" },
   { key: "fire", label: "FireTrack" },
   { key: "legionella", label: "LegionellaTrack" },
-  { key: "pool", label: "AquaTrack" },
+  { key: "pool", label: "AquaTrack (water tests)" },
   { key: "pat", label: "PATtrack" },
   { key: "pest", label: "PestTrack" },
   { key: "fix", label: "FixTrack" },
@@ -752,7 +777,7 @@ const TRACK_SUMMARY_MODULES = [
   { key: "tree", label: "TreeTrack" },
   { key: "bike", label: "BikeTrack" },
   { key: "green", label: "GreenTrack" },
-  { key: "swim", label: "SwimTrack" },
+  { key: "swim", label: "AquaTrack (sessions & safety)" },
   { key: "incident", label: "IncidentTrack" },
 ] as const;
 
@@ -1321,6 +1346,8 @@ function EmailSetupGuide({
 
 interface BillingConfig {
   subscription?: { status?: string } | null;
+  /** False while Stripe is unconfigured or unverified: checkout is unavailable. */
+  billingAvailable?: boolean;
   siteCount: number;
   perSite: { priceId: string; unitAmount: number; currency: string } | null;
   billableQuantity: number;
@@ -1333,12 +1360,60 @@ interface BillingConfig {
     addons: string[];
     bundle: boolean;
     subscribed: boolean;
+    /** Modules chosen at signup ("bundle" for the Complete bundle). */
+    selected?: string[];
     perSiteRate: number;
     capPence: number;
     /** Add-ons whose recurring GBP price can't be purchased right now. */
     addonAvailability?: { checked: boolean; unavailable: string[] };
-    catalog: { key: string; label: string; amountPence: number }[];
+    catalog: { key: string; label: string; amountPence: number; comingSoon?: boolean }[];
   };
+}
+
+// Existing clients who already pay redeem the ALPS discount code they were
+// given here; it takes 50% off from the next invoice.
+function SubscriptionDiscountForm({ billingPath, onApplied }: { billingPath: (path: string) => string; onApplied: () => void }) {
+  const { toast } = useToast();
+  const [code, setCode] = useState("");
+  const [saving, setSaving] = useState(false);
+  const apply = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!code.trim() || saving) return;
+    setSaving(true);
+    try {
+      await apiFetch(billingPath("/billing/discount-code/redeem"), {
+        method: "POST",
+        body: JSON.stringify({ discountCode: code.trim() }),
+      });
+      setCode("");
+      toast({ title: "Discount applied", description: "50% off your subscription from your next invoice." });
+      onApplied();
+    } catch (err: any) {
+      toast({ title: "Couldn't apply the discount", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <form onSubmit={apply} className="rounded-lg border border-border p-4 space-y-2">
+      <label htmlFor="subscription-discount-code" className="block text-sm font-medium">ALPS client discount code</label>
+      <p className="text-xs text-muted-foreground">If ALPS has given you a discount code, enter it for 50% off your subscription from your next invoice.</p>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Input
+          id="subscription-discount-code"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder="ALPS-XXXX-XXXX-XXXX-XXXX"
+          autoComplete="off"
+          spellCheck={false}
+          className="sm:max-w-xs font-mono"
+        />
+        <Button type="submit" variant="outline" disabled={saving || !code.trim()}>
+          {saving ? "Applying…" : "Apply code"}
+        </Button>
+      </div>
+    </form>
+  );
 }
 
 function BillingCard() {
@@ -1356,8 +1431,10 @@ function BillingCard() {
   // these rows never show Active until a later action is confirmed.
   const [unconfirmedServices, setUnconfirmedServices] = useState<Set<string>>(() => new Set());
 
+  const billingPath = (path: string) => withBillingClient(path, activeClientId);
+
   const fetchConfig = () => {
-    apiFetch<BillingConfig>("/billing/config")
+    apiFetch<BillingConfig>(billingPath("/billing/config"))
       .then(setConfig)
       .catch(() => setConfig(null))
       .finally(() => setLoading(false));
@@ -1365,12 +1442,28 @@ function BillingCard() {
 
   useEffect(() => {
     fetchConfig();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClientId]);
+
+  // Module picker for checkout, pre-selected with the modules chosen at signup.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedAddons, setPickedAddons] = useState<Set<string>>(new Set());
+  const [pickedBundle, setPickedBundle] = useState(false);
+  const purchasableAddons = CHECKOUT_ADDONS.filter((addon) => !addon.comingSoon);
+  const openCheckoutPicker = () => {
+    const selected = config?.services?.selected ?? [];
+    const known = new Set(purchasableAddons.map((addon) => addon.key));
+    setPickedBundle(selected.includes("bundle"));
+    setPickedAddons(new Set(selected.filter((key) => known.has(key))));
+    setPickerOpen(true);
+  };
+  const pickedTotal = checkoutPerSiteTotal(pickedAddons.size, pickedBundle);
+  const pickedReachesCap = !pickedBundle && pickedTotal === checkoutPerSiteTotal(0, true);
 
   const openPortal = async () => {
     setBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/portal", { method: "POST" });
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/portal"), { method: "POST" });
       if (data.url) window.location.href = data.url;
     } catch (err: any) {
       toast({ title: "Couldn't open billing portal", description: err.message, variant: "destructive" });
@@ -1382,9 +1475,14 @@ function BillingCard() {
   const startCheckout = async () => {
     setCheckoutBusy(true);
     try {
-      const data = await apiFetch<{ url: string }>("/billing/checkout", {
+      // Send the modules picked in the dialog; the server prices them (and
+      // switches to the Complete bundle at the per-site cap).
+      const data = await apiFetch<{ url: string }>(billingPath("/billing/checkout"), {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          bundle: pickedBundle,
+          services: pickedBundle ? [] : Array.from(pickedAddons),
+        }),
       });
       if (!data.url) throw new Error("Could not start checkout");
       window.location.href = data.url;
@@ -1425,7 +1523,7 @@ function BillingCard() {
         // The body carries only the service and action: the server derives the
         // Stripe idempotency key from subscription + service + billing period,
         // so a retry after a failure reuses the same key and cannot double-charge.
-        const response = await authenticatedApiFetch("/billing/services", {
+        const response = await authenticatedApiFetch(billingPath("/billing/services"), {
           method: "POST",
           body: JSON.stringify({ service: serviceKey, action }),
         });
@@ -1478,7 +1576,7 @@ function BillingCard() {
       // Always re-read server truth: the row's state comes from the live
       // subscription, never from the outcome of this request alone.
       fetchConfig();
-      await apiFetch("/billing/refresh-access", { method: "POST" }).catch(() => {});
+      await apiFetch(billingPath("/billing/refresh-access"), { method: "POST" }).catch(() => {});
       await Promise.resolve(refreshAuth()).catch(() => {});
       serviceActionsInFlight.current.delete(serviceKey);
       setActionBusy(null);
@@ -1493,7 +1591,10 @@ function BillingCard() {
   const sites = config?.siteCount ?? 0;
   const billable = config?.billableQuantity ?? Math.max(sites, 1);
   const total = config?.monthlyTotal != null ? config.monthlyTotal / 100 : billable * perSiteRate;
-  const status = config?.subscription?.status ?? "trial";
+  const status = hasSubscription
+    ? (config?.subscription?.status ?? "active").replace(/_/g, " ")
+    : config?.cancelledAt ? "cancelled" : (config?.subscription?.status === "trial" || !config?.subscription?.status ? "trial" : "no active subscription");
+  const billingAvailable = config?.billingAvailable !== false;
 
   return (
     <>
@@ -1541,11 +1642,22 @@ function BillingCard() {
                     <ExternalLink className="w-4 h-4 mr-1.5" /> {busy ? "Opening…" : "Manage subscription"}
                   </Button>
                 ) : canAdmin ? (
-                  <Button onClick={startCheckout} disabled={checkoutBusy}>
+                  <Button onClick={openCheckoutPicker} disabled={checkoutBusy || !billingAvailable}>
                     <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Set up billing"}
                   </Button>
                 ) : null}
               </div>
+
+              {hasSubscription && canAdmin && billingAvailable && (
+                <SubscriptionDiscountForm billingPath={billingPath} onApplied={fetchConfig} />
+              )}
+
+              {!billingAvailable && !hasSubscription && (
+                <div role="status" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>Billing is temporarily unavailable, so subscriptions can't be set up right now. Your access is kept in the meantime — please try again later.</p>
+                </div>
+              )}
 
               {config?.dataDeletionScheduledAt && !config?.dataDeletedAt && (
                 <div className="flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-950/30">
@@ -1603,7 +1715,8 @@ function BillingCard() {
                   const availability = servicesConfig.addonAvailability;
                   const availabilityUnknown = availability?.checked === false;
                   const priceUnavailable = availabilityUnknown || (availability?.unavailable.includes(service.key) ?? false);
-                  const purchaseBlocked = !onSubscription && priceUnavailable;
+                  const comingSoon = service.comingSoon === true;
+                  const purchaseBlocked = !onSubscription && (priceUnavailable || comingSoon);
                   const notice = serviceNotices[service.key];
                   const busyHere = actionBusy === service.key;
                   return (
@@ -1628,7 +1741,7 @@ function BillingCard() {
                             </span>
                           ) : purchaseBlocked ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold">
-                              Temporarily unavailable
+                              {comingSoon ? "Coming soon" : "Temporarily unavailable"}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border text-xs font-semibold">
@@ -1638,7 +1751,9 @@ function BillingCard() {
                         </div>
                         {purchaseBlocked && !onTrial && (
                           <p className="mt-2 text-xs text-muted-foreground max-w-md" data-testid="addon-unavailable-reason">
-                            {availabilityUnknown
+                            {comingSoon
+                              ? `${service.label} is coming soon and can't be added yet.`
+                              : availabilityUnknown
                               ? "We couldn't check add-on availability just now, so adding is paused. Nothing has been charged — please refresh or try again shortly."
                               : `${service.label} can't be added online right now because its price is temporarily unavailable. Nothing has been charged — please try again later or contact support.`}
                           </p>
@@ -1694,6 +1809,64 @@ function BillingCard() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={pickerOpen} onOpenChange={(open) => { if (!checkoutBusy) setPickerOpen(open); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Choose your modules</DialogTitle>
+            <DialogDescription>
+              ComplyTrack core is always included. Prices are per site, per month, plus VAT.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 rounded-md border p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={pickedBundle}
+                onChange={() => setPickedBundle((value) => !value)}
+              />
+              <span className="flex-1 text-sm font-semibold">ComplyTrack Complete — every module</span>
+              <span className="text-sm font-medium">£{checkoutPerSiteTotal(0, true)}</span>
+            </label>
+            {purchasableAddons.map((addon) => (
+              <label key={addon.key} className={cn("flex items-center gap-3 rounded-md border p-3", pickedBundle ? "opacity-60" : "cursor-pointer")}>
+                <input
+                  type="checkbox"
+                  disabled={pickedBundle}
+                  checked={pickedBundle || pickedAddons.has(addon.key)}
+                  onChange={() => setPickedAddons((current) => {
+                    const next = new Set(current);
+                    if (next.has(addon.key)) next.delete(addon.key); else next.add(addon.key);
+                    return next;
+                  })}
+                />
+                <span className="flex-1 text-sm">
+                  <span className="font-medium">{addon.label}</span>
+                  <span className="ml-1.5 text-xs text-muted-foreground">{addon.desc}</span>
+                </span>
+                <span className="text-sm text-muted-foreground">+ £10</span>
+              </label>
+            ))}
+            {CHECKOUT_ADDONS.filter((addon) => addon.comingSoon).map((addon) => (
+              <div key={addon.key} className="flex items-center gap-3 rounded-md border p-3 opacity-50">
+                <span className="flex-1 text-sm font-medium">{addon.label}</span>
+                <span className="text-xs uppercase text-muted-foreground">Coming soon</span>
+              </div>
+            ))}
+          </div>
+          {pickedReachesCap && (
+            <p className="text-xs text-emerald-800">
+              Your selection reaches the £{pickedTotal} per-site cap, so you'll get ComplyTrack Complete — every module — for the same price.
+            </p>
+          )}
+          <DialogFooter className="items-center gap-3 sm:justify-between">
+            <span className="text-sm font-semibold">£{pickedTotal} per site / month</span>
+            <Button onClick={startCheckout} disabled={checkoutBusy}>
+              <CreditCard className="w-4 h-4 mr-1.5" /> {checkoutBusy ? "Opening checkout…" : "Continue to checkout"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -1789,14 +1962,17 @@ function DataExportCard() {
 }
 
 function InvoicesCard() {
+  const { activeClientId } = useAuth();
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<{ invoices: InvoiceRow[] }>("/billing/invoices")
+    setInvoices(null);
+    setError(null);
+    apiFetch<{ invoices: InvoiceRow[] }>(withBillingClient("/billing/invoices", activeClientId))
       .then((d) => setInvoices(d.invoices))
       .catch((err: any) => setError(err.message || "Couldn't load invoices"));
-  }, []);
+  }, [activeClientId]);
 
   const fmtAmount = (inv: InvoiceRow) => {
     const amount = (inv.status === "paid" ? inv.amountPaid : inv.amountDue) / 100;
@@ -1862,10 +2038,43 @@ function InvoicesCard() {
 }
 
 
+// ── Account timezone choices ─────────────────────────────────────────────────
+// Common IANA zones for UK businesses, UK first. A stored zone that is not
+// listed is still offered so saving the form never changes it unasked.
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Europe/London", label: "UK — London (GMT/BST)" },
+  { value: "Europe/Jersey", label: "Jersey" },
+  { value: "Europe/Guernsey", label: "Guernsey" },
+  { value: "Europe/Isle_of_Man", label: "Isle of Man" },
+  { value: "Europe/Gibraltar", label: "Gibraltar" },
+  { value: "Europe/Dublin", label: "Ireland — Dublin" },
+  { value: "Europe/Lisbon", label: "Portugal — Lisbon" },
+  { value: "Atlantic/Canary", label: "Canary Islands" },
+  { value: "Europe/Paris", label: "France — Paris" },
+  { value: "Europe/Madrid", label: "Spain — Madrid" },
+  { value: "Europe/Amsterdam", label: "Netherlands — Amsterdam" },
+  { value: "Europe/Brussels", label: "Belgium — Brussels" },
+  { value: "Europe/Berlin", label: "Germany — Berlin" },
+  { value: "Europe/Zurich", label: "Switzerland — Zurich" },
+  { value: "Europe/Rome", label: "Italy — Rome" },
+  { value: "Europe/Athens", label: "Greece — Athens" },
+  { value: "America/New_York", label: "US — Eastern (New York)" },
+  { value: "America/Chicago", label: "US — Central (Chicago)" },
+  { value: "America/Denver", label: "US — Mountain (Denver)" },
+  { value: "America/Los_Angeles", label: "US — Pacific (Los Angeles)" },
+  { value: "America/Toronto", label: "Canada — Toronto" },
+  { value: "Asia/Dubai", label: "UAE — Dubai" },
+  { value: "Asia/Singapore", label: "Singapore" },
+  { value: "Asia/Hong_Kong", label: "Hong Kong" },
+  { value: "Australia/Sydney", label: "Australia — Sydney" },
+  { value: "Pacific/Auckland", label: "New Zealand — Auckland" },
+  { value: "UTC", label: "UTC" },
+];
+
 // ── Photo requirement labels ─────────────────────────────────────────────────
 const PHOTO_ENTITY_LABELS: Record<string, string> = {
   fire_safety_check: "FireTrack — fire safety checks",
-  pool_check:        "PoolTrack — pool water tests",
+  pool_check:        "AquaTrack — pool water tests",
   hot_tub_check:     "TubTrack — hot tub checks",
   legionella_check:  "LegionellaTrack — water safety checks",
   tree_inspection:   "TreeTrack — tree inspections",
@@ -1879,10 +2088,10 @@ const PHOTO_ENTITY_LABELS: Record<string, string> = {
   green_pre_use_check:       "GreenTrack — pre-use checks",
   green_service:             "GreenTrack — service records",
   green_defect:              "GreenTrack — defect reports",
-  swim_session:              "SwimTrack — pool sessions",
-  swim_surveillance_check:   "SwimTrack — surveillance checks",
-  swim_first_aid_check:      "SwimTrack — first-aid checks",
-  swim_incident:             "SwimTrack — incident records",
+  swim_session:              "AquaTrack — pool sessions",
+  swim_surveillance_check:   "AquaTrack — surveillance checks",
+  swim_first_aid_check:      "AquaTrack — first-aid checks",
+  swim_incident:             "AquaTrack — incident records",
 };
 
 function PhotoRequirementsCard() {
@@ -2225,6 +2434,7 @@ export default function SettingsPage() {
         {canAdmin && <RequiredActionTemplatesCard />}
         <TrackSummaryRoutingCard />
         <PhotoRequirementsCard />
+        {canAdmin && <BusinessTypeCard />}
         <form onSubmit={handleSave}>
           <Card className="shadow-lg border-border/50 bg-card mb-6">
             <CardHeader className="bg-muted/20 border-b border-border/50 pb-4">
@@ -2248,15 +2458,22 @@ export default function SettingsPage() {
                 <div className="space-y-1.5 col-span-2">
                   <Label>Account Timezone</Label>
                   <p className="text-xs text-muted-foreground">
-                    Used for daily entry dates and the staff correction cutoff. Enter an IANA timezone such as Europe/London or America/New_York. Existing accounts default to Europe/London.
+                    Used for daily entry dates and the staff correction cutoff. Existing accounts default to UK time (Europe/London).
                   </p>
-                  <Input
-                    name="accountTimezone"
-                    value={formData.accountTimezone}
-                    onChange={handleChange}
-                    placeholder="Europe/London"
-                    autoComplete="off"
-                  />
+                  <Select
+                    value={formData.accountTimezone || "Europe/London"}
+                    onValueChange={(value) => setFormData((prev) => ({ ...prev, accountTimezone: value }))}
+                  >
+                    <SelectTrigger aria-label="Account timezone" data-testid="select-account-timezone">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formData.accountTimezone && !TIMEZONE_OPTIONS.some(o => o.value === formData.accountTimezone) && (
+                        <SelectItem value={formData.accountTimezone}>{formData.accountTimezone}</SelectItem>
+                      )}
+                      {TIMEZONE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>
@@ -2443,8 +2660,23 @@ export default function SettingsPage() {
                     autoComplete="off"
                     value={formData.resendApiKey}
                     onChange={handleChange}
-                    placeholder="Optional provider key"
+                    placeholder={(settings as any)?.resendApiKeySet ? "Saved key (leave blank to keep it)" : "Optional provider key"}
                   />
+                  {(settings as any)?.resendApiKeySet && (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <p className="text-xs text-muted-foreground">A provider key is saved. Leaving the box blank keeps it.</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        data-testid="button-remove-provider-key"
+                        disabled={updateSettings.isPending}
+                        onClick={() => updateSettings.mutate({ data: { resendApiKey: null } as AppSettings })}
+                      >
+                        Remove key
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </details>
             </CardContent>
@@ -2994,21 +3226,22 @@ const MODULES = [
 
 function ModulesCard() {
   const { toast } = useToast();
+  const { activeClientId } = useAuth();
   const [modules, setModules] = useState<ModuleState | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<ModuleState>("/billing/modules")
+    apiFetch<ModuleState>(withBillingClient("/billing/modules", activeClientId))
       .then(setModules)
       .catch(() => setModules(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeClientId]);
 
   const toggle = async (id: "safetrack" | "dailytrack", currentlyEnabled: boolean) => {
     setToggling(id);
     try {
-      const updated = await apiFetch<ModuleState>(`/billing/modules/${id}`, {
+      const updated = await apiFetch<ModuleState>(withBillingClient(`/billing/modules/${id}`, activeClientId), {
         method: "POST",
         body: JSON.stringify({ enabled: !currentlyEnabled }),
       });

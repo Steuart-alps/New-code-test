@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, date, jsonb, index } from "drizzle-orm/pg-core";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -40,7 +40,10 @@ export const fixTrackIssuesTable = pgTable("fix_track_issues", {
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_fix_track_issues_client_status").on(table.clientId, table.status),
+]);
 
 export const fixTrackIssueActivityTable = pgTable("fix_track_issue_activity", {
   id: serial("id").primaryKey(),

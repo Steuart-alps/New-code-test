@@ -711,7 +711,7 @@ async function testFoodSafetyConfig(admin, viewer, staff, clientBId, ts) {
 
   expectStatus(
     "food-config: invalid jurisdiction → 400",
-    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "northern_ireland" })).status,
+    (await admin("PUT", "/food-safety/config", { food_jurisdiction: "republic_of_ireland" })).status,
     400,
   );
   expectOk(

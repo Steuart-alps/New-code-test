@@ -1,3 +1,5 @@
+import { appendClientId, callerChoseClientId, setCsrfTokenProvider } from "@workspace/api-client-react";
+
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export const API_BASE = `${BASE}/api`;
@@ -21,6 +23,30 @@ export async function getCsrfToken(): Promise<string | null> {
       });
   }
   return csrfRequest;
+}
+
+/** Forget the cached token, e.g. after sign-out destroys the session it belonged to. */
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
+// Generated API hooks share the same session-bound token.
+setCsrfTokenProvider({ get: getCsrfToken, reset: clearCsrfToken });
+
+/**
+ * Adds the session's CSRF token to a state-changing request sent with plain
+ * `fetch`. Prefer `apiFetch`; this is for page helpers that build their own
+ * request.
+ */
+export async function withCsrfToken(init: RequestInit = {}): Promise<RequestInit> {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) return init;
+  const headers = new Headers(init.headers);
+  if (!headers.has("Authorization") && !headers.has("X-CSRF-Token")) {
+    const token = await getCsrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+  }
+  return { ...init, headers };
 }
 
 type MutationObserver = (method: string, url: string) => (() => void) | void;
@@ -55,8 +81,57 @@ export function beginApiMutation(method: string | undefined, url: string): () =>
   };
 }
 
+let clientIdGetter: (() => number | null) | null = null;
+let unauthorizedHandler: (() => void) | null = null;
+let paymentRequiredHandler: (() => void) | null = null;
+
+/** Mirrors the generated client's setClientIdGetter for hand-written fetches. */
+export function setApiFetchClientIdGetter(getter: (() => number | null) | null): void {
+  clientIdGetter = getter;
+}
+
+/** Mirrors the generated client's setUnauthorizedHandler (any 401 response). */
+export function setApiFetchUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
+/** Mirrors the generated client's setPaymentRequiredHandler (any 402 response). */
+export function setApiFetchPaymentRequiredHandler(handler: (() => void) | null): void {
+  paymentRequiredHandler = handler;
+}
+
+/**
+ * Adds the selected business (`clientId`) to an API path or URL so reads and
+ * writes go to the business the user is working in, not a consultant's home
+ * business. A clientId already in the URL or JSON body is left alone. Use it
+ * in page-local fetch helpers; `apiFetch` already does this.
+ */
+export function withActiveClient(url: string, body?: unknown): string {
+  const clientId = clientIdGetter?.() ?? null;
+  if (clientId === null || callerChoseClientId(url, body)) return url;
+  return appendClientId(url, clientId);
+}
+
+/** Runs the shared 401/402 handlers for a response from a hand-written fetch. */
+export function notifyAuthStatus(response: Response): void {
+  const handler = response.status === 401 ? unauthorizedHandler
+    : response.status === 402 ? paymentRequiredHandler
+      : null;
+  if (!handler) return;
+  try {
+    handler();
+  } catch {
+    // Handlers must never affect the caller's error handling.
+  }
+}
+
 export async function apiFetch(path: string, init?: RequestInit) {
   const method = (init?.method ?? "GET").toUpperCase();
+  // Sign-in, 2FA and session endpoints act on the account, not a business.
+  const isAuthPath = path.startsWith("/auth/");
+  // Analytics events must never identify a business, so never add its id.
+  const isAnalyticsPath = path.startsWith("/analytics/");
+  if (!isAuthPath && !isAnalyticsPath) path = withActiveClient(path, init?.body);
   const mutationSucceeded = beginApiMutation(method, path);
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
@@ -74,6 +149,9 @@ export async function apiFetch(path: string, init?: RequestInit) {
     // request will obtain a fresh token rather than reusing stale state.
     csrfToken = null;
   }
+  // Sign-in and 2FA endpoints answer a wrong password or code with 401; the
+  // form shows that itself, so only other requests end the session.
+  if (!isAuthPath) notifyAuthStatus(res);
   if (res.ok) mutationSucceeded();
   return res;
 }

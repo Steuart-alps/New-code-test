@@ -11,13 +11,15 @@ import { db } from "@workspace/db";
 import { clientsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { sendEmail, getPublicAppUrl } from "./email";
+import { sendEmail, getPublicAppUrl, escapeHtml } from "./email";
+import { getAccountToday } from "./accountClock";
 import { getCheckAlerts, type CheckAlert } from "./checkReminders";
 import { getNotificationEmails } from "./getNotificationEmails";
+import { claimEmailDelivery, emailDeliveryIdempotencyKey, settleEmailDelivery } from "./emailDeliveryClaims";
 
 // ── Email HTML builder ────────────────────────────────────────────────────────
 
-function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
+export function buildCheckReminderEmailHtml(alerts: CheckAlert[], appUrl: string): string {
   const unsafe = alerts.filter(a => a.status === "action_required");
   const overdue = alerts.filter(a => a.status === "overdue");
   const dueSoon = alerts.filter(a => a.status === "due_soon");
@@ -41,8 +43,8 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
     return `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;">
-          <div style="font-weight:600;font-size:14px;color:#0f172a;">${a.checkLabel}</div>
-          <div style="font-size:12px;color:#64748b;margin-top:2px;">${a.moduleLabel} · ${a.frequencyLabel} · ${last}</div>
+          <div style="font-weight:600;font-size:14px;color:#0f172a;">${escapeHtml(a.checkLabel)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px;">${escapeHtml(a.moduleLabel)} · ${escapeHtml(a.frequencyLabel)} · ${last}</div>
         </td>
         <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:right;white-space:nowrap;">
           ${badge}<br/>
@@ -84,7 +86,7 @@ function buildEmailHtml(alerts: CheckAlert[], appUrl: string): string {
         <tbody>${allRows}</tbody>
       </table>
       <div style="margin-top:28px;text-align:center;">
-        <a href="${appUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
+        <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:600;">
           Open ComplyTrack →
         </a>
       </div>
@@ -109,7 +111,6 @@ export interface CheckReminderJobResult {
 export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult> {
   const result: CheckReminderJobResult = { clientsChecked: 0, clientsEmailed: 0, emailsSent: 0, errors: 0 };
 
-  const todayIso = new Date().toISOString().slice(0, 10);
   const appUrl = getPublicAppUrl();
 
   // Get all active clients
@@ -121,6 +122,8 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
   for (const client of clients) {
     result.clientsChecked++;
     try {
+      // One digest per client per local calendar day.
+      const todayIso = await getAccountToday(client.id);
       // Skip if already sent today
       const logged = await db.execute(sql`
         SELECT 1 FROM check_reminder_log
@@ -130,7 +133,9 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const rows = (logged as any).rows ?? [];
       if (rows.length > 0) continue;
 
-      // Get actionable results and due checks — skip "never".
+      // Get actionable results and due checks — skip "never". Fire, water,
+      // pool and spa checks are evaluated per site, so each site's own gaps
+      // are reported (labelled with the site name).
       const alerts = await getCheckAlerts(client.id);
       const actionable = alerts.filter(a => a.status === "action_required" || a.status === "overdue" || a.status === "due_soon");
       if (actionable.length === 0) continue;
@@ -139,7 +144,7 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
       const { emails } = await getNotificationEmails(client.id);
       if (emails.length === 0) continue;
 
-      const html = buildEmailHtml(actionable, appUrl);
+      const html = buildCheckReminderEmailHtml(actionable, appUrl);
       const unsafeCount = actionable.filter(a => a.status === "action_required").length;
       const overdueCount = actionable.filter(a => a.status === "overdue").length;
       const subject = unsafeCount > 0
@@ -148,14 +153,35 @@ export async function runCheckReminderEmailJob(): Promise<CheckReminderJobResult
         ? `⚠️ ${overdueCount} safety check${overdueCount !== 1 ? "s" : ""} overdue — ComplyTrack`
         : `📋 Safety checks due today — ComplyTrack`;
 
-      await sendEmail({ to: emails, subject, html });
+      // Claim before sending so two instances (e.g. during a deploy overlap)
+      // cannot both send today's digest. The lease expires, so a crash
+      // mid-send is retried under the same provider idempotency key.
+      const lease = await claimEmailDelivery("check-reminder", `${client.id}:${todayIso}`);
+      if (!lease) continue;
+      let settled = false;
+      try {
+        const again = await db.execute(sql`
+          SELECT 1 FROM check_reminder_log
+          WHERE client_id = ${client.id} AND log_date = ${todayIso}
+          LIMIT 1
+        `);
+        if (((again as any).rows ?? []).length > 0) continue;
 
-      // Log the send
-      await db.execute(sql`
-        INSERT INTO check_reminder_log (client_id, log_date, sent_at)
-        VALUES (${client.id}, ${todayIso}, now())
-        ON CONFLICT (client_id, log_date) DO NOTHING
-      `);
+        await sendEmail({ to: emails, subject, html, idempotencyKey: emailDeliveryIdempotencyKey(lease) });
+
+        // Log the send and release the lease together.
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO check_reminder_log (client_id, log_date, sent_at)
+            VALUES (${client.id}, ${todayIso}, now())
+            ON CONFLICT (client_id, log_date) DO NOTHING
+          `);
+          await settleEmailDelivery(lease, tx);
+        });
+        settled = true;
+      } finally {
+        if (!settled) await settleEmailDelivery(lease).catch(() => {});
+      }
 
       result.clientsEmailed++;
       result.emailsSent += emails.length;

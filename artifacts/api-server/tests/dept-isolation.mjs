@@ -406,6 +406,29 @@ async function main() {
     answers: [{ question: "Opening check", checked: true }],
   });
   expectOk("staff: submit attributed daily checklist", staffDaily.status, [201]);
+  // Mobile outbox replays (response lost after the server applied it) are
+  // recognised by the device entry ID: same user and answers → 200 with the
+  // stored row; anything else stays 409. Today's PM list (staff record lock).
+  const replayPath = `/daily-checklists/${siteAlphaId}/${uniqueDate(0)}/pm`;
+  const replayBody = {
+    answers: [{ question: "Closing check", checked: true, notes: "Doors locked" }],
+    clientEntryId: `daily-${Date.now().toString(36)}-replay-test`,
+  };
+  const firstSend = await staff("POST", replayPath, replayBody);
+  expectOk("staff: submit daily checklist with device entry ID", firstSend.status, [201]);
+  const replayed = await staff("POST", replayPath, replayBody);
+  expectOk("staff: replayed device entry returns the stored submission", replayed.status, [200]);
+  check("staff: replay does not create another submission",
+    replayed.data?.id === firstSend.data?.id && replayed.data?.submittedById === firstSend.data?.submittedById,
+    `first=${firstSend.data?.id} replay=${replayed.data?.id}`);
+  expectOk("staff: reused device entry with different answers is rejected", (await staff("POST", replayPath, {
+    ...replayBody, answers: [{ question: "Closing check", checked: false }],
+  })).status, [409]);
+  expectOk("staff: another device entry for a submitted checklist is rejected", (await staff("POST", replayPath, {
+    ...replayBody, clientEntryId: `daily-${Date.now().toString(36)}-other-entry`,
+  })).status, [409]);
+  expectOk("admin: another user's device entry ID is not a replay",
+    (await admin("POST", replayPath, replayBody)).status, [409]);
   const staffLegacyDaily = await staff("POST", "/daily-track-am", {
     siteId: siteAlphaId,
     checklistType: "kitchen_opening",

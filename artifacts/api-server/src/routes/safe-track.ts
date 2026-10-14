@@ -13,7 +13,13 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc } from "drizzle-orm";
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectStorageService, ObjectNotFoundError, ObjectOwnershipError } from "../lib/objectStorage";
+import {
+  ObjectContentError,
+  ObjectStorageService,
+  ObjectNotFoundError,
+  ObjectOwnershipError,
+  isTenantReservedObjectPath,
+} from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 
 const router = Router();
@@ -45,6 +51,22 @@ function deptCondition(table: any, clientId: number, deptId: number | null) {
   return [or(isNull(table.siteId), inArray(table.siteId, allowedSites(clientId, deptId))) as any];
 }
 
+/**
+ * Check the attachment is this tenant's upload and an allowed document type
+ * by its own bytes (the stored and recorded type come from those bytes, not
+ * the browser), then grant the tenant ACL. Returns the content type to record.
+ */
+async function finalizeSafeTrackDocument(objectPath: string, fileName: string | null | undefined, clientId: number) {
+  const storage = new ObjectStorageService();
+  const normalizedPath = storage.normalizeObjectEntityPath(objectPath);
+  if (!isTenantReservedObjectPath(normalizedPath, clientId)) {
+    throw new ObjectOwnershipError("Upload was not reserved for this tenant");
+  }
+  const contentType = await storage.verifyDocumentUpload(normalizedPath, fileName ?? "");
+  await storage.finalizeTenantUpload(normalizedPath, clientId);
+  return contentType.split(";")[0];
+}
+
 function crudFor<T extends { clientId: number; siteId?: number | null }>(
   table: any,
   createSchema: z.ZodTypeAny,
@@ -72,11 +94,13 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if (!(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
-        await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
+        data.mimeType = await finalizeSafeTrackDocument(data.objectPath, data.fileName, clientId);
       } catch (err) {
         const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-          : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
-        return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+          : err instanceof ObjectContentError || err instanceof ObjectOwnershipError ? err.message
+          : "Could not secure uploaded document";
+        const status = err instanceof ObjectNotFoundError ? 404 : err instanceof ObjectContentError ? 400 : 403;
+        return res.status(status).json({ error });
       }
     }
     const insertRows = await db.insert(table).values({ ...data, clientId, createdBy: (req.session as any).userId ?? null }).returning() as any[];
@@ -96,11 +120,13 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
     if ("departmentId" in data && !(await verifyDepartment(data.departmentId, clientId))) return res.status(400).json({ error: "Invalid department" });
     if (data.objectPath) {
       try {
-        await new ObjectStorageService().finalizeTenantUpload(data.objectPath, clientId);
+        data.mimeType = await finalizeSafeTrackDocument(data.objectPath, data.fileName, clientId);
       } catch (err) {
         const error = err instanceof ObjectNotFoundError ? "Uploaded object not found"
-          : err instanceof ObjectOwnershipError ? err.message : "Could not secure uploaded document";
-        return res.status(err instanceof ObjectNotFoundError ? 404 : 403).json({ error });
+          : err instanceof ObjectContentError || err instanceof ObjectOwnershipError ? err.message
+          : "Could not secure uploaded document";
+        const status = err instanceof ObjectNotFoundError ? 404 : err instanceof ObjectContentError ? 400 : 403;
+        return res.status(status).json({ error });
       }
     }
     const [row] = await db.update(table).set({ ...data, updatedAt: new Date() })
@@ -317,7 +343,8 @@ const sopCreate = z.object({
   scope: z.string().max(1000).nullable().optional(),
   content: z.string().max(50000).nullable().optional(),
   version: z.string().max(20).optional(),
-  publishedAt: z.string().datetime().nullable().optional(),
+  // Drizzle timestamp columns need a Date, not the ISO string the web sends.
+  publishedAt: z.string().datetime().nullable().optional().transform((value) => (value ? new Date(value) : value)),
   siteId: z.number().int().nullable().optional(),
   departmentId: z.number().int().nullable().optional(),
   signature: signatureField,
@@ -377,7 +404,8 @@ const handbookCreate = z.object({
   section: z.string().max(300).nullable().optional(),
   content: z.string().max(50000).nullable().optional(),
   version: z.string().max(20).optional(),
-  publishedAt: z.string().datetime().nullable().optional(),
+  // Drizzle timestamp columns need a Date, not the ISO string the web sends.
+  publishedAt: z.string().datetime().nullable().optional().transform((value) => (value ? new Date(value) : value)),
   siteId: z.number().int().nullable().optional(),
   signature: signatureField,
   requiresAcknowledgement: z.boolean().optional(),

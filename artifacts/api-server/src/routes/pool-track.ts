@@ -6,6 +6,7 @@ import { sitesTable, appSettingsTable, trackControlProfilesTable, auditEventsTab
 import { requireAuth, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { getAccountTimezone, zonedDateTimeToUtc } from "../lib/accountClock";
 
 const router = Router();
 
@@ -246,6 +247,7 @@ router.get("/status", requireAuth, async (req, res) => {
   `);
 
   const now = new Date();
+  const timeZone = await getAccountTimezone(clientId);
   const rowsArr: any[] = Array.isArray(rows) ? (rows as any) : ((rows as any).rows ?? []);
   const latestByType = Object.fromEntries(
     rowsArr.map((r: any) => [r.check_type, r])
@@ -261,10 +263,8 @@ router.get("/status", requireAuth, async (req, res) => {
       return { checkType: ct, frequencyHours, status: "never", lastDate: null, lastTime: null, result: null };
     }
 
-    // Parse last check datetime
-    const lastDt = latest.check_time
-      ? new Date(`${latest.check_date}T${latest.check_time}`)
-      : new Date(latest.check_date);
+    // Check times are recorded on the site's local clock, not the server's.
+    const lastDt = zonedDateTimeToUtc(String(latest.check_date), latest.check_time, timeZone);
     const hoursSince = (now.getTime() - lastDt.getTime()) / (1000 * 60 * 60);
     const dueDate = new Date(lastDt.getTime() + frequencyHours * 3600000).toISOString();
     const checkStatus = hoursSince > frequencyHours ? "overdue"

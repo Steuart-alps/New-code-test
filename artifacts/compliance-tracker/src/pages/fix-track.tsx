@@ -938,9 +938,11 @@ export default function FixTrackPage() {
               triggerLabel="Customise trades"
               labelFor={humanizeType}
             />
-            <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
-              <Plus className="w-4 h-4" /> Report Issue
-            </Button>
+            {canEdit && (
+              <Button onClick={openCreate} className="shadow-lg shadow-primary/20 gap-1.5 flex-1 sm:flex-none">
+                <Plus className="w-4 h-4" /> Report Issue
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1077,7 +1079,7 @@ export default function FixTrackPage() {
           <div className="py-16 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
             <Wrench className="w-12 h-12 mx-auto mb-3 opacity-20" />
             <p className="text-sm font-medium mb-1">{issues.length === 0 ? "No issues reported yet" : "No issues match your filters"}</p>
-            {issues.length === 0 && <p className="text-xs">Click 'Report Issue' to log your first maintenance fault.</p>}
+            {issues.length === 0 && canEdit && <p className="text-xs">Click 'Report Issue' to log your first maintenance fault.</p>}
           </div>
         ) : (
           <div className="space-y-3">

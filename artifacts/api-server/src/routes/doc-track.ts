@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
-import { ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
+import { ObjectContentError, ObjectNotFoundError, ObjectOwnershipError, ObjectStorageService } from "../lib/objectStorage";
 import { respondObjectStorageDownloadUnavailable, respondObjectStorageUnavailable } from "../lib/objectStorageUnavailable";
 import { getObjectAclPolicy } from "../lib/objectAcl";
 import {
@@ -153,6 +153,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   //
   // Security: never re-tag an object that already belongs to another tenant —
   // otherwise a caller who learns a foreign object path could claim it.
+  let storedMimeType = mimeType;
   try {
     const file = await storage.getObjectEntityFile(objectPath);
     const existingAcl = await getObjectAclPolicy(file);
@@ -163,6 +164,10 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
     if (!existingAcl?.owner && !objectPath.startsWith(tenantUploadPrefix)) {
       return res.status(403).json({ error: "Upload was not reserved for this account" });
     }
+    // The file's own bytes decide its type (an allow-list of document
+    // formats), never the type the browser declared, so an uploaded HTML or
+    // SVG file can't be served back as a page on the app's origin.
+    storedMimeType = (await storage.verifyDocumentUpload(objectPath, fileName)).split(";")[0];
     await storage.trySetObjectEntityAclPolicy(objectPath, {
       owner: String(clientId),
       visibility: "private",
@@ -170,6 +175,9 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   } catch (err) {
     if (err instanceof ObjectNotFoundError) {
       return res.status(404).json({ error: "Uploaded object not found" });
+    }
+    if (err instanceof ObjectContentError) {
+      return res.status(400).json({ error: err.message });
     }
     req.log.error({ err, objectPath }, "Could not set ACL policy on DocTrack upload");
     return res.status(500).json({ error: "Could not secure uploaded document" });
@@ -182,7 +190,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
        annual_acknowledgement, department)
     VALUES
       (${clientId}, ${siteId ?? null}, ${title}, ${category}, ${description ?? null},
-       ${fileName}, ${fileSize ?? null}, ${mimeType}, ${objectPath},
+       ${fileName}, ${fileSize ?? null}, ${storedMimeType}, ${objectPath},
        ${uploadedBy ?? null}, ${createdBy}, ${requiresAcknowledgement ?? false},
        ${annualAcknowledgement ?? false}, ${department ?? null})
     RETURNING *

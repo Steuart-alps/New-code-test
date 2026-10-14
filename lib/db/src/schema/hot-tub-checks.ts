@@ -1,4 +1,5 @@
-import { pgTable, serial, integer, text, date, timestamp, numeric } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, date, timestamp, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { clientsTable } from "./clients";
 import { sitesTable } from "./sites";
 import { usersTable } from "./users";
@@ -34,9 +35,19 @@ export const hotTubChecksTable = pgTable("hot_tub_checks", {
   staffRosterId: integer("staff_roster_id").references(() => staffMembersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+  // Mobile outbox entry ID and payload fingerprint: a replay of an applied
+  // submission is recognised instead of creating a duplicate. Not a credential.
+  clientEntryId: text("client_entry_id"),
+  clientEntryHash: text("client_entry_hash"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  // Created by the api-server runtime migrations (dashboard read paths).
+  index("IDX_hot_tub_checks_client_date").on(table.clientId, table.checkDate),
+  uniqueIndex("UQ_hot_tub_checks_client_entry_id")
+    .on(table.clientId, table.clientEntryId)
+    .where(sql`${table.clientEntryId} IS NOT NULL`),
+]);
 
 export type HotTubCheck = typeof hotTubChecksTable.$inferSelect;
 export type NewHotTubCheck = typeof hotTubChecksTable.$inferInsert;

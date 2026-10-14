@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "main": "expo-router/entry",
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "expo-location"
+      ]
+    }
+  },
   "scripts": {
     "dev": "pnpm exec expo start",
     "build": "node scripts/build.js",
@@ -22,8 +29,14 @@
     "test:kitchen-diary-scope": "node tests/kitchen-diary-scope.mjs",
     "test:kitchen-temperature-flow": "node tests/kitchen-temperature-form-flow.mjs",
     "test:kitchen-outbox": "node tests/kitchen-outbox.mjs",
-    "export:ios": "rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
-    "export:android": "rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
+    "test:check-outbox": "node tests/check-outbox.mjs",
+    "test:offline-resilience": "node tests/offline-resilience-logic.mjs",
+    "test:auth-offline": "node tests/auth-offline.mjs",
+    "test:store-compliance": "node tests/store-compliance.mjs",
+    "test:today-tasks": "node tests/today-tasks-logic.mjs",
+    "test:accessibility": "node tests/accessibility-basics.mjs",
+    "export:ios": "node scripts/require-domain.js && rm -rf dist/ios && CI=1 pnpm exec expo export --platform ios --output-dir dist/ios --clear --dump-assetmap",
+    "export:android": "node scripts/require-domain.js && rm -rf dist/android && CI=1 pnpm exec expo export --platform android --output-dir dist/android --clear --dump-assetmap",
     "validate:production": "node scripts/validate-production.js"
   },
   "devDependencies": {

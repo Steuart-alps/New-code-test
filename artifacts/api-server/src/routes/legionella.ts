@@ -5,16 +5,19 @@ import { legionellaChecksTable, sitesTable, appSettingsTable, trackControlProfil
 import { eq, and, or, isNull, inArray, desc, sql } from "drizzle-orm";
 import { requireAuth, denyViewers, requireClientAdmin, getClientId, getActiveDepartmentId } from "../middleware/requireAuth";
 import { resolveStaffPerformer, resolveStaffPerformerUpdate } from "../lib/staffPerformer";
+import { clientEntryFrom, clientEntryIdSchema, isUniqueViolation, respondToStoredEntry } from "../lib/clientEntryReplay";
 import { approvedFrequencies, createMonitoringPlanRouter } from "../lib/waterMonitoringPlan";
+import { unreadLegionellaOutletUnits } from "../lib/checkReminders";
+import { getAccountToday } from "../lib/accountClock";
 
 const router = Router();
 
 // HSG274 Part 2 Table 2.1 — recommended monitoring, inspection and testing activities
 const CHECK_TYPES = [
   // Temperature monitoring — hot water system
-  "calorifier_temp",       // Weekly:     Calorifier flow/return (≥60°C)
-  "hot_sentinel_temp",     // Monthly:    Hot water sentinel outlets (≥50°C after 1 min)
-  "hot_nonsent_temp",      // Quarterly:  Hot water representative outlets (≥50°C after 1 min)
+  "calorifier_temp",       // Monthly:    Calorifier flow (≥60°C) / return (≥50°C)
+  "hot_sentinel_temp",     // Monthly:    Hot water sentinel outlets (≥50°C after 1 min; ≥55°C in healthcare)
+  "hot_nonsent_temp",      // Quarterly:  Hot water representative outlets (≥50°C after 1 min; ≥55°C in healthcare)
   // Temperature monitoring — cold water system
   "cold_tank_temp",        // Monthly:    Cold water storage temperature (≤20°C)
   "cold_sentinel_temp",    // Monthly:    Cold water sentinel outlets (≤20°C after 2 min)
@@ -29,9 +32,9 @@ const CHECK_TYPES = [
   "outlet_flush",          // Weekly:     Little-used outlet 5-minute flush
 ] as const;
 
-// Frequencies per HSG274 Part 2 Table 2.1
+// Default frequencies, based on HSG274 Part 2 Table 2.1 except where noted
 const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
-  calorifier_temp:       7,    // Weekly
+  calorifier_temp:       7,    // Weekly product default; HSG274 Table 2.1 benchmark is monthly
   hot_sentinel_temp:     30,   // Monthly
   hot_nonsent_temp:      90,   // Quarterly
   cold_tank_temp:        30,   // Monthly
@@ -48,10 +51,54 @@ const FREQUENCY_DAYS: Record<(typeof CHECK_TYPES)[number], number> = {
 router.use("/monitoring-plan", createMonitoringPlanRouter("legionella", CHECK_TYPES, "frequencyDays"));
 
 const LEGIONELLA_PROFILE_MODULE = "legionella";
+// calorifier_temp is the flow minimum; readings recorded against a return
+// use CALORIFIER_RETURN_MIN_C (HSG274 Part 2: flow ≥60°C, return ≥50°C).
 const DEFAULT_TEMPERATURE_LIMITS: Record<string, { min?: number; max?: number }> = {
   calorifier_temp: { min: 60 }, hot_sentinel_temp: { min: 50 }, hot_nonsent_temp: { min: 50 },
   cold_tank_temp: { max: 20 }, cold_sentinel_temp: { max: 20 }, cold_nonsent_temp: { max: 20 },
 };
+const CALORIFIER_RETURN_MIN_C = 50;
+// HSG274 Part 2: hot outlets should reach 50°C within a minute, or 55°C in
+// healthcare premises.
+const HEALTHCARE_HOT_OUTLET_MIN_C = 55;
+const HEALTHCARE_BUSINESS_TYPES = new Set(["care_home_healthcare"]);
+// TMV (thermostatic mixing valve) outlets serve vulnerable users with blended
+// water, so their hot check is a scald-risk maximum, not the 50/55°C minimum:
+// HSG274 Part 2 / HTM 04-01 give 44°C for baths and showers (41°C for basins
+// is a stricter local choice the written scheme can record).
+const TMV_OUTLET_MAX_C = 44;
+const TMV_HOT_CHECK_TYPES = new Set(["hot_sentinel_temp", "hot_nonsent_temp"]);
+
+/** Product default limits for this business: healthcare raises hot outlets to 55°C. */
+function defaultTemperatureLimits(healthcare: boolean): Record<string, { min?: number; max?: number }> {
+  if (!healthcare) return DEFAULT_TEMPERATURE_LIMITS;
+  return {
+    ...DEFAULT_TEMPERATURE_LIMITS,
+    hot_sentinel_temp: { min: HEALTHCARE_HOT_OUTLET_MIN_C },
+    hot_nonsent_temp: { min: HEALTHCARE_HOT_OUTLET_MIN_C },
+  };
+}
+
+/** The business type chosen at signup decides the healthcare hot-water default. */
+async function isHealthcareClient(clientId: number): Promise<boolean> {
+  const result = await db.execute(sql`SELECT business_type FROM clients WHERE id = ${clientId} LIMIT 1`);
+  const businessType = (result.rows as Array<{ business_type: string | null }>)[0]?.business_type;
+  return businessType != null && HEALTHCARE_BUSINESS_TYPES.has(businessType);
+}
+
+/** Whether the outlet a check is linked to is a TMV outlet (tenant-scoped). */
+async function isTmvOutlet(clientId: number, outletId: number | null | undefined): Promise<boolean> {
+  if (outletId == null) return false;
+  const result = await db.execute(sql`
+    SELECT 1 FROM legionella_sentinel_outlets WHERE id = ${outletId} AND client_id = ${clientId} AND type = 'tmv' LIMIT 1
+  `);
+  return result.rows.length > 0;
+}
+
+/** A calorifier reading is a return reading when its location names the return. */
+function isCalorifierReturn(location: string | null | undefined): boolean {
+  return typeof location === "string" && /\breturn\b/i.test(location);
+}
 const legionellaProfileSchema = z.object({
   systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
   writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
@@ -102,6 +149,8 @@ const createSchema = z.object({
 });
 
 const updateSchema = createSchema.partial().omit({ checkType: true });
+// Creation only: the mobile outbox's device entry ID (see clientEntryReplay).
+const postSchema = createSchema.extend({ clientEntryId: clientEntryIdSchema.optional() });
 
 /** Returns the site row if it belongs to the tenant, or null. */
 async function fetchClientSite(siteId: number | null | undefined, clientId: number) {
@@ -221,11 +270,12 @@ router.get("/status", requireAuth, async (req, res) => {
       ? "fail" : row.lastResult;
     lastByType.set(row.checkType, { lastDate, lastResult });
   }
+  // A registered outlet that has never been tested keeps its check type at
+  // "never" until it is, whatever the other outlets' readings say.
+  const unreadOutlets = await unreadLegionellaOutletUnits(clientId, [selectedSiteId]);
   const MS_DAY = 24 * 60 * 60 * 1000;
   const toUtcDays = (isoDate: string) => Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / MS_DAY);
-  const now = new Date();
-  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const todayDays = toUtcDays(todayIso);
+  const todayDays = toUtcDays(await getAccountToday(clientId));
 
   const siteProfile = await getLegionellaProfile(clientId, selectedSiteId);
   const frequencies = approvedFrequencies(siteProfile, CHECK_TYPES, "frequencyDays");
@@ -234,8 +284,8 @@ router.get("/status", requireAuth, async (req, res) => {
     const last = lastByType.get(checkType) ?? null;
     if (frequencyDays === null) return { checkType, frequencyDays, lastDate: last?.lastDate ?? null,
       lastResult: last?.lastResult ?? null, dueDate: null, status: "plan_required" as const };
-    if (!last) {
-      return { checkType, frequencyDays, lastDate: null, lastResult: null, dueDate: null, status: "never" as const };
+    if (!last || unreadOutlets.has(`${selectedSiteId}:${checkType}`)) {
+      return { checkType, frequencyDays, lastDate: null, lastResult: last?.lastResult ?? null, dueDate: null, status: "never" as const };
     }
     const dueDays = toUtcDays(last.lastDate) + frequencyDays;
     const dueDate = new Date(dueDays * MS_DAY).toISOString().slice(0, 10);
@@ -253,7 +303,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
 
-  const parsed = createSchema.safeParse(req.body);
+  const parsed = postSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const data = parsed.data;
   if (data.checkType.endsWith("_temp") && data.temperature == null)
@@ -266,20 +316,38 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
 
+  const userId = req.currentUser!.id;
+  const entry = clientEntryFrom(data);
+  const storedEntry = async () => entry && (await db.select().from(legionellaChecksTable)
+    .where(and(eq(legionellaChecksTable.clientId, clientId), eq(legionellaChecksTable.clientEntryId, entry.id)))
+    .limit(1))[0];
+  const prior = await storedEntry();
+  if (entry && prior) return respondToStoredEntry(res, prior, userId, entry);
+
   const profile = data.siteId == null ? null : await getLegionellaProfile(clientId, data.siteId);
-  const breach = legionellaBreach(data.checkType, data.temperature, profile);
-  const inserted = await db.transaction(async tx => {
-    const [row] = await tx.insert(legionellaChecksTable).values({
-      clientId, checkType: data.checkType, checkDate: data.checkDate,
-      result: breach ? "fail" : data.result,
-      temperature: data.temperature != null ? String(data.temperature) : null,
-      siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
-      performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
-      createdBy: req.currentUser!.id,
-    }).returning();
-    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
-    return row;
-  });
+  const breach = legionellaBreach(data.checkType, data.temperature, profile,
+    { healthcare: await isHealthcareClient(clientId), location: data.location, tmvOutlet: await isTmvOutlet(clientId, data.outletId) });
+  let inserted;
+  try {
+    inserted = await db.transaction(async tx => {
+      const [row] = await tx.insert(legionellaChecksTable).values({
+        clientId, checkType: data.checkType, checkDate: data.checkDate,
+        result: breach ? "fail" : data.result,
+        temperature: data.temperature != null ? String(data.temperature) : null,
+        siteId: data.siteId ?? null, location: data.location ?? null, notes: data.notes ?? null,
+        performedBy: performer.performedBy, staffRosterId: performer.staffRosterId,
+        createdBy: userId,
+        clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
+      }).returning();
+      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      return row;
+    });
+  } catch (err) {
+    // A concurrent replay of the same device entry won the insert.
+    const raced = entry && isUniqueViolation(err) ? await storedEntry() : undefined;
+    if (entry && raced) return respondToStoredEntry(res, raced, userId, entry);
+    throw err;
+  }
 
   // Link to sentinel outlet if provided (column added via runtime migration).
   if (inserted && data.outletId) {
@@ -299,11 +367,12 @@ const OUTLET_CHECK_TYPE_MAP: Record<string, string> = {
   hot:        "hot_sentinel_temp",
   cold:       "cold_sentinel_temp",
   calorifier: "calorifier_temp",
+  tmv:        "hot_sentinel_temp", // checked against TMV_OUTLET_MAX_C, not the hot minimum
 };
 
 const outletCreateSchema = z.object({
   name:      z.string().min(1).max(500),
-  type:      z.enum(["hot", "cold", "calorifier"]),
+  type:      z.enum(["hot", "cold", "calorifier", "tmv"]),
   location:  z.string().max(500).nullable().optional(),
   siteId:    z.number().int().nullable().optional(),
   sortOrder: z.number().int().optional(),
@@ -503,7 +572,12 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const nextTemperature = temperature !== undefined ? temperature : (existing.temperature == null ? null : Number(existing.temperature));
   if (existing.checkType.endsWith("_temp") && nextTemperature == null)
     return res.status(400).json({ error: "Record a temperature before marking this check" });
-  const breach = legionellaBreach(existing.checkType, nextTemperature, profile);
+  const linkedOutlet = await db.execute(sql`SELECT outlet_id FROM legionella_checks WHERE id = ${id} AND client_id = ${clientId}`);
+  const breach = legionellaBreach(existing.checkType, nextTemperature, profile, {
+    healthcare: await isHealthcareClient(clientId),
+    location: parsed.data.location !== undefined ? parsed.data.location : existing.location,
+    tmvOutlet: await isTmvOutlet(clientId, (linkedOutlet.rows[0] as { outlet_id: number | null } | undefined)?.outlet_id),
+  });
   updateData.result = breach ? "fail" : (parsed.data.result !== undefined ? parsed.data.result : existing.result);
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
@@ -580,19 +654,24 @@ async function getLegionellaProfile(clientId: number, siteId: number) {
   return row?.profile ?? null;
 }
 
-function legionellaLimits(profile: unknown, checkType: string) {
+function legionellaLimits(profile: unknown, checkType: string, opts: LimitOptions) {
+  if (opts.tmvOutlet && TMV_HOT_CHECK_TYPES.has(checkType)) return { max: TMV_OUTLET_MAX_C };
   const configured = profile && typeof profile === "object"
     ? (profile as any).temperatureLimits?.[checkType] : undefined;
-  const limits = DEFAULT_TEMPERATURE_LIMITS[checkType];
+  const limits = checkType === "calorifier_temp" && isCalorifierReturn(opts.location)
+    ? { min: CALORIFIER_RETURN_MIN_C }
+    : defaultTemperatureLimits(opts.healthcare)[checkType];
   return configured && typeof configured === "object"
     ? { min: typeof configured.min === "number" && Number.isFinite(configured.min) ? configured.min : limits?.min,
         max: typeof configured.max === "number" && Number.isFinite(configured.max) ? configured.max : limits?.max }
     : limits;
 }
 
-function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown) {
+type LimitOptions = { healthcare: boolean; location?: string | null; tmvOutlet?: boolean };
+
+function legionellaBreach(checkType: string, temperature: number | null | undefined, profile: unknown, opts: LimitOptions) {
   if (temperature == null || !Number.isFinite(temperature)) return null;
-  const limits = legionellaLimits(profile, checkType);
+  const limits = legionellaLimits(profile, checkType, opts);
   if (!limits || (limits.min == null && limits.max == null)) return null;
   if ((limits.min != null && temperature < limits.min) || (limits.max != null && temperature > limits.max)) {
     return { temperature, limits };
@@ -631,7 +710,7 @@ router.get("/config", requireAuth, async (req, res) => {
   }
   const profile = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
   const effectiveTemperatureLimits = Object.fromEntries(
-    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+    Object.entries(defaultTemperatureLimits(await isHealthcareClient(clientId))).map(([checkType, defaults]) => [
       checkType,
       { ...defaults, ...((profile as any)?.temperatureLimits?.[checkType] ?? {}) },
     ]),
@@ -694,7 +773,7 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
   }
   const after = siteId == null ? null : await getLegionellaProfile(clientId, siteId);
   const effectiveTemperatureLimits = Object.fromEntries(
-    Object.entries(DEFAULT_TEMPERATURE_LIMITS).map(([checkType, defaults]) => [
+    Object.entries(defaultTemperatureLimits(await isHealthcareClient(clientId))).map(([checkType, defaults]) => [
       checkType,
       { ...defaults, ...((after as any)?.temperatureLimits?.[checkType] ?? {}) },
     ]),

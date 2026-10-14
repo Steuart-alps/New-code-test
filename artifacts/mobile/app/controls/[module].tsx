@@ -389,6 +389,6 @@ const styles = StyleSheet.create({
   historyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8, marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   historyDate: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   historyMeta: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  logBtn: { height: 50, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  logBtn: { minHeight: 50, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   logBtnText: { color: '#ffffff', fontSize: 15, fontFamily: 'Inter_600SemiBold' },
 });

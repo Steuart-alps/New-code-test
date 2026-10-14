@@ -108,6 +108,8 @@ export async function sendPushToUsers(
             "Accept-Encoding": "gzip, deflate",
           },
           body: JSON.stringify(batch),
+          // Push is best-effort: a hung Expo connection must not stall the job.
+          signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) {
           logger.warn({ status: res.status }, "Expo push request failed");

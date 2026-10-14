@@ -255,6 +255,49 @@ async function testSignoffLocks(req) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PM manager sign-offs — double submit / retry never duplicates
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function testSignoffIdempotent(req) {
+  console.log("\n── DailyTrack PM — manager sign-off double submit ──");
+
+  const signoffDate = isoDate(-32);
+  const body = { signoffDate, managerName: "Double Clicker", notes: "Closed up", submittedAt: new Date().toISOString() };
+  // Two submits racing (a double click) create one row.
+  const [first, second] = await Promise.all([
+    req("POST", "/daily-track-pm/signoffs", body),
+    req("POST", "/daily-track-pm/signoffs", body),
+  ]);
+  const statuses = [first.status, second.status].sort();
+  check("signoff-dup: racing POSTs → one 201 and one 200", statuses[0] === 200 && statuses[1] === 201, `statuses=${statuses}`);
+  check("signoff-dup: both return the same row", first.data?.id != null && first.data?.id === second.data?.id,
+    `ids=${first.data?.id},${second.data?.id}`);
+
+  // A later retry returns the submitted row unchanged.
+  const retry = await req("POST", "/daily-track-pm/signoffs", { ...body, notes: "Retry text" });
+  check("signoff-dup: retry after submit → 200", retry.status === 200, `status=${retry.status}`);
+  check("signoff-dup: retry returns the existing row", retry.data?.id === first.data?.id, `id=${retry.data?.id}`);
+  check("signoff-dup: submitted notes unchanged", retry.data?.notes === "Closed up", `notes=${retry.data?.notes}`);
+
+  const list = await req("GET", `/daily-track-pm/signoffs?date=${signoffDate}`);
+  check("signoff-dup: one sign-off stored", (list.data ?? []).length === 1, `count=${(list.data ?? []).length}`);
+
+  // Saving a draft and then submitting through POST updates the draft in place.
+  const draftDate = isoDate(-33);
+  const draft = await req("POST", "/daily-track-pm/signoffs", { signoffDate: draftDate, managerName: "Draft Manager" });
+  check("signoff-dup: draft POST → 201", draft.status === 201, `status=${draft.status}`);
+  const submit = await req("POST", "/daily-track-pm/signoffs", {
+    signoffDate: draftDate, managerName: "Draft Manager", notes: "Done", submittedAt: new Date().toISOString(),
+  });
+  check("signoff-dup: submit over draft → 200 same row", submit.status === 200 && submit.data?.id === draft.data?.id,
+    `status=${submit.status} id=${submit.data?.id}`);
+  check("signoff-dup: draft is now submitted", submit.data?.submittedAt != null && submit.data?.notes === "Done",
+    JSON.stringify(submit.data));
+  const draftList = await req("GET", `/daily-track-pm/signoffs?date=${draftDate}`);
+  check("signoff-dup: draft date holds one sign-off", (draftList.data ?? []).length === 1, `count=${(draftList.data ?? []).length}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -291,6 +334,7 @@ async function main() {
   await testAmLocks(req);
   await testPmChecklistLocks(req);
   await testSignoffLocks(req);
+  await testSignoffIdempotent(req);
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length > 0) {

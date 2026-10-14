@@ -22,6 +22,10 @@ const bundled = await build({
       builder.onResolve({
         filter: /^(react-native|react-native-safe-area-context|@expo\/vector-icons|expo-router|expo-haptics|@\/hooks\/useColors|@\/lib\/auth|@\/lib\/api|@\/components\/KeyboardAwareScrollViewCompat)$/,
       }, () => ({ path: nativePath }));
+      // The production outbox core with in-memory storage, signed in as the fixture user.
+      builder.onResolve({ filter: /^@\/lib\/checkOutbox$/ }, () => ({
+        path: fileURLToPath(new URL('./fixtures/check-outbox-native.jsx', import.meta.url)),
+      }));
       // Optional negative controls prove the assertions detect regressions.
       // They alter only the in-memory bundle, never production files.
       const mutations = {
@@ -153,9 +157,11 @@ try {
   await page.getByTestId('pat-appliance-11').click();
   state.appliances.find((a) => a.id === 11).active = false;
   await page.getByTestId('pat-submit-test').click();
-  await page.waitForFunction(() => window.patHarness.alerts.some((a) => a.title === 'Error'));
+  await page.waitForFunction(() => window.patHarness.alerts.some((a) => a.title === 'Not accepted'));
   assert.equal(await page.evaluate(() => window.patHarness.alerts.at(-1).message),
     'Retired appliances cannot receive new tests; reactivate the appliance first');
+  // The rejected test stays in the open form for correcting, not on the device outbox.
+  assert.equal(await page.getByTestId('outbox-entries').count(), 0);
   await page.getByTestId('pat-close-form').click();
   await page.evaluate(() => window.patHarness.refresh());
   await page.waitForFunction(() => !document.querySelector('[data-testid="pat-appliance-11"]'));

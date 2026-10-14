@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { useFormOptions, pickOptions } from "@/hooks/use-form-options";
 import { FormOptionsEditor } from "@/components/form-options-editor";
 import { StaffPerformerSelect } from "@/components/staff-performer-select";
-import { beginApiMutation } from "@/lib/api";
+import { beginApiMutation, notifyAuthStatus, withActiveClient, withCsrfToken } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,11 +145,12 @@ const CHECK_ITEMS: { key: string; label: string; icon?: string }[] = [
 const baseUrl = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/api`;
 async function apiFetch(path: string, opts?: RequestInit) {
   const mutationSucceeded = beginApiMutation(opts?.method, path);
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetch(withActiveClient(`${baseUrl}${path}`, opts?.body), await withCsrfToken({
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
     ...opts,
-  });
+  }));
+  notifyAuthStatus(res);
   if (res.ok) mutationSucceeded();
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
@@ -1177,7 +1178,7 @@ export default function BikeTrackPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams({ from: exportFrom, to: exportTo, format: exportFormat });
-      const response = await fetch(`${baseUrl}/bike-track/hires/export?${params}`, { credentials: "include" });
+      const response = await fetch(withActiveClient(`${baseUrl}/bike-track/hires/export?${params}`), { credentials: "include" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body?.error ?? "The register could not be downloaded");

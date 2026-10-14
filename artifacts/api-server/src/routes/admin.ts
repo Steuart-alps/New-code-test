@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { seedDemo } from "../lib/seedDemo";
 import { ensureServicePrices, getServicePricePreflight } from "../lib/services";
-import { requireAuth, requireConsultant } from "../middleware/requireAuth";
+import { requireAuth, requireConsultant, requirePlatformOperator } from "../middleware/requireAuth";
+import { isPlatformAdmin } from "../lib/platformAdmin";
 import { getClientId, requireClientAdmin } from "../middleware/requireAuth";
 import { logger } from "../lib/logger";
 import { db } from "@workspace/db";
@@ -159,6 +160,9 @@ router.post("/data-deletion/request", requireAuth, requireClientAdmin, async (re
 });
 
 router.get("/admin/data-deletion-requests", requireAuth, requireConsultant, async (req, res) => {
+  // Platform administrators (PLATFORM_ADMIN_EMAILS) review requests from
+  // businesses with no second consultant, e.g. self-signups.
+  const platformAdmin = isPlatformAdmin(req.currentUser!.email);
   try {
     const result = await db.execute(sql`
       SELECT r.id, r.client_id, c.name AS client_name, r.requested_at,
@@ -166,7 +170,7 @@ router.get("/admin/data-deletion-requests", requireAuth, requireConsultant, asyn
       FROM client_data_deletion_requests r
       JOIN clients c ON c.id = r.client_id
       WHERE r.status IN ('pending', 'approved')
-        AND (r.client_id = ${req.currentUser!.clientId}
+        AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
           OR EXISTS (
             SELECT 1 FROM consultant_clients cc
             WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}
@@ -187,13 +191,16 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
   if (!Number.isSafeInteger(id) || id < 1 || !["approved", "refused"].includes(decision) || note.length < 10 || note.length > 2000) {
     return res.status(400).json({ error: "Choose approve or refuse and provide a review note (10–2000 characters)" });
   }
+  // A platform administrator may review any business's request; the reviewer
+  // must still differ from the requester, and holds/the 30-day wait still apply.
+  const platformAdmin = isPlatformAdmin(req.currentUser!.email);
   try {
     const result = await db.transaction(async tx => {
       const selected = await tx.execute(sql`
         SELECT r.client_id FROM client_data_deletion_requests r
         WHERE r.id = ${id} AND r.status = 'pending'
           AND r.requested_by IS DISTINCT FROM ${req.currentUser!.id}
-          AND (r.client_id = ${req.currentUser!.clientId}
+          AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
             OR EXISTS (
               SELECT 1 FROM consultant_clients cc
               WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}
@@ -208,7 +215,7 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
             reviewed_at = now(), review_note = ${note}
         WHERE r.id = ${id} AND r.status = 'pending'
           AND r.requested_by IS DISTINCT FROM ${req.currentUser!.id}
-          AND (r.client_id = ${req.currentUser!.clientId}
+          AND (${platformAdmin} OR r.client_id = ${req.currentUser!.clientId}
             OR EXISTS (SELECT 1 FROM consultant_clients cc
               WHERE cc.client_id = r.client_id AND cc.user_id = ${req.currentUser!.id}))
           AND (${decision} = 'refused' OR NOT EXISTS (
@@ -232,8 +239,10 @@ router.patch("/admin/data-deletion-requests/:id/review", requireAuth, requireCon
 // Read-only launch check. This is deliberately separate from the repair
 // endpoint below: an administrator can see every catalogue gap without
 // creating Stripe products, changing a subscription, or granting access.
+// Platform operators only (PLATFORM_ADMIN_EMAILS): every self-signup owner
+// has the consultant role.
 // GET /api/admin/service-price-preflight
-router.get("/api/admin/service-price-preflight", requireAuth, requireConsultant, async (_req, res) => {
+router.get("/admin/service-price-preflight", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await getServicePricePreflight();
     res.status(result.ready ? 200 : 503).json(result);
@@ -276,9 +285,9 @@ router.post("/admin/seed-demo", async (req, res) => {
 // Ensure a Stripe price exists for every activatable module so clients can
 // turn any of them on from their billing page. Idempotent — safe to call
 // repeatedly; only creates prices for modules that are currently missing one.
-// Consultant-only (platform administration action).
+// Platform operators only (PLATFORM_ADMIN_EMAILS); creates Stripe prices.
 // POST /api/admin/ensure-service-prices
-router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, async (_req, res) => {
+router.post("/admin/ensure-service-prices", requireAuth, requireConsultant, requirePlatformOperator, async (_req, res) => {
   try {
     const result = await ensureServicePrices();
     logger.info({ result }, "Ensured Stripe service prices");

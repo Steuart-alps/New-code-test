@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, BookOpen, CheckCircle2, ExternalLink, Plus, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { withCsrfToken } from "@/lib/api";
 
 type Appointment = { area: string; person: string; evidence?: string | null };
 type Profile = {
@@ -63,11 +64,11 @@ export default function ComplianceHubPage() {
   const apiBase = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${apiBase}${path}${clientQuery}`, {
+    const response = await fetch(`${apiBase}${path}${clientQuery}`, await withCsrfToken({
       credentials: "include",
       headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
       ...init,
-    });
+    }));
     const data = await response.json().catch(() => null);
     if (!response.ok) throw new Error(data?.error || "Request failed");
     return data as T;

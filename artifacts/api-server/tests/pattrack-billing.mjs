@@ -52,7 +52,8 @@ try {
   );
   assert.match(
     settingsPage,
-    /apiFetch\("\/billing\/refresh-access",\s*\{\s*method:\s*"POST"\s*\}\)/,
+    // The selected business is sent with the call (billingPath adds clientId).
+    /apiFetch\((?:billingPath\()?"\/billing\/refresh-access"\)?,\s*\{\s*method:\s*"POST"\s*\}\)/,
     "Settings must refresh access immediately after changing a service",
   );
   assert.match(
