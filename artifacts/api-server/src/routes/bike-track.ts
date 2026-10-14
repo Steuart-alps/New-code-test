@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable } from "@workspace/db/schema";
+import { bikesTable, bikeHireRecordsTable, bikeChecksTable, appSettingsTable, sitesTable } from "@workspace/db/schema";
 import { eq, and, desc, sql, inArray, or, isNull } from "drizzle-orm";
 import { requireAuth, getClientId, denyViewers, requireClientAdmin } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -78,6 +78,14 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// A supplied siteId must name one of the caller's own sites.
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  return !!site;
+}
+
 function checkItemsToRow(items: Record<string, any>) {
   return {
     brakesFront:    items.brakesFront   ?? null,
@@ -114,6 +122,7 @@ router.post("/bikes", requireAuth, denyViewers, async (req, res) => {
   const parsed = bikeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   // bike type is validated against the client's effective option list (custom
   // or default) rather than a fixed enum, so clients can customise the list.
   const allowedTypes = await getEffectiveOptionList(clientId, "bike_types");
@@ -144,6 +153,7 @@ router.put("/bikes/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(bikesTable.id, id), eq(bikesTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
 
   // Allow an unchanged stored type even if it is no longer in the effective
   // list; reject only NEW types not in it.
@@ -261,10 +271,14 @@ router.get("/hires", requireAuth, async (req, res) => {
   if (status) conditions.push(eq(bikeHireRecordsTable.status, status));
 
   const rows = await db.execute(sql`
-    SELECT h.*,
-           b.ref AS bike_ref, b.name AS bike_name, b.type AS bike_type,
-           pre.id AS pre_check_id, pre.overall_result AS pre_result,
-           post.id AS post_check_id, post.overall_result AS post_result
+    SELECT h.id, h.client_id AS "clientId", h.site_id AS "siteId", h.bike_id AS "bikeId",
+           h.guest_name AS "guestName", h.guest_contact AS "guestContact", h.hire_date AS "hireDate",
+           h.return_date_expected AS "returnDateExpected", h.return_date_actual AS "returnDateActual",
+           h.deposit_pence AS "depositPence", h.deposit_returned AS "depositReturned", h.status, h.notes,
+           h.created_by AS "createdBy", h.created_at AS "createdAt", h.updated_at AS "updatedAt",
+           b.ref AS "bikeRef", b.name AS "bikeName", b.type AS "bikeType",
+           pre.id AS "preCheckId", pre.overall_result AS "preResult",
+           post.id AS "postCheckId", post.overall_result AS "postResult"
     FROM bike_hire_records h
     JOIN bikes b ON b.id = h.bike_id
     LEFT JOIN bike_checks pre  ON pre.hire_record_id  = h.id AND pre.check_type  = 'pre_hire'
@@ -292,50 +306,60 @@ router.post("/hires", requireAuth, denyViewers, async (req, res) => {
   if (bike.status === "maintenance") return res.status(409).json({ error: "Bike is currently in maintenance" });
   if (bike.status === "retired") return res.status(409).json({ error: "Bike is retired" });
 
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
+
   const userId = (req.session as any).userId ?? null;
 
-  // Create hire record
-  const [hire] = await db.insert(bikeHireRecordsTable).values({
-    clientId,
-    siteId: d.siteId ?? null,
-    bikeId: d.bikeId,
-    guestName: d.guestName,
-    guestContact: d.guestContact ?? null,
-    hireDate: d.hireDate,
-    returnDateExpected: d.returnDateExpected ?? null,
-    depositPence: d.depositPence ?? null,
-    depositReturned: false,
-    status: "active",
-    notes: d.notes ?? null,
-    createdBy: userId,
-  }).returning();
+  // Validate the pre-hire performer before writing anything.
+  const preCheckPerformer = d.preHireCheck
+    ? await resolveStaffPerformer(clientId, d.preHireCheck.staffRosterId, d.preHireCheck.performedBy)
+    : null;
+  if (d.preHireCheck && !preCheckPerformer) return res.status(400).json({ error: "Invalid staff roster member" });
 
-  // Mark bike as hired
-  await db.update(bikesTable).set({ status: "hired", updatedAt: new Date() })
-    .where(eq(bikesTable.id, d.bikeId));
-
-  // Save pre-hire check if provided
-  let preCheck = null;
-  if (d.preHireCheck) {
-    const c = d.preHireCheck;
-    const performer = await resolveStaffPerformer(clientId, c.staffRosterId, c.performedBy);
-    if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
-    const overallResult = c.overallResult ?? "pass";
-    const [check] = await db.insert(bikeChecksTable).values({
+  const { hire, preCheck } = await db.transaction(async (tx) => {
+    // Create hire record
+    const [hire] = await tx.insert(bikeHireRecordsTable).values({
       clientId,
-      hireRecordId: hire.id,
+      siteId: d.siteId ?? null,
       bikeId: d.bikeId,
-      checkType: "pre_hire",
-      checkDate: c.checkDate ?? d.hireDate,
-       performedBy: performer.performedBy,
-       staffRosterId: performer.staffRosterId,
-      overallResult,
-      ...checkItemsToRow(c),
-      notes: c.checkNotes ?? null,
+      guestName: d.guestName,
+      guestContact: d.guestContact ?? null,
+      hireDate: d.hireDate,
+      returnDateExpected: d.returnDateExpected ?? null,
+      depositPence: d.depositPence ?? null,
+      depositReturned: false,
+      status: "active",
+      notes: d.notes ?? null,
       createdBy: userId,
     }).returning();
-    preCheck = check;
-  }
+
+    // Mark bike as hired
+    await tx.update(bikesTable).set({ status: "hired", updatedAt: new Date() })
+      .where(eq(bikesTable.id, d.bikeId));
+
+    // Save pre-hire check if provided
+    let preCheck = null;
+    if (d.preHireCheck && preCheckPerformer) {
+      const c = d.preHireCheck;
+      const performer = preCheckPerformer;
+      const overallResult = c.overallResult ?? "pass";
+      const [check] = await tx.insert(bikeChecksTable).values({
+        clientId,
+        hireRecordId: hire.id,
+        bikeId: d.bikeId,
+        checkType: "pre_hire",
+        checkDate: c.checkDate ?? d.hireDate,
+         performedBy: performer.performedBy,
+         staffRosterId: performer.staffRosterId,
+        overallResult,
+        ...checkItemsToRow(c),
+        notes: c.checkNotes ?? null,
+        createdBy: userId,
+      }).returning();
+      preCheck = check;
+    }
+    return { hire, preCheck };
+  });
 
   res.status(201).json({ hire, preCheck });
 });
@@ -348,6 +372,7 @@ router.put("/hires/:id", requireAuth, denyViewers, async (req, res) => {
   const updateSchema = hireSchema.omit({ bikeId: true, preHireCheck: true }).partial();
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await siteBelongsToClient(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const [row] = await db.update(bikeHireRecordsTable)
     .set({ ...parsed.data, updatedAt: new Date() })
     .where(and(eq(bikeHireRecordsTable.id, id), eq(bikeHireRecordsTable.clientId, clientId)))
@@ -480,7 +505,11 @@ router.get("/services", requireAuth, async (req, res) => {
   const { bikeId } = req.query as { bikeId?: string };
 
   const rows = await db.execute(sql`
-    SELECT s.*, b.ref AS bike_ref, b.name AS bike_name, b.type AS bike_type
+    SELECT s.id, s.client_id AS "clientId", s.bike_id AS "bikeId", s.service_date AS "serviceDate",
+           s.service_type AS "serviceType", s.serviced_by AS "servicedBy",
+           s.next_service_date AS "nextServiceDate", s.cost_pence AS "costPence", s.notes,
+           s.created_by AS "createdBy", s.created_at AS "createdAt", s.updated_at AS "updatedAt",
+           b.ref AS "bikeRef", b.name AS "bikeName", b.type AS "bikeType"
     FROM bike_services s
     JOIN bikes b ON b.id = s.bike_id
     WHERE s.client_id = ${clientId}
@@ -498,7 +527,8 @@ router.get("/services/latest", requireAuth, async (req, res) => {
 
   const rows = await db.execute(sql`
     SELECT DISTINCT ON (bike_id)
-      bike_id, service_date, service_type, serviced_by, next_service_date
+      bike_id AS "bikeId", service_date AS "serviceDate", service_type AS "serviceType",
+      serviced_by AS "servicedBy", next_service_date AS "nextServiceDate"
     FROM bike_services
     WHERE client_id = ${clientId}
     ORDER BY bike_id, service_date DESC, id DESC

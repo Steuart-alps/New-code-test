@@ -12,6 +12,14 @@ const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// A supplied siteId must name one of the caller's own sites.
+async function siteBelongsToClient(siteId: number | null | undefined, clientId: number): Promise<boolean> {
+  if (siteId == null) return true;
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable)
+    .where(and(eq(sitesTable.id, siteId), eq(sitesTable.clientId, clientId))).limit(1);
+  return !!site;
+}
+
 
 const CONFIG_KEYS = [
   "pest_contractor_name",
@@ -168,6 +176,7 @@ router.post("/visits", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffRoster(clientId, d.signedOffByRosterId, d.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   const [row] = await db.insert(pestVisitsTable).values({
@@ -202,6 +211,7 @@ router.put("/visits/:id", requireAuth, denyViewers, async (req, res) => {
   const body = VisitBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
    const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
    const performer = await resolveStaffPerformerUpdate(clientId, d.signedOffByRosterId, d.signedOffBy, existingVisit.signedOffByRosterId, existingVisit.signedOffBy);
    if (d.signedOffByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
   await db.update(pestVisitsTable).set({
@@ -270,6 +280,7 @@ router.post("/activity", requireAuth, denyViewers, async (req, res) => {
   const body = ActivityBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.flatten() });
   const d = body.data;
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const performer = await resolveStaffRoster(clientId, d.recordedByRosterId, d.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
@@ -319,6 +330,7 @@ router.put("/activity/:id", requireAuth, denyViewers, async (req, res) => {
     .where(and(eq(pestActivityTable.id, id), eq(pestActivityTable.clientId, clientId)))
     .limit(1);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
   const performer = await resolveStaffPerformerUpdate(clientId, d.recordedByRosterId, d.recordedBy, existing.recordedByRosterId, existing.recordedBy);
   if (d.recordedByRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
 
