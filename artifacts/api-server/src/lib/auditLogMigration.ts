@@ -108,6 +108,10 @@ export async function migrateAuditLog() {
         END IF;
         IF TG_OP = 'DELETE' THEN tenant := OLD.client_id; entity := OLD.id;
         ELSE tenant := NEW.client_id; entity := NEW.id; END IF;
+        -- Some audited tables have no foreign key to clients, so rows can
+        -- outlive a deleted client. Their history can't reference it; skip
+        -- rather than fail the write (or a start-up backfill) on audit_log's FK.
+        IF NOT EXISTS (SELECT 1 FROM clients WHERE id = tenant) THEN RETURN NULL; END IF;
         SELECT coalesce(jsonb_object_agg(k, jsonb_build_object(
           'before', prior->k, 'after', current_row->k)), '{}'::jsonb)
           INTO changes
