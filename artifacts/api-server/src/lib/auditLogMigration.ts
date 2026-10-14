@@ -7,6 +7,56 @@ export const AUDITED_TABLES = [
   "doc_track_documents", "incidents",
 ] as const;
 
+/**
+ * Every other table that holds records people create or edit. Records must be
+ * auditable for 5 years, and these tables are deleted with their business at
+ * the end of the retention period (lib/offboarding.ts) or by user deletes, so
+ * their history has to live in audit_log. Installed after all runtime
+ * migrations, because several of these tables are created late in the run.
+ * app_settings is excluded: it stores the write-only resendApiKey in plain
+ * key/value rows that the name-based redaction can't see.
+ */
+export const EXTENDED_AUDITED_TABLES = [
+  "allergen_items", "asbestos_records", "asbestos_register_entries",
+  "bike_checks", "bike_hire_records", "bike_services", "bikes",
+  "categories", "check_photos", "checklist_templates", "client_documents",
+  "compliance_actions", "compliance_items", "contractor_certificates", "contractors",
+  "coshh_substances", "daily_checklist_submissions", "daily_checklists",
+  "daily_manager_signoffs", "departments", "doc_acknowledgements",
+  "green_defects", "green_fuel_logs", "green_machines", "green_pre_use_checks",
+  "green_puwer_inspections", "green_service_records",
+  "hot_tub_checks", "hot_tubs",
+  "kitchen_cleaning_logs", "kitchen_cleaning_tasks", "kitchen_probe_checks", "kitchen_weekly_records",
+  "legionella_sentinel_outlets",
+  "pat_appliances", "pat_certificate_rooms", "pat_certificates", "pat_failures",
+  "pat_replacements", "pat_rooms", "pat_tests",
+  "pest_activity", "pest_visits", "pool_checks", "premises_inspections",
+  "privacy_breaches", "privacy_processing_activities", "privacy_processors", "privacy_programs",
+  "privacy_retention_schedules", "privacy_rights_requests",
+  "room_track_checks", "room_track_rooms",
+  "safe_competency_signoffs", "safe_handbook", "safe_incidents", "safe_inductions",
+  "safe_sops", "safe_track_acknowledgements", "safe_training_records",
+  "site_documents", "sites", "staff_roster", "staff_training_records",
+  "swim_first_aid_checks", "swim_incidents", "swim_sessions", "swim_surveillance_checks",
+  "task_completions", "tasks",
+  "track_action_templates", "track_actions", "track_control_profiles", "track_evidence",
+  "tree_inspections",
+] as const;
+
+async function installAuditTriggers(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], tables: readonly string[]) {
+  for (const table of tables) {
+    // Static identifiers only. A missing required table fails migration/startup.
+    await tx.execute(sql.raw(`
+      DROP TRIGGER IF EXISTS compliance_audit_log ON "${table}";
+      CREATE TRIGGER compliance_audit_log AFTER INSERT OR UPDATE OR DELETE ON "${table}"
+        FOR EACH ROW EXECUTE FUNCTION capture_compliance_audit_log();
+      DROP TRIGGER IF EXISTS compliance_audit_no_truncate ON "${table}";
+      CREATE TRIGGER compliance_audit_no_truncate BEFORE TRUNCATE ON "${table}"
+        FOR EACH STATEMENT EXECUTE FUNCTION prevent_audit_log_mutation();
+    `));
+  }
+}
+
 /** Install atomically: a failed trigger install must not leave partial coverage. */
 export async function migrateAuditLog() {
   await db.transaction(async (tx) => {
@@ -79,16 +129,11 @@ export async function migrateAuditLog() {
       CREATE TRIGGER audit_log_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_log
         FOR EACH STATEMENT EXECUTE FUNCTION prevent_audit_log_mutation();
     `);
-    for (const table of AUDITED_TABLES) {
-      // Static identifiers only. A missing required table fails migration/startup.
-      await tx.execute(sql.raw(`
-        DROP TRIGGER IF EXISTS compliance_audit_log ON "${table}";
-        CREATE TRIGGER compliance_audit_log AFTER INSERT OR UPDATE OR DELETE ON "${table}"
-          FOR EACH ROW EXECUTE FUNCTION capture_compliance_audit_log();
-        DROP TRIGGER IF EXISTS compliance_audit_no_truncate ON "${table}";
-        CREATE TRIGGER compliance_audit_no_truncate BEFORE TRUNCATE ON "${table}"
-          FOR EACH STATEMENT EXECUTE FUNCTION prevent_audit_log_mutation();
-      `));
-    }
+    await installAuditTriggers(tx, AUDITED_TABLES);
   });
+}
+
+/** Run after every runtime migration: needs migrateAuditLog's functions. */
+export async function migrateExtendedAuditLog() {
+  await db.transaction((tx) => installAuditTriggers(tx, EXTENDED_AUDITED_TABLES));
 }

@@ -2,7 +2,7 @@ import { db, setSessionLockTimeout } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { ensureRuntimeBaseline } from "./runtimeBaseline";
-import { migrateAuditLog } from "./auditLogMigration";
+import { migrateAuditLog, migrateExtendedAuditLog } from "./auditLogMigration";
 import { migrateLegacyPatHistory } from "./patLegacyHistoryMigration";
 import { migratePatRoomHistory } from "./patRoomHistoryMigration";
 import { migratePatFailureHistory } from "./patFailureHistoryMigration";
@@ -2092,6 +2092,9 @@ async function runRuntimeMigrationsOnce() {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS "asbestos_survey_history_record_idx" ON "asbestos_survey_history" ("client_id", "record_id")`);
+
+    // Last: every audited table must exist by now (see auditLogMigration.ts).
+    await migrateExtendedAuditLog();
 
     logger.info("Runtime migrations complete");
   } catch (err) {
