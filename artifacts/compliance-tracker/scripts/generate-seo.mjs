@@ -11,6 +11,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBaseUrl, assertCanonicalForProduction } from "./site-url.mjs";
+import { publicPages } from "./seo-pages.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
@@ -21,15 +22,6 @@ const { baseUrl, source } = resolveBaseUrl();
 // publish broken sitemap/llms URLs. Fail loudly so the deployment is corrected.
 assertCanonicalForProduction(baseUrl, source);
 const today = new Date().toISOString().slice(0, 10);
-
-// Public, indexable pages. Everything else is behind auth.
-const publicPages = [
-  { path: "/", changefreq: "weekly", priority: "1.0" },
-  { path: "/signup", changefreq: "monthly", priority: "0.8" },
-  { path: "/login", changefreq: "monthly", priority: "0.5" },
-  { path: "/terms", changefreq: "yearly", priority: "0.3" },
-  { path: "/privacy", changefreq: "yearly", priority: "0.3" },
-];
 
 // Authenticated app sections — keep crawlers out (they only get the SPA shell).
 const privatePaths = [
@@ -63,8 +55,8 @@ ${publicPages
     return `  <url>
     <loc>${loc}</loc>
     <lastmod>${today}</lastmod>
-    <changefreq>${page.changefreq}</changefreq>
-    <priority>${page.priority}</priority>
+    <changefreq>${page.sitemap.changefreq}</changefreq>
+    <priority>${page.sitemap.priority}</priority>
   </url>`;
   })
   .join("\n")}
