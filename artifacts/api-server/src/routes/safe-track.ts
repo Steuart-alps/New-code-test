@@ -103,7 +103,7 @@ function crudFor<T extends { clientId: number; siteId?: number | null }>(
         return res.status(status).json({ error });
       }
     }
-    const insertRows = await db.insert(table).values({ ...data, clientId, createdBy: (req.session as any).userId ?? null }).returning() as any[];
+    const insertRows = await db.insert(table).values({ ...data, clientId, createdBy: req.currentUser?.id ?? null }).returning() as any[];
     const row = insertRows[0];
     res.status(201).json(row);
   });
@@ -286,7 +286,7 @@ function ackSaveRoute(table: any, docType: string) {
     if (rosterIds.some((rosterId) => !rosterNames.has(rosterId))) {
       return res.status(404).json({ error: "Staff member not found" });
     }
-    const acknowledgedBy: number | null = (req.session as any).userId ?? null;
+    const acknowledgedBy: number | null = req.currentUser?.id ?? null;
     let created = 0;
     for (const ack of parsed.data.acknowledgements) {
       // Idempotent — skip already acknowledged

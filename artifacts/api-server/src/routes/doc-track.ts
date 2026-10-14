@@ -143,7 +143,7 @@ router.post("/documents", requireAuth, denyViewers, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error.flatten() });
 
   const { title, category, description, fileName, fileSize, mimeType, objectPath, siteId, uploadedBy, requiresAcknowledgement, annualAcknowledgement, department } = parsed.data;
-  const createdBy = (req.session as any).userId ?? null;
+  const createdBy = req.currentUser?.id ?? null;
   if (!await canAccessSite(clientId, siteId, getActiveDepartmentId(req))) return res.status(403).json({ error: "Site not accessible" });
 
   // Tag the uploaded object with a tenant-scoped ACL so the private object
