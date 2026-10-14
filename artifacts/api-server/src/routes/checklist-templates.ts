@@ -69,7 +69,7 @@ router.get("/checklist-templates", requireAuth, async (req, res) => {
 router.put("/checklist-templates", requireAuth, requireClientAdmin, async (req, res) => {
   const clientId = getClientId(req);
   if (!clientId) return res.status(400).json({ error: "No client context" });
-  const userId = (req as any).userId as number;
+  const userId = req.currentUser!.id;
 
   const schema = z.object({
     type: z.string().min(1),
