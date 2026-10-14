@@ -4,12 +4,12 @@ import { createHmac } from "node:crypto";
 const BASE = process.env.API_BASE;
 assert.ok(BASE, "Run through test:daily-track-month-history to start a test-mode API");
 
-function session() {
+function session(defaultHeaders = {}) {
   let cookie = "";
   return async (method, path, body) => {
     const response = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}), ...defaultHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const setCookie = response.headers.get("set-cookie");
@@ -39,7 +39,8 @@ async function enrol(request) {
 }
 
 async function register(suffix) {
-  const request = session();
+  // The admin deliberately backfills 2025 records: owners may, with a reason.
+  const request = session({ "X-Override-Reason": encodeURIComponent("Month history fixture: backfilled record") });
   const email = `month-history-${suffix}@test.local`;
   const { verificationToken } = await request("POST", "/auth/register", {
     name: "Month History Admin", email, password: "password-123",
