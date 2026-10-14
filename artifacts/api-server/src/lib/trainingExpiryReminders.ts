@@ -150,7 +150,7 @@ function buildEmailHtml(alerts: TrainingExpiryAlert[], appUrl: string): string {
       </div>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
+      ComplyTrack by ALPS Consultancy · You are receiving this as an account manager.
     </div>
   </div>
 </body>

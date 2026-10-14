@@ -283,7 +283,7 @@ export default function ContractorPortalPage() {
         <ShieldCheck className="w-7 h-7 text-emerald-400" />
         <div>
           <span className="text-lg font-bold tracking-tight">ComplyTrack</span>
-          <span className="text-slate-400 text-sm ml-2">by ALPS Consulting</span>
+          <span className="text-slate-400 text-sm ml-2">by ALPS Consultancy</span>
         </div>
       </div>
 
@@ -491,7 +491,7 @@ export default function ContractorPortalPage() {
         </div>
 
         <p className="text-center text-xs text-slate-400 pb-8">
-          ComplyTrack by ALPS Consulting · Updates sent directly to your client's account
+          ComplyTrack by ALPS Consultancy · Updates sent directly to your client's account
         </p>
       </div>
     </div>

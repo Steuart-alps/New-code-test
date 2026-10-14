@@ -226,7 +226,7 @@ export default function ProfileScreen() {
                 Platform
               </Text>
               <Text style={[styles.infoValue, { color: colors.foreground }]}>
-                ComplyTrack by ALPS Consulting
+                ComplyTrack by ALPS Consultancy
               </Text>
             </View>
           </View>

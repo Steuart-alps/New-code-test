@@ -278,7 +278,7 @@ export function buildManagerEmailHtml(alerts: ContractorComplianceAlert[], appUr
       </div>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · You are receiving this as an account manager.
+      ComplyTrack by ALPS Consultancy · You are receiving this as an account manager.
     </div>
   </div>
 </body>
@@ -339,7 +339,7 @@ export function buildContractorEmailHtml(
       </p>
     </div>
     <div style="padding:20px 40px;border-top:1px solid #f1f5f9;font-size:12px;color:#94a3b8;text-align:center;">
-      ComplyTrack by ALPS Consulting · Sent on behalf of ${esc(clientName)}.
+      ComplyTrack by ALPS Consultancy · Sent on behalf of ${esc(clientName)}.
     </div>
   </div>
 </body>
