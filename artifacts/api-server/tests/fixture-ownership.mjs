@@ -11,8 +11,10 @@
 //     the run id in their slug. Any other tracked id aborts the cleanup, so a
 //     wrong id can never delete another tenant.
 //   * Dependent rows are found by walking foreign keys from those clients and
-//     users. If a dependent row belongs to a different client_id, the cleanup
-//     aborts instead of deleting it.
+//     users, plus rows of the owned clients in tables whose client_id has no
+//     foreign key (so no orphans point at a deleted client). If a dependent
+//     row belongs to a different client_id, the cleanup aborts instead of
+//     deleting it.
 //   * The audit ledgers (audit_log, audit_events, ...) are append-only through
 //     user triggers. Only for the duration of the cleanup transaction, the
 //     user triggers on tables that hold this run's rows are disabled and then
@@ -64,7 +66,7 @@ DECLARE
   owned_users integer[];
   owned_clients integer[];
   refused integer[];
-  item record; fk record; trg record; pending record;
+  item record; fk record; trg record; pending record; nofk record;
   col_type text; child_pk text; child_pk_type text; new_vals text[];
   foreign_rows bigint; deleted bigint; total bigint := 0; cur integer := 0;
   remaining integer; progress boolean;
@@ -95,6 +97,42 @@ BEGIN
     ('users'::regclass, 'id', owned_users::text[], true);
   INSERT INTO _fx_seen SELECT 'clients'::regclass, unnest(owned_clients::text[]) ON CONFLICT DO NOTHING;
   INSERT INTO _fx_seen SELECT 'users'::regclass, unnest(owned_users::text[]) ON CONFLICT DO NOTHING;
+
+  -- Tenant rows in tables whose client_id has no foreign key (some tables in a
+  -- drizzle-pushed schema) are invisible to the walk below. Left behind, they
+  -- point at a deleted client, and the next audited UPDATE of them (e.g. a
+  -- runtime-migration backfill) fails on audit_log's client foreign key.
+  IF cardinality(owned_clients) > 0 THEN
+    FOR nofk IN
+      SELECT a.attrelid::regclass AS tbl, format_type(a.atttypid, a.atttypmod) AS col_type
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE a.attname = 'client_id' AND NOT a.attisdropped AND a.attnum > 0
+        AND c.relkind = 'r' AND n.nspname = 'public' AND a.attrelid <> 'clients'::regclass
+        AND NOT EXISTS (SELECT 1 FROM pg_constraint con
+          WHERE con.conrelid = a.attrelid AND con.contype = 'f'
+            AND con.confrelid = 'clients'::regclass AND con.conkey = ARRAY[a.attnum])
+      ORDER BY a.attrelid::regclass::text
+    LOOP
+      SELECT pa.attname, format_type(pa.atttypid, pa.atttypmod) INTO child_pk, child_pk_type
+        FROM pg_index i JOIN pg_attribute pa ON pa.attrelid = i.indrelid AND pa.attnum = i.indkey[0]
+        WHERE i.indrelid = nofk.tbl AND i.indisprimary AND i.indnatts = 1;
+      IF child_pk IS NULL THEN
+        INSERT INTO _fx_queue (tbl, col, vals, recurse) VALUES (nofk.tbl, 'client_id', owned_clients::text[], false);
+      ELSE
+        EXECUTE format(
+          'WITH found AS (SELECT %I::text AS v FROM %s WHERE client_id = ANY($1::%s[])),
+                fresh AS (INSERT INTO _fx_seen SELECT $2, v FROM found ON CONFLICT DO NOTHING RETURNING val)
+           SELECT array_agg(val) FROM fresh',
+          child_pk, nofk.tbl, nofk.col_type)
+          INTO new_vals USING owned_clients::text[], nofk.tbl;
+        IF new_vals IS NOT NULL THEN
+          INSERT INTO _fx_queue (tbl, col, vals, recurse) VALUES (nofk.tbl, child_pk, new_vals, true);
+        END IF;
+      END IF;
+    END LOOP;
+  END IF;
 
   -- Walk restrict/no-action/cascade foreign keys outward from the owned roots.
   LOOP
