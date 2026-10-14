@@ -752,10 +752,10 @@ router.post("/documents/:id/acknowledge", requireAuth, denyViewers, async (req, 
       : sql`NULL::date`;
     const trainResult = await db.execute(sql`
       INSERT INTO train_track_records
-        (client_id, site_id, record_type, staff_name, training_type, document_title,
+        (client_id, site_id, record_type, staff_name, staff_roster_id, training_type, document_title,
          document_type, completed_date, expiry_date, notes, signature)
       VALUES
-        (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName},
+        (${clientId}, ${doc.site_id ?? null}, 'signoff', ${ack.staffName}, ${ack.staffRosterId},
          ${doc.title},
          ${doc.title}, ${doc.category}, ${today}::date,
          ${expiryDate},
