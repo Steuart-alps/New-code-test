@@ -308,7 +308,7 @@ router.post("/hires", requireAuth, denyViewers, async (req, res) => {
 
   if (!(await siteBelongsToClient(d.siteId, clientId))) return res.status(400).json({ error: "Invalid siteId for this client" });
 
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
 
   // Validate the pre-hire performer before writing anything.
   const preCheckPerformer = d.preHireCheck
@@ -398,7 +398,7 @@ router.post("/hires/:id/return", requireAuth, denyViewers, async (req, res) => {
   if (hire.status === "returned") return res.status(409).json({ error: "Hire already returned" });
 
   const today = todayIso();
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
 
   // Save post-return check
   let postCheck = null;
@@ -548,7 +548,7 @@ router.post("/services", requireAuth, denyViewers, async (req, res) => {
   const bike = ((bikeCheckResult as any).rows ?? [])[0];
   if (!bike) return res.status(400).json({ error: "Bike not found" });
 
-  const userId = (req.session as any).userId ?? null;
+  const userId = req.currentUser?.id ?? null;
 
   const insertResult = await db.execute(sql`
     INSERT INTO bike_services
