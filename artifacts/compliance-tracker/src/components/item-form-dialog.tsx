@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { useAppMutations } from "@/hooks/use-app-data";
+import { format } from "date-fns";
 import { ComplianceItem, useListCategories, useListSites, useListContractors } from "@workspace/api-client-react";
 
 const ALL_SITES = "__all__";
@@ -77,7 +78,7 @@ export function ItemFormDialog({
         categoryId: item.categoryId || undefined,
         siteId: item.siteId ? String(item.siteId) : undefined,
         contractorId: item.contractorId || undefined,
-        dueDate: item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "",
+        dueDate: item.dueDate ? format(new Date(item.dueDate), "yyyy-MM-dd'T'HH:mm") : "",
         leadTimeDays: item.leadTimeDays || 7,
         frequencyMonths: item.frequencyMonths ?? null,
         notes: item.notes || "",

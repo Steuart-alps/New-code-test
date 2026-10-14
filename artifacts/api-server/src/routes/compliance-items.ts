@@ -371,7 +371,13 @@ router.put("/compliance-items/:id", requireAuth, requireClientAdmin, async (req,
     Object.assign(updateData, completion.fields);
     if (completion.recurring) recurrence = { completedAt, nextDueDate: completion.fields.dueDate };
   }
-  else if (body.status) updateData.completedAt = null;
+  // The edit form always re-sends the status. Only reopening a completed
+  // one-off check clears its completion; a repeating check keeps its "last
+  // completed" date.
+  else if (body.status && existing[0].status === "completed"
+    && !((body.frequencyMonths !== undefined ? body.frequencyMonths : existing[0].frequencyMonths) ?? 0)) {
+    updateData.completedAt = null;
+  }
   // A reminder delivered for the old due date does not cover the new one, so
   // the scheduler may remind again for the new cycle.
   const nextDueDate = updateData.dueDate as Date | null | undefined;
@@ -458,7 +464,12 @@ router.patch("/compliance-items/:id/status", requireAuth, denyViewers, async (re
         // The next due date starts a new reminder cycle.
         ...(completion.recurring ? { notificationSentAt: null } : {}),
       }
-    : { status, completedAt: null };
+    : {
+        status,
+        // Reopening a completed one-off check clears its completion; a
+        // repeating check keeps its "last completed" date.
+        ...(existing[0].status === "completed" && !existing[0].frequencyMonths ? { completedAt: null } : {}),
+      };
   await db.transaction(async (tx) => {
     await tx
       .update(complianceItemsTable)

@@ -181,7 +181,11 @@ export function parseStoredOptionState(
   const state = input as { active?: unknown; disabled?: unknown };
   const active = validateOptionList(state.active);
   if (!active.ok) return active;
-  const disabled = validateDisabledList(state.disabled ?? []);
+  // Lists saved before the disabled history was capped can hold more than
+  // the limit; keep the most recent entries rather than rejecting the list.
+  const disabled = validateDisabledList(
+    Array.isArray(state.disabled) ? state.disabled.slice(-MAX_OPTIONS) : state.disabled ?? [],
+  );
   if (!disabled.ok) return disabled;
 
   const activeKeys = new Set(active.value.map((item) => item.toLowerCase()));
