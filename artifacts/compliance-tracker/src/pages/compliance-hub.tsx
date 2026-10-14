@@ -27,7 +27,7 @@ type Action = {
   id: number; sourceTrack: string; sourceRecordId?: string | null; title: string;
   severity: "low" | "medium" | "high" | "critical"; status: "open" | "in_progress" | "awaiting_verification" | "verified";
   ownerName: string; dueDate?: string | null; interimControl?: string | null; correctiveAction: string;
-  evidenceReference?: string | null; verificationNotes?: string | null;
+  evidenceReference?: string | null; verificationNotes?: string | null; fixTrackIssueId?: number | null;
 };
 
 const emptyProfile: Profile = {
@@ -137,6 +137,18 @@ export default function ComplianceHubPage() {
     } finally { setSavingAction(false); }
   }
 
+  async function sendToFixTrack(id: number) {
+    const generation = loadGeneration.current;
+    try {
+      const sent = await request<{ fixTrackIssueId: number }>(`/compliance-hub/actions/${id}/fix-track`, { method: "POST", body: "{}" });
+      if (generation !== loadGeneration.current) return;
+      await refresh();
+      toast({ title: "Sent to FixTrack", description: `FixTrack issue #${sent.fixTrackIssueId} raised.` });
+    } catch (error: any) {
+      toast({ title: "Couldn't send to FixTrack", description: error.message, variant: "destructive" });
+    }
+  }
+
   async function updateAction(id: number) {
     const generation = loadGeneration.current;
     try {
@@ -220,7 +232,7 @@ export default function ComplianceHubPage() {
             </CardContent>
           </Card>}
           <div className="space-y-3">{loading ? <p className="text-muted-foreground">Loading corrective actions…</p> : actions.length === 0 ? <Card><CardContent className="p-6 text-muted-foreground">No corrective actions are logged for this client.</CardContent></Card> : actions.map(action => <Card key={action.id} className={action.status === "verified" ? "opacity-75" : ""}><CardContent className="p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">{action.title}</h3><Badge variant={action.status === "verified" ? "secondary" : "outline"}>{action.status.replaceAll("_", " ")}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{action.severity}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div>{canEdit && action.status !== "verified" && <Button variant="outline" size="sm" onClick={() => beginEditingAction(action)}>Update / verify</Button>}</div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-start sm:justify-between"><div><div className="flex items-center gap-2 flex-wrap"><h3 className="font-semibold">{action.title}</h3><Badge variant={action.status === "verified" ? "secondary" : "outline"}>{action.status.replaceAll("_", " ")}</Badge><Badge variant={action.severity === "critical" || action.severity === "high" ? "destructive" : "outline"}>{action.severity}</Badge></div><p className="text-sm text-muted-foreground mt-1">{action.sourceTrack}{action.sourceRecordId ? ` · ${action.sourceRecordId}` : ""} · Owner: {action.ownerName}{action.dueDate ? ` · Due ${action.dueDate}` : ""}</p></div><div className="flex flex-wrap gap-2">{action.fixTrackIssueId ? <a className="text-sm font-medium text-primary underline self-center" href={`/fix-track/${action.fixTrackIssueId}`}>FixTrack issue #{action.fixTrackIssueId}</a> : canEdit && action.status !== "verified" && !/green/i.test(action.sourceTrack) && <Button variant="outline" size="sm" onClick={() => sendToFixTrack(action.id)}>Send to FixTrack</Button>}{canEdit && action.status !== "verified" && <Button variant="outline" size="sm" onClick={() => beginEditingAction(action)}>Update / verify</Button>}</div></div>
             <div className="grid gap-3 md:grid-cols-2 text-sm"><div><span className="font-medium">Corrective action: </span>{action.correctiveAction}</div>{action.interimControl && <div><span className="font-medium">Interim control: </span>{action.interimControl}</div>}{action.evidenceReference && <div><span className="font-medium">Evidence: </span>{action.evidenceReference}</div>}{action.verificationNotes && <div><span className="font-medium">Verification: </span>{action.verificationNotes}</div>}</div>
             {editingAction === action.id && <div className="grid gap-3 border-t pt-4 md:grid-cols-2"><div className="space-y-2"><Label>Action status</Label><Select value={actionUpdate.status} onValueChange={status => setActionUpdate({ ...actionUpdate, status })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="in_progress">In progress</SelectItem><SelectItem value="awaiting_verification">Awaiting verification</SelectItem><SelectItem value="verified">Verified closed</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Evidence reference</Label><Input value={actionUpdate.evidenceReference} onChange={e => setActionUpdate({ ...actionUpdate, evidenceReference: e.target.value })} /></div><div className="space-y-2 md:col-span-2"><Label>Verification notes {actionUpdate.status === "verified" ? "(required)" : ""}</Label><Textarea value={actionUpdate.verificationNotes} onChange={e => setActionUpdate({ ...actionUpdate, verificationNotes: e.target.value })} placeholder="Who verified the action, what they checked and when" /><p className="text-xs text-muted-foreground">Verified closure is available only from “Awaiting verification”, by a different client admin or consultant. It cannot be edited afterwards.</p></div><div className="flex gap-2 md:col-span-2"><Button onClick={() => updateAction(action.id)}>Save action update</Button><Button variant="ghost" onClick={() => setEditingAction(null)}>Cancel</Button></div></div>}
           </CardContent></Card>)}</div>

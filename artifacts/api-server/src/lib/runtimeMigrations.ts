@@ -2490,73 +2490,86 @@ async function migrateTrackActions() {
       END LOOP;
     END $$
   `);
-  await migrateTrackActionFixTrackJobs();
+  await migrateTrackActionsForFindings();
 }
 
-// Every new action outside GreenTrack raises a FixTrack job straight away, so
-// repairs and follow-ups from all tracks are worked in one place. The action
-// keeps its own sign-off ("parallel"): resolving it in its track resolves the
-// job, and resolving the job completes the action when its track needs no
-// further evidence (routes/fix-track.ts, routes/track-actions.ts). AFTER
-// INSERT, so rows an ON CONFLICT DO NOTHING skips never raise a job.
-// Existing actions are left as they are.
-async function migrateTrackActionFixTrackJobs() {
+
+// Findings that are not a pass/fail result still need an action on their
+// track: a premises inspection that records action required, and any pest
+// sighting not already resolved. Keyed by source row, so an update never
+// adds a second action. Whether the work goes to FixTrack is the user's call.
+async function migrateTrackActionsForFindings() {
   await db.execute(sql`
-    CREATE OR REPLACE FUNCTION raise_fix_track_job_for_track_action()
+    CREATE OR REPLACE FUNCTION raise_track_action_for_finding()
     RETURNS trigger
     LANGUAGE plpgsql
     AS $$
     DECLARE
-      new_issue_id integer;
-      site_name text;
-      reporter text;
-      module_label text;
+      action_module text;
+      action_title text;
+      action_instruction text;
+      action_severity text := 'action_required';
+      action_site_id integer := NEW.site_id;
     BEGIN
-      IF NEW.module = 'green' OR NEW.fix_track_issue_id IS NOT NULL
-        OR NEW.fix_track_disposition IS NOT NULL OR NEW.status = 'resolved' THEN
-        RETURN NULL;
+      IF TG_TABLE_NAME = 'premises_inspections' THEN
+        IF nullif(trim(coalesce(NEW.action_required, '')), '') IS NULL OR NEW.status = 'closed' THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'premises';
+        action_title := 'Premises inspection: ' || coalesce(nullif(trim(NEW.area), ''), initcap(replace(NEW.inspection_type, '_', ' ')));
+        action_instruction := concat_ws(E'\n',
+          'Inspection on ' || NEW.inspection_date::text || coalesce(' by ' || nullif(trim(NEW.inspected_by), ''), '') || '.',
+          'Action required: ' || trim(NEW.action_required),
+          'Hazard: ' || nullif(trim(NEW.hazard_details), ''),
+          'Findings: ' || nullif(trim(NEW.findings), ''));
+      ELSIF TG_TABLE_NAME = 'pest_activity' THEN
+        IF NEW.resolved THEN
+          RETURN NEW;
+        END IF;
+        action_module := 'pest';
+        action_title := 'Pest activity: ' || initcap(replace(NEW.pest_type, '_', ' '))
+          || coalesce(' at ' || nullif(trim(NEW.location), ''), '');
+        action_instruction := concat_ws(E'\n',
+          'Recorded on ' || NEW.recorded_date::text || coalesce(' by ' || nullif(trim(NEW.recorded_by), ''), '') || ': '
+            || replace(NEW.evidence_type, '_', ' ') || ', severity ' || NEW.severity || '.',
+          'Action taken so far: ' || nullif(trim(NEW.action_taken), ''),
+          'Notes: ' || nullif(trim(NEW.notes), ''));
+        IF lower(NEW.severity) IN ('high', 'critical', 'severe') THEN
+          action_severity := 'urgent';
+        END IF;
+      ELSE
+        RETURN NEW;
       END IF;
-      SELECT s.name INTO site_name FROM sites s WHERE s.id = NEW.site_id AND s.client_id = NEW.client_id;
-      SELECT nullif(trim(u.name), '') INTO reporter FROM users u WHERE u.id = NEW.created_by;
-      module_label := CASE NEW.module
-        WHEN 'daily_am' THEN 'Morning checks' WHEN 'daily_pm' THEN 'Evening checks'
-        WHEN 'kitchen' THEN 'KitchenTrack' WHEN 'fire' THEN 'FireTrack'
-        WHEN 'legionella' THEN 'LegionellaTrack' WHEN 'pool' THEN 'PoolTrack'
-        WHEN 'pat' THEN 'PATTrack' WHEN 'pest' THEN 'PestTrack'
-        WHEN 'premises' THEN 'PremisesTrack' WHEN 'doc' THEN 'DocTrack'
-        WHEN 'safe' THEN 'SafeTrack' WHEN 'train' THEN 'TrainTrack'
-        WHEN 'hot_tub' THEN 'HotTubTrack' WHEN 'tree' THEN 'TreeTrack'
-        WHEN 'bike' THEN 'BikeTrack' WHEN 'swim' THEN 'SwimTrack'
-        WHEN 'incident' THEN 'Incidents' WHEN 'room' THEN 'RoomTrack'
-        ELSE NEW.module END;
-      INSERT INTO fix_track_issues (
-        client_id, site_id, title, issue_type, location, description, priority, status,
-        reported_by, reported_date, target_date, assigned_to, created_by
+      IF action_site_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM sites WHERE id = action_site_id AND client_id = NEW.client_id
+      ) THEN
+        action_site_id := NULL;
+      END IF;
+      INSERT INTO track_actions (
+        client_id, site_id, module, source_kind, source_record_id, title, instruction,
+        provenance, severity, status, created_by
       ) VALUES (
-        NEW.client_id, NEW.site_id, NEW.title, 'general',
-        coalesce(site_name, 'See originating module action'),
-        concat_ws(E'\n', NEW.instruction, 'Originating module: ' || module_label, 'Module action: ' || NEW.id),
-        CASE NEW.severity WHEN 'urgent' THEN 'urgent' WHEN 'action_required' THEN 'high' ELSE 'medium' END,
-        'reported',
-        coalesce(reporter, 'ComplyTrack (automatic)'),
-        (now() AT TIME ZONE 'Europe/London')::date,
-        NEW.due_date, NEW.owner_name, NEW.created_by
-      ) RETURNING id INTO new_issue_id;
-      INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
-      VALUES (NEW.client_id, new_issue_id, 'status', 'reported', NEW.created_by);
-      UPDATE track_actions
-      SET fix_track_issue_id = new_issue_id,
-          fix_track_disposition = 'parallel'
-      WHERE id = NEW.id;
-      RETURN NULL;
+        NEW.client_id, action_site_id, action_module, TG_TABLE_NAME, NEW.id, action_title, action_instruction,
+        'product_default', action_severity, 'open', NEW.created_by
+      )
+      ON CONFLICT ("client_id", "module", "source_kind", "source_record_id")
+        WHERE "source_kind" IS NOT NULL AND "source_record_id" IS NOT NULL
+      DO NOTHING;
+      RETURN NEW;
     END;
     $$
   `);
-  await db.execute(sql`DROP TRIGGER IF EXISTS raise_fix_track_job ON "track_actions"`);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "premises_inspections"`);
   await db.execute(sql`
-    CREATE TRIGGER raise_fix_track_job
-    AFTER INSERT ON "track_actions"
-    FOR EACH ROW EXECUTE FUNCTION raise_fix_track_job_for_track_action()
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT OR UPDATE OF action_required, status ON "premises_inspections"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
+  `);
+  await db.execute(sql`DROP TRIGGER IF EXISTS raise_track_action_for_finding ON "pest_activity"`);
+  await db.execute(sql`
+    CREATE TRIGGER raise_track_action_for_finding
+    AFTER INSERT ON "pest_activity"
+    FOR EACH ROW EXECUTE FUNCTION raise_track_action_for_finding()
   `);
 }
 

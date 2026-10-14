@@ -116,17 +116,9 @@ router.put("/compliance-hub/profile", requireAuth, requireClientAdmin, async (re
   res.json(rows(result)[0]);
 });
 
-router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<void> => {
-  const clientId = clientOrError(req, res);
-  if (!clientId) return;
-  const departmentId = getActiveDepartmentId(req);
-  const result = await db.execute(sql`
-    SELECT a.id, a.source_track AS "sourceTrack", a.source_record_id AS "sourceRecordId", a.title, a.severity, a.status,
-      a.owner_name AS "ownerName", a.due_date::text AS "dueDate", a.interim_control AS "interimControl",
-      a.corrective_action AS "correctiveAction", a.evidence_reference AS "evidenceReference",
-      a.verification_notes AS "verificationNotes", a.verified_by AS "verifiedBy", a.verified_at AS "verifiedAt",
-      a.created_at AS "createdAt", a.updated_at AS "updatedAt"
-    FROM compliance_actions a WHERE a.client_id = ${clientId}
+/** Actions linked to an incident or water check follow that record's department. */
+function visibleToDepartment(departmentId: number | null) {
+  return sql`(TRUE
       AND (${departmentId}::integer IS NULL OR a.source_track <> 'IncidentTrack' OR EXISTS (
         SELECT 1 FROM incidents i LEFT JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
         WHERE i.client_id = a.client_id AND i.id::text = a.source_record_id
@@ -150,6 +142,21 @@ router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<voi
           AND (${departmentId}::integer IS NULL OR hc.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
       ))
+  )`;
+}
+
+router.get("/compliance-hub/actions", requireAuth, async (req, res): Promise<void> => {
+  const clientId = clientOrError(req, res);
+  if (!clientId) return;
+  const departmentId = getActiveDepartmentId(req);
+  const result = await db.execute(sql`
+    SELECT a.id, a.source_track AS "sourceTrack", a.source_record_id AS "sourceRecordId", a.title, a.severity, a.status,
+      a.owner_name AS "ownerName", a.due_date::text AS "dueDate", a.interim_control AS "interimControl",
+      a.corrective_action AS "correctiveAction", a.evidence_reference AS "evidenceReference",
+      a.verification_notes AS "verificationNotes", a.verified_by AS "verifiedBy", a.verified_at AS "verifiedAt",
+      a.created_at AS "createdAt", a.updated_at AS "updatedAt", a.fix_track_issue_id AS "fixTrackIssueId"
+    FROM compliance_actions a WHERE a.client_id = ${clientId}
+      AND ${visibleToDepartment(departmentId)}
     ORDER BY CASE WHEN a.status = 'verified' THEN 1 ELSE 0 END, a.due_date NULLS LAST, a.created_at DESC
   `);
   res.json(rows(result));
@@ -174,20 +181,18 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
     return;
   }
   const departmentId = getActiveDepartmentId(req);
-  let incidentSite: { id: number | null; name: string | null } = { id: null, name: null };
   const inserted = await db.transaction(async tx => {
     if (incidentId !== null) {
       // Closing an incident updates (and locks) this same row. Holding its lock
       // through the insert prevents a new unverified action racing with closure.
       const incident = await tx.execute(sql`
-        SELECT i.status, i.site_id, s.name AS site_name FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
+        SELECT i.status FROM incidents i LEFT JOIN sites s ON s.id = i.site_id
         WHERE i.client_id = ${clientId} AND i.id = ${incidentId}
           AND (${departmentId}::integer IS NULL OR i.site_id IS NULL OR
             (s.id IS NOT NULL AND (s.department_id IS NULL OR s.department_id = ${departmentId})))
         FOR UPDATE OF i
       `);
       if (!incident.rows.length || incident.rows[0].status === "closed") return null;
-      incidentSite = { id: (incident.rows[0].site_id as number | null) ?? null, name: (incident.rows[0].site_name as string | null) ?? null };
     }
     const result = await tx.execute(sql`
       INSERT INTO compliance_actions (
@@ -204,38 +209,71 @@ router.post("/compliance-hub/actions", requireAuth, denyViewers, async (req, res
         verification_notes AS "verificationNotes", verified_by AS "verifiedBy", verified_at AS "verifiedAt",
         created_at AS "createdAt", updated_at AS "updatedAt"
     `);
-    const action = rows<Record<string, unknown> & { id: number }>(result)[0];
-    // Actions from every track except GreenTrack also raise a FixTrack job.
-    // The action keeps its own verification here; the job tracks the work.
-    if (!/green/i.test(a.sourceTrack)) {
-      const issue = await tx.execute(sql`
-        INSERT INTO fix_track_issues (
-          client_id, site_id, title, issue_type, location, description, priority, status,
-          reported_by, reported_date, target_date, assigned_to, created_by
-        ) VALUES (
-          ${clientId}, ${incidentSite.id}, ${a.title}, 'general',
-          ${incidentSite.name ?? "See Compliance Hub action"},
-          ${[a.correctiveAction, a.interimControl ? `Interim control: ${a.interimControl}` : null, `Originating module: ${a.sourceTrack}`, `Compliance Hub action: ${action.id}`].filter(Boolean).join("\n")},
-          ${a.severity === "critical" ? "urgent" : a.severity}, 'reported',
-          ${req.currentUser!.name?.trim() || "ComplyTrack (automatic)"}, (now() AT TIME ZONE 'Europe/London')::date,
-          ${a.dueDate ?? null}::date, ${a.ownerName}, ${req.currentUser!.id}
-        ) RETURNING id
-      `);
-      const issueId = rows<{ id: number }>(issue)[0].id;
-      await tx.execute(sql`
-        INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
-        VALUES (${clientId}, ${issueId}, 'status', 'reported', ${req.currentUser!.id})
-      `);
-      await tx.execute(sql`UPDATE compliance_actions SET fix_track_issue_id = ${issueId} WHERE id = ${action.id} AND client_id = ${clientId}`);
-      action.fixTrackIssueId = issueId;
-    }
-    return action;
+    return rows(result)[0];
   });
   if (!inserted) {
     res.status(404).json({ error: "Incident not found, closed, or inaccessible; reopen it before linking a new action" });
     return;
   }
   res.status(201).json(inserted);
+});
+
+// The user decides whether an action needs FixTrack repair or contractor
+// work. GreenTrack actions stay in GreenTrack.
+router.post("/compliance-hub/actions/:id/fix-track", requireAuth, denyViewers, async (req, res): Promise<void> => {
+  const clientId = clientOrError(req, res);
+  if (!clientId) return;
+  const id = Number(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    res.status(400).json({ error: "Invalid action id" });
+    return;
+  }
+  const departmentId = getActiveDepartmentId(req);
+  const outcome = await db.transaction(async tx => {
+    const found = await tx.execute(sql`
+      SELECT a.id, a.source_track, a.source_record_id, a.title, a.severity, a.status, a.owner_name, a.due_date::text AS due_date,
+        a.interim_control, a.corrective_action, a.fix_track_issue_id
+      FROM compliance_actions a
+      WHERE a.id = ${id} AND a.client_id = ${clientId} AND ${visibleToDepartment(departmentId)}
+      FOR UPDATE OF a
+    `);
+    const action = rows<{
+      id: number; source_track: string; source_record_id: string | null; title: string; severity: string; status: string;
+      owner_name: string; due_date: string | null; interim_control: string | null; corrective_action: string; fix_track_issue_id: number | null;
+    }>(found)[0];
+    if (!action) return { status: 404, body: { error: "Corrective action not found" } };
+    if (/green/i.test(action.source_track)) return { status: 400, body: { error: "GreenTrack actions stay within GreenTrack" } };
+    if (action.status === "verified") return { status: 409, body: { error: "Verified actions cannot be sent to FixTrack" } };
+    if (action.fix_track_issue_id) return { status: 200, body: { fixTrackIssueId: action.fix_track_issue_id } };
+    // Incident actions take the incident's site (same business only).
+    const site = action.source_track === "IncidentTrack" && action.source_record_id
+      ? rows<{ id: number; name: string }>(await tx.execute(sql`
+          SELECT s.id, s.name FROM incidents i JOIN sites s ON s.id = i.site_id AND s.client_id = i.client_id
+          WHERE i.client_id = ${clientId} AND i.id::text = ${action.source_record_id}
+        `))[0]
+      : undefined;
+    const issue = await tx.execute(sql`
+      INSERT INTO fix_track_issues (
+        client_id, site_id, title, issue_type, location, description, priority, status,
+        reported_by, reported_date, target_date, assigned_to, created_by
+      ) VALUES (
+        ${clientId}, ${site?.id ?? null}, ${action.title}, 'general',
+        ${site?.name ?? "See Compliance Hub action"},
+        ${[action.corrective_action, action.interim_control ? `Interim control: ${action.interim_control}` : null, `Originating module: ${action.source_track}`, `Compliance Hub action: ${action.id}`].filter(Boolean).join("\n")},
+        ${action.severity === "critical" ? "urgent" : action.severity}, 'reported',
+        ${req.currentUser!.name?.trim() || "ComplyTrack"}, (now() AT TIME ZONE 'Europe/London')::date,
+        ${action.due_date}::date, ${action.owner_name}, ${req.currentUser!.id}
+      ) RETURNING id
+    `);
+    const issueId = rows<{ id: number }>(issue)[0].id;
+    await tx.execute(sql`
+      INSERT INTO fix_track_issue_activity (client_id, issue_id, event_type, status, created_by)
+      VALUES (${clientId}, ${issueId}, 'status', 'reported', ${req.currentUser!.id})
+    `);
+    await tx.execute(sql`UPDATE compliance_actions SET fix_track_issue_id = ${issueId}, updated_at = now() WHERE id = ${action.id} AND client_id = ${clientId}`);
+    return { status: 201, body: { fixTrackIssueId: issueId } };
+  });
+  res.status(outcome.status).json(outcome.body);
 });
 
 router.patch("/compliance-hub/actions/:id", requireAuth, denyViewers, async (req, res): Promise<void> => {

@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { createTenant, createUser, isoDay, pool } from './approval-workflow-fixtures.mjs';
 
 // Daily checklists answer each item Pass, Fail or N/A; a submit needs every
-// item answered and a note on each fail. Failed items become actions, and
-// every action outside GreenTrack raises a FixTrack job that completes it.
+// item answered and a note on each fail. Failed items, premises findings and
+// pest sightings become actions; the user chooses whether each goes to
+// FixTrack (not GreenTrack), and finishing the job completes the action.
 try {
   const owner = await createTenant('checklist-results');
   const staff = await createUser(owner, { role: 'client_staff' });
@@ -41,15 +42,16 @@ try {
   const action = actions[0];
   assert.equal(action.sourceKind, 'daily_checklist_item:1');
   assert.match(action.instruction, /No soap/);
-  assert.ok(action.fixTrackIssueId, 'the failed item raised a FixTrack job');
-  assert.equal(action.fixTrackDisposition, 'parallel');
+  assert.equal(action.fixTrackIssueId, null, 'FixTrack is the user\'s choice');
 
-  const issue = (await owner.request('GET', `/fix-track/issues/${action.fixTrackIssueId}`)).data;
+  // The user sends it to FixTrack; finishing the job completes the action.
+  const sent = await staff.request('POST', `/track-actions/${action.id}/fix-track`, { create: true });
+  assert.equal(sent.status, 201, JSON.stringify(sent));
+  assert.equal(sent.data.fixTrackDisposition, 'linked');
+  const issue = (await owner.request('GET', `/fix-track/issues/${sent.data.fixTrackIssueId}`)).data;
   assert.equal(issue.title, action.title);
   assert.equal(issue.priority, 'high');
   assert.equal(issue.siteId, site.id);
-
-  // Finishing the job completes an action whose track needs no evidence.
   assert.equal((await owner.request('PUT', `/fix-track/issues/${issue.id}`, { status: 'in_progress' })).status, 200);
   const done = await owner.request('PUT', `/fix-track/issues/${issue.id}`, { status: 'resolved', solutionNotes: 'Soap refilled', resolverSignature: 'data:image/png;base64,AAAA' });
   assert.equal(done.status, 200, JSON.stringify(done));
@@ -68,36 +70,51 @@ try {
   assert.equal(mobile.status, 201, JSON.stringify(mobile));
   const pmActions = (await owner.request('GET', `/track-actions?module=daily_pm&siteId=${site.id}`)).data;
   assert.equal(pmActions.length, 1);
-  assert.ok(pmActions[0].fixTrackIssueId);
-
-  // Signing the action off in its track also resolves its FixTrack job.
+  assert.equal(pmActions[0].fixTrackIssueId, null);
+  // Kept in its track: resolved there directly.
   const signedOff = await owner.request('PATCH', `/track-actions/${pmActions[0].id}`, {
     status: 'resolved', remedialAction: 'Alarm engineer reset the panel', evidenceReference: 'Engineer report', resolutionNotes: 'Alarm sets correctly', resolverSignature: 'data:image/png;base64,AAAA',
   });
   assert.equal(signedOff.status, 200, JSON.stringify(signedOff));
-  const pmIssue = (await owner.request('GET', `/fix-track/issues/${pmActions[0].fixTrackIssueId}`)).data;
-  assert.equal(pmIssue.status, 'resolved');
-  assert.ok(pmIssue.resolvedByName);
 
-  // GreenTrack actions stay in GreenTrack; other tracks raise a job.
-  const { rows: inserted } = await pool.query(`
+  // GreenTrack actions cannot be sent to FixTrack.
+  const { rows: [green] } = await pool.query(`
     INSERT INTO track_actions (client_id, site_id, module, title, severity, status, provenance)
-    VALUES ($1, $2, 'green', 'Green follow-up', 'monitor', 'open', 'one_off'),
-           ($1, $2, 'fire', 'Fire follow-up', 'urgent', 'open', 'one_off')
-    RETURNING id, module, fix_track_issue_id`, [owner.clientId, site.id]);
-  const { rows: linked } = await pool.query(
-    `SELECT a.module, a.fix_track_issue_id, i.priority FROM track_actions a LEFT JOIN fix_track_issues i ON i.id = a.fix_track_issue_id WHERE a.id = ANY($1) ORDER BY a.module`,
-    [inserted.map(row => row.id)]);
-  assert.deepEqual(linked.map(row => [row.module, row.fix_track_issue_id !== null, row.priority]), [['fire', true, 'urgent'], ['green', false, null]]);
+    VALUES ($1, $2, 'green', 'Green follow-up', 'monitor', 'open', 'one_off') RETURNING id`, [owner.clientId, site.id]);
+  assert.equal((await owner.request('POST', `/track-actions/${green.id}/fix-track`, { create: true })).status, 400);
 
-  // Compliance Hub actions raise a job as well.
+  // A premises inspection that needs action, and a pest sighting, raise actions.
+  const inspection = await staff.request('POST', '/premises-track', {
+    inspectionDate: date, area: 'Rear yard', actionRequired: 'Repair the loose paving slab', hazardDetails: 'Trip hazard', siteId: site.id,
+  });
+  assert.equal(inspection.status, 201, JSON.stringify(inspection));
+  const clean = await staff.request('POST', '/premises-track', { inspectionDate: date, area: 'Reception', siteId: site.id });
+  assert.equal(clean.status, 201, JSON.stringify(clean));
+  const premisesActions = (await owner.request('GET', `/track-actions?module=premises&siteId=${site.id}`)).data;
+  assert.equal(premisesActions.length, 1, JSON.stringify(premisesActions));
+  assert.match(premisesActions[0].title, /Rear yard/);
+  assert.match(premisesActions[0].instruction, /loose paving slab/);
+  const sighting = await staff.request('POST', '/pest-track/activity', {
+    recordedDate: date, pestType: 'rodent', evidenceType: 'droppings', location: 'Dry store', severity: 'high', siteId: site.id,
+  });
+  assert.equal(sighting.status, 201, JSON.stringify(sighting));
+  const pestActions = (await owner.request('GET', `/track-actions?module=pest&siteId=${site.id}`)).data;
+  assert.equal(pestActions.length, 1, JSON.stringify(pestActions));
+  assert.equal(pestActions[0].severity, 'urgent');
+
+  // Compliance Hub actions are sent to FixTrack on request.
   const hub = await owner.request('POST', '/compliance-hub/actions', {
     sourceTrack: 'FireTrack', title: 'Replace fire door closer', severity: 'critical', ownerName: 'Site manager', correctiveAction: 'Fit a new closer',
   });
   assert.equal(hub.status, 201, JSON.stringify(hub));
-  assert.ok(hub.data.fixTrackIssueId);
-  const hubIssue = (await owner.request('GET', `/fix-track/issues/${hub.data.fixTrackIssueId}`)).data;
+  assert.equal(hub.data.fixTrackIssueId ?? null, null);
+  const hubSent = await owner.request('POST', `/compliance-hub/actions/${hub.data.id}/fix-track`, {});
+  assert.equal(hubSent.status, 201, JSON.stringify(hubSent));
+  const hubIssue = (await owner.request('GET', `/fix-track/issues/${hubSent.data.fixTrackIssueId}`)).data;
   assert.equal(hubIssue.priority, 'urgent');
+  assert.equal((await owner.request('POST', `/compliance-hub/actions/${hub.data.id}/fix-track`, {})).data.fixTrackIssueId, hubSent.data.fixTrackIssueId);
+  const listed = (await owner.request('GET', '/compliance-hub/actions')).data.find(row => row.id === hub.data.id);
+  assert.equal(listed.fixTrackIssueId, hubSent.data.fixTrackIssueId);
 
   console.log('Checklist results and FixTrack jobs passed.');
 } finally {

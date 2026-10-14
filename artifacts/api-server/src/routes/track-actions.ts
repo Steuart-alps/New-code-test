@@ -235,9 +235,9 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
     if (!action) return { status: 404 as const, error: "Action not found" };
     if (action.module === "green") return { status: 400 as const, error: "GreenTrack actions stay within GreenTrack" };
     if (action.status === "resolved") return { status: 409 as const, error: "Resolved actions cannot be sent to FixTrack" };
-    if (action.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_") && parsed.data.create) {
-      return { status: 409 as const, error: "Temperature corrective actions must stay in KitchenTrack for manager verification; raise a separate maintenance issue if necessary" };
-    }
+    // A failed temperature can still get a repair job, but a manager verifies
+    // and resolves the action in KitchenTrack ("parallel").
+    const keptInTrack = action.module === "kitchen" && !!action.sourceKind?.startsWith("kitchen_temperature_");
     if (!await canAccessSite(action.siteId, clientId, departmentId)) return { status: 403 as const, error: "Forbidden site" };
     if (!parsed.data.create) {
       const [row] = await tx.update(trackActionsTable).set({ fixTrackDisposition: "not_needed", updatedAt: new Date() }).where(eq(trackActionsTable.id, action.id)).returning();
@@ -254,7 +254,7 @@ router.post("/:id/fix-track", requireAuth, denyViewers, async (req, res) => {
       targetDate: action.dueDate, assignedTo: action.ownerName, createdBy: req.currentUser!.id,
     }).returning();
     await tx.insert(fixTrackIssueActivityTable).values({ clientId, issueId: issue.id, eventType: "status", status: "reported", createdBy: req.currentUser!.id });
-    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
+    const [row] = await tx.update(trackActionsTable).set({ fixTrackIssueId: issue.id, fixTrackDisposition: keptInTrack ? "parallel" : "linked", updatedAt: new Date() }).where(and(eq(trackActionsTable.id, action.id), isNull(trackActionsTable.fixTrackIssueId))).returning();
     if (!row) return { status: 409 as const, error: "This action was linked by another user" };
     return { status: 201 as const, row };
   });

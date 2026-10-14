@@ -2,8 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, trackActionsTable, trackEvidenceTable, usersTable } from "@workspace/db/schema";
-import { missingEvidenceForAction } from "../lib/trackEvidenceRequirements";
+import { appSettingsTable, fixTrackIssueActivityTable, fixTrackIssuesTable, sitesTable, contractorsTable, trackActionsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, or, isNull, inArray, desc, ne, sql } from "drizzle-orm";
 import { requireAuth, requireClientAdmin, getClientId, getActiveDepartmentId, denyViewers } from "../middleware/requireAuth";
 import { getEffectiveOptionList } from "../lib/formOptions";
@@ -39,21 +38,6 @@ import { DEFAULT_FIX_TRACK_STALE_DAYS, parseFixTrackStaleDays } from "../lib/fix
 
 const router = Router();
 
-/**
- * Whether finishing an automatically raised FixTrack job may also complete its
- * module action: failed-temperature actions always need KitchenTrack manager
- * verification, and actions whose track asks for evidence (or urgent actions,
- * which need independently reviewed evidence) are signed off in that track.
- */
-async function actionNeedsNoFurtherSignOff(clientId: number, action: typeof trackActionsTable.$inferSelect) {
-  if (action.module === "kitchen" && action.sourceKind?.startsWith("kitchen_temperature_")) return false;
-  if ((await missingEvidenceForAction(clientId, action)).length) return false;
-  if (action.severity !== "urgent") return true;
-  const [reviewed] = await db.select({ id: trackEvidenceTable.id }).from(trackEvidenceTable).where(and(
-    eq(trackEvidenceTable.clientId, clientId), eq(trackEvidenceTable.actionId, action.id), eq(trackEvidenceTable.reviewStatus, "verified"),
-  )).limit(1);
-  return !!reviewed;
-}
 const storage = new ObjectStorageService();
 /** Throws TokenPayloadError for a damaged or undecryptable draft; callers
  *  must not preview or dispatch it. */
@@ -752,12 +736,11 @@ router.put("/issues/:id", requireAuth, denyViewers, async (req, res) => {
     }
     // The linked module action completes with the repair. A job a contractor
     // finished from the email link is resolved without a signed-in user, so
-    // its action completes when a manager closes the job. An automatically
-    // raised job ("parallel") completes its action only when the track needs
-    // no further evidence; otherwise the action stays open for sign-off there.
+    // its action completes when a manager closes the job. A failed-temperature
+    // action ("parallel") is verified and resolved in KitchenTrack instead.
     const finishing = isStatusChange && (data.status === "resolved" || data.status === "closed");
     const syncsAction = finishing && linkedAction && linkedAction.status !== "resolved"
-      && (linkedAction.fixTrackDisposition !== "parallel" || await actionNeedsNoFurtherSignOff(clientId, linkedAction));
+      && linkedAction.fixTrackDisposition !== "parallel";
     if (syncsAction) {
       await tx.update(trackActionsTable).set({
         status: "resolved",
