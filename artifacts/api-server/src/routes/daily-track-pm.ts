@@ -157,6 +157,7 @@ router.put("/signoffs/:id", requireAuth, denyViewers, async (req, res) => {
   if (existing.submittedAt) return res.status(409).json({ error: "Sign-off already submitted" });
   const parsed = signoffCreateSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
   const [row] = await db.update(dailyManagerSignoffsTable)
     .set({ ...data, submittedAt: data.submittedAt ? new Date(data.submittedAt) : undefined, updatedAt: new Date() })
@@ -275,6 +276,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res) => {
   }
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
+  if (!(await verifySite(parsed.data.siteId, clientId))) return res.status(400).json({ error: "Invalid site" });
   const data = parsed.data as any;
   const performer = await resolveStaffPerformerUpdate(clientId, data.staffRosterId, data.completedBy, (existing as any).staffRosterId, existing.completedBy);
   if (data.staffRosterId != null && !performer) return res.status(400).json({ error: "Invalid staff roster member" });
