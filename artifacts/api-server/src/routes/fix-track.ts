@@ -1795,41 +1795,43 @@ router.post("/quotes/:quoteId/accept", requireAuth, denyViewers, async (req, res
   const deptScope = deptId === null ? sql`` : sql` AND (i.site_id IS NULL OR s.department_id=${deptId})`;
   const out = await db.transaction(async (tx) => {
     const r = await tx.execute(sql`SELECT qs.*,q.*,i.title,i.description,i.location,i.issue_type,i.priority,
-      s.name AS site_name,c.name AS contractor_name
+      i.site_id,i.target_date,s.name AS site_name,c.name AS contractor_name,q.to_email AS contractor_email,
+      cl.name AS company_name,
+      (SELECT ics_content FROM contractor_email_queue
+        WHERE client_id=i.client_id AND entity_type='fix_track' AND entity_id=i.id
+        ORDER BY created_at DESC LIMIT 1) AS previous_ics
       FROM fix_track_quote_submissions qs
       JOIN contractor_email_queue q ON q.id=qs.queue_id JOIN fix_track_issues i ON i.id=q.issue_id
+      JOIN clients cl ON cl.id=i.client_id
       LEFT JOIN sites s ON s.id=i.site_id LEFT JOIN contractors c ON c.id=q.contractor_id
       WHERE qs.id=${id} AND qs.client_id=${clientId} AND qs.status='submitted'${deptScope}
       FOR UPDATE OF qs,q,i`);
     const q = (r.rows as any[])[0]; if (!q) return null;
-    const subject = `Job Assigned: ${q.title}`;
-    const text = [
-      `Dear ${q.contractor_name ?? "Contractor"},`,
-      `The job "${q.title}" has been assigned to you.`,
-      `Site: ${q.site_name ?? "Not specified"}`,
-      `Location: ${q.location ?? "Not specified"}`,
-      `Type: ${q.issue_type}`,
-      `Priority: ${q.priority}`,
-      q.description ?? "",
-    ].filter(Boolean).join("\n");
-    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;color:#1e293b">
-      <p>Dear ${escapeHtml(q.contractor_name ?? "Contractor")},</p>
-      <p>The following job has been assigned to you.</p>
-      <h2>${escapeHtml(q.title)}</h2>
-      <p><strong>Site:</strong> ${escapeHtml(q.site_name ?? "Not specified")}<br>
-      <strong>Location:</strong> ${escapeHtml(q.location ?? "Not specified")}<br>
-      <strong>Type:</strong> ${escapeHtml(q.issue_type)}<br>
-      <strong>Priority:</strong> ${escapeHtml(q.priority)}</p>
-      ${q.description ? `<p>${escapeHtml(q.description)}</p>` : ""}
-    </div>`;
+    // Same draft as request-send's "assign" mode: booked/completed links held
+    // only in the encrypted payload, plus the calendar invite.
+    const tokens = await generateActionTokens(q.issue_id, clientId, q.contractor_id, tx);
+    const tokenPayload = { booked: tokens.bookedToken, completed: tokens.completedToken };
+    const icsContent = fixTrackCalendarInvite(q, await getClientSenderEmail(clientId), clientId, q.issue_id, nextCalendarSequence(q.previous_ics));
+    const icsFilename = icsContent ? calendarFilename(q.title) : null;
+    const rendered = await sendContractorAssignmentEmail({
+      contractorName: q.contractor_name ?? "Contractor", contractorEmail: q.contractor_email,
+      issueTitle: q.title, issueType: q.issue_type, issuePriority: q.priority,
+      issueLocation: q.location, issueDescription: q.description, siteName: q.site_name,
+      companyName: q.company_name, bookedToken: tokens.bookedToken, completedToken: tokens.completedToken,
+      baseUrl: getPublicAppUrl(), clientId, siteDocuments: await siteDocumentsForContractorEmail(q.site_id, clientId),
+      icsAttachment: icsContent ?? undefined, icsFilename: icsFilename ?? undefined, previewOnly: true,
+    });
+    const persisted = placeholderizeQueuedDraft(rendered.subject, rendered.html,
+      rendered.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), tokenPayload);
     await tx.execute(sql`UPDATE fix_track_quote_submissions SET status='accepted' WHERE id=${id}`);
     await tx.execute(sql`UPDATE fix_track_issues SET contractor_id=${q.contractor_id}, email_request_mode='assign',
       email_request_status='pending', updated_at=now() WHERE id=${q.issue_id} AND client_id=${clientId}`);
     await tx.execute(sql`INSERT INTO contractor_email_queue
-      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,email_preview_json,requested_by,idempotency_key)
+      (client_id,issue_id,entity_type,entity_id,department_id,contractor_id,mode,email_type,to_email,subject,body_html,body_text,
+       ics_content,ics_filename,email_preview_json,encrypted_token_payload,requested_by,idempotency_key)
       VALUES (${clientId},${q.issue_id},'fix_track',${q.issue_id},${q.department_id},${q.contractor_id},'assign','assignment',${q.to_email},
-      ${subject},${html},${text},
-      ${JSON.stringify({ subject, text, html })},${(req.session as any).userId ?? null},${randomUUID()})`);
+      ${persisted.subject},${persisted.html},${persisted.text},${icsContent},${icsFilename},
+      ${JSON.stringify(persisted.preview)},${encryptTokenPayload(tokenPayload)},${(req.session as any).userId ?? null},${randomUUID()})`);
     return q;
   });
   if (!out) return res.status(404).json({ error: "Quote not found" });
