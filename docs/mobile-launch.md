@@ -37,8 +37,8 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
    - Push notifications stay off until it's done: `lib/push.ts` needs the project ID.
    - If PR #77 is merged first, the project has an `app.config.js`. `eas init` may then print the ID for you to paste into `app.json` under `expo.extra.eas.projectId`, because `app.config.js` spreads `app.json`.
 6. **Set `EXPO_PUBLIC_DOMAIN`.**
-   - It's already set per profile in `eas.json`. Change it there if the API moves to a custom domain, for example `complytrack.alpsconsultancy.co.uk`.
-   - The legal links use `https://complytrack.alpsconsultancy.co.uk`. Set `EXPO_PUBLIC_SITE_URL` in the profile's `env` if that domain isn't live yet.
+   - It's already set per profile in `eas.json`. Change it there if the API moves to a custom domain, for example `www.alpsconsultancy.co.uk`.
+   - The legal links use `https://www.alpsconsultancy.co.uk`. Set `EXPO_PUBLIC_SITE_URL` in the profile's `env` if that domain isn't live yet.
    - `pnpm run export:ios` refuses to bundle without `EXPO_PUBLIC_DOMAIN`.
 7. **Create the store records:**
    - In App Store Connect: My Apps > + > New App. Platform iOS, name "ComplyTrack", primary language English (UK), bundle ID `uk.co.alpsconsultancy.complytrack` (EAS registers it on the first build if it isn't listed yet), SKU `complytrack-ios`.
@@ -89,9 +89,9 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 | Name (30 max) | ComplyTrack |
 | Subtitle (30 max) | Health & safety compliance |
 | Category | Primary: Business. Secondary: Productivity |
-| Support URL | https://alpsconsultancy.co.uk |
-| Marketing URL | https://complytrack.alpsconsultancy.co.uk |
-| Privacy policy URL | https://complytrack.alpsconsultancy.co.uk/privacy |
+| Support URL | https://www.alpsconsultancy.co.uk |
+| Marketing URL | https://www.alpsconsultancy.co.uk |
+| Privacy policy URL | https://www.alpsconsultancy.co.uk/privacy |
 | Copyright | 2026 ALPS Consulting Ltd |
 | Keywords (100 max) | `health and safety,compliance,fire safety,legionella,PAT testing,RIDDOR,HACCP,checklist,audit,risk` |
 
@@ -131,7 +131,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 > SECURE BY DESIGN
 > Each business only sees its own data. Two-factor sign-in protects accounts, and viewer accounts are read-only.
 >
-> ComplyTrack needs an account from your employer or health and safety consultant. Businesses can start at complytrack.alpsconsultancy.co.uk.
+> ComplyTrack needs an account from your employer or health and safety consultant. Businesses can start at www.alpsconsultancy.co.uk.
 
 ## 3. Google Play listing (draft)
 
@@ -139,7 +139,7 @@ Run these on your own computer from `artifacts/mobile`. You need Node 24 and the
 - **Short description** (80 max): `Log health & safety checks, report issues and track compliance on site.`
 - **Full description:** use the App Store description above (Google allows 4,000 characters, so it fits as is).
 - **Category:** Business. **Tags:** Business, Productivity.
-- **Contact details:** website `https://alpsconsultancy.co.uk`, and the support email address you want to publish (required).
+- **Contact details:** website `https://www.alpsconsultancy.co.uk`, and the support email address you want to publish (required).
 - **Store graphics:**
   - 512×512 icon: resize `assets/images/app-icon.png`.
   - 1024×500 feature graphic: the navy `#061537` background with the shield and "ComplyTrack".
@@ -268,7 +268,7 @@ App Store Connect needs 3 to 10 screenshots per size. iPad screenshots aren't ne
 - [ ] `EXPO_PUBLIC_DOMAIN=complytrack-aavy.onrender.com pnpm --filter @workspace/mobile run export:ios` and `export:android` both succeed.
 - [ ] `npx expo-doctor` is clean. Offline, it can only fail the two checks that need exp.host / reactnative.directory.
 - [ ] `eas init` is done and `extra.eas.projectId` is committed. Push permission prompts appear on a real device.
-- [ ] The privacy policy page is updated (section 4) and `https://complytrack.alpsconsultancy.co.uk/privacy` and `/terms` load.
+- [ ] The privacy policy page is updated (section 4) and `https://www.alpsconsultancy.co.uk/privacy` and `/terms` load.
 - [ ] Demo review business and account are set up, with 2FA off for that business only (section 6).
 - [ ] `ios.buildNumber` / `android.versionCode` are higher than any previous upload.
 - [ ] **iPhone smoke test:** work through `/mnt/project-files/mobile/iphone-smoke-test.md` on the **TestFlight** build. That checklist was written for Expo Go; for the TestFlight build, skip its "Start the app" section. Do the same checks on Android internal testing:

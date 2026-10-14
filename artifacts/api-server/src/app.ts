@@ -143,6 +143,24 @@ if (fs.existsSync(webIndexHtml)) {
     },
   });
 
+  // Once the site has its own domain (PUBLIC_SITE_URL), send web page
+  // requests that arrive on Render's onrender.com address there, so people
+  // and search engines see one copy of the site. API paths are left alone:
+  // the mobile app and webhooks may still call the onrender.com address.
+  const canonicalOrigin = process.env.PUBLIC_SITE_URL
+    ? new URL(process.env.PUBLIC_SITE_URL).origin
+    : null;
+  const renderHost = process.env.RENDER_EXTERNAL_URL
+    ? new URL(process.env.RENDER_EXTERNAL_URL).host.toLowerCase()
+    : null;
+  if (canonicalOrigin && renderHost && new URL(canonicalOrigin).host !== renderHost) {
+    app.use((req, res, next) => {
+      if ((req.method !== "GET" && req.method !== "HEAD") || isServerPath(req.path)) return next();
+      if (req.headers.host?.toLowerCase() !== renderHost) return next();
+      res.redirect(301, canonicalOrigin + req.originalUrl);
+    });
+  }
+
   app.use((req, res, next) => (isServerPath(req.path) ? next() : serveWebFiles(req, res, next)));
 
   app.use((req, res, next) => {

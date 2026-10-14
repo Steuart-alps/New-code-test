@@ -82,8 +82,8 @@ export default function PrivacyPage() {
         <p>
           We may update this policy from time to time; material changes will be notified in the app or by email. For
           privacy questions or to exercise your rights, contact ALPS Consulting Ltd via{" "}
-          <a href="https://alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
-            alpsconsultancy.co.uk
+          <a href="mailto:info@alpsconsultancy.co.uk" className="text-primary underline underline-offset-2">
+            info@alpsconsultancy.co.uk
           </a>
           .
         </p>

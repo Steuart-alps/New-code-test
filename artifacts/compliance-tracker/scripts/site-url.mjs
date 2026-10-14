@@ -4,7 +4,7 @@
 //   1. PUBLIC_SITE_URL            (set this once you have a custom domain)
 //   2. Render's deployment URL when running on Render
 //   3. the verified production custom domain
-const PRODUCTION_SITE_URL = "https://complytrack.alpsconsultancy.co.uk";
+const PRODUCTION_SITE_URL = "https://www.alpsconsultancy.co.uk";
 export function resolveBaseUrl() {
   if (process.env.PUBLIC_SITE_URL) {
     return {
