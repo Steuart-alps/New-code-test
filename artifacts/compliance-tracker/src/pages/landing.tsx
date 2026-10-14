@@ -446,7 +446,7 @@ export default function LandingPage() {
             </div>
             <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-white/20">
               <span className="text-sm text-white/60 font-display italic">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-80 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-80 brightness-0 invert" />
             </div>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
@@ -469,7 +469,7 @@ export default function LandingPage() {
               <span className="text-primary italic">Done Right.</span>
             </h1>
             <p className="text-xl text-white/70 mb-12 max-w-2xl mx-auto leading-relaxed font-light">
-              A modular compliance platform from ALPS Consulting. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
+              A modular compliance platform from ALPS Consultancy. Choose the modules your business needs — fire safety, food hygiene, water safety — and pay only for what you use.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
               <Button size="lg" className="px-10 py-7 text-lg bg-primary hover:bg-primary/90 text-primary-foreground rounded-[2px] w-full sm:w-auto" onClick={() => navigate("/signup")}>
@@ -610,7 +610,7 @@ export default function LandingPage() {
             <div className="hidden sm:block w-px h-6 bg-white/20" />
             <div className="flex items-center gap-3">
               <span className="text-sm font-display italic text-white/60">by</span>
-              <img src={alpsLogo} alt="ALPS Consulting" className="h-6 opacity-70 brightness-0 invert" />
+              <img src={alpsLogo} alt="ALPS Consultancy" className="h-6 opacity-70 brightness-0 invert" />
             </div>
           </div>
           <p className="text-sm font-light">© {new Date().getFullYear()} ALPS Consulting Ltd. All rights reserved.</p>
