@@ -33,7 +33,7 @@ type PublicDocumentType = "doc" | "ra" | "sop" | "handbook";
 
 async function resolveStaff(clientId: number, staffRosterId: number) {
   const result = await db.execute(sql`
-    SELECT id, name, department
+    SELECT id, name, department, site_id
     FROM staff_roster
     WHERE id = ${staffRosterId} AND client_id = ${clientId} AND active = true
     LIMIT 1
@@ -49,7 +49,7 @@ async function resolvePublicDocument(
 ) {
   const result = await db.execute(sql`
     WITH selected_staff AS (
-      SELECT department
+      SELECT department, site_id
       FROM staff_roster
       WHERE id = ${staffRosterId} AND client_id = ${clientId} AND active = true
     ),
@@ -60,6 +60,7 @@ async function resolvePublicDocument(
       WHERE d.client_id = ${clientId}
         AND d.requires_acknowledgement = true
         AND (d.department IS NULL OR d.department = staff.department)
+        AND (d.site_id IS NULL OR d.site_id = staff.site_id)
 
       UNION ALL
 
@@ -187,6 +188,7 @@ router.get("/:token/documents", async (req, res) => {
         WHERE d.client_id = ${client.id}
           AND d.requires_acknowledgement = true
           AND (d.department = ${staff.department} OR d.department IS NULL)
+          AND (d.site_id IS NULL OR d.site_id = ${staff.site_id ?? null}::integer)
 
         UNION ALL
 
