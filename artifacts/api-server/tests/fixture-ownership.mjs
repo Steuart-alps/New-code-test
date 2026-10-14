@@ -146,11 +146,16 @@ BEGIN
   END LOOP;
 
   -- Suspend user triggers (audit capture and append-only guards) only on the
-  -- tables that hold this run's rows, remembering their previous state.
+  -- tables that hold this run's rows, remembering their previous state. Also
+  -- on tables whose foreign keys point at those tables: an ON DELETE SET NULL
+  -- or CASCADE there fires their audit trigger, and the new audit_log row
+  -- would then block deleting the client.
   INSERT INTO _fx_triggers
     SELECT t.tgrelid::regclass, t.tgname, t.tgenabled FROM pg_trigger t
     WHERE NOT t.tgisinternal AND t.tgenabled <> 'D'
-      AND t.tgrelid IN (SELECT DISTINCT tbl FROM _fx_queue WHERE cardinality(vals) > 0);
+      AND (t.tgrelid IN (SELECT DISTINCT tbl FROM _fx_queue WHERE cardinality(vals) > 0)
+        OR t.tgrelid IN (SELECT c.conrelid FROM pg_constraint c WHERE c.contype = 'f'
+          AND c.confrelid IN (SELECT DISTINCT tbl FROM _fx_queue WHERE cardinality(vals) > 0)));
   FOR trg IN SELECT * FROM _fx_triggers ORDER BY tbl::text, tgname LOOP
     EXECUTE format('ALTER TABLE %s DISABLE TRIGGER %I', trg.tbl, trg.tgname);
   END LOOP;
