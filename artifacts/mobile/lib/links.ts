@@ -5,7 +5,7 @@
  * EXPO_PUBLIC_SITE_URL overrides the production web address, e.g. for a
  * staging build. Keep this module import-free: tests load it with Node.
  */
-const PRODUCTION_SITE_URL = 'https://www.alpsconsultancy.co.uk';
+const PRODUCTION_SITE_URL = 'https://complytrack.alpsconsultancy.co.uk';
 
 export function siteUrl(): string {
   const raw = (process.env.EXPO_PUBLIC_SITE_URL ?? '').trim().replace(/\/+$/, '');
@@ -16,8 +16,8 @@ export const privacyPolicyUrl = () => `${siteUrl()}/privacy`;
 export const termsUrl = () => `${siteUrl()}/terms`;
 /** Web settings, where owners manage billing and the business account. */
 export const webSettingsUrl = () => `${siteUrl()}/settings`;
-/** ALPS Consultancy's contact address (the one the privacy policy gives). */
-export const CONTACT_URL = 'mailto:info@alpsconsultancy.co.uk';
+/** ALPS Consultancy's website (the contact address the privacy policy gives). */
+export const CONTACT_URL = 'https://www.alpsconsultancy.co.uk';
 
 /** Roles that own the business account and may request its erasure. */
 export function canRequestBusinessDeletion(role: string | null | undefined): boolean {

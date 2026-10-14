@@ -47,12 +47,12 @@ const load = () => import(`data:text/javascript,${encodeURIComponent(js)}#${Math
 
 delete process.env.EXPO_PUBLIC_SITE_URL;
 let links = await load();
-assert.equal(links.privacyPolicyUrl(), 'https://www.alpsconsultancy.co.uk/privacy');
-assert.equal(links.termsUrl(), 'https://www.alpsconsultancy.co.uk/terms');
+assert.equal(links.privacyPolicyUrl(), 'https://complytrack.alpsconsultancy.co.uk/privacy');
+assert.equal(links.termsUrl(), 'https://complytrack.alpsconsultancy.co.uk/terms');
 process.env.EXPO_PUBLIC_SITE_URL = 'https://staging.example.test/';
 assert.equal(links.privacyPolicyUrl(), 'https://staging.example.test/privacy');
 process.env.EXPO_PUBLIC_SITE_URL = 'http://insecure.example.test';
-assert.equal(links.termsUrl(), 'https://www.alpsconsultancy.co.uk/terms', 'non-HTTPS override ignored');
+assert.equal(links.termsUrl(), 'https://complytrack.alpsconsultancy.co.uk/terms', 'non-HTTPS override ignored');
 delete process.env.EXPO_PUBLIC_SITE_URL;
 
 assert.equal(links.canRequestBusinessDeletion('client_admin'), true);

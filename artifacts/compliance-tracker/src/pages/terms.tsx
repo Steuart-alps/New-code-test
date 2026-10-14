@@ -93,8 +93,8 @@ export default function TermsPage() {
         <h2>11. Contact</h2>
         <p>
           Questions about these terms? Contact ALPS Consulting Ltd via{" "}
-          <a href="mailto:info@alpsconsultancy.co.uk" className="text-primary underline underline-offset-2">
-            info@alpsconsultancy.co.uk
+          <a href="https://www.alpsconsultancy.co.uk" className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">
+            alpsconsultancy.co.uk
           </a>
           .
         </p>
