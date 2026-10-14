@@ -75,6 +75,7 @@ interface HotTubCheck {
   temperature: string | null;
   location: string | null;
   performedBy: string | null;
+  staffRosterId?: number | null;
   notes: string | null;
   createdAt: string;
 }
@@ -383,6 +384,7 @@ export default function HotTubPage() {
   function openAdd() {
     setEditItem(null);
     setForm({ ...emptyForm(), performedBy: user?.name ?? "" });
+    setStaffRosterId(null);
     setShowDialog(true);
   }
 
@@ -402,6 +404,7 @@ export default function HotTubPage() {
       performedBy: r.performedBy ?? "",
       notes: r.notes ?? "",
     });
+    setStaffRosterId(r.staffRosterId ?? null);
     setShowDialog(true);
   }
 
@@ -940,10 +943,10 @@ export default function HotTubPage() {
             {sites.length > 0 && (
               <div>
                 <Label>Site</Label>
-                <Select value={form.siteId} onValueChange={v => setForm(f => ({ ...f, siteId: v }))}>
+                <Select value={form.siteId || "none"} onValueChange={v => setForm(f => ({ ...f, siteId: v === "none" ? "" : v }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select site (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific site</SelectItem>
+                    <SelectItem value="none">No specific site</SelectItem>
                     {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -954,10 +957,10 @@ export default function HotTubPage() {
             <div>
               <Label>Hot Tub / Spa</Label>
               {activeTubs.length > 0 ? (
-                <Select value={form.hotTubId} onValueChange={v => setForm(f => ({ ...f, hotTubId: v }))}>
+                <Select value={form.hotTubId || "none"} onValueChange={v => setForm(f => ({ ...f, hotTubId: v === "none" ? "" : v }))}>
                   <SelectTrigger className="mt-1 rounded-sm"><SelectValue placeholder="Select tub (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Not tub-specific</SelectItem>
+                    <SelectItem value="none">Not tub-specific</SelectItem>
                     {activeTubs.map(t => (
                       <SelectItem key={t.id} value={String(t.id)}>
                         <span className="flex items-center gap-2">
@@ -1240,10 +1243,10 @@ function ManageTubsDialog({
                 className="rounded-sm"
               />
               {sites.length > 0 && (
-                <Select value={newSiteId} onValueChange={setNewSiteId}>
+                <Select value={newSiteId || "none"} onValueChange={v => setNewSiteId(v === "none" ? "" : v)}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Link to a site (optional)" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific site</SelectItem>
+                    <SelectItem value="none">No specific site</SelectItem>
                     {sites.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

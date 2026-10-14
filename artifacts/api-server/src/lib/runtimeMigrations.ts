@@ -4942,6 +4942,21 @@ async function migrateLegionellaOutlets() {
     ADD COLUMN IF NOT EXISTS outlet_id integer
     REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL
   `);
+  // A database built by drizzle-kit push already has the plain column, so the
+  // ADD COLUMN above is skipped there; add the foreign key on its own.
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'legionella_checks_outlet_id_fkey'
+      ) THEN
+        UPDATE legionella_checks c SET outlet_id = NULL
+        WHERE outlet_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM legionella_sentinel_outlets o WHERE o.id = c.outlet_id);
+        ALTER TABLE legionella_checks ADD CONSTRAINT legionella_checks_outlet_id_fkey
+          FOREIGN KEY (outlet_id) REFERENCES legionella_sentinel_outlets(id) ON DELETE SET NULL;
+      END IF;
+    END $$
+  `);
   // Migrate existing JSON from app_settings (idempotent — skips clients already migrated).
   const settings = await db.execute(sql`
     SELECT client_id, value FROM app_settings
