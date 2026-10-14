@@ -2,9 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
-import { usersTable, userRoleEnum, passwordResetTokensTable } from "@workspace/db/schema";
+import { usersTable, userRoleEnum, passwordResetTokensTable, auditEventsTable, incidentRiddorEventsTable, feedbackReportReviewsTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull } from "drizzle-orm";
-import { hashPassword } from "../lib/auth";
+import { hashPassword, getUserWithClientByEmail } from "../lib/auth";
 import { requireAuth, requireClientAdmin, canAccessClient } from "../middleware/requireAuth";
 import { escapeHtml, sendSystemEmail, getPublicAppUrl } from "../lib/email";
 import { resetTwoFactorWithAlert, deliverTwoFactorResetAlert } from "../lib/twoFactorResetAlerts";
@@ -168,23 +168,41 @@ router.post("/users", requireAuth, requireClientAdmin, async (req, res) => {
     }
   }
 
+  // Sign-in matches email case-insensitively and registration stores it in
+  // lower case; do the same here so an existing address is a clear 409.
+  const email = body.email.trim().toLowerCase();
+  if (await getUserWithClientByEmail(email)) {
+    res.status(409).json({ error: "A user with this email already exists" });
+    return;
+  }
+
   // When no password is supplied, the admin is inviting the user: create the
   // account with an unusable random password and email them a link to set
   // their own via the existing reset-password token machinery.
   const invite = !body.password;
   const passwordHash = await hashPassword(body.password ?? randomBytes(32).toString("hex"));
-  const rows = await db
-    .insert(usersTable)
-    .values({
-      email: body.email,
-      name: body.name,
-      role: body.role as typeof userRoleEnum[number],
-      clientId: body.clientId ?? null,
-      departmentId: body.departmentId ?? null,
-      active: body.active,
-      passwordHash,
-    })
-    .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+  let rows;
+  try {
+    rows = await db
+      .insert(usersTable)
+      .values({
+        email,
+        name: body.name,
+        role: body.role as typeof userRoleEnum[number],
+        clientId: body.clientId ?? null,
+        departmentId: body.departmentId ?? null,
+        active: body.active,
+        passwordHash,
+      })
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+  } catch (error: any) {
+    // A concurrent create of the same address.
+    if ((error?.code ?? error?.cause?.code) === "23505") {
+      res.status(409).json({ error: "A user with this email already exists" });
+      return;
+    }
+    throw error;
+  }
 
   if (invite) {
     await sendInviteEmail(rows[0], req.log);
@@ -311,6 +329,24 @@ router.delete("/users/:id", requireAuth, requireClientAdmin, async (req, res) =>
     return;
   }
   if (rejectsConsultantTarget(actor, target, res)) return;
+
+  // Audit trails are append-only, so a user one names as actor can't be
+  // deleted (ON DELETE SET NULL would rewrite those rows). Deactivate them
+  // instead, which also ends their sessions.
+  const authored = await Promise.all([
+    db.select({ id: auditEventsTable.id }).from(auditEventsTable).where(eq(auditEventsTable.actorId, id)).limit(1),
+    db.select({ id: incidentRiddorEventsTable.id }).from(incidentRiddorEventsTable).where(eq(incidentRiddorEventsTable.actorId, id)).limit(1),
+    db.select({ id: feedbackReportReviewsTable.id }).from(feedbackReportReviewsTable).where(eq(feedbackReportReviewsTable.actorId, id)).limit(1),
+  ]);
+  if (authored.some((rows) => rows.length > 0)) {
+    const rows = await db
+      .update(usersTable)
+      .set({ active: false, updatedAt: new Date() })
+      .where(eq(usersTable.id, id))
+      .returning({ id: usersTable.id, email: usersTable.email, name: usersTable.name, role: usersTable.role, clientId: usersTable.clientId, departmentId: usersTable.departmentId, active: usersTable.active, totpEnabled: usersTable.totpEnabled, isMaintenanceManager: usersTable.isMaintenanceManager, isDepartmentManager: usersTable.isDepartmentManager, createdAt: usersTable.createdAt, updatedAt: usersTable.updatedAt });
+    res.json({ ...rows[0], deactivated: true });
+    return;
+  }
 
   await db.delete(usersTable).where(eq(usersTable.id, id));
   res.json({ ok: true });
