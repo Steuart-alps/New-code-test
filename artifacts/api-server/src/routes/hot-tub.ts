@@ -455,7 +455,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         clientEntryId: entry?.id ?? null,
         clientEntryHash: entry?.hash ?? null,
       }).returning();
-      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      if (row?.result === "fail") await ensureHotTubAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
   } catch (err) {
@@ -538,7 +538,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(hotTubChecksTable).set(updateData)
       .where(and(eq(hotTubChecksTable.id, id), eq(hotTubChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureHotTubAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 

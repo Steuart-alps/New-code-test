@@ -351,7 +351,7 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
         createdBy: userId,
         clientEntryId: entry?.id ?? null, clientEntryHash: entry?.hash ?? null,
       }).returning();
-      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, (req.session as any).userId ?? null, performer.performedBy);
+      if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, row.id, breach, req.currentUser?.id ?? null, performer.performedBy);
       return row;
     });
   } catch (err) {
@@ -604,7 +604,7 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
   const updated = await db.transaction(async tx => {
     const [row] = await tx.update(legionellaChecksTable).set(updateData)
       .where(and(eq(legionellaChecksTable.id, id), eq(legionellaChecksTable.clientId, clientId))).returning();
-    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, (req.session as any).userId ?? null, performer.performedBy);
+    if (row?.result === "fail") await ensureLegionellaAction(tx, clientId, id, breach, req.currentUser?.id ?? null, performer.performedBy);
     return row;
   });
 
