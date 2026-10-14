@@ -55,7 +55,8 @@ try {
   assert.equal(futureCheckDate({ method: 'POST', path: '/fix-track', body: { targetDate: '2099-01-01' } }), null,
     'future target dates elsewhere are untouched');
 
-  const owner = await createTenant('dashboard-accuracy');
+  // The owner deliberately records past-dated checks, which needs a reason.
+  const owner = await createTenant('dashboard-accuracy', { overrideReason: 'Dashboard fixture: past-dated check' });
   const c = owner.clientId;
   const siteA = ok(await owner.request('POST', '/sites', { name: 'Site A', seedStarterChecks: false }));
   const siteB = ok(await owner.request('POST', '/sites', { name: 'B & Co', seedStarterChecks: false }));

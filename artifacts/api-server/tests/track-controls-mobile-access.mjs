@@ -25,13 +25,14 @@ function check(name, condition, detail = "") {
 const expectStatus = (name, actual, expected) =>
   check(name, actual === expected, `expected ${expected}, got ${actual}`);
 
-async function call(method, path, { cookie, bearer, body } = {}) {
+async function call(method, path, { cookie, bearer, body, headers = {} } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
       ...(cookie ? { cookie } : {}),
       ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -44,8 +45,11 @@ async function call(method, path, { cookie, bearer, body } = {}) {
 /** Registers a verified client admin and returns a cookie-session caller. */
 async function registerAdmin(label, ts) {
   let cookie = "";
+  // The admin records checks on a fixed past date, which an owner may do
+  // with a reason.
+  const headers = { "X-Override-Reason": encodeURIComponent("Track controls fixture: fixed-date check") };
   const admin = async (method, path, body) => {
-    const res = await call(method, path, { cookie, body });
+    const res = await call(method, path, { cookie, body, headers });
     if (res.setCookie) cookie = res.setCookie.split(";")[0];
     return res;
   };

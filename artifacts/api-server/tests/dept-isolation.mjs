@@ -42,12 +42,13 @@ function expectOk(name, status, allowed = [200, 201]) {
 
 function makeSession() {
   let cookie = "";
-  return async function request(method, path, body) {
+  return async function request(method, path, body, extraHeaders = {}) {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
         ...(cookie ? { cookie } : {}),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -218,12 +219,13 @@ async function main() {
   // return its count without leaking the record to another department.
   const lastMonthDate = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15))
     .toISOString().slice(0, 10);
+  // Backfilling a past record needs an owner's reason.
   const priorMonthCheck = await admin("POST", "/fire-safety", {
     checkType: "alarm",
     checkDate: lastMonthDate,
     result: "pass",
     siteId: siteAlphaId,
-  });
+  }, { "X-Override-Reason": encodeURIComponent("Dept isolation fixture: prior-month record") });
   expectOk("admin: create prior-month module record", priorMonthCheck.status, [200, 201]);
 
   // ── 4. Create staff user assigned to Dept Alpha ──────────────────────────────

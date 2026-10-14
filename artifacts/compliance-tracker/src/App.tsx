@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { lazy, Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { OverrideReasonDialog } from "@/components/override-reason-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 
@@ -272,6 +273,7 @@ function App() {
               <ProtectedRoutes />
             </Suspense>
           </WouterRouter>
+          <OverrideReasonDialog />
           <Toaster />
         </AuthProvider>
       </TooltipProvider>

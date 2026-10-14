@@ -88,6 +88,50 @@ export function setPaymentRequiredHandler(handler: (() => void) | null): void {
   _paymentRequiredHandler = handler;
 }
 
+export type OverrideReasonRequest = {
+  method: string;
+  url: string;
+  /** The server's explanation, suitable for showing to the user. */
+  message: string;
+};
+
+/** Resolves to the reason the user gave, or null when they cancelled. */
+export type OverrideReasonHandler = (info: OverrideReasonRequest) => Promise<string | null>;
+
+let _overrideReasonHandler: OverrideReasonHandler | null = null;
+
+/** Header carrying an owner's reason for changing a record past its correction window. */
+export const OVERRIDE_REASON_HEADER = "X-Override-Reason";
+/** Error code the API sends (HTTP 423) when such a change needs a reason. */
+export const OVERRIDE_REASON_REQUIRED_CODE = "OVERRIDE_REASON_REQUIRED";
+
+/**
+ * Register a handler that asks the user why they are changing a record older
+ * than its correction window. When a mutation is answered 423 with code
+ * OVERRIDE_REASON_REQUIRED, the handler is called; a returned reason retries
+ * the same request once with the `X-Override-Reason` header (URI-encoded),
+ * while null leaves the original 423 error in place. Pass `null` to clear.
+ */
+export function setOverrideReasonHandler(handler: OverrideReasonHandler | null): void {
+  _overrideReasonHandler = handler;
+}
+
+/** Whether a request body can be sent a second time unchanged. */
+export function isReplayableBody(body: unknown): boolean {
+  if (body == null || typeof body === "string") return true;
+  if (typeof FormData !== "undefined" && body instanceof FormData) return true;
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) return true;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return true;
+  return false;
+}
+
+/** The server's message when an error body asks for an override reason, else null. */
+export function overrideReasonMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  if ((data as Record<string, unknown>).code !== OVERRIDE_REASON_REQUIRED_CODE) return null;
+  return getStringField(data, "error") ?? "This record is more than a day old. Add a reason to change it.";
+}
+
 export type ApiMutationObserver = (
   method: string,
   url: string,
@@ -499,7 +543,32 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  const response = await fetch(input, { ...init, method, headers, credentials: "include" });
+  let response = await fetch(input, { ...init, method, headers, credentials: "include" });
+
+  // An owner changing a record past its correction window must give a
+  // reason: ask once, then resend the same request with it.
+  if (
+    response.status === 423 &&
+    UNSAFE_METHODS.has(method) &&
+    _overrideReasonHandler !== null &&
+    !isRequest(input) &&
+    isReplayableBody(init.body)
+  ) {
+    const lockedData = await parseErrorBody(response, method);
+    const message = overrideReasonMessage(lockedData);
+    let reason: string | null = null;
+    if (message) {
+      try {
+        reason = (await _overrideReasonHandler({ method, url: requestInfo.url, message }))?.trim() || null;
+      } catch {
+        reason = null;
+      }
+    }
+    if (!reason) throw new ApiError(response, lockedData, requestInfo);
+    const retryHeaders = new Headers(headers);
+    retryHeaders.set(OVERRIDE_REASON_HEADER, encodeURIComponent(reason));
+    response = await fetch(input, { ...init, method, headers: retryHeaders, credentials: "include" });
+  }
 
   if (!response.ok) {
     if (sendsCsrfToken && (response.status === 401 || response.status === 403)) {
