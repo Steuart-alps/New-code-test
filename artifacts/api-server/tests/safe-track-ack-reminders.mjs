@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { build } from "esbuild";
+import { buildOwnedFixturePurgeSql, resolveRunId } from "./fixture-ownership.mjs";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const dbDir = path.resolve(testsDir, "../../../lib/db");
@@ -13,6 +14,7 @@ const pinoLink = path.join(dbDir, "node_modules", "pino");
 let pinoLinkCreated = false;
 let pool;
 let clientIds = [];
+const runId = resolveRunId();
 try {
   // pino belongs to the API package while pg belongs to the DB package. Keep
   // both external and temporarily expose the former to Node's ESM resolver.
@@ -39,7 +41,8 @@ try {
     registerSafeTrackAckReminderSchedule,
   } = lib;
   pool = lib.pool;
-  const tag = `safe-ack-${Date.now()}`;
+  // Client slugs carry the run id so cleanup removes only this run's tenants.
+  const tag = `safe-ack-${runId}`;
   const insertClient = async (suffix) => {
     const row = await db.execute(sql`INSERT INTO clients (name, slug, active) VALUES (${`${tag}-${suffix}`}, ${`${tag}-${suffix}`}, true) RETURNING id`);
     clientIds.push(row.rows[0].id); return row.rows[0].id;
@@ -172,9 +175,21 @@ try {
   console.log("SafeTrack acknowledgement reminder integration checks passed.");
 } finally {
   if (pool) {
-    for (const id of clientIds) {
-      await pool.query("DELETE FROM safe_track_ack_reminder_log WHERE client_id = $1", [id]).catch(() => {});
-      await pool.query("DELETE FROM clients WHERE id = $1", [id]).catch(() => {});
+    // The run's sites, roster and SafeTrack rows leave audit_log rows that
+    // block a plain DELETE FROM clients (tests/fixture-ownership.mjs).
+    let cleanupConnection = null;
+    try {
+      for (const id of clientIds) {
+        await pool.query("DELETE FROM safe_track_ack_reminder_log WHERE client_id = $1", [id]).catch(() => {});
+      }
+      cleanupConnection = await pool.connect();
+      await cleanupConnection.query(buildOwnedFixturePurgeSql({ runId, clientIds }));
+    } catch (err) {
+      await cleanupConnection?.query("ROLLBACK").catch(() => {});
+      console.error("Cleanup failed:", err);
+      process.exitCode = 1;
+    } finally {
+      cleanupConnection?.release();
     }
     await pool.end().catch(() => {});
   }
