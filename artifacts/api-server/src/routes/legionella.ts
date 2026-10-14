@@ -86,6 +86,14 @@ async function isHealthcareClient(clientId: number): Promise<boolean> {
   return businessType != null && HEALTHCARE_BUSINESS_TYPES.has(businessType);
 }
 
+/** Whether a client-supplied outlet id is one of this client's sentinel outlets. */
+async function isClientOutlet(clientId: number, outletId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT 1 FROM legionella_sentinel_outlets WHERE id = ${outletId} AND client_id = ${clientId} LIMIT 1
+  `);
+  return result.rows.length > 0;
+}
+
 /** Whether the outlet a check is linked to is a TMV outlet (tenant-scoped). */
 async function isTmvOutlet(clientId: number, outletId: number | null | undefined): Promise<boolean> {
   if (outletId == null) return false;
@@ -99,17 +107,19 @@ async function isTmvOutlet(clientId: number, outletId: number | null | undefined
 function isCalorifierReturn(location: string | null | undefined): boolean {
   return typeof location === "string" && /\breturn\b/i.test(location);
 }
+// The Template form sends "" for an untouched date or nation; store that as "not set".
+const blankAsNull = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(v => (v === "" ? null : v), schema);
 const legionellaProfileSchema = z.object({
   systemInventoryReference: z.string().trim().max(2000).nullable().optional(),
   writtenControlSchemeReference: z.string().trim().max(2000).nullable().optional(),
   riskAssessmentReference: z.string().trim().max(2000).nullable().optional(),
-  riskAssessmentReviewDate: z.string().date().nullable().optional(),
+  riskAssessmentReviewDate: blankAsNull(z.string().date().nullable().optional()),
   competentPerson: z.string().trim().max(500).nullable().optional(),
   samplingLabRecordReference: z.string().trim().max(2000).nullable().optional(),
   controlLimitsRationale: z.string().trim().max(10000).nullable().optional(),
   remedialVerificationReference: z.string().trim().max(2000).nullable().optional(),
-  schemeReviewDate: z.string().date().nullable().optional(),
-  ukNation: z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional(),
+  schemeReviewDate: blankAsNull(z.string().date().nullable().optional()),
+  ukNation: blankAsNull(z.enum(["england", "scotland", "wales", "northern_ireland"]).nullable().optional()),
   frequencyDays: z.record(z.string(), z.number().int().min(1).max(3650)).optional(),
   temperatureLimits: z.record(z.enum(CHECK_TYPES), z.object({
     min: z.number().finite().optional(), max: z.number().finite().optional(),
@@ -315,6 +325,8 @@ router.post("/", requireAuth, denyViewers, async (req, res) => {
   const siteAccess = await checkSiteAccess(data.siteId, clientId, deptId);
   if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
   if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  if (data.outletId != null && !(await isClientOutlet(clientId, data.outletId)))
+    return res.status(400).json({ error: "Invalid outlet" });
 
   const userId = req.currentUser!.id;
   const entry = clientEntryFrom(data);
@@ -474,6 +486,9 @@ router.post("/outlets", requireAuth, denyViewers, async (req, res) => {
   const parsed = outletCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid data" });
   const d = parsed.data;
+  const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+  if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+  if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   const rows = await db.execute(sql`
     INSERT INTO legionella_sentinel_outlets (client_id, site_id, name, type, location, sort_order)
     VALUES (${clientId}, ${d.siteId ?? null}, ${d.name}, ${d.type}, ${d.location ?? null}, ${d.sortOrder ?? 0})
@@ -500,6 +515,11 @@ router.put("/outlets/:id", requireAuth, denyViewers, async (req, res) => {
   const type     = d.type     ?? cur.type;
   const location = d.location !== undefined ? d.location : cur.location;
   const siteId   = d.siteId   !== undefined ? d.siteId   : cur.site_id;
+  if (d.siteId !== undefined) {
+    const siteAccess = await checkSiteAccess(d.siteId, clientId, getActiveDepartmentId(req));
+    if (siteAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
+    if (siteAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
+  }
   const sortOrd  = d.sortOrder ?? cur.sort_order;
   const rows = await db.execute(sql`
     UPDATE legionella_sentinel_outlets
@@ -558,6 +578,8 @@ router.put("/:id", requireAuth, denyViewers, async (req, res, next) => {
     if (newAccess === "not_found") return res.status(400).json({ error: "Invalid site" });
     if (newAccess === "forbidden") return res.status(403).json({ error: "Site not accessible" });
   }
+  if (parsed.data.outletId != null && !(await isClientOutlet(clientId, parsed.data.outletId)))
+    return res.status(400).json({ error: "Invalid outlet" });
   const performer = await resolveStaffPerformerUpdate(clientId, parsed.data.staffRosterId, parsed.data.performedBy,
     existing.staffRosterId, existing.performedBy);
   if (!performer) return res.status(400).json({ error: "Invalid staff roster member" });
@@ -733,13 +755,20 @@ router.put("/config", requireAuth, requireClientAdmin, async (req, res) => {
   if (updates.controlProfile !== undefined) {
     if (siteId == null) return res.status(400).json({ error: "A site is required for a control profile" });
     const profile = legionellaProfileSchema.safeParse(updates.controlProfile);
-    if (!profile.success) return res.status(400).json({ error: profile.error.flatten() });
+    if (!profile.success) {
+      const issue = profile.error.issues[0];
+      return res.status(400).json({
+        error: `Invalid control profile: ${issue?.path.join(".") || "profile"} — ${issue?.message ?? "invalid value"}`,
+        details: profile.error.flatten(),
+      });
+    }
     await db.transaction(async tx => {
       const [previous] = await tx.select({ profile: trackControlProfilesTable.profile })
         .from(trackControlProfilesTable).where(and(eq(trackControlProfilesTable.clientId, clientId),
           eq(trackControlProfilesTable.siteId, siteId), eq(trackControlProfilesTable.module, LEGIONELLA_PROFILE_MODULE))).limit(1);
       const merged = { ...(previous?.profile as Record<string, unknown> ?? {}), ...profile.data,
-        ...(profile.data.writtenControlSchemeReference !== undefined
+        // A blank Template field must not wipe the reference recorded at plan approval.
+        ...(profile.data.writtenControlSchemeReference?.trim()
           ? { writtenSchemeReference: profile.data.writtenControlSchemeReference } : {}),
         approvedAt: null, approvedBy: null, reviewRequired: true };
       await tx.insert(trackControlProfilesTable).values({

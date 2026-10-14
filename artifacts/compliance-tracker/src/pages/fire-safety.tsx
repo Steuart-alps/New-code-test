@@ -837,8 +837,9 @@ function EditCheckDialog({ check, siteId }: { check: FireSafetyCheck; siteId?: n
         id: check.id,
         data: {
           checkDate, result: effectiveResult,
-          siteId: selectedSite, location: location || undefined,
-           performedBy: performedBy || null, staffRosterId: staffRosterId, notes: buildNotes(),
+          // null (not undefined) so clearing a field on edit actually clears it
+          siteId: selectedSite ?? null, location: location || null,
+           performedBy: performedBy || null, staffRosterId: staffRosterId, notes: buildNotes() ?? null,
         } as any,
       },
       {
