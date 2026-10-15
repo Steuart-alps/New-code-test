@@ -146,6 +146,49 @@ export const ListAuditLogResponse = zod.array(ListAuditLogResponseItem).max(50)
 
 
 /**
+ * Client admins and consultants only. Newest first, scoped to the active business. Entries never include link tokens; linkRef is a short prefix of the stored SHA-256 fingerprint so repeat use of one link can be matched without exposing the credential.
+ * @summary List recent public-link access for the signed-in business
+ */
+export const listPublicLinkAccessQueryFromMax = 40;
+
+export const listPublicLinkAccessQueryToMax = 40;
+
+export const listPublicLinkAccessQueryCursorMax = 200;
+
+export const listPublicLinkAccessQueryLimitMax = 100;
+
+
+
+export const ListPublicLinkAccessQueryParams = zod.object({
+  "linkType": zod.enum(['sign_off', 'contractor_portal', 'fix_track_action', 'fix_track_quote']).optional(),
+  "actionType": zod.enum(['view', 'submit']).optional(),
+  "from": zod.coerce.string().max(listPublicLinkAccessQueryFromMax).optional().describe('Only access at or after this instant (ISO 8601).'),
+  "to": zod.coerce.string().max(listPublicLinkAccessQueryToMax).optional().describe('Only access before this instant (ISO 8601).'),
+  "cursor": zod.coerce.string().max(listPublicLinkAccessQueryCursorMax).optional().describe('nextCursor from the previous page.'),
+  "limit": zod.coerce.number().min(1).max(listPublicLinkAccessQueryLimitMax).optional()
+})
+
+export const listPublicLinkAccessResponseEntriesItemLinkRefMin = 8;
+export const listPublicLinkAccessResponseEntriesItemLinkRefMax = 8;
+
+export const listPublicLinkAccessResponseEntriesMax = 100;
+
+
+
+export const ListPublicLinkAccessResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.number(),
+  "linkType": zod.enum(['sign_off', 'contractor_portal', 'fix_track_action', 'fix_track_quote']),
+  "actionType": zod.enum(['view', 'submit']),
+  "activity": zod.string(),
+  "linkRef": zod.string().min(listPublicLinkAccessResponseEntriesItemLinkRefMin).max(listPublicLinkAccessResponseEntriesItemLinkRefMax),
+  "occurredAt": zod.date()
+})).max(listPublicLinkAccessResponseEntriesMax),
+  "nextCursor": zod.string().nullable()
+})
+
+
+/**
  * @summary List all categories
  */
 export const ListCategoriesResponseItem = zod.object({
