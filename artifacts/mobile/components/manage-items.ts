@@ -28,6 +28,36 @@ export const MANAGE_ITEMS: ManageItem[] = [
     route: '/manage/tasks',
     audience: 'managers',
   },
+  // Site registers: read only on the phone (GET /api/registers/* is open to
+  // every role; allergen records are part of KitchenTrack, as on the website).
+  {
+    id: 'allergens',
+    label: 'Allergen records',
+    subtitle: 'The 14 allergens in each dish or product',
+    icon: 'coffee',
+    iconColor: '#b45309',
+    route: '/manage/allergens',
+    audience: 'everyone',
+    service: 'kitchentrack',
+  },
+  {
+    id: 'coshh',
+    label: 'COSHH register',
+    subtitle: 'Hazardous substances, controls, PPE and data sheets',
+    icon: 'droplet',
+    iconColor: '#c2410c',
+    route: '/manage/coshh',
+    audience: 'everyone',
+  },
+  {
+    id: 'asbestos',
+    label: 'Asbestos register',
+    subtitle: 'Where asbestos is, its condition and the survey',
+    icon: 'shield',
+    iconColor: '#475569',
+    route: '/manage/asbestos',
+    audience: 'everyone',
+  },
 ];
 
 /** Client admins and consultants manage the business; staff and viewers don't. */

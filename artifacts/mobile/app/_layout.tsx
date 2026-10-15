@@ -195,6 +195,27 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name="manage/allergens"
+        options={{
+          title: 'Allergen records',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/coshh"
+        options={{
+          title: 'COSHH register',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="manage/asbestos"
+        options={{
+          title: 'Asbestos register',
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
         name="checks/green-records"
         options={{
           title: 'Machine records',
