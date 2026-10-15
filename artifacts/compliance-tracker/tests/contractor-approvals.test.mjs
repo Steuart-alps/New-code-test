@@ -91,6 +91,19 @@ assert.match(
   /<AlertDialogAction[\s\S]*disabled=\{/,
   "the dialog confirm action must be disabled while the request is pending",
 );
+for (const handler of ["submitApproval", "submitDismissal"]) {
+  const body = source.match(new RegExp(`async function ${handler}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
+  assert.match(
+    body,
+    /return true;\s*\} catch \(e: any\) \{\s*if \(mountedRef\.current\) \{\s*toast\(\{ title: "Error", description: e\.message, variant: "destructive" \}\);\s*\}\s*return false;\s*\} finally \{\s*if \(mountedRef\.current\) setSubmittingId\(null\);/,
+    `${handler} must show the destructive error toast on failure and always reset the submitting state`,
+  );
+  assert.ok(
+    body.indexOf("setItems(prev => prev.filter") > -1 &&
+      body.indexOf("setItems(prev => prev.filter") < body.indexOf("} catch"),
+    `${handler} must remove the row only after a successful response`,
+  );
+}
 assert.match(
   source,
   /if \(success && mountedRef\.current\) setPendingCancellationConfirmation\(null\)/,
@@ -388,6 +401,35 @@ try {
   assert.equal(quoteDismissed.confirmed, true);
   assert.equal(confirmations.at(-1), "Are you sure you want to cancel this email request?");
   assert.equal(requests.at(-1).requestPath, "/fix-track/contractor-email-queue/46/cancel");
+
+  // A failed server response rejects with the message the page shows in its
+  // destructive toast, after exactly one request, for every action kind.
+  const failingActions = {
+    confirm: () => true,
+    clientApiFetch: async (requestPath, init) => {
+      requests.push({ requestPath, init });
+      return { ok: false, status: 502 };
+    },
+  };
+  const failures = [
+    [() => approveContractorEmail({ id: 47, emailType: "assignment" }, failingActions),
+      "Failed to approve email", "/fix-track/contractor-email-queue/47/approve-and-send"],
+    [() => approveContractorEmail({ id: 48, emailType: "cancellation" }, failingActions),
+      "Failed to approve email", "/fix-track/contractor-email-queue/48/approve-and-send"],
+    [() => approveContractorEmail({ id: 49, emailType: "cancellation" }, failingActions,
+      { subject: "Calendar cancellation: Revised", text: "Revised." }),
+      "Failed to approve email", "/fix-track/contractor-email-queue/49/edit-and-send"],
+    [() => dismissContractorEmail({ id: 50, emailType: "assignment" }, failingActions),
+      "Failed to cancel email", "/fix-track/contractor-email-queue/50/cancel"],
+    [() => dismissContractorEmail({ id: 51, emailType: "cancellation" }, failingActions),
+      "Failed to cancel email", "/fix-track/contractor-email-queue/51/cancel"],
+  ];
+  for (const [run, message, requestPath] of failures) {
+    const requestCount = requests.length;
+    await assert.rejects(run, { message }, `${requestPath} must reject on a failed response`);
+    assert.equal(requests.length, requestCount + 1, `${requestPath} must be requested exactly once`);
+    assert.equal(requests.at(-1).requestPath, requestPath);
+  }
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }

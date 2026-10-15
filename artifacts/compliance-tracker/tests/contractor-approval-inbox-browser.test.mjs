@@ -425,6 +425,78 @@ test("staff and foreign-department managers cannot see or act on the pending dra
   assert.equal(await contractorEmailCount(), before, "denied requests send nothing");
 });
 
+test("a rejected approval or dismissal keeps the pending row, shows the error toast and re-enables its actions", async () => {
+  const draftId = fixtures.assignmentQueueId;
+  const before = await contractorEmailCount();
+  const page = fixtures.managerPage;
+  await withDiagnostics(page, "rejected approval and dismissal", async () => {
+    await page.goto(`${appOrigin}/contractor-approvals`);
+    const card = queueCard(page, fixtures.acceptIssue.title);
+    await card.getByText("Assigning Job").waitFor();
+    const approve = card.getByRole("button", { name: "Approve & Send" });
+    const dismiss = card.getByRole("button", { name: "Cancel", exact: true });
+    const edit = card.getByRole("button", { name: "Edit" });
+
+    // The server's rejection is held until the row's submitting state has been
+    // observed, then answered with a failed response. The request never
+    // reaches the API, so the draft stays pending for the later tests.
+    async function rejectOnce(action, status, trigger) {
+      let release;
+      const held = new Promise(resolve => { release = resolve; });
+      let arrived;
+      const intercepted = new Promise(resolve => { arrived = resolve; });
+      let fulfilled;
+      const answered = new Promise(resolve => { fulfilled = resolve; });
+      let requests = 0;
+      // The page may append ?clientId=…, so match on the path alone.
+      const actionPath = `/api/fix-track/contractor-email-queue/${draftId}/${action}`;
+      const pattern = url => url.origin === appOrigin && url.pathname === actionPath;
+      const handler = async route => {
+        requests++;
+        arrived();
+        await held;
+        await route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: "Rejected by server" }) });
+        fulfilled();
+      };
+      await page.route(pattern, handler);
+      try {
+        await trigger();
+        await intercepted;
+        // While the request is in flight the row's actions are disabled.
+        for (const button of [approve, dismiss, edit]) await button.and(page.locator(":disabled")).waitFor();
+        release();
+        // Unrouting before the handler answers would hand the request on to
+        // the real API, so wait for the rejection to be sent first.
+        await answered;
+        return requests;
+      } finally {
+        release();
+        await page.unroute(pattern, handler);
+      }
+    }
+
+    assert.equal(await rejectOnce("approve-and-send", 502, () => approve.click()), 1);
+    // The page's only toast slot holds the destructive error toast.
+    await page.locator("li.destructive").filter({ hasText: "Failed to approve email" }).waitFor();
+    await card.waitFor();
+    for (const button of [approve, dismiss, edit]) await button.and(page.locator(":enabled")).waitFor();
+
+    page.once("dialog", dialog => dialog.accept());
+    assert.equal(await rejectOnce("cancel", 409, () => dismiss.click()), 1);
+    await page.locator("li.destructive").filter({ hasText: "Failed to cancel email" }).waitFor();
+    await card.waitFor();
+    for (const button of [approve, dismiss, edit]) await button.and(page.locator(":enabled")).waitFor();
+
+    assert.equal(await queueCard(page, fixtures.acceptIssue.title).count(), 1, "the pending row is still listed once");
+    await page.reload();
+    await queueCard(page, fixtures.acceptIssue.title).getByText("Assigning Job").waitFor();
+  });
+  const row = await queueRow(draftId);
+  assert.equal(row.status, "pending", "the draft is still pending after both rejections");
+  assert.equal(row.approved_by, null);
+  assert.equal(await contractorEmailCount(), before, "rejected actions send nothing");
+});
+
 test("reminder Edit & Send keeps the reviewed draft through a failed send and dispatches it exactly on retry", async () => {
   const contractor = await db.execute(sql`
     INSERT INTO contractors (client_id, name, email)
