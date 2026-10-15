@@ -16,6 +16,17 @@ function check(name, condition, detail = "") {
   if (condition) passed++;
   else { failures++; console.error(`FAIL: ${name}${detail ? ` — ${detail}` : ""}`); }
 }
+// A fixture later checks build on (a created row, an issued token). If it is
+// missing, record one clear failure and stop, instead of letting undefined IDs
+// reach SQL or property reads and crash with an unrelated error.
+class FixtureMissing extends Error {}
+function need(name, value, response) {
+  if (value !== undefined && value !== null && value !== "") return value;
+  failures++;
+  const detail = response ? ` — HTTP ${response.status} ${JSON.stringify(response.data)?.slice(0, 300)}` : "";
+  console.error(`FAIL: ${name}${detail}`);
+  throw new FixtureMissing(name);
+}
 function session() {
   let cookie = "";
   return async (method, route, body) => {
@@ -73,7 +84,9 @@ try {
   const foreignContractor = await foreign.request("POST", "/contractors", {
     name: "Foreign Contractor", email: `foreign-contractor-${Date.now()}@test.local`,
   });
-  const contractorId = created.data?.id, secondId = second.data?.id, foreignId = foreignContractor.data?.id;
+  const contractorId = need("owner contractor created", created.data?.id, created);
+  const secondId = need("second owner contractor created", second.data?.id, second);
+  const foreignId = need("foreign contractor created", foreignContractor.data?.id, foreignContractor);
   check("contractors created", [contractorId, secondId, foreignId].every(Number.isInteger));
   check("manager records use canonical DBS types and dates",
     created.data?.dbsType === "Basic"
@@ -93,7 +106,7 @@ try {
   // Allow reminder coverage to run independently of public portal fixtures.
   if (process.env.CONTRACTOR_RESEND_ONLY !== "1") {
   const issue1 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, { expiresInDays: 2 });
-  const token1 = issue1.data?.token;
+  const token1 = need("first portal link issued", issue1.data?.token, issue1);
   check("manager issue returns plaintext token once", issue1.status === 201 && typeof token1 === "string" && token1.length === 64);
   const view1 = await publicRequest("GET", `/contractor-portal/${token1}`);
   check("token sees only bound contractor", view1.status === 200 && view1.data?.name === created.data.name && !("notes" in view1.data));
@@ -107,7 +120,7 @@ try {
   check("valid contractor portal access leaves access evidence", portalEvidence?.id != null);
 
   const issue2 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
-  const token2 = issue2.data?.token;
+  const token2 = need("portal link reissued", issue2.data?.token, issue2);
   check("reissue gives different token", issue2.status === 201 && token2 !== token1);
   const [storedToken] = (await db.execute(sql`SELECT token, token_hash FROM contractor_portal_tokens WHERE contractor_id = ${contractorId}`)).rows;
   check("portal raw token is not stored", storedToken?.token == null && storedToken?.token_hash === digest(token2));
@@ -132,7 +145,7 @@ try {
   check("manager revocation invalidates child reminder",
     (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 404);
   const issue3 = await owner.request("POST", `/contractors/${contractorId}/portal-link`, {});
-  const token3 = issue3.data.token;
+  const token3 = need("portal link issued after revocation", issue3.data?.token, issue3);
   check("manual reissue cannot resurrect earlier reminder",
     (await publicRequest("GET", `/contractor-portal/${reminderToken}`)).status === 404);
 
@@ -162,6 +175,8 @@ try {
     certificateName: "Other certificate", notes: "other-manager-note",
   });
   check("manager certificates created", managerCert.status === 201 && foreignCert.status === 201);
+  need("manager certificate created", managerCert.data?.id, managerCert);
+  need("other contractor certificate created", foreignCert.data?.id, foreignCert);
   const [managerProvenance] = (await db.execute(sql`
     SELECT portal_created FROM contractor_certificates WHERE id = ${managerCert.data.id}
   `)).rows;
@@ -207,7 +222,8 @@ try {
   const portalCreate = await publicRequest("POST", `/contractor-portal/${token3}/certificates`, {
     certificateName: "Portal certificate", notes: "must-not-be-accepted",
   });
-  const [stored] = (await db.execute(sql`SELECT notes, portal_created FROM contractor_certificates WHERE id = ${portalCreate.data?.id}`)).rows;
+  need("portal certificate created", portalCreate.data?.id, portalCreate);
+  const [stored] = (await db.execute(sql`SELECT notes, portal_created FROM contractor_certificates WHERE id = ${portalCreate.data.id}`)).rows;
   check("portal notes ignored rather than accepted", portalCreate.status === 201 && stored?.notes == null);
   check("portal-created certificate is explicitly marked and response is safe",
     stored?.portal_created === true && portalCreate.data?.canDelete === true && portalCreate.data?.hasFile === false
@@ -306,6 +322,13 @@ try {
   check("completed requirement cannot resend", (await owner.request("POST", resendPath)).status === 404);
 
   console.log(`${passed} contractor portal route checks passed, ${failures} failed`);
+} catch (error) {
+  if (error instanceof FixtureMissing) {
+    console.error(`STOPPED after ${passed} passed checks: the remaining checks need "${error.message}"`);
+  } else {
+    failures++;
+    console.error("Contractor portal suite crashed:", error);
+  }
 } finally {
   try {
     if (db && clientIds.length) await db.execute(sql`DELETE FROM clients WHERE id IN (${clientIds[0]}, ${clientIds[1]})`);
