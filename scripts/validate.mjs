@@ -78,6 +78,7 @@ const DEFAULT_CHECKS = {
   "test-config": { stage: "integration", class: "api", cmd: "cd artifacts/api-server && pnpm run test:config:ci" },
   "fresh-schema-regression": { stage: "integration", class: "api", cmd: api("test:schema:fresh") },
   "test-twofa-recovery": { stage: "integration", class: "api", cmd: api("test:twofa-recovery") },
+  "staff-invitations": { stage: "integration", class: "api", cmd: api("test:staff-invitations") },
   "pat-evidence-retention": { stage: "integration", class: "api", cmd: api("test:pat-dept-isolation") },
   "content-filter-endpoints": { stage: "integration", class: "api", cmd: api("test:content-filter") },
   "feedback-triage": { stage: "integration", class: "api", cmd: api("test:feedback-triage") },
